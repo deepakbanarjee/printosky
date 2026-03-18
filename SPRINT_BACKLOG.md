@@ -88,3 +88,4 @@ Last updated: 2026-03-19 (Session 6)
 - Floating print panel under clicked job row
 - Home/remote PC access via store.printosky.com
 - Troubleshooting playbook created
+# Sprint 7
