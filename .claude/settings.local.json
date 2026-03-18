@@ -89,7 +89,13 @@
       "Bash(ls C:/printosky_watcher/*.bat)",
       "Bash(findstr /n \"storePcUrl store_pc_url\" \"C:\\\\printosky_watcher\\\\website\\\\admin.html\")",
       "Bash(findstr /n \"storePcUrl\" \"C:\\\\printosky_watcher\\\\website\\\\admin.html\")",
-      "Bash(git -C C:printosky_watcher status)"
+      "Bash(git -C C:printosky_watcher status)",
+      "Bash(git commit:*)",
+      "Bash(curl \"http://localhost:3005/job-items?job_id=OSP-20260318-0001\")",
+      "Bash(curl \"http://localhost:3005/job-items?job_id=OSP-20260313-0011\")",
+      "Bash(curl \"http://localhost:3005/vendors\")",
+      "Bash(git push:*)",
+      "Bash(gh repo:*)"
     ]
   }
 }
