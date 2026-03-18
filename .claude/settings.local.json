@@ -95,7 +95,8 @@
       "Bash(curl \"http://localhost:3005/job-items?job_id=OSP-20260313-0011\")",
       "Bash(curl \"http://localhost:3005/vendors\")",
       "Bash(git push:*)",
-      "Bash(gh repo:*)"
+      "Bash(gh repo:*)",
+      "Bash(git checkout:*)"
     ]
   }
 }
