@@ -774,14 +774,22 @@ def handle_quote(qs: dict) -> dict:
         return {"total": 0, "error": "rate_card not loaded"}
 
     pages      = int(qs.get("pages", [1])[0])
-    paper_type = qs.get("paper_type", ["A4_BW"])[0]
     sides      = qs.get("sides", ["ss"])[0]
     layout     = qs.get("layout", ["1-up"])[0]
     copies     = int(qs.get("copies", [1])[0])
     finishing  = qs.get("finishing", ["none"])[0]
-    is_student = qs.get("is_student", ["false"])[0].lower() == "true"
-    urgent     = qs.get("urgent", ["false"])[0].lower() == "true"
-    paper_size = qs.get("paper_size", ["A4"])[0]
+    is_student = qs.get("is_student", ["false"])[0].lower() in ("true", "1")
+    urgent     = qs.get("urgent",     ["false"])[0].lower() in ("true", "1")
+    paper_size = qs.get("paper_size", ["A4"])[0].upper()
+
+    # paper_type: accept explicit param OR derive from colour + paper_size shorthand
+    colour_raw = qs.get("colour", [""])[0].lower()
+    if "paper_type" in qs:
+        paper_type = qs["paper_type"][0]
+    elif colour_raw in ("col", "colour", "color"):
+        paper_type = f"{paper_size}_col"
+    else:
+        paper_type = f"{paper_size}_BW"
 
     items = [{"pages": pages, "paper_type": paper_type, "sides": sides,
               "layout": layout, "copies": copies}]
@@ -1072,6 +1080,18 @@ class PrintHandler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "pc_id required"})
                 return
             self._json(200, get_active_staff(DB_PATH, pc_id))
+        elif path == "/job-items":
+            job_id = qs.get("job_id", [None])[0]
+            if not job_id:
+                self._json(400, {"error": "job_id required"}); return
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM print_items WHERE job_id=? ORDER BY item_number",
+                (job_id,)
+            ).fetchall()
+            conn.close()
+            self._json(200, {"items": [dict(r) for r in rows]})
         elif path == "/quote":
             self._json(200, handle_quote(qs))
         elif path == "/vendors":

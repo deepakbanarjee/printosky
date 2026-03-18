@@ -595,6 +595,8 @@
   .jp-btn.notify:hover { background: rgba(255,171,64,.08); }
   .jp-btn.collect { border-color: var(--green); color: var(--green); }
   .jp-btn.collect:hover { background: rgba(0,230,118,.08); }
+  .jp-btn.vendor  { border-color: #ff7a52; color: #ff7a52; }
+  .jp-btn.vendor:hover  { background: rgba(255,107,64,.08); }
   .jp-btn:disabled { opacity: .4; cursor: default; }
 
   /* ── Payment / Photocopy Modal ─────────────────── */
@@ -757,6 +759,32 @@
 
     <!-- ── Job Print Panel (expands below table on row click) ── -->
   </main>
+</div>
+
+<!-- ── Vendor Modal ── -->
+<div class="modal-overlay" id="vendor-modal">
+  <div class="modal-box" style="border-top-color:#ff7a52">
+    <div class="modal-title" style="color:#ff7a52">Send to Vendor</div>
+    <div id="vm-job-info" style="font-size:.68rem;color:var(--muted);font-family:var(--mono);margin-bottom:.8rem"></div>
+    <div class="modal-field">
+      <label>Vendor</label>
+      <select id="vm-vendor" style="width:100%">
+        <option value="">— select vendor —</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>Cost to Vendor (Rs.)</label>
+      <input type="number" id="vm-cost" min="0" step="1" placeholder="0">
+    </div>
+    <div class="modal-field">
+      <label>Expected Return Date</label>
+      <input type="date" id="vm-return-date">
+    </div>
+    <div class="modal-btns">
+      <button class="modal-ok" onclick="confirmVendorSend()" style="border-color:#ff7a52;color:#ff7a52;background:rgba(255,107,64,.08)">Send →</button>
+      <button class="modal-cancel" onclick="closeVendorModal()">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <!-- ── Payment Modal ── -->
@@ -1324,7 +1352,7 @@ function panelHTML() {
         <div class="jp-opts-section">
           <div class="pp-field">
             <label>Finishing</label>
-            <select class="pp-sel" id="jp-finishing" style="width:100%" onchange="editFinishing=this.value; scheduleQuote()">
+            <select class="pp-sel" id="jp-finishing" style="width:100%" onchange="editFinishing=this.value; scheduleQuote(); document.getElementById('jp-btn-vendor').style.display=OUTSOURCED_FINISHING.includes(this.value)?'block':'none'">
               <option value="none">None</option>
               <option value="staple">Staple</option>
               <option value="spiral">Spiral Binding</option>
@@ -1356,6 +1384,7 @@ function panelHTML() {
           </div>
           <div class="jp-action-bar">
             <button class="jp-btn save"    id="jp-btn-save"    onclick="saveJobSpecs()">Save Specs &amp; Quote</button>
+            <button class="jp-btn vendor"  id="jp-btn-vendor"  onclick="openVendorModal()" style="display:none">Send to Vendor →</button>
             <button class="jp-btn notify"  id="jp-btn-notify"  onclick="markReady()" style="display:none">Notify Customer Ready →</button>
             <button class="jp-btn collect" id="jp-btn-collect" onclick="openPaymentModal()" style="display:none">Collect Payment</button>
           </div>
@@ -1413,6 +1442,29 @@ function selectJob(jobId) {
 
   renderJobPanel();
   setTimeout(() => panelRow.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
+
+  // Load saved print_items from DB if they exist
+  fetch(`${STORE_PC_URL}/job-items?job_id=${encodeURIComponent(jobId)}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.items && data.items.length > 0) {
+        editItems = data.items.map(it => ({
+          item_number: it.item_number,
+          page_list:   it.page_list || "all",
+          colour:      it.colour    || "bw",
+          sides:       it.sides     || "ss",
+          layout:      it.layout    || "1-up",
+          copies:      it.copies    || 1,
+          paper_gsm:   it.paper_gsm || 70,
+          printer:     it.printer   || "",
+          status:      it.status    || "Pending",
+          pages:       it.pages     || (selectedJob && selectedJob.page_count) || 1,
+        }));
+        renderItems();
+        scheduleQuote();
+      }
+    })
+    .catch(() => {}); // silent — defaults already rendered
 }
 
 function closeJobPanel() {
@@ -1449,8 +1501,10 @@ function renderJobPanel() {
   document.getElementById("jp-student").checked   = editIsStudent;
   document.getElementById("jp-urgent").checked    = editUrgent;
 
-  const done    = j.status === "Completed";
-  const printed = ["Printed","Ready","At Vendor"].includes(j.status);
+  const done       = j.status === "Completed";
+  const printed    = ["Printed","Ready","At Vendor"].includes(j.status);
+  const outsourced = OUTSOURCED_FINISHING.includes(editFinishing);
+  document.getElementById("jp-btn-vendor").style.display  = (outsourced && !done) ? "block" : "none";
   document.getElementById("jp-btn-notify").style.display  = (printed && !done) ? "block" : "none";
   document.getElementById("jp-btn-collect").style.display = (printed && !done) ? "block" : "none";
 
@@ -1757,6 +1811,67 @@ async function markReady() {
 }
 
 // ── Payment Modal ─────────────────────────────────────────────────────────────
+// ── Vendor Modal ─────────────────────────────────────────────────────────────
+const OUTSOURCED_FINISHING = ["project","record","lam_roll","lam_cover","thermal","soft"];
+
+async function openVendorModal() {
+  if (!selectedJob) return;
+  const j = selectedJob;
+  document.getElementById("vm-job-info").textContent = `${j.job_id} — ${j.finishing || ""}`;
+  // Default return date = tomorrow
+  const tom = new Date(); tom.setDate(tom.getDate() + 1);
+  document.getElementById("vm-return-date").value = tom.toISOString().slice(0,10);
+  document.getElementById("vm-cost").value = "";
+  // Load vendors
+  const sel = document.getElementById("vm-vendor");
+  sel.innerHTML = '<option value="">— select vendor —</option>';
+  try {
+    const r = await fetch(`${STORE_PC_URL}/vendors?finishing_type=${encodeURIComponent(j.finishing || "")}`);
+    const d = await r.json();
+    (d.vendors || []).forEach(v => {
+      const opt = document.createElement("option");
+      opt.value = v.name; opt.textContent = v.name;
+      sel.appendChild(opt);
+    });
+    if (sel.options.length === 2) sel.selectedIndex = 1; // auto-select if only one
+  } catch(e) {}
+  document.getElementById("vendor-modal").classList.add("open");
+}
+
+function closeVendorModal() {
+  document.getElementById("vendor-modal").classList.remove("open");
+}
+
+async function confirmVendorSend() {
+  if (!selectedJob) return;
+  const vendor_name  = document.getElementById("vm-vendor").value;
+  const cost         = parseFloat(document.getElementById("vm-cost").value) || 0;
+  const return_date  = document.getElementById("vm-return-date").value;
+  if (!vendor_name) { alert("Select a vendor"); return; }
+  const btn = document.querySelector("#vendor-modal .modal-ok");
+  btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    const r = await fetch(`${STORE_PC_URL}/vendor-send`, {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        job_id: selectedJob.job_id,
+        vendor_type: selectedJob.finishing,
+        vendor_name,
+        cost_to_vendor: cost,
+        expected_return_date: return_date,
+        staff_id: localStorage.getItem("staff_id") || ""
+      })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      closeVendorModal();
+      selectedJob.status = "At Vendor";
+      closeJobPanel();
+    } else { alert("Error: " + (d.error || "unknown")); }
+  } catch(e) { alert("Network error"); }
+  btn.disabled = false; btn.textContent = "Send →";
+}
+
 function openPaymentModal() {
   if (!selectedJob) return;
   payJobId = selectedJob.job_id;
