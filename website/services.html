@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Printing Services in Thrissur — Bulk Print, Binding, Lamination | Printosky</title>
+<meta name="description" content="Bulk document printing, student project printing, spiral & wiro binding, lamination, PVC cards and colour printing in Thriprayar, Thrissur. Fast turnaround, competitive prices.">
+<meta name="keywords" content="bulk printing Thrissur, document printing Thrissur, spiral binding Thrissur, wiro binding Thrissur, lamination Thrissur, PVC card printing Thrissur, colour printing Thrissur, student project printing Kerala">
+<link rel="canonical" href="https://printosky.com/services.html">
+<meta property="og:title" content="Printing Services in Thrissur | Printosky">
+<meta property="og:description" content="Bulk printing, student documents, binding, lamination, PVC cards and colour printing in Thriprayar, Thrissur.">
+<meta property="og:url" content="https://printosky.com/services.html">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="styles.css">
+<style>
+.services-section { padding: 80px 60px; background: var(--white); }
+.services-section:nth-child(even) { background: var(--paper); }
+
+.service-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 80px;
+  align-items: center;
+  max-width: 1000px;
+  margin: 0 auto 80px;
+  padding-bottom: 80px;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
+}
+.service-row:last-child { border-bottom: none; margin-bottom: 0; }
+.service-row.reverse { direction: rtl; }
+.service-row.reverse > * { direction: ltr; }
+
+.srv-visual {
+  background: var(--blue);
+  border-radius: 16px;
+  aspect-ratio: 4/3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 80px;
+  position: relative;
+  overflow: hidden;
+}
+.srv-visual::before {
+  content: '';
+  position: absolute;
+  width: 200px; height: 200px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 50%;
+  top: -50px; right: -50px;
+}
+
+.srv-label {
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+.srv-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  color: var(--ink);
+  margin-bottom: 16px;
+  line-height: 1.1;
+}
+.srv-desc {
+  font-size: 16px;
+  color: var(--mid);
+  line-height: 1.7;
+  font-weight: 300;
+  margin-bottom: 24px;
+}
+.srv-features { list-style: none; margin-bottom: 32px; }
+.srv-features li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--ink);
+  margin-bottom: 10px;
+}
+.srv-check {
+  width: 20px; height: 20px;
+  background: rgba(232,80,10,0.1);
+  color: var(--accent);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+
+/* PRICING BANNER */
+.pricing-note {
+  background: var(--light);
+  border-left: 3px solid var(--accent);
+  padding: 16px 20px;
+  border-radius: 0 8px 8px 0;
+  font-size: 14px;
+  color: var(--mid);
+  margin-bottom: 32px;
+}
+.pricing-note strong { color: var(--ink); }
+
+@media (max-width: 768px) {
+  .services-section { padding: 48px 20px; }
+  .service-row { grid-template-columns: 1fr; gap: 32px; margin-bottom: 48px; padding-bottom: 48px; }
+  .service-row.reverse { direction: ltr; }
+  .srv-title { font-size: 26px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="logo">Print<span>osky</span></a>
+  <ul class="nav-links">
+    <li><a href="services.html" class="active">Services</a></li>
+    <li><a href="about.html">About</a></li>
+    <li><a href="contact.html">Contact</a></li>
+    <li><a href="order.html" class="nav-cta">Place Order →</a></li>
+  </ul>
+  <button class="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></button>
+</nav>
+<div class="mobile-menu" id="mobileMenu">
+  <a href="services.html">Services</a>
+  <a href="about.html">About</a>
+  <a href="contact.html">Contact</a>
+  <a href="order.html" class="mob-cta">Place Order →</a>
+</div>
+
+<div class="page-hero">
+  <div class="page-hero-label">What We Offer</div>
+  <h1 class="page-hero-title">Everything you need,<br>printed right.</h1>
+  <p class="page-hero-sub">From a single CV to thousands of pages — we handle it all from our Thriprayar location.</p>
+</div>
+
+<section class="services-section">
+  <div class="service-row">
+    <div class="srv-visual">📄</div>
+    <div>
+      <div class="srv-label">Service 01</div>
+      <h2 class="srv-title">Bulk Document Printing</h2>
+      <p class="srv-desc">High-volume, high-speed printing for businesses, offices, and institutions. Our Konica Bizhub Pro 1100 handles thousands of pages efficiently without compromising on quality.</p>
+      <ul class="srv-features">
+        <li><span class="srv-check">✓</span> Black & white and colour options</li>
+        <li><span class="srv-check">✓</span> A4, A3 and custom sizes</li>
+        <li><span class="srv-check">✓</span> Single and double-sided</li>
+        <li><span class="srv-check">✓</span> Pickup or delivery available</li>
+      </ul>
+      <a href="order.html" class="btn-primary">Order Now →</a>
+    </div>
+  </div>
+
+  <div class="service-row reverse">
+    <div class="srv-visual" style="background: #2C5F2E;">🎓</div>
+    <div>
+      <div class="srv-label">Service 02</div>
+      <h2 class="srv-title">Student Documents & Academic Projects</h2>
+      <p class="srv-desc">Get your project, thesis, report or assignment printed and bound exactly the way your institution requires. We understand academic formatting — we've done thousands of them.</p>
+      <ul class="srv-features">
+        <li><span class="srv-check">✓</span> Academic project formatting available</li>
+        <li><span class="srv-check">✓</span> Spiral and wiro binding</li>
+        <li><span class="srv-check">✓</span> Laminated covers</li>
+        <li><span class="srv-check">✓</span> Same-day service available</li>
+      </ul>
+      <a href="order.html" class="btn-primary">Order Now →</a>
+    </div>
+  </div>
+
+  <div class="service-row">
+    <div class="srv-visual" style="background: #5C3317;">📎</div>
+    <div>
+      <div class="srv-label">Service 03</div>
+      <h2 class="srv-title">Binding Services</h2>
+      <p class="srv-desc">Professional binding for any document. Whether it's a student project, a business proposal, or a report — we bind it cleanly and durably.</p>
+      <ul class="srv-features">
+        <li><span class="srv-check">✓</span> Spiral binding</li>
+        <li><span class="srv-check">✓</span> Wiro / ring binding</li>
+        <li><span class="srv-check">✓</span> Staple binding</li>
+        <li><span class="srv-check">✓</span> Available standalone or with printing</li>
+      </ul>
+      <a href="order.html" class="btn-primary">Order Now →</a>
+    </div>
+  </div>
+
+  <div class="service-row reverse">
+    <div class="srv-visual" style="background: #3D3580;">✨</div>
+    <div>
+      <div class="srv-label">Service 04</div>
+      <h2 class="srv-title">Lamination</h2>
+      <p class="srv-desc">Protect and present your documents professionally. We offer single and double-side lamination for any document size — certificates, covers, ID cards, menus and more.</p>
+      <ul class="srv-features">
+        <li><span class="srv-check">✓</span> Single-side lamination</li>
+        <li><span class="srv-check">✓</span> Double-side lamination</li>
+        <li><span class="srv-check">✓</span> All document sizes</li>
+        <li><span class="srv-check">✓</span> Large-scale via partner network</li>
+      </ul>
+      <a href="order.html" class="btn-primary">Order Now →</a>
+    </div>
+  </div>
+
+  <div class="service-row">
+    <div class="srv-visual" style="background: #1A3D5C;">💳</div>
+    <div>
+      <div class="srv-label">Service 05</div>
+      <h2 class="srv-title">PVC Cards</h2>
+      <p class="srv-desc">Professional-quality PVC cards for any use. From student ID cards to visiting cards to membership cards — printed with crisp, durable results on our dedicated card printer.</p>
+      <ul class="srv-features">
+        <li><span class="srv-check">✓</span> Student ID cards</li>
+        <li><span class="srv-check">✓</span> Visiting / business cards</li>
+        <li><span class="srv-check">✓</span> Membership and loyalty cards</li>
+        <li><span class="srv-check">✓</span> Design assistance available</li>
+      </ul>
+      <a href="order.html" class="btn-primary">Order Now →</a>
+    </div>
+  </div>
+
+  <div class="service-row reverse">
+    <div class="srv-visual" style="background: #8B1A1A;">🎨</div>
+    <div>
+      <div class="srv-label">Service 06</div>
+      <h2 class="srv-title">Colour Printing</h2>
+      <p class="srv-desc">High-quality colour output on our Epson WF-C21000. Accurate, vibrant colour for presentations, brochures, project covers, posters and any document where colour matters.</p>
+      <ul class="srv-features">
+        <li><span class="srv-check">✓</span> Vibrant, accurate colour reproduction</li>
+        <li><span class="srv-check">✓</span> A4 and A3 sizes</li>
+        <li><span class="srv-check">✓</span> Presentations, brochures, posters</li>
+        <li><span class="srv-check">✓</span> Large-format via partner network</li>
+      </ul>
+      <a href="order.html" class="btn-primary">Order Now →</a>
+    </div>
+  </div>
+</section>
+
+<div class="cta-strip">
+  <div class="cta-strip-text">
+    Not sure what you need?
+    <span>Message us and we'll guide you through it.</span>
+  </div>
+  <a href="https://wa.me/919495706405" target="_blank" class="btn-white">WhatsApp Us →</a>
+</div>
+
+<footer>
+  <div class="footer-grid">
+    <div>
+      <a href="index.html" class="footer-logo">Print<span>osky</span></a>
+      <div class="footer-tagline">Powered by Oxygen Students Paradise</div>
+      <div class="footer-contact-item">📞 +91 94957 06405</div>
+      <div class="footer-contact-item">📍 Thriprayar, Thrissur, Kerala</div>
+      <div class="footer-contact-item">🕐 Mon–Sat, 9am–7pm</div>
+    </div>
+    <div>
+      <div class="footer-col-title">Pages</div>
+      <ul class="footer-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="services.html">Services</a></li>
+        <li><a href="order.html">Place Order</a></li>
+        <li><a href="about.html">About</a></li>
+        <li><a href="contact.html">Contact</a></li>
+      </ul>
+    </div>
+    <div>
+      <div class="footer-col-title">Services</div>
+      <ul class="footer-links">
+        <li><a href="services.html">Bulk Printing</a></li>
+        <li><a href="services.html">Student Documents</a></li>
+        <li><a href="services.html">Binding</a></li>
+        <li><a href="services.html">Lamination</a></li>
+        <li><a href="services.html">PVC Cards</a></li>
+        <li><a href="services.html">Colour Print</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 Printosky. All rights reserved.</span>
+    <span>Powered by Oxygen Students Paradise · Thriprayar, Thrissur</span>
+  </div>
+</footer>
+
+<script>function toggleMenu() { document.getElementById('mobileMenu').classList.toggle('open'); }</script>
+</body>
+</html>

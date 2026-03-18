@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Place a Print Order Online — Thrissur | Printosky</title>
+<meta name="description" content="Order printing online from Thriprayar, Thrissur. Upload your file, choose your specs — we print, bind and have it ready same day.">
+<meta name="keywords" content="order printing online Thrissur, online print order Kerala, document printing order Thrissur">
+<link rel="canonical" href="https://printosky.com/order.html">
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<link rel="stylesheet" href="styles.css">
+<style>
+.order-layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 0;
+  min-height: 80vh;
+}
+
+.order-form-area {
+  padding: 64px 60px;
+  background: var(--white);
+}
+
+.order-sidebar {
+  background: var(--blue);
+  padding: 64px 40px;
+  position: sticky;
+  top: 68px;
+  height: fit-content;
+}
+
+.form-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.form-subtitle {
+  font-size: 16px;
+  color: var(--mid);
+  font-weight: 300;
+  margin-bottom: 48px;
+  line-height: 1.5;
+}
+
+/* FORM STYLES */
+.form-section-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(232,80,10,0.15);
+}
+
+.form-group {
+  margin-bottom: 22px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 7px;
+}
+label .req { color: var(--accent); }
+label .opt { color: var(--mid); font-weight: 400; font-size: 12px; }
+
+input[type="text"],
+input[type="tel"],
+input[type="email"],
+input[type="number"],
+select,
+textarea {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1.5px solid rgba(0,0,0,0.12);
+  border-radius: 8px;
+  font-size: 15px;
+  font-family: 'DM Sans', sans-serif;
+  color: var(--ink);
+  background: var(--white);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  outline: none;
+  appearance: none;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(27,63,139,0.08);
+}
+textarea { resize: vertical; min-height: 90px; line-height: 1.5; }
+select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236B7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 16px center; padding-right: 40px; cursor: pointer; }
+
+.radio-group, .checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.radio-option, .checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--ink);
+}
+.radio-option input, .checkbox-option input { width: auto; accent-color: var(--accent); width: 16px; height: 16px; }
+
+.file-upload-area {
+  border: 2px dashed rgba(27,63,139,0.25);
+  border-radius: 10px;
+  padding: 36px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  background: rgba(27,63,139,0.02);
+  position: relative;
+}
+.file-upload-area:hover { border-color: var(--blue); background: rgba(27,63,139,0.04); }
+.file-upload-area input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.upload-icon { font-size: 36px; margin-bottom: 12px; }
+.upload-title { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; color: var(--blue); margin-bottom: 6px; }
+.upload-sub { font-size: 13px; color: var(--mid); }
+.upload-types { font-size: 12px; color: rgba(107,114,128,0.7); margin-top: 8px; }
+#file-name { font-size: 13px; color: var(--accent); margin-top: 10px; font-weight: 500; }
+
+.form-divider { border: none; border-top: 1px solid rgba(0,0,0,0.07); margin: 32px 0; }
+
+.submit-section { margin-top: 36px; }
+.submit-note {
+  font-size: 13px;
+  color: var(--mid);
+  margin-top: 16px;
+  line-height: 1.5;
+}
+.submit-note a { color: var(--blue); }
+
+/* SUCCESS MESSAGE */
+.success-msg {
+  display: none;
+  background: #F0FFF4;
+  border: 1.5px solid #86EFAC;
+  border-radius: 10px;
+  padding: 24px;
+  text-align: center;
+  margin-top: 24px;
+}
+.success-msg .s-icon { font-size: 40px; margin-bottom: 12px; }
+.success-msg h3 { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; color: #166534; margin-bottom: 8px; }
+.success-msg p { font-size: 14px; color: #15803D; line-height: 1.5; }
+
+/* SIDEBAR */
+.sidebar-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--white);
+  margin-bottom: 28px;
+}
+.sidebar-item {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.sidebar-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.sidebar-item-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--white);
+  margin-bottom: 4px;
+}
+.sidebar-item-desc {
+  font-size: 13px;
+  color: rgba(255,255,255,0.5);
+  line-height: 1.4;
+}
+.sidebar-divider { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 28px 0; }
+.sidebar-wa {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(37,211,102,0.15);
+  border: 1px solid rgba(37,211,102,0.3);
+  border-radius: 10px;
+  padding: 16px;
+  text-decoration: none;
+  transition: background 0.2s;
+}
+.sidebar-wa:hover { background: rgba(37,211,102,0.25); }
+.sidebar-wa-text { font-size: 13px; color: rgba(255,255,255,0.8); line-height: 1.4; }
+.sidebar-wa-num { font-size: 15px; font-weight: 500; color: var(--white); }
+
+@media (max-width: 900px) {
+  .order-layout { grid-template-columns: 1fr; }
+  .order-form-area { padding: 48px 20px; }
+  .order-sidebar { position: static; padding: 40px 20px; }
+  .form-row { grid-template-columns: 1fr; }
+  .form-title { font-size: 28px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="logo">Print<span>osky</span></a>
+  <ul class="nav-links">
+    <li><a href="services.html">Services</a></li>
+    <li><a href="about.html">About</a></li>
+    <li><a href="contact.html">Contact</a></li>
+    <li><a href="order.html" class="nav-cta active">Place Order →</a></li>
+  </ul>
+  <button class="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></button>
+</nav>
+<div class="mobile-menu" id="mobileMenu">
+  <a href="services.html">Services</a>
+  <a href="about.html">About</a>
+  <a href="contact.html">Contact</a>
+  <a href="order.html" class="mob-cta">Place Order →</a>
+</div>
+
+<div class="order-layout">
+  <!-- FORM -->
+  <div class="order-form-area">
+    <h1 class="form-title">Place Your Order</h1>
+    <p class="form-subtitle">Fill in the details below and upload your file. We'll confirm your order on WhatsApp within 30 minutes.</p>
+
+    <form id="orderForm" onsubmit="handleSubmit(event)">
+
+      <!-- YOUR DETAILS -->
+      <div class="form-section-title">Your Details</div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Full Name <span class="req">*</span></label>
+          <input type="text" name="name" placeholder="Your name" required>
+        </div>
+        <div class="form-group">
+          <label>WhatsApp Number <span class="req">*</span></label>
+          <input type="tel" name="whatsapp" placeholder="+91 98765 43210" required>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Email Address <span class="opt">(optional)</span></label>
+        <input type="email" name="email" placeholder="your@email.com">
+      </div>
+
+      <hr class="form-divider">
+
+      <!-- YOUR FILE -->
+      <div class="form-section-title">Your File</div>
+
+      <div class="form-group">
+        <label>Upload Your File <span class="req">*</span></label>
+        <div class="file-upload-area" onclick="document.getElementById('fileInput').click()">
+          <input type="file" id="fileInput" name="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onchange="showFileName(this)" style="display:none">
+          <div class="upload-icon">📁</div>
+          <div class="upload-title">Click to upload your file</div>
+          <div class="upload-sub">or drag and drop here</div>
+          <div class="upload-types">PDF, DOC, DOCX, JPG, PNG · Max 50MB</div>
+          <div id="file-name"></div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Special Instructions <span class="opt">(optional)</span></label>
+        <textarea name="instructions" placeholder="e.g. Print page 3 in colour only, use thick paper for cover, specific margin requirements..."></textarea>
+      </div>
+
+      <hr class="form-divider">
+
+      <!-- PRINT OPTIONS -->
+      <div class="form-section-title">Print Options</div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Paper Size <span class="req">*</span></label>
+          <select name="paperSize" required>
+            <option value="" disabled selected>Select size</option>
+            <option>A4</option>
+            <option>A3</option>
+            <option>A5</option>
+            <option>Letter</option>
+            <option>Other (mention in instructions)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Number of Copies <span class="req">*</span></label>
+          <input type="number" name="copies" placeholder="1" min="1" required>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Print Type <span class="req">*</span></label>
+          <div class="radio-group">
+            <label class="radio-option"><input type="radio" name="printType" value="Black & White" required> Black & White</label>
+            <label class="radio-option"><input type="radio" name="printType" value="Colour"> Colour</label>
+            <label class="radio-option"><input type="radio" name="printType" value="Mixed (some pages colour)"> Mixed (mention in instructions)</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Print Sides <span class="req">*</span></label>
+          <div class="radio-group">
+            <label class="radio-option"><input type="radio" name="printSides" value="Single side" required> Single side</label>
+            <label class="radio-option"><input type="radio" name="printSides" value="Double side"> Double side</label>
+          </div>
+        </div>
+      </div>
+
+      <hr class="form-divider">
+
+      <!-- FINISHING -->
+      <div class="form-section-title">Finishing</div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Binding</label>
+          <select name="binding">
+            <option value="None">No binding</option>
+            <option>Spiral binding</option>
+            <option>Wiro binding</option>
+            <option>Staple</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Lamination</label>
+          <select name="lamination">
+            <option value="None">No lamination</option>
+            <option>Single-side</option>
+            <option>Double-side</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Cover Page</label>
+        <div class="radio-group" style="flex-direction: row; gap: 24px;">
+          <label class="radio-option"><input type="radio" name="cover" value="No"> No</label>
+          <label class="radio-option"><input type="radio" name="cover" value="Yes"> Yes</label>
+        </div>
+      </div>
+
+      <hr class="form-divider">
+
+      <!-- DELIVERY -->
+      <div class="form-section-title">Pickup or Delivery</div>
+
+      <div class="form-group">
+        <div class="radio-group" style="flex-direction: row; gap: 24px;">
+          <label class="radio-option"><input type="radio" name="delivery" value="Pickup from Thriprayar" required onchange="toggleDelivery(this)"> Pickup from Thriprayar</label>
+          <label class="radio-option"><input type="radio" name="delivery" value="Delivery" onchange="toggleDelivery(this)"> Delivery</label>
+        </div>
+      </div>
+
+      <div class="form-group" id="addressGroup" style="display:none">
+        <label>Delivery Address <span class="req">*</span></label>
+        <textarea name="address" placeholder="Full delivery address including landmark, city and pincode..." id="addressField"></textarea>
+      </div>
+
+      <hr class="form-divider">
+
+      <!-- PAYMENT -->
+      <div class="form-section-title">Payment</div>
+
+      <div class="form-group">
+        <div class="radio-group">
+          <label class="radio-option"><input type="radio" name="payment" value="Cash on pickup" required> Cash on pickup</label>
+          <label class="radio-option"><input type="radio" name="payment" value="UPI on pickup"> UPI on pickup</label>
+          <label class="radio-option"><input type="radio" name="payment" value="Pay online" onchange="showPayOnlineNote()"> Pay online (team will send payment link on WhatsApp)</label>
+        </div>
+      </div>
+      <div id="payOnlineNote" style="display:none; margin-top:12px; background:#EFF6FF; border:1.5px solid #BFDBFE; border-radius:8px; padding:14px 16px; font-size:13px; color:#1E40AF; line-height:1.5;">
+        💳 After we confirm your order on WhatsApp, we'll send you a secure Razorpay payment link for the exact amount.
+      </div>
+
+      <!-- SUBMIT -->
+      <div class="submit-section">
+        <button type="submit" class="btn-primary" style="width: 100%; justify-content: center; padding: 18px; font-size: 16px;">
+          Submit Order →
+        </button>
+        <p class="submit-note">
+          By submitting, you agree to be contacted by our team on WhatsApp to confirm your order.
+          Need help? <a href="https://wa.me/919495706405" target="_blank">Message us directly.</a>
+        </p>
+      </div>
+    </form>
+
+    <div class="success-msg" id="successMsg">
+      <div class="s-icon">🎉</div>
+      <h3>Order Received!</h3>
+      <p>Thank you! Our team will review your file and confirm your order on <strong>WhatsApp (+91 94957 06405)</strong> within 30 minutes during working hours.<br><br>If it's urgent, message us directly on WhatsApp.</p>
+      <br>
+      <a href="https://wa.me/919495706405" target="_blank" class="btn-wa" style="display: inline-flex; margin: 0 auto;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+        Chat with Us on WhatsApp
+      </a>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <div class="order-sidebar">
+    <div class="sidebar-title">Need help ordering?</div>
+
+    <div class="sidebar-item">
+      <div class="sidebar-icon">📱</div>
+      <div>
+        <div class="sidebar-item-title">WhatsApp us directly</div>
+        <div class="sidebar-item-desc">Send your file and requirements on WhatsApp and we'll handle the rest.</div>
+      </div>
+    </div>
+
+    <div class="sidebar-item">
+      <div class="sidebar-icon">⏱️</div>
+      <div>
+        <div class="sidebar-item-title">30-min confirmation</div>
+        <div class="sidebar-item-desc">We confirm every order on WhatsApp within 30 minutes during working hours.</div>
+      </div>
+    </div>
+
+    <div class="sidebar-item">
+      <div class="sidebar-icon">🕐</div>
+      <div>
+        <div class="sidebar-item-title">Working hours</div>
+        <div class="sidebar-item-desc">Monday – Saturday<br>9:00 AM – 7:00 PM</div>
+      </div>
+    </div>
+
+    <div class="sidebar-item">
+      <div class="sidebar-icon">💰</div>
+      <div>
+        <div class="sidebar-item-title">Payment options</div>
+        <div class="sidebar-item-desc">Cash, UPI on pickup, or online payment link. No advance needed for known customers.</div>
+      </div>
+    </div>
+
+    <hr class="sidebar-divider">
+
+    <a href="https://wa.me/919495706405" target="_blank" class="sidebar-wa">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      <div>
+        <div class="sidebar-wa-text">Message us on WhatsApp</div>
+        <div class="sidebar-wa-num">+91 94957 06405</div>
+      </div>
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-grid">
+    <div>
+      <a href="index.html" class="footer-logo">Print<span>osky</span></a>
+      <div class="footer-tagline">Powered by Oxygen Students Paradise</div>
+      <div class="footer-contact-item">📞 +91 94957 06405</div>
+      <div class="footer-contact-item">📍 Thriprayar, Thrissur, Kerala</div>
+      <div class="footer-contact-item">🕐 Mon–Sat, 9am–7pm</div>
+    </div>
+    <div>
+      <div class="footer-col-title">Pages</div>
+      <ul class="footer-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="services.html">Services</a></li>
+        <li><a href="order.html">Place Order</a></li>
+        <li><a href="about.html">About</a></li>
+        <li><a href="contact.html">Contact</a></li>
+      </ul>
+    </div>
+    <div>
+      <div class="footer-col-title">Services</div>
+      <ul class="footer-links">
+        <li><a href="services.html">Bulk Printing</a></li>
+        <li><a href="services.html">Student Documents</a></li>
+        <li><a href="services.html">Binding</a></li>
+        <li><a href="services.html">Lamination</a></li>
+        <li><a href="services.html">PVC Cards</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 Printosky. All rights reserved.</span>
+    <span>Powered by Oxygen Students Paradise · Thriprayar, Thrissur</span>
+  </div>
+</footer>
+
+<script>
+function showPayOnlineNote() {
+  document.getElementById('payOnlineNote').style.display = 'block';
+}
+
+function toggleMenu() { document.getElementById('mobileMenu').classList.toggle('open'); }
+
+function showFileName(input) {
+  const name = input.files[0]?.name;
+  document.getElementById('file-name').textContent = name ? '✓ ' + name : '';
+}
+
+function toggleDelivery(radio) {
+  const group = document.getElementById('addressGroup');
+  const field = document.getElementById('addressField');
+  if (radio.value === 'Delivery') {
+    group.style.display = 'block';
+    field.required = true;
+  } else {
+    group.style.display = 'none';
+    field.required = false;
+  }
+}
+
+function handleSubmit(e) {
+  e.preventDefault();
+  const form = document.getElementById('orderForm');
+  const data = new FormData(form);
+  const name = data.get('name');
+  const phone = data.get('whatsapp');
+  const copies = data.get('copies');
+  const paperSize = data.get('paperSize');
+  const printType = data.get('printType');
+  const printSides = data.get('printSides');
+  const binding = data.get('binding');
+  const lamination = data.get('lamination');
+  const delivery = data.get('delivery');
+  const payment = data.get('payment');
+  const instructions = data.get('instructions');
+
+  // Build WhatsApp message
+  const msg = `🖨️ *New Printosky Order*\n\n*Name:* ${name}\n*Phone:* ${phone}\n*Copies:* ${copies}\n*Size:* ${paperSize}\n*Type:* ${printType}\n*Sides:* ${printSides}\n*Binding:* ${binding}\n*Lamination:* ${lamination}\n*Delivery:* ${delivery}\n*Payment:* ${payment}${instructions ? '\n*Notes:* ' + instructions : ''}\n\n_Order placed via printosky.com_`;
+
+  // Open WhatsApp with pre-filled message
+  const waUrl = `https://wa.me/919495706405?text=${encodeURIComponent(msg)}`;
+  window.open(waUrl, '_blank');
+
+  // Show success message
+  form.style.display = 'none';
+  document.getElementById('successMsg').style.display = 'block';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+</script>
+</body>
+</html>

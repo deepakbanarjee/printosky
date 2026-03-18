@@ -1,0 +1,7 @@
+watchdog==3.0.0
+gspread==6.0.2
+google-auth==2.28.0
+google-auth-oauthlib==1.2.0
+requests==2.31.0
+websockets>=10.0
+pysnmp>=4.4.0

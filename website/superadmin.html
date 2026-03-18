@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Printosky Superadmin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Variables ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --teal:       #1A6B8A;
+  --teal-light: #EBF5FB;
+  --teal-mid:   #2E86AB;
+  --dark:       #0F2027;
+  --dark2:      #1C2833;
+  --mid:        #4A5568;
+  --muted:      #8FA3B1;
+  --border:     #E2EBF0;
+  --surface:    #F7FAFB;
+  --white:      #FFFFFF;
+  --green:      #27AE60;
+  --amber:      #E67E22;
+  --red:        #E74C3C;
+  --blue:       #2980B9;
+  --radius:     10px;
+  --shadow:     0 2px 12px rgba(26,107,138,0.10);
+  --shadow-lg:  0 8px 32px rgba(26,107,138,0.15);
+  --font:       'DM Sans', sans-serif;
+  --mono:       'DM Mono', monospace;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--surface);
+  color: var(--dark2);
+  min-height: 100vh;
+  font-size: 14px;
+}
+
+/* ── Login Screen ──────────────────────────────────────────────── */
+#login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0F2027 0%, #203A43 50%, #2C5364 100%);
+}
+.login-box {
+  background: white;
+  border-radius: 16px;
+  padding: 48px 40px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+.login-logo { font-size: 28px; font-weight: 700; color: var(--teal); letter-spacing: -0.5px; margin-bottom: 4px; }
+.login-sub  { font-size: 12px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 32px; }
+.role-tabs  { display: flex; gap: 8px; margin-bottom: 24px; background: var(--surface); border-radius: 8px; padding: 4px; }
+.role-tab   { flex: 1; padding: 8px; border: none; background: none; border-radius: 6px; cursor: pointer; font-family: var(--font); font-size: 13px; font-weight: 500; color: var(--muted); transition: all .2s; }
+.role-tab.active { background: var(--white); color: var(--teal); box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+.login-box input {
+  width: 100%; padding: 12px 16px; border: 1.5px solid var(--border);
+  border-radius: 8px; font-family: var(--font); font-size: 14px;
+  margin-bottom: 12px; outline: none; transition: border-color .2s;
+}
+.login-box input:focus { border-color: var(--teal); }
+.login-btn {
+  width: 100%; padding: 13px; background: var(--teal); color: white;
+  border: none; border-radius: 8px; font-family: var(--font); font-size: 14px;
+  font-weight: 600; cursor: pointer; transition: background .2s;
+}
+.login-btn:hover { background: var(--teal-mid); }
+.login-error { color: var(--red); font-size: 12px; margin-top: 8px; }
+
+/* ── App Shell ─────────────────────────────────────────────────── */
+#app { display: none; min-height: 100vh; }
+
+/* ── Sidebar ───────────────────────────────────────────────────── */
+.sidebar {
+  position: fixed; top: 0; left: 0; bottom: 0;
+  width: 220px; background: var(--dark);
+  display: flex; flex-direction: column;
+  z-index: 100; transition: transform .3s;
+}
+.sidebar-logo {
+  padding: 24px 20px 20px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.sidebar-logo .brand { font-size: 18px; font-weight: 700; color: white; letter-spacing: -0.3px; }
+.sidebar-logo .role-badge {
+  display: inline-block; margin-top: 4px;
+  font-size: 10px; font-weight: 600; letter-spacing: 1.5px;
+  text-transform: uppercase; padding: 2px 8px;
+  border-radius: 4px; background: var(--teal); color: white;
+}
+.sidebar-logo .role-badge.store { background: var(--amber); }
+nav { flex: 1; padding: 16px 0; overflow-y: auto; }
+.nav-section { font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase;
+  color: rgba(255,255,255,.3); padding: 12px 20px 6px; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 20px; cursor: pointer; color: rgba(255,255,255,.6);
+  font-size: 13px; font-weight: 500; transition: all .2s;
+  border-left: 3px solid transparent;
+}
+.nav-item:hover { color: white; background: rgba(255,255,255,.06); }
+.nav-item.active { color: white; background: rgba(26,107,138,.3); border-left-color: var(--teal); }
+.nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+.sidebar-footer {
+  padding: 16px 20px; border-top: 1px solid rgba(255,255,255,.08);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sidebar-footer .user-info { font-size: 12px; color: rgba(255,255,255,.5); }
+.logout-btn { font-size: 11px; color: rgba(255,255,255,.3); cursor: pointer; background: none; border: none; font-family: var(--font); }
+.logout-btn:hover { color: var(--red); }
+
+/* ── Main content ──────────────────────────────────────────────── */
+.main { margin-left: 220px; padding: 28px; min-height: 100vh; }
+.page { display: none; }
+.page.active { display: block; animation: fadeIn .25s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* ── Page header ───────────────────────────────────────────────── */
+.page-header { margin-bottom: 24px; }
+.page-header h1 { font-size: 22px; font-weight: 700; color: var(--dark); letter-spacing: -0.4px; }
+.page-header p  { font-size: 13px; color: var(--muted); margin-top: 3px; }
+
+/* ── Stat cards ────────────────────────────────────────────────── */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.stat-card {
+  background: white; border-radius: var(--radius); padding: 20px;
+  box-shadow: var(--shadow); border: 1px solid var(--border);
+  position: relative; overflow: hidden;
+}
+.stat-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--teal);
+}
+.stat-card.green::before { background: var(--green); }
+.stat-card.amber::before { background: var(--amber); }
+.stat-card.red::before   { background: var(--red); }
+.stat-label { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.stat-value { font-size: 28px; font-weight: 700; color: var(--dark); margin: 6px 0 2px; letter-spacing: -1px; }
+.stat-sub   { font-size: 12px; color: var(--muted); }
+
+/* ── Cards / panels ────────────────────────────────────────────── */
+.card {
+  background: white; border-radius: var(--radius);
+  box-shadow: var(--shadow); border: 1px solid var(--border);
+  margin-bottom: 20px; overflow: hidden;
+}
+.card-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  background: white;
+}
+.card-header h2 { font-size: 14px; font-weight: 600; color: var(--dark); }
+.card-body { padding: 20px; }
+
+/* ── Toolbar ───────────────────────────────────────────────────── */
+.toolbar {
+  display: flex; gap: 10px; align-items: center;
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.toolbar input[type=text] {
+  flex: 1; min-width: 180px; padding: 8px 12px;
+  border: 1.5px solid var(--border); border-radius: 7px;
+  font-family: var(--font); font-size: 13px; outline: none;
+}
+.toolbar input[type=text]:focus { border-color: var(--teal); }
+.toolbar select {
+  padding: 8px 12px; border: 1.5px solid var(--border); border-radius: 7px;
+  font-family: var(--font); font-size: 13px; outline: none; cursor: pointer;
+  background: white; color: var(--dark2);
+}
+.btn {
+  padding: 8px 16px; border-radius: 7px; border: none; cursor: pointer;
+  font-family: var(--font); font-size: 13px; font-weight: 600;
+  transition: all .15s; display: inline-flex; align-items: center; gap: 6px;
+}
+.btn-primary { background: var(--teal); color: white; }
+.btn-primary:hover { background: var(--teal-mid); }
+.btn-outline { background: white; color: var(--teal); border: 1.5px solid var(--teal); }
+.btn-outline:hover { background: var(--teal-light); }
+.btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 5px; }
+.btn-danger { background: #FEF2F2; color: var(--red); border: 1.5px solid #FECACA; }
+.btn-success { background: #F0FDF4; color: var(--green); border: 1.5px solid #BBF7D0; }
+.btn-ghost { background: none; color: var(--muted); border: 1.5px solid var(--border); }
+.btn-ghost:hover { color: var(--dark2); border-color: var(--muted); }
+
+/* ── Table ─────────────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  padding: 10px 14px; text-align: left;
+  font-size: 11px; font-weight: 600; letter-spacing: .8px;
+  text-transform: uppercase; color: var(--muted);
+  border-bottom: 1.5px solid var(--border); white-space: nowrap;
+  background: var(--surface);
+}
+tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+tbody tr:hover { background: var(--teal-light); }
+tbody tr:last-child { border-bottom: none; }
+td { padding: 11px 14px; font-size: 13px; color: var(--dark2); }
+.mono { font-family: var(--mono); font-size: 12px; color: var(--teal); }
+.text-muted { color: var(--muted); font-size: 12px; }
+
+/* ── Badges ────────────────────────────────────────────────────── */
+.badge {
+  display: inline-block; padding: 3px 9px; border-radius: 20px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.badge-blue   { background: #EBF5FB; color: var(--blue); }
+.badge-green  { background: #F0FDF4; color: var(--green); }
+.badge-amber  { background: #FFF8F0; color: var(--amber); }
+.badge-red    { background: #FEF2F2; color: var(--red); }
+.badge-grey   { background: #F1F5F9; color: var(--mid); }
+.badge-teal   { background: var(--teal-light); color: var(--teal); }
+
+/* ── Modal ─────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(15,32,39,.5);
+  z-index: 1000; display: none; align-items: center; justify-content: center;
+  backdrop-filter: blur(3px); padding: 20px;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: white; border-radius: 14px; width: 100%;
+  max-width: 520px; box-shadow: var(--shadow-lg);
+  animation: modalIn .2s ease;
+  max-height: 90vh; overflow-y: auto;
+}
+@keyframes modalIn { from { opacity: 0; transform: scale(.96) translateY(8px); } to { opacity: 1; transform: none; } }
+.modal-header {
+  padding: 20px 24px 16px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal-header h3 { font-size: 16px; font-weight: 700; color: var(--dark); }
+.modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--muted); line-height: 1; }
+.modal-body { padding: 20px 24px; }
+.modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+
+/* ── Form ──────────────────────────────────────────────────────── */
+.form-row { margin-bottom: 16px; }
+.form-row label { display: block; font-size: 12px; font-weight: 600; color: var(--mid); margin-bottom: 5px; }
+.form-row input, .form-row select, .form-row textarea {
+  width: 100%; padding: 9px 12px; border: 1.5px solid var(--border);
+  border-radius: 7px; font-family: var(--font); font-size: 13px;
+  outline: none; transition: border-color .2s; color: var(--dark2);
+  background: white;
+}
+.form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color: var(--teal); }
+.form-row textarea { resize: vertical; min-height: 80px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+/* ── Toast ─────────────────────────────────────────────────────── */
+#toast {
+  position: fixed; bottom: 24px; right: 24px;
+  background: var(--dark); color: white;
+  padding: 12px 18px; border-radius: 8px; font-size: 13px;
+  box-shadow: var(--shadow-lg); z-index: 9999;
+  transform: translateY(80px); opacity: 0;
+  transition: all .3s; max-width: 300px;
+}
+#toast.show { transform: none; opacity: 1; }
+#toast.success { background: var(--green); }
+#toast.error   { background: var(--red); }
+
+/* ── Loading ───────────────────────────────────────────────────── */
+.loading { text-align: center; padding: 40px; color: var(--muted); font-size: 13px; }
+.spinner {
+  width: 28px; height: 28px; border: 2.5px solid var(--border);
+  border-top-color: var(--teal); border-radius: 50%;
+  animation: spin .7s linear infinite; margin: 0 auto 10px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Empty state ───────────────────────────────────────────────── */
+.empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
+.empty-state .emoji { font-size: 36px; margin-bottom: 10px; }
+.empty-state p { font-size: 14px; }
+
+/* ── Inline actions ────────────────────────────────────────────── */
+.actions { display: flex; gap: 6px; }
+
+/* ── B2B balance chip ──────────────────────────────────────────── */
+.balance-chip { font-size: 12px; font-weight: 600; }
+.balance-chip.owe { color: var(--red); }
+.balance-chip.clear { color: var(--green); }
+
+/* ── Mobile hamburger ──────────────────────────────────────────── */
+.hamburger {
+  display: none; position: fixed; top: 14px; left: 14px;
+  z-index: 200; background: var(--dark); border: none; padding: 8px;
+  border-radius: 7px; cursor: pointer; color: white; font-size: 18px;
+}
+.sidebar-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.5); z-index: 99;
+}
+
+@media (max-width: 768px) {
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.open { transform: none; }
+  .sidebar-overlay.open { display: block; }
+  .main { margin-left: 0; padding: 16px; padding-top: 60px; }
+  .hamburger { display: block; }
+  .stat-grid { grid-template-columns: 1fr 1fr; }
+  .form-grid { grid-template-columns: 1fr; }
+  td, th { padding: 9px 10px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════════
+  LOGIN SCREEN
+══════════════════════════════════════════════════════════════ -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">🖨️ Printosky</div>
+    <div class="login-sub">Admin Portal</div>
+    <div class="role-tabs">
+      <button class="role-tab active" onclick="selectRole('superadmin')">Superadmin</button>
+      <button class="role-tab" onclick="selectRole('store')">Store Admin</button>
+    </div>
+    <input type="password" id="pw-input" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="login-btn" onclick="doLogin()">Sign In →</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+  APP SHELL
+══════════════════════════════════════════════════════════════ -->
+<div id="app">
+  <button class="hamburger" onclick="toggleSidebar()">☰</button>
+  <div class="sidebar-overlay" onclick="closeSidebar()"></div>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="brand">🖨️ Printosky</div>
+      <span class="role-badge" id="role-badge">Superadmin</span>
+    </div>
+    <nav id="nav">
+      <div class="nav-section">Overview</div>
+      <div class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+        <span class="icon">📊</span> Dashboard
+      </div>
+      <div class="nav-section">Operations</div>
+      <div class="nav-item" data-page="jobs" onclick="navigate('jobs')">
+        <span class="icon">📋</span> Jobs
+      </div>
+      <div class="nav-item" data-page="b2b" onclick="navigate('b2b')">
+        <span class="icon">🏢</span> B2B Clients
+      </div>
+      <div class="nav-section superadmin-only">Management</div>
+      <div class="nav-item superadmin-only" data-page="partners" onclick="navigate('partners')">
+        <span class="icon">📍</span> Partner Stores
+      </div>
+      <div class="nav-item superadmin-only" data-page="rates" onclick="navigate('rates')">
+        <span class="icon">💰</span> Rate Card
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-info" id="user-info">Oxygen Students Paradise</div>
+      <button class="logout-btn" onclick="logout()">Sign out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ── Dashboard ───────────────────────────────────────────── -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <h1>Dashboard</h1>
+        <p id="dash-subtitle">Loading...</p>
+      </div>
+      <div class="stat-grid" id="stat-grid">
+        <div class="stat-card"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;" class="dash-grid">
+        <div class="card">
+          <div class="card-header"><h2>Recent Jobs</h2>
+            <button class="btn btn-outline btn-sm" onclick="navigate('jobs')">View all →</button>
+          </div>
+          <div id="recent-jobs-list"><div class="loading"><div class="spinner"></div></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h2>B2B Balances</h2>
+            <button class="btn btn-outline btn-sm" onclick="navigate('b2b')">Manage →</button>
+          </div>
+          <div id="b2b-balance-list"><div class="loading"><div class="spinner"></div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Jobs ────────────────────────────────────────────────── -->
+    <div class="page" id="page-jobs">
+      <div class="page-header">
+        <h1>Jobs</h1>
+        <p>All print jobs across the system</p>
+      </div>
+      <div class="card">
+        <div class="toolbar">
+          <input type="text" id="job-search" placeholder="Search job ID, file, phone..." oninput="filterJobs()">
+          <select id="job-status-filter" onchange="filterJobs()">
+            <option value="">All statuses</option>
+            <option value="Received">Received</option>
+            <option value="Paid">Paid</option>
+            <option value="Completed">Completed</option>
+          </select>
+          <button class="btn btn-primary" onclick="loadJobs()">↺ Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Job ID</th>
+                <th>File</th>
+                <th>Received</th>
+                <th>Source</th>
+                <th>Status</th>
+                <th>Amount</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="jobs-tbody">
+              <tr><td colspan="7"><div class="loading"><div class="spinner"></div>Loading jobs...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── B2B ──────────────────────────────────────────────────── -->
+    <div class="page" id="page-b2b">
+      <div class="page-header">
+        <h1>B2B Clients</h1>
+        <p>Manage bulk clients, discounts, and invoicing</p>
+      </div>
+      <div class="card">
+        <div class="toolbar">
+          <input type="text" id="b2b-search" placeholder="Search company or phone..." oninput="filterB2B()">
+          <button class="btn btn-primary" onclick="openAddB2B()">+ Add Client</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Contact</th>
+                <th>Phone</th>
+                <th>Discount</th>
+                <th>Balance Due</th>
+                <th>Credit Limit</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="b2b-tbody">
+              <tr><td colspan="7"><div class="loading"><div class="spinner"></div>Loading...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Partners (coming soon) ───────────────────────────────── -->
+    <div class="page" id="page-partners">
+      <div class="page-header"><h1>Partner Stores</h1><p>Hub & Spoke network management</p></div>
+      <div class="card">
+        <div class="card-body">
+          <div class="empty-state">
+            <div class="emoji">📍</div>
+            <p style="font-weight:600;color:var(--dark);margin-bottom:6px;">Coming next sprint</p>
+            <p>Partner store registration, territory assignment,<br>and performance tracking will be here.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Rate Card (coming soon) ──────────────────────────────── -->
+    <div class="page" id="page-rates">
+      <div class="page-header"><h1>Rate Card</h1><p>Live pricing — changes apply immediately</p></div>
+      <div class="card">
+        <div class="card-body">
+          <div class="empty-state">
+            <div class="emoji">💰</div>
+            <p style="font-weight:600;color:var(--dark);margin-bottom:6px;">Coming next sprint</p>
+            <p>Edit A4, A3, binding, and delivery rates<br>directly from here — no code changes needed.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+  JOB UPDATE MODAL
+══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-job">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Update Job</h3>
+      <button class="modal-close" onclick="closeModal('modal-job')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label>Job ID</label>
+        <input type="text" id="edit-job-id" readonly style="background:var(--surface);color:var(--muted)">
+      </div>
+      <div class="form-row">
+        <label>Status</label>
+        <select id="edit-job-status">
+          <option value="Received">Received</option>
+          <option value="Paid">Paid</option>
+          <option value="Completed">Completed</option>
+        </select>
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <label>Amount Collected (₹)</label>
+          <input type="number" id="edit-job-amount" placeholder="0">
+        </div>
+        <div class="form-row">
+          <label>Payment Mode</label>
+          <select id="edit-job-paymode">
+            <option value="">—</option>
+            <option value="UPI">UPI</option>
+            <option value="CASH">Cash</option>
+            <option value="NEFT">NEFT</option>
+            <option value="RAZORPAY">Razorpay</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Notes</label>
+        <textarea id="edit-job-notes" placeholder="Internal notes..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-job')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveJob()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+  ADD / EDIT B2B MODAL
+══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-b2b">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="b2b-modal-title">Add B2B Client</h3>
+      <button class="modal-close" onclick="closeModal('modal-b2b')">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="b2b-edit-id">
+      <div class="form-grid">
+        <div class="form-row">
+          <label>Company Name *</label>
+          <input type="text" id="b2b-company" placeholder="St. Thomas College">
+        </div>
+        <div class="form-row">
+          <label>Contact Person</label>
+          <input type="text" id="b2b-contact" placeholder="John Mathew">
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <label>WhatsApp Number *</label>
+          <input type="text" id="b2b-phone" placeholder="9495706405">
+          <div class="form-hint">10-digit number, no country code</div>
+        </div>
+        <div class="form-row">
+          <label>Email</label>
+          <input type="email" id="b2b-email" placeholder="accounts@college.edu">
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <label>Discount %</label>
+          <input type="number" id="b2b-discount" placeholder="0" min="0" max="50" step="0.5">
+        </div>
+        <div class="form-row">
+          <label>Credit Limit (₹)</label>
+          <input type="number" id="b2b-credit" placeholder="0">
+        </div>
+      </div>
+      <div class="form-row">
+        <label>GST Number</label>
+        <input type="text" id="b2b-gst" placeholder="32XXXXX...">
+      </div>
+      <div class="form-row">
+        <label>Address</label>
+        <textarea id="b2b-address" placeholder="Full address for invoice..." style="min-height:60px;"></textarea>
+      </div>
+      <div class="form-row">
+        <label>Notes</label>
+        <textarea id="b2b-notes" placeholder="Special instructions, preferences..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-b2b')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveB2B()">Save Client</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+  RECORD PAYMENT MODAL
+══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-payment">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Record Payment</h3>
+      <button class="modal-close" onclick="closeModal('modal-payment')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="payment-client-info" style="background:var(--teal-light);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:var(--teal);font-weight:500;"></div>
+      <input type="hidden" id="payment-phone">
+      <div class="form-grid">
+        <div class="form-row">
+          <label>Amount Received (₹) *</label>
+          <input type="number" id="payment-amount" placeholder="0">
+        </div>
+        <div class="form-row">
+          <label>Payment Mode *</label>
+          <select id="payment-mode">
+            <option value="NEFT">NEFT</option>
+            <option value="IMPS">IMPS</option>
+            <option value="CHEQUE">Cheque</option>
+            <option value="CASH">Cash</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Reference / UTR Number</label>
+        <input type="text" id="payment-ref" placeholder="Transaction reference...">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-payment')">Cancel</button>
+      <button class="btn btn-success" onclick="savePayment()">✓ Record Payment</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+  VIEW JOBS MODAL (for a B2B client)
+══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-b2b-jobs">
+  <div class="modal" style="max-width:680px;">
+    <div class="modal-header">
+      <h3 id="b2b-jobs-title">Jobs</h3>
+      <button class="modal-close" onclick="closeModal('modal-b2b-jobs')">×</button>
+    </div>
+    <div class="modal-body" id="b2b-jobs-body" style="padding:0;">
+      <div class="loading"><div class="spinner"></div>Loading...</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-b2b-jobs')">Close</button>
+      <button class="btn btn-primary" id="gen-invoice-btn" onclick="generateInvoice()">📄 Generate & Send Invoice</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════
+// CONFIG
+// ══════════════════════════════════════════════════════════════════
+const SUPABASE_URL = 'https://mlhuwlnwwwxdnqafelko.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI';
+
+// SHA-256 hashes — change passwords by updating hashes here
+const PASSWORDS = {
+  superadmin: '22b5bf6b3fb239527eae312609476110f2abd5ceac4df0c3b3270ecf39083518',  // Printosky@Super2026
+  store:      '037589dcf5f165dc2ad53b6b453be08fd90aee611c71f822247023f1d7b5196d',   // Printosky@1234
+};
+
+// ══════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════
+let currentRole = 'superadmin';
+let allJobs     = [];
+let allB2B      = [];
+let activeB2BPhone = null;
+
+// ══════════════════════════════════════════════════════════════════
+// AUTH
+// ══════════════════════════════════════════════════════════════════
+function selectRole(role) {
+  currentRole = role;
+  document.querySelectorAll('.role-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function doLogin() {
+  const pw   = document.getElementById('pw-input').value;
+  const hash = await sha256(pw);
+  if (hash === PASSWORDS[currentRole]) {
+    sessionStorage.setItem('role', currentRole);
+    showApp(currentRole);
+  } else {
+    document.getElementById('login-error').textContent = 'Incorrect password. Try again.';
+    document.getElementById('pw-input').value = '';
+    document.getElementById('pw-input').focus();
+  }
+}
+
+function showApp(role) {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('role-badge').textContent = role === 'superadmin' ? 'Superadmin' : 'Store Admin';
+  document.getElementById('role-badge').className = 'role-badge' + (role === 'store' ? ' store' : '');
+  document.getElementById('user-info').textContent = role === 'superadmin' ? 'Printosky HQ' : 'Oxygen Students Paradise';
+  // Hide superadmin-only items for store role
+  if (role === 'store') {
+    document.querySelectorAll('.superadmin-only').forEach(el => el.style.display = 'none');
+  }
+  loadDashboard();
+}
+
+function logout() {
+  sessionStorage.removeItem('role');
+  location.reload();
+}
+
+// Auto-login if session exists
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = sessionStorage.getItem('role');
+  if (saved && PASSWORDS[saved]) showApp(saved);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════════════════════
+function navigate(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  document.querySelector(`[data-page="${page}"]`).classList.add('active');
+  closeSidebar();
+  if (page === 'dashboard') loadDashboard();
+  if (page === 'jobs')      loadJobs();
+  if (page === 'b2b')       loadB2B();
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.querySelector('.sidebar-overlay').classList.toggle('open');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.querySelector('.sidebar-overlay').classList.remove('open');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SUPABASE API
+// ══════════════════════════════════════════════════════════════════
+async function sbFetch(path, opts = {}) {
+  const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': opts.prefer || 'return=representation',
+      ...opts.headers
+    },
+    ...opts
+  });
+  if (!res.ok) throw new Error(await res.text());
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+async function sbGet(table, params = '') {
+  return sbFetch(table + '?' + params);
+}
+
+async function sbUpsert(table, data) {
+  return sbFetch(table, {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=representation',
+    headers: { 'Prefer': 'resolution=merge-duplicates,return=representation' },
+    body: JSON.stringify(data)
+  });
+}
+
+async function sbUpdate(table, match, data) {
+  return sbFetch(table + '?' + match, {
+    method: 'PATCH',
+    body: JSON.stringify(data)
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════════════════════════════════
+async function loadDashboard() {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('dash-subtitle').textContent = `Today — ${new Date().toLocaleDateString('en-IN', {weekday:'long', day:'numeric', month:'long'})}`;
+
+  try {
+    const [jobs, summary] = await Promise.all([
+      sbGet('jobs', 'order=received_at.desc&limit=100'),
+      sbGet('daily_summary', `date=eq.${today}`)
+    ]);
+
+    // Stats
+    const todayJobs   = jobs.filter(j => j.received_at?.startsWith(today));
+    const pendingJobs = jobs.filter(j => j.status !== 'Completed');
+    const todayRev    = todayJobs.reduce((s, j) => s + (j.amount_collected || 0), 0);
+    const totalRev    = jobs.reduce((s, j) => s + (j.amount_collected || 0), 0);
+
+    document.getElementById('stat-grid').innerHTML = `
+      <div class="stat-card">
+        <div class="stat-label">Today's Jobs</div>
+        <div class="stat-value">${todayJobs.length}</div>
+        <div class="stat-sub">${pendingJobs.length} pending</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-label">Today's Revenue</div>
+        <div class="stat-value">₹${todayRev.toFixed(0)}</div>
+        <div class="stat-sub">collected today</div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-label">Pending Jobs</div>
+        <div class="stat-value">${pendingJobs.length}</div>
+        <div class="stat-sub">need action</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Revenue</div>
+        <div class="stat-value">₹${(totalRev/1000).toFixed(1)}k</div>
+        <div class="stat-sub">all time</div>
+      </div>
+    `;
+
+    // Recent jobs
+    const recent = jobs.slice(0, 8);
+    if (recent.length === 0) {
+      document.getElementById('recent-jobs-list').innerHTML = '<div class="empty-state"><div class="emoji">📭</div><p>No jobs yet</p></div>';
+    } else {
+      document.getElementById('recent-jobs-list').innerHTML = `
+        <table style="width:100%;">
+          <thead><tr>
+            <th style="padding:8px 14px;">Job ID</th>
+            <th style="padding:8px 14px;">File</th>
+            <th style="padding:8px 14px;">Status</th>
+            <th style="padding:8px 14px;">Amount</th>
+          </tr></thead>
+          <tbody>${recent.map(j => `
+            <tr>
+              <td style="padding:9px 14px;"><span class="mono">${j.job_id}</span></td>
+              <td style="padding:9px 14px;" class="text-muted">${(j.filename||'').slice(0,22)}${j.filename?.length>22?'…':''}</td>
+              <td style="padding:9px 14px;">${statusBadge(j.status)}</td>
+              <td style="padding:9px 14px;">${j.amount_collected ? '₹'+j.amount_collected.toFixed(0) : '<span class="text-muted">—</span>'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    // B2B balances — from Supabase b2b_clients table if it exists
+    try {
+      const b2b = await sbGet('b2b_clients', 'active=eq.true&order=company_name');
+      allB2B = b2b;
+      const withBalance = b2b.filter(c => c.balance_due > 0);
+      if (!withBalance.length) {
+        document.getElementById('b2b-balance-list').innerHTML = '<div class="empty-state"><div class="emoji">✅</div><p>All balances clear</p></div>';
+      } else {
+        document.getElementById('b2b-balance-list').innerHTML = `
+          <table style="width:100%;">
+            <thead><tr>
+              <th style="padding:8px 14px;">Company</th>
+              <th style="padding:8px 14px;">Balance Due</th>
+            </tr></thead>
+            <tbody>${withBalance.map(c => `
+              <tr>
+                <td style="padding:9px 14px;font-weight:500;">${c.company_name}</td>
+                <td style="padding:9px 14px;"><span class="balance-chip owe">₹${c.balance_due.toFixed(0)}</span></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>`;
+      }
+    } catch(e) {
+      document.getElementById('b2b-balance-list').innerHTML = '<div class="empty-state"><p class="text-muted">B2B table not set up yet</p></div>';
+    }
+
+  } catch(e) {
+    document.getElementById('stat-grid').innerHTML = `<div class="stat-card" style="grid-column:1/-1;"><div class="card-body"><p style="color:var(--red);">⚠️ Could not load data. Check Supabase connection.</p><p class="text-muted" style="margin-top:6px;font-size:12px;">${e.message}</p></div></div>`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// JOBS
+// ══════════════════════════════════════════════════════════════════
+async function loadJobs() {
+  document.getElementById('jobs-tbody').innerHTML = '<tr><td colspan="7"><div class="loading"><div class="spinner"></div>Loading jobs...</div></td></tr>';
+  try {
+    allJobs = await sbGet('jobs', 'order=received_at.desc&limit=500');
+    renderJobs(allJobs);
+  } catch(e) {
+    document.getElementById('jobs-tbody').innerHTML = `<tr><td colspan="7" style="color:var(--red);padding:20px;">Error: ${e.message}</td></tr>`;
+  }
+}
+
+function renderJobs(jobs) {
+  if (!jobs.length) {
+    document.getElementById('jobs-tbody').innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="emoji">📭</div><p>No jobs found</p></div></td></tr>';
+    return;
+  }
+  document.getElementById('jobs-tbody').innerHTML = jobs.map(j => `
+    <tr>
+      <td><span class="mono">${j.job_id}</span></td>
+      <td>
+        <div style="font-weight:500;">${(j.filename||'—').slice(0,30)}${j.filename?.length>30?'…':''}</div>
+        <div class="text-muted">${j.sender || 'Walk-in'}</div>
+      </td>
+      <td class="text-muted">${j.received_at ? new Date(j.received_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—'}</td>
+      <td><span class="badge badge-grey">${j.source||'—'}</span></td>
+      <td>${statusBadge(j.status)}</td>
+      <td>${j.amount_collected ? '<strong>₹'+j.amount_collected.toFixed(0)+'</strong>' : '<span class="text-muted">—</span>'}
+        ${j.payment_mode ? `<div class="text-muted">${j.payment_mode}</div>` : ''}
+      </td>
+      <td>
+        <div class="actions">
+          <button class="btn btn-outline btn-sm" onclick="openEditJob(${JSON.stringify(j).replace(/"/g,'&quot;')})">Edit</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function filterJobs() {
+  const q      = document.getElementById('job-search').value.toLowerCase();
+  const status = document.getElementById('job-status-filter').value;
+  const filtered = allJobs.filter(j => {
+    const matchQ = !q || j.job_id?.toLowerCase().includes(q) || j.filename?.toLowerCase().includes(q) || j.sender?.includes(q);
+    const matchS = !status || j.status === status;
+    return matchQ && matchS;
+  });
+  renderJobs(filtered);
+}
+
+function openEditJob(job) {
+  document.getElementById('edit-job-id').value     = job.job_id;
+  document.getElementById('edit-job-status').value = job.status || 'Received';
+  document.getElementById('edit-job-amount').value = job.amount_collected || '';
+  document.getElementById('edit-job-paymode').value= job.payment_mode || '';
+  document.getElementById('edit-job-notes').value  = job.notes || '';
+  openModal('modal-job');
+}
+
+async function saveJob() {
+  const jobId  = document.getElementById('edit-job-id').value;
+  const status = document.getElementById('edit-job-status').value;
+  const amount = document.getElementById('edit-job-amount').value;
+  const mode   = document.getElementById('edit-job-paymode').value;
+  const notes  = document.getElementById('edit-job-notes').value;
+  const update = { status };
+  if (amount) update.amount_collected = parseFloat(amount);
+  if (mode)   update.payment_mode     = mode;
+  if (notes)  update.notes            = notes;
+  if (status === 'Completed') update.completed_at = new Date().toISOString();
+  try {
+    await sbUpdate('jobs', `job_id=eq.${jobId}`, update);
+    closeModal('modal-job');
+    toast('Job updated successfully', 'success');
+    loadJobs();
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// B2B CLIENTS
+// ══════════════════════════════════════════════════════════════════
+async function loadB2B() {
+  document.getElementById('b2b-tbody').innerHTML = '<tr><td colspan="7"><div class="loading"><div class="spinner"></div>Loading...</div></td></tr>';
+  try {
+    allB2B = await sbGet('b2b_clients', 'active=eq.true&order=company_name');
+    renderB2B(allB2B);
+  } catch(e) {
+    document.getElementById('b2b-tbody').innerHTML = `<tr><td colspan="7" style="color:var(--red);padding:20px;">
+      B2B table not set up yet. <a href="#" onclick="createB2BTables()">Create now →</a><br>
+      <span style="font-size:11px;color:var(--muted);">${e.message}</span>
+    </td></tr>`;
+  }
+}
+
+function renderB2B(clients) {
+  if (!clients.length) {
+    document.getElementById('b2b-tbody').innerHTML = `<tr><td colspan="7">
+      <div class="empty-state"><div class="emoji">🏢</div>
+      <p>No B2B clients yet.</p>
+      <button class="btn btn-primary" style="margin-top:14px;" onclick="openAddB2B()">+ Add First Client</button>
+      </div></td></tr>`;
+    return;
+  }
+  document.getElementById('b2b-tbody').innerHTML = clients.map(c => `
+    <tr>
+      <td>
+        <div style="font-weight:600;">${c.company_name}</div>
+        ${c.notes ? `<div class="text-muted">${c.notes.slice(0,40)}</div>` : ''}
+      </td>
+      <td>${c.contact_name || '<span class="text-muted">—</span>'}</td>
+      <td><span class="mono" style="font-size:12px;">${c.phone}</span></td>
+      <td>${c.discount_pct ? `<span class="badge badge-teal">${c.discount_pct}%</span>` : '<span class="text-muted">—</span>'}</td>
+      <td>${c.balance_due > 0
+        ? `<span class="balance-chip owe">₹${c.balance_due.toFixed(0)} due</span>`
+        : `<span class="balance-chip clear">Clear</span>`}
+      </td>
+      <td>${c.credit_limit ? '₹'+c.credit_limit.toFixed(0) : '<span class="text-muted">—</span>'}</td>
+      <td>
+        <div class="actions">
+          <button class="btn btn-outline btn-sm" onclick="openViewB2BJobs('${c.phone}','${c.company_name}')">Jobs</button>
+          <button class="btn btn-success btn-sm" onclick="openRecordPayment('${c.phone}','${c.company_name}',${c.balance_due||0})">Pay</button>
+          <button class="btn btn-ghost btn-sm" onclick="openEditB2B(${JSON.stringify(c).replace(/"/g,'&quot;')})">Edit</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function filterB2B() {
+  const q = document.getElementById('b2b-search').value.toLowerCase();
+  renderB2B(allB2B.filter(c =>
+    !q || c.company_name?.toLowerCase().includes(q) || c.phone?.includes(q) || c.contact_name?.toLowerCase().includes(q)
+  ));
+}
+
+function openAddB2B() {
+  document.getElementById('b2b-modal-title').textContent = 'Add B2B Client';
+  document.getElementById('b2b-edit-id').value = '';
+  ['b2b-company','b2b-contact','b2b-phone','b2b-email','b2b-gst','b2b-address','b2b-notes'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('b2b-discount').value = '0';
+  document.getElementById('b2b-credit').value = '';
+  openModal('modal-b2b');
+}
+
+function openEditB2B(client) {
+  document.getElementById('b2b-modal-title').textContent = 'Edit B2B Client';
+  document.getElementById('b2b-edit-id').value    = client.phone;
+  document.getElementById('b2b-company').value    = client.company_name || '';
+  document.getElementById('b2b-contact').value    = client.contact_name || '';
+  document.getElementById('b2b-phone').value      = client.phone || '';
+  document.getElementById('b2b-email').value      = client.email || '';
+  document.getElementById('b2b-discount').value   = client.discount_pct || 0;
+  document.getElementById('b2b-credit').value     = client.credit_limit || '';
+  document.getElementById('b2b-gst').value        = client.gst_number || '';
+  document.getElementById('b2b-address').value    = client.address || '';
+  document.getElementById('b2b-notes').value      = client.notes || '';
+  openModal('modal-b2b');
+}
+
+async function saveB2B() {
+  const phone   = document.getElementById('b2b-phone').value.trim().replace(/\D/g,'');
+  const company = document.getElementById('b2b-company').value.trim();
+  if (!phone || !company) { toast('Company name and phone are required', 'error'); return; }
+  const data = {
+    phone,
+    company_name:  company,
+    contact_name:  document.getElementById('b2b-contact').value.trim(),
+    email:         document.getElementById('b2b-email').value.trim(),
+    discount_pct:  parseFloat(document.getElementById('b2b-discount').value) || 0,
+    credit_limit:  parseFloat(document.getElementById('b2b-credit').value) || 0,
+    gst_number:    document.getElementById('b2b-gst').value.trim(),
+    address:       document.getElementById('b2b-address').value.trim(),
+    notes:         document.getElementById('b2b-notes').value.trim(),
+    active:        true,
+    registered_at: new Date().toISOString(),
+  };
+  try {
+    await sbUpsert('b2b_clients', data);
+    closeModal('modal-b2b');
+    toast('B2B client saved!', 'success');
+    loadB2B();
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+// ── Record payment ──────────────────────────────────────────────
+function openRecordPayment(phone, company, balance) {
+  document.getElementById('payment-phone').value = phone;
+  document.getElementById('payment-client-info').innerHTML = `<strong>${company}</strong> — Balance due: ₹${balance.toFixed(0)}`;
+  document.getElementById('payment-amount').value = balance > 0 ? balance.toFixed(0) : '';
+  document.getElementById('payment-ref').value = '';
+  openModal('modal-payment');
+}
+
+async function savePayment() {
+  const phone  = document.getElementById('payment-phone').value;
+  const amount = parseFloat(document.getElementById('payment-amount').value);
+  const mode   = document.getElementById('payment-mode').value;
+  const ref    = document.getElementById('payment-ref').value.trim();
+  if (!amount || amount <= 0) { toast('Please enter a valid amount', 'error'); return; }
+  try {
+    // Record in b2b_payments table
+    await sbUpsert('b2b_payments', {
+      phone, amount, mode, reference: ref,
+      paid_at: new Date().toISOString()
+    });
+    // Reduce balance_due
+    const client = allB2B.find(c => c.phone === phone);
+    if (client) {
+      const newBal = Math.max(0, (client.balance_due || 0) - amount);
+      await sbUpdate('b2b_clients', `phone=eq.${phone}`, { balance_due: newBal });
+    }
+    closeModal('modal-payment');
+    toast(`₹${amount.toFixed(0)} payment recorded!`, 'success');
+    loadB2B();
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+// ── View jobs for a B2B client ──────────────────────────────────
+async function openViewB2BJobs(phone, company) {
+  activeB2BPhone = phone;
+  document.getElementById('b2b-jobs-title').textContent = `Jobs — ${company}`;
+  document.getElementById('b2b-jobs-body').innerHTML = '<div class="loading"><div class="spinner"></div>Loading...</div>';
+  openModal('modal-b2b-jobs');
+  try {
+    const jobs = await sbGet('jobs', `sender=eq.${phone}&order=received_at.desc`);
+    if (!jobs.length) {
+      document.getElementById('b2b-jobs-body').innerHTML = '<div class="empty-state"><div class="emoji">📭</div><p>No jobs found</p></div>';
+      return;
+    }
+    const uninvoiced = jobs.filter(j => !j.invoiced);
+    const total = uninvoiced.reduce((s,j) => s+(j.amount_collected||0), 0);
+    document.getElementById('b2b-jobs-body').innerHTML = `
+      <div style="padding:12px 20px;background:var(--teal-light);border-bottom:1px solid var(--border);font-size:13px;">
+        <strong>${uninvoiced.length} uninvoiced jobs</strong> — ₹${total.toFixed(0)} pending
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Job ID</th><th>File</th><th>Date</th>
+            <th>Status</th><th>Amount</th><th>Invoiced</th>
+          </tr></thead>
+          <tbody>${jobs.map(j => `
+            <tr>
+              <td><span class="mono">${j.job_id}</span></td>
+              <td class="text-muted">${(j.filename||'—').slice(0,28)}</td>
+              <td class="text-muted">${j.received_at?new Date(j.received_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short'}):'—'}</td>
+              <td>${statusBadge(j.status)}</td>
+              <td>${j.amount_collected?'₹'+j.amount_collected.toFixed(0):'<span class="text-muted">—</span>'}</td>
+              <td>${j.invoiced?'<span class="badge badge-green">✓</span>':'<span class="badge badge-amber">Pending</span>'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch(e) {
+    document.getElementById('b2b-jobs-body').innerHTML = `<div style="padding:20px;color:var(--red);">Error: ${e.message}</div>`;
+  }
+}
+
+async function generateInvoice() {
+  if (!activeB2BPhone) return;
+  // Trigger invoice generation via local watcher webhook on port 3002
+  toast('Sending invoice request to store PC...', '');
+  try {
+    const resp = await fetch('http://localhost:3002/generate-invoice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: activeB2BPhone }),
+    });
+    if (resp.ok) {
+      toast('Invoice sent via WhatsApp! ✓', 'success');
+      closeModal('modal-b2b-jobs');
+    } else {
+      toast('Store PC not reachable. Generate manually from store.', 'error');
+    }
+  } catch(e) {
+    toast('Store PC offline. Use watcher: invoice ' + activeB2BPhone, 'error');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// UTILITIES
+// ══════════════════════════════════════════════════════════════════
+function statusBadge(status) {
+  const map = {
+    'Received':  'badge-blue',
+    'Paid':      'badge-green',
+    'Completed': 'badge-teal',
+    'Cancelled': 'badge-red',
+  };
+  return `<span class="badge ${map[status]||'badge-grey'}">${status||'—'}</span>`;
+}
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// Close modal on overlay click
+document.querySelectorAll('.modal-overlay').forEach(o => {
+  o.addEventListener('click', e => { if (e.target === o) o.classList.remove('open'); });
+});
+
+let toastTimer;
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (type ? ' ' + type : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = '', 3200);
+}
+
+async function createB2BTables() {
+  toast('B2B tables need to be created via Supabase SQL Editor. See ADMIN_SETUP.md.', '');
+}
+</script>
+</body>
+</html>

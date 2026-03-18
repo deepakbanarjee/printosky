@@ -1,0 +1,39 @@
+# Netlify
+.netlify
+
+# WhatsApp browser session (large, locked files)
+whatsapp_capture/.wwebjs_auth/
+whatsapp_capture/.wwebjs_cache/
+whatsapp_capture/node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+logs/
+*.log
+
+# Uploads / received files
+uploads/
+data/uploads/
+
+# Executables and shortcuts
+cloudflared.exe
+*.lnk
+
+# Zip archives
+*.zip
+
+# Temp / misc
+sc
+start
+stop
+type
+epson_snmp_results.txt

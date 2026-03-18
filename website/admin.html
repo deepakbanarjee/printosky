@@ -1,0 +1,1921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Printosky Admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0a0e13;
+    --surface:  #111820;
+    --card:     #161d26;
+    --border:   #1e2a36;
+    --accent:   #00c8ff;
+    --green:    #00e676;
+    --amber:    #ffab40;
+    --red:      #ff5252;
+    --text:     #e0eaf5;
+    --muted:    #5a7080;
+    --mono:     'IBM Plex Mono', monospace;
+    --sans:     'IBM Plex Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+  }
+
+  /* ── Login Screen ─────────────────────────────── */
+  #login-screen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: radial-gradient(ellipse at 40% 50%, #001a2e 0%, var(--bg) 70%);
+  }
+
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    padding: 2.5rem;
+    width: 340px;
+    animation: fadeUp .4s ease;
+  }
+
+  .login-logo {
+    font-family: var(--mono);
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: .15em;
+    margin-bottom: .25rem;
+  }
+
+  .login-sub {
+    font-size: .75rem;
+    color: var(--muted);
+    font-family: var(--mono);
+    margin-bottom: 2rem;
+    letter-spacing: .05em;
+  }
+
+  label {
+    display: block;
+    font-size: .7rem;
+    color: var(--muted);
+    font-family: var(--mono);
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    margin-bottom: .4rem;
+  }
+
+  input[type="password"], input[type="text"] {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: .9rem;
+    padding: .65rem .8rem;
+    outline: none;
+    transition: border-color .2s;
+  }
+
+  input[type="password"]:focus, input[type="text"]:focus { border-color: var(--accent); }
+
+  /* PIN dots display */
+  .pin-dots {
+    display: flex;
+    gap: .6rem;
+    justify-content: center;
+    margin: 1.2rem 0;
+  }
+  .pin-dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: transparent;
+    transition: background .15s, border-color .15s;
+  }
+  .pin-dot.filled { background: var(--accent); border-color: var(--accent); }
+
+  .login-btn {
+    display: block;
+    width: 100%;
+    margin-top: 1.2rem;
+    padding: .7rem;
+    background: var(--accent);
+    color: #000;
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: .85rem;
+    letter-spacing: .1em;
+    border: none;
+    cursor: pointer;
+    transition: opacity .2s;
+  }
+
+  .login-btn:hover { opacity: .85; }
+
+  .login-err {
+    margin-top: .8rem;
+    font-size: .75rem;
+    color: var(--red);
+    font-family: var(--mono);
+    display: none;
+  }
+
+  .admin-override-link {
+    display: block;
+    margin-top: 1.4rem;
+    font-size: .68rem;
+    color: var(--muted);
+    font-family: var(--mono);
+    text-align: center;
+    cursor: pointer;
+    text-decoration: underline;
+    opacity: .6;
+  }
+  .admin-override-link:hover { opacity: 1; }
+  #admin-override-form { display: none; margin-top: 1rem; }
+
+  /* Staff badge in header */
+  .staff-badge {
+    font-family: var(--mono);
+    font-size: .72rem;
+    color: var(--green);
+    background: rgba(0,230,118,.08);
+    border: 1px solid rgba(0,230,118,.2);
+    padding: .2rem .6rem;
+    letter-spacing: .05em;
+  }
+
+  /* ── Main Dashboard ───────────────────────────── */
+  #dashboard { display: none; }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: .8rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .hdr-logo { font-family: var(--mono); font-size: 1rem; font-weight: 600; color: var(--accent); letter-spacing: .12em; }
+  .hdr-sub  { font-family: var(--mono); font-size: .68rem; color: var(--muted); margin-top: .1rem; }
+
+  .hdr-right { display: flex; align-items: center; gap: 1rem; }
+
+  .sync-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    display: inline-block;
+    transition: background .3s;
+  }
+  .sync-dot.ok  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .sync-dot.err { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+
+  .sync-label { font-family: var(--mono); font-size: .68rem; color: var(--muted); }
+
+  .refresh-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: .7rem;
+    padding: .3rem .7rem;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .logout-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: .7rem;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  main { padding: 1.5rem; max-width: 1300px; margin: 0 auto; }
+
+  /* ── Stats Row ────────────────────────────────── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--border);
+  }
+
+  .stat {
+    background: var(--card);
+    padding: 1.2rem 1.4rem;
+    position: relative;
+  }
+
+  .stat-label {
+    font-family: var(--mono);
+    font-size: .63rem;
+    color: var(--muted);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-bottom: .5rem;
+  }
+
+  .stat-value {
+    font-family: var(--mono);
+    font-size: 1.9rem;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .stat-sub {
+    font-family: var(--mono);
+    font-size: .65rem;
+    color: var(--muted);
+    margin-top: .3rem;
+  }
+
+  .stat-value.green  { color: var(--green); }
+  .stat-value.amber  { color: var(--amber); }
+  .stat-value.accent { color: var(--accent); }
+  .stat-value.white  { color: var(--text); }
+
+  /* ── Two Column ───────────────────────────────── */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* ── Panel ────────────────────────────────────── */
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--border);
+  }
+
+  .panel-hdr {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: .8rem 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-title {
+    font-family: var(--mono);
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+
+  .panel-badge {
+    font-family: var(--mono);
+    font-size: .62rem;
+    padding: .15rem .5rem;
+    background: var(--border);
+    color: var(--muted);
+    border-radius: 2px;
+  }
+
+  /* ── Jobs Table ───────────────────────────────── */
+  .table-wrap { overflow-x: auto; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: .72rem;
+  }
+
+  thead th {
+    text-align: left;
+    padding: .6rem 1rem;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: .62rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    font-weight: 500;
+    border-bottom: 1px solid var(--border);
+  }
+
+  tbody td {
+    padding: .6rem 1rem;
+    border-bottom: 1px solid #141c24;
+    white-space: nowrap;
+    color: var(--text);
+  }
+
+  tbody tr:hover td { background: #1a2430; }
+
+  .badge {
+    display: inline-block;
+    padding: .15rem .5rem;
+    border-radius: 2px;
+    font-size: .62rem;
+    font-weight: 600;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+
+  .badge-completed { background: #00382d; color: var(--green); }
+  .badge-pending   { background: #332800; color: var(--amber); }
+  .badge-received  { background: #1a2a3a; color: var(--accent); }
+  .badge-progress  { background: #2a1a00; color: #ffd740; }
+  .badge-paid      { background: #002a1a; color: #69f0ae; }
+
+  .amount { color: var(--green); font-weight: 600; }
+  .amount-0 { color: var(--muted); }
+
+  .tag-cash { color: var(--amber); }
+  .tag-upi  { color: var(--accent); }
+
+  /* ── Filter bar ───────────────────────────────── */
+  .filter-bar {
+    display: flex;
+    gap: .5rem;
+    padding: .8rem 1rem;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+
+  .filter-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: .65rem;
+    padding: .25rem .6rem;
+    cursor: pointer;
+    transition: all .15s;
+    letter-spacing: .05em;
+  }
+  .filter-btn.active,
+  .filter-btn:hover { border-color: var(--accent); color: var(--accent); background: #001a26; }
+
+  .search-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: .72rem;
+    padding: .25rem .6rem;
+    outline: none;
+    width: 180px;
+    margin-left: auto;
+  }
+  .search-input:focus { border-color: var(--accent); }
+
+  /* ── Empty / Loading ──────────────────────────── */
+  .empty {
+    text-align: center;
+    padding: 3rem;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: .78rem;
+  }
+
+  .spinner {
+    display: inline-block;
+    width: 18px; height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    vertical-align: middle;
+    margin-right: .4rem;
+  }
+
+  @keyframes spin   { to { transform: rotate(360deg); } }
+  @keyframes fadeUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:none; } }
+
+  /* ── Print button ─────────────────────────────── */
+  .print-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: .62rem;
+    padding: .2rem .5rem;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .print-btn:hover  { border-color: var(--accent); color: var(--accent); }
+  .print-btn:disabled { opacity: .35; cursor: default; }
+  .print-btn.sent   { border-color: var(--green); color: var(--green); }
+  .print-btn.err    { border-color: var(--red);   color: var(--red); }
+
+  /* ── Printer breakdown ───────────────────────── */
+  .printer-breakdown {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  @media (max-width: 700px) { .printer-breakdown { grid-template-columns: 1fr; } }
+
+  .pb-files {
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: var(--mono);
+    font-size: .68rem;
+  }
+  .pb-file-row {
+    display: flex;
+    justify-content: space-between;
+    padding: .3rem .8rem;
+    border-bottom: 1px solid #141c24;
+    color: var(--muted);
+  }
+  .pb-file-row .fn { color: var(--text); max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pb-file-row .pg { color: var(--accent); }
+  .pb-file-row .tm { color: var(--muted); font-size: .62rem; }
+
+  .pb-stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: .4rem .8rem;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: .72rem;
+  }
+  .pb-stat-row .k { color: var(--muted); font-size: .65rem; }
+  .pb-stat-row .v { font-weight: 600; }
+  .pb-stat-row .v.green  { color: var(--green); }
+  .pb-stat-row .v.amber  { color: var(--amber); }
+  .pb-stat-row .v.accent { color: var(--accent); }
+
+  /* ── Job row clickable ─────────────────────────── */
+  tr.job-row { cursor: pointer; }
+  tr.job-row:hover td { background: #141c24; }
+  tr.job-row.active-row td { background: #0d1a28; border-top: 1px solid var(--accent); }
+
+  /* ── New badge states ──────────────────────────── */
+  .badge-ready  { background: rgba(255,171,64,.12); color: var(--amber);  border: 1px solid rgba(255,171,64,.3); }
+  .badge-vendor { background: rgba(255,107,64,.12); color: #ff7a52;       border: 1px solid rgba(255,107,64,.3); }
+
+  /* ── Job Print Panel ───────────────────────────── */
+  /* Panel row — inserted into table after clicked row */
+  .panel-row > td { padding: 0 !important; background: #070c15; border-top: 2px solid var(--accent); }
+  #job-panel {
+    background: #0b1320;
+    padding: 1rem 1.2rem 1.2rem;
+    animation: fadeUp .2s ease;
+  }
+  .jp-hdr {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    margin-bottom: 1rem;
+    padding-bottom: .7rem;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .jp-id   { font-family: var(--mono); font-size: .85rem; font-weight: 600; color: var(--accent); }
+  .jp-meta { font-family: var(--mono); font-size: .7rem;  color: var(--muted); }
+  .jp-close-btn {
+    margin-left: auto;
+    background: none; border: 1px solid var(--border);
+    color: var(--muted); font-size: .7rem; font-family: var(--mono);
+    padding: .2rem .6rem; cursor: pointer;
+  }
+  .jp-close-btn:hover { border-color: var(--red); color: var(--red); }
+  /* Two-pane split: left=preview, right=options */
+  .jp-split { display: grid; grid-template-columns: 1fr 390px; gap: 0; min-height: 520px; }
+  .jp-preview-pane {
+    display: flex; flex-direction: column;
+    border-right: 1px solid var(--border);
+    padding-right: 1.2rem; margin-right: 1.2rem;
+  }
+  .jp-preview-pane iframe {
+    flex: 1; width: 100%; min-height: 460px;
+    border: 1px solid var(--border); background: #fff;
+  }
+  .jp-preview-footer {
+    font-family: var(--mono); font-size: .6rem; color: var(--muted);
+    margin-top: .4rem; text-align: center;
+  }
+  .jp-options-pane { overflow-y: auto; max-height: 520px; padding-right: .3rem; }
+  @media (max-width: 900px) {
+    .jp-split { grid-template-columns: 1fr; }
+    .jp-preview-pane { border-right: none; padding-right: 0; margin-right: 0; border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1rem; }
+    .jp-preview-pane iframe { min-height: 300px; }
+  }
+
+  /* Print items */
+  .pp-label { font-family: var(--mono); font-size: .65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin-bottom: .5rem; }
+  .print-item {
+    background: #111820;
+    border: 1px solid var(--border);
+    padding: .7rem .9rem;
+    margin-bottom: .5rem;
+    position: relative;
+  }
+  .pi-hdr { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+  .pi-label { font-family: var(--mono); font-size: .72rem; font-weight: 600; color: var(--accent); }
+  .pi-printer-tag {
+    font-family: var(--mono); font-size: .6rem;
+    padding: .1rem .35rem; background: rgba(0,200,255,.1); color: var(--accent);
+  }
+  .pi-printer-tag.epson { background: rgba(0,230,118,.1); color: var(--green); }
+  .pi-remove {
+    margin-left: auto; background: none; border: none;
+    color: var(--red); cursor: pointer; font-size: .75rem; opacity: .55;
+  }
+  .pi-remove:hover { opacity: 1; }
+  .pp-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .35rem; flex-wrap: wrap; }
+  .pp-row label { font-size: .6rem; color: var(--muted); margin: 0; white-space: nowrap; font-family: var(--mono); text-transform: uppercase; }
+  .pp-sel, .pp-inp {
+    background: #0a0e13; border: 1px solid var(--border);
+    color: var(--text); font-family: var(--mono); font-size: .7rem;
+    padding: .2rem .4rem; border-radius: 1px;
+  }
+  .pp-sel:focus, .pp-inp:focus { outline: none; border-color: var(--accent); }
+  .pp-inp { width: 60px; }
+  .pp-inp.wide { width: 130px; }
+  .pi-print-btn {
+    margin-top: .45rem;
+    background: none; border: 1px solid var(--accent);
+    color: var(--accent); font-family: var(--mono); font-size: .65rem;
+    padding: .25rem .65rem; cursor: pointer; width: 100%; transition: all .15s;
+  }
+  .pi-print-btn:hover { background: rgba(0,200,255,.1); }
+  .pi-print-btn.printed { border-color: var(--green); color: var(--green); }
+  .pi-print-btn.err { border-color: var(--red); color: var(--red); }
+  .pi-print-btn:disabled { opacity: .4; cursor: default; }
+  .pp-add-btn {
+    background: none; border: 1px dashed var(--border);
+    color: var(--muted); font-family: var(--mono); font-size: .7rem;
+    padding: .35rem; cursor: pointer; width: 100%; margin-top: .2rem; transition: all .15s;
+  }
+  .pp-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Options pane sections */
+  .jp-opts-section { border-top: 1px solid var(--border); padding-top: .7rem; margin-top: .7rem; }
+  .pp-field { margin-bottom: .65rem; }
+  .pp-field label { display: block; font-size: .62rem; color: var(--muted); font-family: var(--mono); text-transform: uppercase; letter-spacing: .08em; margin-bottom: .25rem; }
+  .pp-check-row { display: flex; gap: 1.2rem; margin-bottom: .65rem; }
+  .pp-check-row label { display: flex; align-items: center; gap: .35rem; font-size: .7rem; color: var(--text); font-family: var(--mono); cursor: pointer; }
+  .pp-check-row input { cursor: pointer; }
+  .quote-box {
+    background: #0a0e13; border: 1px solid var(--border);
+    padding: .65rem .8rem; margin: .8rem 0;
+  }
+  .quote-total { font-size: 1.6rem; font-weight: 700; color: var(--green); font-family: var(--mono); }
+  .quote-brkdn { font-size: .62rem; color: var(--muted); line-height: 1.7; margin-top: .3rem; font-family: var(--mono); }
+  .jp-action-bar { display: flex; flex-direction: column; gap: .4rem; margin-top: .5rem; }
+  .jp-btn {
+    background: none; border: 1px solid var(--border);
+    color: var(--muted); font-family: var(--mono); font-size: .72rem;
+    padding: .45rem .8rem; cursor: pointer; transition: all .15s; text-align: left;
+  }
+  .jp-btn.save   { border-color: var(--accent); color: var(--accent); }
+  .jp-btn.save:hover   { background: rgba(0,200,255,.08); }
+  .jp-btn.notify { border-color: var(--amber);  color: var(--amber); }
+  .jp-btn.notify:hover { background: rgba(255,171,64,.08); }
+  .jp-btn.collect { border-color: var(--green); color: var(--green); }
+  .jp-btn.collect:hover { background: rgba(0,230,118,.08); }
+  .jp-btn:disabled { opacity: .4; cursor: default; }
+
+  /* ── Payment / Photocopy Modal ─────────────────── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.75); z-index: 200;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-top: 2px solid var(--green); padding: 1.5rem; width: 360px;
+    animation: fadeUp .2s ease;
+  }
+  .modal-box.amber-top { border-top-color: var(--amber); }
+  .modal-title { font-family: var(--mono); font-size: .85rem; font-weight: 600; color: var(--green); margin-bottom: 1rem; letter-spacing: .05em; }
+  .modal-title.amber { color: var(--amber); }
+  .modal-field { margin-bottom: .8rem; }
+  .modal-field label { display: block; font-size: .65rem; color: var(--muted); font-family: var(--mono); text-transform: uppercase; letter-spacing: .1em; margin-bottom: .3rem; }
+  .modal-field input, .modal-field select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); font-family: var(--mono); font-size: 1rem;
+    padding: .45rem .6rem; border-radius: 1px;
+  }
+  .modal-field input:focus, .modal-field select:focus { outline: none; border-color: var(--green); }
+  .modal-btns { display: flex; gap: .5rem; margin-top: 1rem; }
+  .modal-ok {
+    flex: 1; background: rgba(0,230,118,.1); border: 1px solid var(--green);
+    color: var(--green); font-family: var(--mono); font-size: .78rem;
+    padding: .5rem; cursor: pointer; transition: all .15s;
+  }
+  .modal-ok:hover { background: rgba(0,230,118,.2); }
+  .modal-ok:disabled { opacity: .4; cursor: default; }
+  .modal-cancel {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    font-family: var(--mono); font-size: .78rem; padding: .5rem 1rem; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<!-- ══ LOGIN ══════════════════════════════════════════════════════════════ -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">PRINTOSKY</div>
+    <div class="login-sub">ADMIN CONSOLE // OXYGEN GLOBALLY</div>
+    <label>Enter PIN</label>
+    <div class="pin-dots">
+      <div class="pin-dot" id="pd0"></div>
+      <div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div>
+      <div class="pin-dot" id="pd3"></div>
+    </div>
+    <input type="password" id="pin-input" placeholder="4-digit PIN" maxlength="4"
+           inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+           oninput="onPinInput()" style="text-align:center;letter-spacing:.4em;font-size:1.4rem;">
+    <button class="login-btn" onclick="tryPinLogin()">ENTER →</button>
+    <div class="login-err" id="login-err">Incorrect PIN</div>
+    <span class="admin-override-link" onclick="toggleAdminOverride()">Admin override</span>
+    <div id="admin-override-form">
+      <label for="pw">Admin Password</label>
+      <input type="password" id="pw" placeholder="••••••••" autocomplete="current-password">
+      <button class="login-btn" onclick="tryAdminLogin()" style="margin-top:.8rem">ENTER →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ DASHBOARD ══════════════════════════════════════════════════════════ -->
+<div id="dashboard">
+  <header>
+    <div>
+      <div class="hdr-logo">PRINTOSKY ADMIN</div>
+      <div class="hdr-sub" id="hdr-store">Oxygen Students Paradise · Thriprayar · Thrissur</div>
+    </div>
+    <div class="hdr-right">
+      <span class="staff-badge" id="staff-badge" style="display:none"></span>
+      <span class="sync-dot" id="sync-dot"></span>
+      <span class="sync-label" id="sync-label">Loading…</span>
+      <button class="refresh-btn" onclick="loadAll()">↻ Refresh</button>
+      <button class="refresh-btn" onclick="resetPCSetup()" title="Reconfigure PC name and server URL">⚙ PC Setup</button>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Stats row -->
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat"><div class="stat-label">Today's Jobs</div><div class="stat-value accent" id="s-jobs">—</div></div>
+      <div class="stat"><div class="stat-label">Completed</div><div class="stat-value green" id="s-done">—</div></div>
+      <div class="stat"><div class="stat-label">Pending</div><div class="stat-value amber" id="s-pend">—</div></div>
+      <div class="stat"><div class="stat-label">Revenue Today</div><div class="stat-value green" id="s-rev">—</div><div class="stat-sub" id="s-rev-sub">—</div></div>
+    </div>
+
+    <!-- Printer breakdown -->
+    <div class="printer-breakdown">
+      <!-- Konica -->
+      <div class="panel">
+        <div class="panel-hdr">
+          <div class="panel-title">▣ Konica — B&amp;W Jobs</div>
+          <span class="panel-badge" id="konica-count">—</span>
+        </div>
+        <div class="pb-stat-row"><span class="k">Received Today</span><span class="v accent" id="konica-received">—</span></div>
+        <div class="pb-stat-row"><span class="k">Printed</span><span class="v green" id="konica-printed">—</span></div>
+        <div class="pb-stat-row"><span class="k">Pending Print</span><span class="v amber" id="konica-pending">—</span></div>
+        <div class="pb-files" id="konica-files">
+          <div class="pb-file-row"><span class="fn" style="color:var(--muted)">No jobs yet today</span></div>
+        </div>
+      </div>
+      <!-- Epson -->
+      <div class="panel">
+        <div class="panel-hdr">
+          <div class="panel-title" style="color:var(--green)">▣ Epson — Colour Jobs</div>
+          <span class="panel-badge" id="epson-count">—</span>
+        </div>
+        <div class="pb-stat-row"><span class="k">Received Today</span><span class="v accent" id="epson-received">—</span></div>
+        <div class="pb-stat-row"><span class="k">Printed</span><span class="v green" id="epson-printed">—</span></div>
+        <div class="pb-stat-row"><span class="k">Pending Print</span><span class="v amber" id="epson-pending">—</span></div>
+        <div class="pb-files" id="epson-files">
+          <div class="pb-file-row"><span class="fn" style="color:var(--muted)">No jobs yet today</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Jobs panel -->
+    <div class="panel">
+      <div class="panel-hdr">
+        <div class="panel-title">Job Log</div>
+        <span class="panel-badge" id="job-count">Loading…</span>
+        <button class="filter-btn" style="margin-left:auto" onclick="openPhotocopyModal()">+ Photocopy</button>
+      </div>
+      <div class="filter-bar">
+        <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
+        <button class="filter-btn" onclick="setFilter('Completed', this)">Completed</button>
+        <button class="filter-btn" onclick="setFilter('Received', this)">Pending</button>
+        <button class="filter-btn" onclick="setFilter('today', this)">Today</button>
+        <input class="search-input" id="search" placeholder="Search job ID / file…" oninput="renderTable()">
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Job ID</th>
+              <th>Received</th>
+              <th>Phone</th>
+              <th>File</th>
+              <th>Source</th>
+              <th>Status</th>
+              <th>Service</th>
+              <th>Amount</th>
+              <th>Payment</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="jobs-tbody">
+            <tr><td colspan="10" class="empty"><span class="spinner"></span> Loading jobs…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Job Print Panel (expands below table on row click) ── -->
+  </main>
+</div>
+
+<!-- ── Payment Modal ── -->
+<div class="modal-overlay" id="payment-modal">
+  <div class="modal-box">
+    <div class="modal-title">Collect Payment</div>
+    <div id="pm-job-info" style="font-size:.68rem;color:var(--muted);font-family:var(--mono);margin-bottom:.8rem"></div>
+    <div class="modal-field">
+      <label>Amount Collected (Rs.)</label>
+      <input type="number" id="pm-amount" min="0" step="1" placeholder="0"
+             onkeydown="if(event.key==='Enter')confirmPayment()">
+    </div>
+    <div class="modal-field">
+      <label>Payment Mode</label>
+      <select id="pm-mode">
+        <option value="Cash">Cash</option>
+        <option value="UPI">UPI</option>
+        <option value="Online">Online</option>
+      </select>
+    </div>
+    <div class="modal-btns">
+      <button class="modal-ok" id="pm-confirm-btn" onclick="confirmPayment()">Mark Complete</button>
+      <button class="modal-cancel" onclick="closePaymentModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Photocopy Modal ── -->
+<div class="modal-overlay" id="photocopy-modal">
+  <div class="modal-box amber-top">
+    <div class="modal-title amber">Quick Photocopy Entry</div>
+    <div class="modal-field">
+      <label>Customer Name (optional)</label>
+      <input type="text" id="pc-name" placeholder="Walk-in customer">
+    </div>
+    <div class="modal-field">
+      <label>Phone (optional)</label>
+      <input type="tel" id="pc-phone" placeholder="+91…">
+    </div>
+    <div style="display:flex;gap:.5rem">
+      <div class="modal-field" style="flex:1">
+        <label>Sheets</label>
+        <input type="number" id="pc-pages" min="1" value="1">
+      </div>
+      <div class="modal-field" style="flex:1">
+        <label>Copies</label>
+        <input type="number" id="pc-copies" min="1" value="1">
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem">
+      <div class="modal-field" style="flex:1">
+        <label>Colour</label>
+        <select id="pc-colour">
+          <option value="bw">B&amp;W</option>
+          <option value="col">Colour</option>
+        </select>
+      </div>
+      <div class="modal-field" style="flex:1">
+        <label>Amount (Rs.)</label>
+        <input type="number" id="pc-amount" min="0" step="1" value="0">
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>Payment Mode</label>
+      <select id="pc-mode">
+        <option value="Cash">Cash</option>
+        <option value="UPI">UPI</option>
+      </select>
+    </div>
+    <div class="modal-btns">
+      <button class="modal-ok" id="pc-confirm-btn" onclick="confirmPhotocopy()" style="border-color:var(--amber);color:var(--amber);background:rgba(255,171,64,.08)">Add &amp; Complete</button>
+      <button class="modal-cancel" onclick="closePhotocopyModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── File Preview Modal ── -->
+<div class="modal-overlay" id="preview-modal" style="z-index:9999;background:rgba(0,0,0,.88)" onclick="if(event.target===this)closePreview()">
+  <div style="background:var(--surface);border:1px solid var(--border);border-top:2px solid var(--accent);width:92vw;max-width:900px;height:90vh;display:flex;flex-direction:column;border-radius:2px">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem 1rem;border-bottom:1px solid var(--border);flex-shrink:0">
+      <span style="font-family:var(--mono);font-size:.75rem;color:var(--accent)" id="preview-title">—</span>
+      <button class="jp-close-btn" onclick="closePreview()">✕ Close</button>
+    </div>
+    <iframe id="preview-frame" style="flex:1;border:none;background:#222" src="about:blank"></iframe>
+    <div id="preview-fallback" style="display:none;flex:1;align-items:center;justify-content:center;flex-direction:column;gap:.8rem;color:var(--muted);font-size:.8rem;text-align:center;padding:2rem">
+      <div style="font-size:2rem">📄</div>
+      <div id="preview-fallback-msg">Preview not available for this file type.</div>
+      <a id="preview-dl-link" href="#" target="_blank" style="color:var(--accent);font-size:.75rem">Open / Download file →</a>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Config ─────────────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI";
+const ADMIN_HASH   = "037589dcf5f165dc2ad53b6b453be08fd90aee611c71f822247023f1d7b5196d";
+// Store PC URL — update this to your current Cloudflare tunnel URL for port 3005
+// STORE_PC_URL is configured per-browser during first-time PC setup (localStorage)
+const STORE_PC_URL = localStorage.getItem("storePcUrl") || "";
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+async function sha256(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ── PC setup (one-time, saved in localStorage) ────────────────────────────
+function getPcId() { return localStorage.getItem("pc_id") || "PC1"; }
+
+function setupPC() {
+  if (!localStorage.getItem("pc_id")) {
+    const pc = (prompt("First-time setup (step 1/2)\nThis PC's name (e.g. PC1, PC2, PC3):") || "PC1").trim().toUpperCase();
+    localStorage.setItem("pc_id", pc);
+  }
+  if (!localStorage.getItem("storePcUrl")) {
+    const isServerPC = localStorage.getItem("pc_id") === "PC1";
+    const hint = isServerPC ? "http://localhost:3005" : "https://store.printosky.com";
+    const entered = prompt(
+      "First-time setup (step 2/2)\nPrint server URL:\n" +
+      "  Server PC (PC1): http://localhost:3005\n" +
+      "  LAN PC:          http://192.168.55.212:3005\n" +
+      "  Remote/Home:     https://store.printosky.com\n\n" +
+      "Enter URL (default: " + hint + "):"
+    );
+    const url = (entered || hint).trim().replace(/\/$/, "");
+    localStorage.setItem("storePcUrl", url);
+    location.reload();
+  }
+}
+
+function resetPCSetup() {
+  if (confirm("Reset this PC's setup?\nYou will be prompted to re-enter PC name and server URL.")) {
+    localStorage.removeItem("pc_id");
+    localStorage.removeItem("storePcUrl");
+    location.reload();
+  }
+}
+
+// ── PIN input visual feedback ──────────────────────────────────────────────
+function onPinInput() {
+  const len = document.getElementById("pin-input").value.length;
+  for (let i = 0; i < 4; i++) {
+    document.getElementById("pd" + i).classList.toggle("filled", i < len);
+  }
+  document.getElementById("login-err").style.display = "none";
+  if (len === 4) tryPinLogin();
+}
+
+function toggleAdminOverride() {
+  const f = document.getElementById("admin-override-form");
+  f.style.display = f.style.display === "none" ? "block" : "none";
+}
+
+// ── Staff PIN login ────────────────────────────────────────────────────────
+async function tryPinLogin() {
+  const pin = document.getElementById("pin-input").value;
+  if (pin.length !== 4) return;
+  const pcId = getPcId();
+  try {
+    const r = await fetch(`${STORE_PC_URL}/staff-login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin, pc_id: pcId }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      sessionStorage.setItem("p_auth", "1");
+      sessionStorage.setItem("staff_id", data.staff_id);
+      sessionStorage.setItem("staff_name", data.name);
+      sessionStorage.setItem("session_id", data.session_id);
+      showDashboard();
+    } else {
+      document.getElementById("login-err").style.display = "block";
+      document.getElementById("pin-input").value = "";
+      onPinInput();
+    }
+  } catch {
+    // Store PC offline — fall back to admin override only
+    document.getElementById("login-err").textContent = "Print server offline — use Admin Override";
+    document.getElementById("login-err").style.display = "block";
+    document.getElementById("pin-input").value = "";
+    onPinInput();
+  }
+}
+
+// ── Admin override (master password) ──────────────────────────────────────
+async function tryAdminLogin() {
+  const pw = document.getElementById("pw").value;
+  const hash = await sha256(pw);
+  if (hash === ADMIN_HASH) {
+    sessionStorage.setItem("p_auth", "1");
+    sessionStorage.removeItem("staff_id");
+    sessionStorage.removeItem("staff_name");
+    sessionStorage.removeItem("session_id");
+    showDashboard();
+  } else {
+    document.getElementById("login-err").textContent = "Incorrect password";
+    document.getElementById("login-err").style.display = "block";
+    document.getElementById("pw").value = "";
+  }
+}
+
+document.getElementById("pw") && document.getElementById("pw").addEventListener("keydown", e => {
+  if (e.key === "Enter") tryAdminLogin();
+});
+document.getElementById("pin-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") tryPinLogin();
+});
+
+// ── Logout ────────────────────────────────────────────────────────────────
+async function logout() {
+  const sid = sessionStorage.getItem("session_id");
+  if (sid && STORE_PC_URL) {
+    try {
+      await fetch(`${STORE_PC_URL}/staff-logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: parseInt(sid), idle: false }),
+      });
+    } catch { /* ignore if offline */ }
+  }
+  sessionStorage.clear();
+  clearIdleTimer();
+  document.getElementById("dashboard").style.display = "none";
+  document.getElementById("staff-badge").style.display = "none";
+  document.getElementById("login-err").textContent = "Incorrect PIN";
+  document.getElementById("pin-input").value = "";
+  onPinInput();
+  document.getElementById("login-screen").style.display = "flex";
+}
+
+function showDashboard() {
+  document.getElementById("login-screen").style.display = "none";
+  document.getElementById("dashboard").style.display = "block";
+  // Show staff badge
+  const name = sessionStorage.getItem("staff_name");
+  const badge = document.getElementById("staff-badge");
+  if (name) {
+    badge.textContent = "● " + name;
+    badge.style.display = "inline";
+  } else {
+    badge.style.display = "none";
+  }
+  resetIdleTimer();
+  loadAll();
+}
+
+// ── Idle timeout (15 min) ──────────────────────────────────────────────────
+let _idleTimer = null;
+const IDLE_MS = 15 * 60 * 1000;
+
+function resetIdleTimer() {
+  clearIdleTimer();
+  _idleTimer = setTimeout(idleLogout, IDLE_MS);
+}
+
+function clearIdleTimer() {
+  if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null; }
+}
+
+async function idleLogout() {
+  const sid = sessionStorage.getItem("session_id");
+  if (sid && STORE_PC_URL) {
+    try {
+      await fetch(`${STORE_PC_URL}/staff-logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: parseInt(sid), idle: true }),
+      });
+    } catch { /* ignore */ }
+  }
+  sessionStorage.clear();
+  clearIdleTimer();
+  document.getElementById("dashboard").style.display = "none";
+  document.getElementById("staff-badge").style.display = "none";
+  document.getElementById("login-err").textContent = "Session expired — enter PIN";
+  document.getElementById("login-err").style.display = "block";
+  document.getElementById("pin-input").value = "";
+  onPinInput();
+  document.getElementById("login-screen").style.display = "flex";
+}
+
+["mousemove", "keydown", "click", "touchstart"].forEach(ev =>
+  document.addEventListener(ev, () => { if (sessionStorage.getItem("p_auth") === "1") resetIdleTimer(); })
+);
+
+// ── Auto-login if session alive ────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", () => {
+  setupPC(); // ensure PC ID + server URL are set
+  if (sessionStorage.getItem("p_auth") === "1") showDashboard();
+});
+
+// ── Supabase fetch ─────────────────────────────────────────────────────────
+async function sbFetch(table, params = "") {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+    }
+  });
+  if (!r.ok) throw new Error(`${table}: ${r.status}`);
+  return r.json();
+}
+
+// ── Demo data (shown when Supabase has no records yet) ───────────────────────
+const DEMO_JOBS = [
+  { job_id:"OSP-20260312-0001", received_at:"2026-03-12 09:14:00", filename:"Chemistry_Notes.pdf", source:"Pen Drive", status:"Completed", service_type:"B&W Print", amount_collected:15, payment_mode:"Cash" },
+  { job_id:"OSP-20260312-0002", received_at:"2026-03-12 10:32:00", filename:"WhatsApp Image.jpg", source:"WhatsApp", status:"Received", service_type:"Colour Print", amount_collected:null, payment_mode:null },
+  { job_id:"OSP-20260312-0003", received_at:"2026-03-12 11:05:00", filename:"Resume_Arun.docx", source:"Pen Drive", status:"Completed", service_type:"B&W Print + Binding", amount_collected:75, payment_mode:"UPI" },
+  { job_id:"OSP-20260312-0004", received_at:"2026-03-12 13:20:00", filename:"Thesis_Final.pdf", source:"Pen Drive", status:"In Progress", service_type:"Thesis Binding", amount_collected:null, payment_mode:null },
+  { job_id:"OSP-20260311-0009", received_at:"2026-03-11 16:45:00", filename:"ID_Photo.jpg", source:"WhatsApp", status:"Completed", service_type:"PVC Card", amount_collected:50, payment_mode:"Cash" },
+];
+const DEMO_SUMMARY = { total_jobs:4, completed:2, pending:2, revenue:140, cash:65, upi:75 };
+
+// ── State ──────────────────────────────────────────────────────────────────
+let allJobs = [];
+let activeFilter = "all";
+let isDemo = false;
+
+// ── Load everything ─────────────────────────────────────────────────────────
+async function loadAll() {
+  setSyncState("loading");
+  try {
+    const [jobs, summary] = await Promise.all([
+      sbFetch("jobs", "order=received_at.desc&limit=200"),
+      sbFetch("daily_summary", `date=eq.${today()}&order=synced_at.desc&limit=1`),
+    ]);
+
+    isDemo = jobs.length === 0;
+    allJobs = isDemo ? DEMO_JOBS : jobs;
+    renderStats(isDemo ? DEMO_SUMMARY : (summary[0] || {}));
+    renderTable();
+    renderPrinterBreakdown();
+    setSyncState(isDemo ? "demo" : "ok");
+  } catch (e) {
+    setSyncState("err", e.message);
+  }
+}
+
+// ── Sync indicator ──────────────────────────────────────────────────────────
+function setSyncState(s, msg) {
+  const dot   = document.getElementById("sync-dot");
+  const label = document.getElementById("sync-label");
+  dot.className = "sync-dot " + (s === "ok" ? "ok" : s === "err" ? "err" : "");
+  label.textContent = s === "ok"   ? "Live · " + now()
+                    : s === "demo" ? "Demo Mode — start watcher at store to see live data"
+                    : s === "err"  ? "Sync error: " + msg
+                    : "Refreshing…";
+}
+
+// ── Stats ───────────────────────────────────────────────────────────────────
+function renderStats(s) {
+  document.getElementById("s-jobs").textContent = s.total_jobs ?? "—";
+  document.getElementById("s-done").textContent = s.completed ?? "—";
+  document.getElementById("s-pend").textContent = s.pending ?? "—";
+  const rev = s.revenue ?? 0;
+  document.getElementById("s-rev").textContent = rev ? "₹" + rev.toFixed(0) : "₹0";
+  const cash = s.cash ?? 0, upi = s.upi ?? 0;
+  document.getElementById("s-rev-sub").textContent = `Cash ₹${cash.toFixed(0)} · UPI ₹${upi.toFixed(0)}`;
+}
+
+// ── Jobs Table ───────────────────────────────────────────────────────────────
+function setFilter(f, btn) {
+  activeFilter = f;
+  document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  renderTable();
+}
+
+function renderTable() {
+  const search = (document.getElementById("search").value || "").toLowerCase();
+  const todayStr = today();
+
+  let rows = allJobs.filter(j => {
+    if (activeFilter === "Completed" && j.status !== "Completed") return false;
+    if (activeFilter === "Received"  && !["Received","In Progress","Printed"].includes(j.status)) return false;
+    if (activeFilter === "today"     && !j.received_at?.startsWith(todayStr)) return false;
+    if (search && !`${j.job_id} ${j.filename}`.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  document.getElementById("job-count").textContent = `${rows.length} job${rows.length !== 1 ? "s" : ""}`;
+
+  const tbody = document.getElementById("jobs-tbody");
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="9" class="empty">No jobs found</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(j => {
+    const isActive = selectedJob && selectedJob.job_id === j.job_id;
+    const isWalkin = !j.sender && j.source !== "WhatsApp";
+    const walkinTag = isWalkin ? ` <span style="font-size:.58rem;color:var(--amber);font-family:var(--mono)">WALK-IN</span>` : "";
+    return `
+    <tr class="job-row${isActive ? " active-row" : ""}" id="jrow-${esc(j.job_id)}" onclick="selectJob('${esc(j.job_id)}')">
+      <td style="color:var(--accent);font-size:.68rem;font-family:var(--mono)">${esc(j.job_id)}</td>
+      <td style="color:var(--muted)">${shortTime(j.received_at)}</td>
+      <td style="color:var(--muted);font-size:.68rem;font-family:var(--mono)">${j.sender ? esc(j.sender.replace('@c.us','').replace('@lid','')) : '<span style="color:var(--border)">—</span>'}</td>
+      <td>${esc(trim(j.filename, 26))}${walkinTag}</td>
+      <td style="color:var(--muted)">${esc(j.source || "—")}</td>
+      <td>${badge(j.status)}</td>
+      <td style="color:var(--muted);font-size:.68rem">${esc(j.service_type || "—")}</td>
+      <td class="${j.amount_collected ? "amount" : "amount-0"}">${j.amount_collected ? "Rs." + j.amount_collected : "—"}</td>
+      <td class="tag-${(j.payment_mode||"").toLowerCase()}">${esc(j.payment_mode || "—")}</td>
+      <td><button class="print-btn${isActive ? " sent" : ""}" onclick="event.stopPropagation();selectJob('${esc(j.job_id)}')">${isActive ? "▲ Close" : "▸ Setup"}</button></td>
+    </tr>`;
+  }).join("");
+}
+
+// ── Print ─────────────────────────────────────────────────────────────────────
+function guessprinter(j) {
+  // Use stored printer column first, then guess from colour field / service
+  if (j.printer) return j.printer.toLowerCase().includes("epson") ? "epson" : "konica";
+  const svc = (j.service_type || "").toLowerCase();
+  const col = (j.colour || "").toLowerCase();
+  if (col === "col" || col === "colour" || svc.includes("colour") || svc.includes("color")) return "epson";
+  return "konica";
+}
+
+function colourMode(j) {
+  const col = (j.colour || "").toLowerCase();
+  if (col === "col" || col === "colour") return "colour";
+  if (col === "bw") return "bw";
+  return "auto";
+}
+
+async function printJob(jobId, filepath, printerKey, copies, colourMode) {
+  if (!STORE_PC_URL) {
+    alert("Print server URL not configured.\n\nClick '⚙ PC Setup' in the header to set it.");
+    return;
+  }
+  const btn = document.getElementById("pbtn-" + jobId);
+  if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+
+  try {
+    const r = await fetch(`${STORE_PC_URL}/print`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: jobId, filepath, printer: printerKey, copies, colour_mode: colourMode, staff_id: sessionStorage.getItem("staff_id") || null }),
+    });
+    const data = await r.json();
+    if (r.ok && data.ok) {
+      if (btn) { btn.className = "print-btn sent"; btn.textContent = `✓ ${printerKey}`; btn.disabled = false; }
+    } else {
+      if (btn) { btn.className = "print-btn err"; btn.textContent = "Error"; btn.disabled = false; }
+      alert("Print failed: " + (data.error || JSON.stringify(data)));
+    }
+  } catch (e) {
+    if (btn) { btn.className = "print-btn err"; btn.textContent = "Offline"; btn.disabled = false; }
+    alert("Cannot reach print server.\nCheck that watcher.py is running.\n\n" + e.message);
+  }
+}
+
+// ── Printer Breakdown ─────────────────────────────────────────────────────────
+function renderPrinterBreakdown() {
+  const todayStr = today();
+  const todayJobs = allJobs.filter(j => (j.received_at || "").startsWith(todayStr));
+
+  ["konica", "epson"].forEach(p => {
+    const isEpson = p === "epson";
+    const pJobs = todayJobs.filter(j => {
+      const printer = (j.printer || "").toLowerCase();
+      if (printer) return isEpson ? printer.includes("epson") : printer.includes("konica");
+      // fallback: guess from colour
+      const col = (j.colour || "").toLowerCase();
+      const svc = (j.service_type || "").toLowerCase();
+      const isColour = col === "col" || col === "colour" || svc.includes("colour");
+      return isEpson ? isColour : !isColour;
+    });
+    const printed = pJobs.filter(j => j.status === "Printed" || j.status === "Completed").length;
+    const pending = pJobs.filter(j => j.status === "Paid" || j.status === "Received" || j.status === "In Progress").length;
+
+    set(`${p}-count`,   `${pJobs.length} job${pJobs.length !== 1 ? "s" : ""}`);
+    set(`${p}-received`, pJobs.length);
+    set(`${p}-printed`,  printed);
+    set(`${p}-pending`,  pending);
+
+    const container = document.getElementById(`${p}-files`);
+    if (!container) return;
+    if (!pJobs.length) {
+      container.innerHTML = `<div class="pb-file-row"><span class="fn" style="color:var(--muted)">No jobs yet today</span></div>`;
+      return;
+    }
+    container.innerHTML = pJobs.map(j => `
+      <div class="pb-file-row">
+        <span class="fn">${esc(trim(j.filename, 24))}</span>
+        <span class="pg">${j.page_count ? j.page_count + "p" : "—"}</span>
+        <span class="tm">${shortTime(j.received_at)}</span>
+        <span>${badge(j.status)}</span>
+      </div>`).join("");
+  });
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function badge(s) {
+  const cls = s === "Completed"   ? "badge-completed"
+            : s === "Ready"       ? "badge-ready"
+            : s === "At Vendor"   ? "badge-vendor"
+            : s === "Received"    ? "badge-received"
+            : s === "Paid"        ? "badge-paid"
+            : s === "In Progress" || s === "Printed" ? "badge-progress"
+            : "badge-pending";
+  return `<span class="badge ${cls}">${esc(s || "Unknown")}</span>`;
+}
+
+function fmt(n)       { return n != null ? Number(n).toLocaleString("en-IN") : "—"; }
+function esc(s)       { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+function trim(s,n)    { s=String(s||""); return s.length>n ? s.slice(0,n-1)+"…" : s; }
+function set(id,val)  { const el=document.getElementById(id); if(el) el.textContent=val; }
+function today()      { return new Date().toISOString().slice(0,10); }
+function now()        { return new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}); }
+
+function shortTime(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso.replace(" ","T"));
+    const isToday = d.toISOString().slice(0,10) === today();
+    if (isToday) return d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+    return d.toLocaleDateString("en-IN",{day:"numeric",month:"short"});
+  } catch { return iso.slice(0,16); }
+}
+
+// ── Auto-refresh every 5 minutes ─────────────────────────────────────────────
+setInterval(() => {
+  if (sessionStorage.getItem("p_auth") === "1") { resetIdleTimer(); loadAll(); }
+}, 5 * 60 * 1000);
+
+// ════════════════════════════════════════════════════════════════════════════
+// SPRINT 1 — Print Panel, Quote, Vendor, Payment, Photocopy
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── State ────────────────────────────────────────────────────────────────────
+let selectedJob   = null;
+let editItems     = [];      // [ { item_number, page_list, colour, sides, layout, copies, paper_gsm, printer, status, pages } ]
+let editFinishing = "none";
+let editIsStudent = false;
+let editUrgent    = false;
+let editPaperSize = "A4";
+let quoteTimer    = null;
+let payJobId      = null;    // job being paid
+
+// ── Panel HTML template ───────────────────────────────────────────────────────
+function panelHTML() {
+  return `<div id="job-panel">
+    <div class="jp-hdr">
+      <span class="jp-id"   id="jp-id">—</span>
+      <span class="jp-meta" id="jp-file">—</span>
+      <span class="jp-meta" id="jp-pages">—</span>
+      <span class="jp-meta" id="jp-source">—</span>
+      <span id="jp-status"></span>
+      <button class="jp-close-btn" onclick="closeJobPanel()">✕ Close</button>
+    </div>
+    <div class="jp-split">
+      <!-- LEFT: file preview -->
+      <div class="jp-preview-pane">
+        <iframe id="jp-preview-iframe" src="about:blank" frameborder="0"></iframe>
+        <div class="jp-preview-footer" id="jp-preview-footer">—</div>
+      </div>
+      <!-- RIGHT: print options -->
+      <div class="jp-options-pane">
+        <div class="pp-label">Print Items</div>
+        <div id="jp-items"></div>
+        <button class="pp-add-btn" onclick="addItem()">+ Add Print Item</button>
+        <div class="jp-opts-section">
+          <div class="pp-field">
+            <label>Finishing</label>
+            <select class="pp-sel" id="jp-finishing" style="width:100%" onchange="editFinishing=this.value; scheduleQuote()">
+              <option value="none">None</option>
+              <option value="staple">Staple</option>
+              <option value="spiral">Spiral Binding</option>
+              <option value="wiro">Wiro Binding</option>
+              <option value="lam_sheet">Sheet Lamination</option>
+              <option value="id_card">ID Card Print</option>
+              <option value="lam_roll">Roll Lamination (Outsourced)</option>
+              <option value="lam_cover">Cover Lamination (Outsourced)</option>
+              <option value="project">Project Binding (Outsourced)</option>
+              <option value="record">Record Binding (Outsourced)</option>
+              <option value="thermal">Thermal Binding (Outsourced)</option>
+            </select>
+          </div>
+          <div class="pp-field">
+            <label>Paper Size</label>
+            <select class="pp-sel" id="jp-paper-size" style="width:100%" onchange="editPaperSize=this.value; scheduleQuote()">
+              <option value="A4">A4</option>
+              <option value="A3">A3</option>
+              <option value="Legal">Legal</option>
+            </select>
+          </div>
+          <div class="pp-check-row">
+            <label><input type="checkbox" id="jp-student" onchange="editIsStudent=this.checked; scheduleQuote()"> Student rate</label>
+            <label><input type="checkbox" id="jp-urgent"  onchange="editUrgent=this.checked; scheduleQuote()"> Urgent +Rs.20</label>
+          </div>
+          <div class="quote-box">
+            <div class="quote-total" id="jp-quote-total">—</div>
+            <div class="quote-brkdn" id="jp-quote-breakdown">Save specs to see breakdown</div>
+          </div>
+          <div class="jp-action-bar">
+            <button class="jp-btn save"    id="jp-btn-save"    onclick="saveJobSpecs()">Save Specs &amp; Quote</button>
+            <button class="jp-btn notify"  id="jp-btn-notify"  onclick="markReady()" style="display:none">Notify Customer Ready →</button>
+            <button class="jp-btn collect" id="jp-btn-collect" onclick="openPaymentModal()" style="display:none">Collect Payment</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Select / deselect a job ──────────────────────────────────────────────────
+function selectJob(jobId) {
+  const job = allJobs.find(j => j.job_id === jobId);
+  if (!job) return;
+
+  if (selectedJob && selectedJob.job_id === jobId) {
+    closeJobPanel(); return;
+  }
+
+  // Remove any existing panel row
+  const old = document.getElementById("job-panel-row");
+  if (old) old.remove();
+
+  selectedJob = job;
+  document.querySelectorAll("tr.job-row").forEach(r => r.classList.remove("active-row"));
+  const row = document.getElementById("jrow-" + jobId);
+  if (row) row.classList.add("active-row");
+
+  // Init edit state from job
+  editFinishing = job.finishing || "none";
+  editIsStudent = !!(job.is_student);
+  editUrgent    = !!(job.urgent);
+  editPaperSize = job.paper_size || "A4";
+  editItems = [{
+    item_number: 1,
+    page_list:   "all",
+    colour:      (job.colour === "col" || job.colour === "colour") ? "col" : "bw",
+    sides:       job.sides  || "ss",
+    layout:      job.layout || "1-up",
+    copies:      job.copies || 1,
+    paper_gsm:   70,
+    printer:     "",
+    status:      "Pending",
+    pages:       job.page_count || 1,
+  }];
+
+  // Insert panel row after clicked row
+  const panelRow = document.createElement("tr");
+  panelRow.id = "job-panel-row";
+  panelRow.className = "panel-row";
+  const td = document.createElement("td");
+  td.colSpan = 10;
+  td.innerHTML = panelHTML();
+  panelRow.appendChild(td);
+  if (row) row.after(panelRow);
+
+  renderJobPanel();
+  setTimeout(() => panelRow.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
+}
+
+function closeJobPanel() {
+  selectedJob = null;
+  const panelRow = document.getElementById("job-panel-row");
+  if (panelRow) panelRow.remove();
+  document.querySelectorAll("tr.job-row").forEach(r => r.classList.remove("active-row"));
+  renderTable();
+}
+
+// ── Render the panel ─────────────────────────────────────────────────────────
+function renderJobPanel() {
+  if (!selectedJob) return;
+  const j = selectedJob;
+  document.getElementById("jp-id").textContent     = j.job_id;
+  document.getElementById("jp-file").textContent   = j.filename || "—";
+  document.getElementById("jp-pages").textContent  = j.page_count ? j.page_count + "p" : "";
+  document.getElementById("jp-source").textContent = j.source || "";
+  document.getElementById("jp-status").innerHTML   = badge(j.status);
+
+  // Load preview iframe
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const iframe = document.getElementById("jp-preview-iframe");
+  const footer = document.getElementById("jp-preview-footer");
+  if (iframe && j.job_id) {
+    iframe.src = `${PC}/file?job_id=${encodeURIComponent(j.job_id)}`;
+    if (footer) footer.textContent = j.filename || j.job_id;
+  }
+
+  renderItems();
+
+  document.getElementById("jp-finishing").value   = editFinishing;
+  document.getElementById("jp-paper-size").value  = editPaperSize;
+  document.getElementById("jp-student").checked   = editIsStudent;
+  document.getElementById("jp-urgent").checked    = editUrgent;
+
+  const done    = j.status === "Completed";
+  const printed = ["Printed","Ready","At Vendor"].includes(j.status);
+  document.getElementById("jp-btn-notify").style.display  = (printed && !done) ? "block" : "none";
+  document.getElementById("jp-btn-collect").style.display = (printed && !done) ? "block" : "none";
+
+  scheduleQuote();
+}
+
+// ── Render print items list ───────────────────────────────────────────────────
+function renderItems() {
+  document.getElementById("jp-items").innerHTML =
+    editItems.map((it, idx) => itemHTML(it, idx)).join("");
+}
+
+function itemHTML(it, idx) {
+  const printer  = it.printer || (it.colour === "col" ? "epson" : "konica");
+  const isEpson  = printer === "epson";
+  const printed  = it.status === "Printed";
+  const jid      = selectedJob ? esc(selectedJob.job_id) : "";
+  return `
+  <div class="print-item" id="pi-${idx}">
+    <div class="pi-hdr">
+      <span class="pi-label">Item ${idx + 1}</span>
+      <span class="pi-printer-tag ${isEpson ? "epson" : ""}">${isEpson ? "EPSON (colour)" : "KONICA (b&w)"}</span>
+      ${editItems.length > 1 ? `<button class="pi-remove" onclick="removeItem(${idx})">✕</button>` : ""}
+    </div>
+    <div class="pp-row">
+      <label>Pages</label>
+      <input class="pp-inp wide" type="text" placeholder="all · 1-10 · 1,5,12"
+             value="${esc(it.page_list || "all")}"
+             oninput="editItems[${idx}].page_list=this.value;scheduleQuote()">
+      <label>Colour</label>
+      <select class="pp-sel" onchange="editItems[${idx}].colour=this.value;editItems[${idx}].printer='';renderItems();scheduleQuote()">
+        <option value="bw"  ${it.colour !== "col" ? "selected" : ""}>B&amp;W</option>
+        <option value="col" ${it.colour === "col"  ? "selected" : ""}>Colour</option>
+      </select>
+    </div>
+    <div class="pp-row">
+      <label>Sides</label>
+      <select class="pp-sel" onchange="editItems[${idx}].sides=this.value;scheduleQuote()">
+        <option value="ss" ${it.sides !== "ds" ? "selected" : ""}>Single-sided</option>
+        <option value="ds" ${it.sides === "ds"  ? "selected" : ""}>Double-sided</option>
+      </select>
+      <label>Layout</label>
+      <select class="pp-sel" onchange="editItems[${idx}].layout=this.value;scheduleQuote()">
+        <option value="1-up" ${it.layout === "1-up" ? "selected" : ""}>1-up</option>
+        <option value="2-up" ${it.layout === "2-up" ? "selected" : ""}>2-up</option>
+        <option value="4-up" ${it.layout === "4-up" ? "selected" : ""}>4-up</option>
+      </select>
+    </div>
+    <div class="pp-row">
+      <label>Copies</label>
+      <input class="pp-inp" type="number" min="1" value="${it.copies || 1}"
+             oninput="editItems[${idx}].copies=+this.value;scheduleQuote()">
+      <label>GSM</label>
+      <select class="pp-sel" onchange="editItems[${idx}].paper_gsm=+this.value">
+        <option value="70" ${(it.paper_gsm||70) === 70 ? "selected" : ""}>70 gsm</option>
+        <option value="65" ${it.paper_gsm === 65 ? "selected" : ""}>65 gsm</option>
+        <option value="75" ${it.paper_gsm === 75 ? "selected" : ""}>75 gsm</option>
+        <option value="90" ${it.paper_gsm === 90 ? "selected" : ""}>90 gsm</option>
+      </select>
+      <label>Pages in file</label>
+      <input class="pp-inp" type="number" min="1" value="${it.pages || (selectedJob && selectedJob.page_count) || 1}"
+             oninput="editItems[${idx}].pages=+this.value;scheduleQuote()">
+    </div>
+    <button class="pi-print-btn${printed ? " printed" : ""}"
+            id="piprint-${idx}" onclick="printItem('${jid}', ${idx + 1})"
+            ${printed ? "" : ""}>
+      ${printed ? "✓ Printed on " + (isEpson ? "Epson" : "Konica") : "Print on " + (isEpson ? "Epson →" : "Konica →")}
+    </button>
+  </div>`;
+}
+
+function addItem() {
+  const newIdx = editItems.length;
+  editItems.push({
+    item_number: newIdx + 1, page_list: "", colour: "bw",
+    sides: "ss", layout: "1-up", copies: 1, paper_gsm: 70,
+    printer: "konica", status: "Pending",
+    pages: (selectedJob && selectedJob.page_count) || 1,
+  });
+  renderItems();
+  scheduleQuote();
+}
+
+function removeItem(idx) {
+  if (editItems.length <= 1) return;
+  editItems.splice(idx, 1);
+  editItems.forEach((it, i) => { it.item_number = i + 1; });
+  renderItems();
+  scheduleQuote();
+}
+
+// ── Live quote (debounced) ────────────────────────────────────────────────────
+function scheduleQuote() {
+  clearTimeout(quoteTimer);
+  quoteTimer = setTimeout(fetchAndShowQuote, 700);
+}
+
+async function fetchAndShowQuote() {
+  if (!STORE_PC_URL || !selectedJob) return;
+  try {
+    let totalPrint = 0, breakdown = [];
+    for (const it of editItems) {
+      const pages = it.pages || selectedJob.page_count || 1;
+      const pt = it.colour === "col" ? "A4_col" : "A4_BW";
+      const p  = new URLSearchParams({ pages, paper_type: pt, sides: it.sides,
+        layout: it.layout, copies: it.copies, finishing: "none",
+        is_student: editIsStudent, urgent: false, paper_size: editPaperSize });
+      const r = await fetch(`${STORE_PC_URL}/quote?${p}`);
+      if (!r.ok) continue;
+      const q = await r.json();
+      if (q.error) continue;
+      totalPrint += (q.print_cost || 0);
+      if (q.breakdown) breakdown.push(...q.breakdown);
+    }
+    // Finishing cost: use a separate call with total sheet estimate
+    let finCost = 0;
+    const totalPages = editItems.reduce((s, it) => s + (it.pages || 1), 0);
+    if (editFinishing && editFinishing !== "none") {
+      const fp = new URLSearchParams({ pages: totalPages, paper_type: "A4_BW",
+        sides: "ss", finishing: editFinishing, is_student: editIsStudent,
+        urgent: editUrgent, paper_size: editPaperSize });
+      const fr = await fetch(`${STORE_PC_URL}/quote?${fp}`);
+      if (fr.ok) {
+        const fq = await fr.json();
+        finCost = fq.finishing_cost || 0;
+        if (fq.breakdown) breakdown.push(...fq.breakdown.filter(b => !/sheet|per sheet/i.test(b)));
+      }
+    }
+    const total = totalPrint + finCost;
+    document.getElementById("jp-quote-total").textContent    = "Rs. " + total.toFixed(0);
+    document.getElementById("jp-quote-breakdown").innerHTML  =
+      breakdown.map(b => `<div>${esc(b)}</div>`).join("") || "<div>—</div>";
+  } catch {
+    document.getElementById("jp-quote-total").textContent = "—";
+  }
+}
+
+// ── Save specs → POST /update-job ─────────────────────────────────────────────
+async function saveJobSpecs() {
+  if (!STORE_PC_URL) { alert("Print server not configured — click PC Setup"); return; }
+  if (!selectedJob)  return;
+  const btn = document.getElementById("jp-btn-save");
+  btn.textContent = "Saving…"; btn.disabled = true;
+  try {
+    const body = {
+      job_id:      selectedJob.job_id,
+      staff_id:    sessionStorage.getItem("staff_id"),
+      finishing:   editFinishing,
+      is_student:  editIsStudent,
+      urgent:      editUrgent,
+      paper_size:  editPaperSize,
+      print_items: editItems.map((it, idx) => ({
+        item_number: idx + 1,
+        page_list:   it.page_list || "all",
+        colour:      it.colour || "bw",
+        sides:       it.sides  || "ss",
+        layout:      it.layout || "1-up",
+        copies:      it.copies || 1,
+        paper_gsm:   it.paper_gsm || 70,
+        printer:     it.printer || (it.colour === "col" ? "epson" : "konica"),
+        pages:       it.pages || selectedJob.page_count || 1,
+      })),
+    };
+    const r    = await fetch(`${STORE_PC_URL}/update-job`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      btn.textContent = "Saved ✓"; btn.disabled = false;
+      if (data.quote) {
+        document.getElementById("jp-quote-total").textContent = "Rs. " + data.quote.total.toFixed(0);
+        const brkdn = data.quote.breakdown || [];
+        document.getElementById("jp-quote-breakdown").innerHTML = brkdn.map(b => `<div>${esc(b)}</div>`).join("") || "<div>—</div>";
+        // Update job quote in allJobs so payment modal prefills correctly
+        const j = allJobs.find(x => x.job_id === selectedJob.job_id);
+        if (j) j.amount_quoted = data.quote.total;
+        if (selectedJob) selectedJob.amount_quoted = data.quote.total;
+      }
+      setTimeout(() => { btn.textContent = "Save Specs & Quote"; }, 2000);
+    } else {
+      alert("Save failed: " + (data.error || "Unknown error"));
+      btn.textContent = "Save Specs & Quote"; btn.disabled = false;
+    }
+  } catch (e) {
+    alert("Cannot reach print server:\n" + e.message);
+    btn.textContent = "Save Specs & Quote"; btn.disabled = false;
+  }
+}
+
+// ── Print one item → POST /print ─────────────────────────────────────────────
+async function printItem(jobId, itemNumber) {
+  if (!STORE_PC_URL) { alert("Print server not configured — click PC Setup"); return; }
+  const idx = itemNumber - 1;
+  const btn = document.getElementById("piprint-" + idx);
+  if (btn) { btn.disabled = true; btn.textContent = "Saving specs…"; }
+
+  // ── Step 1: always save specs first so print_items row exists in DB ──────
+  try {
+    const saveR = await fetch(`${STORE_PC_URL}/update-job`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_id:      jobId,
+        staff_id:    sessionStorage.getItem("staff_id"),
+        finishing:   editFinishing,
+        is_student:  editIsStudent,
+        urgent:      editUrgent,
+        paper_size:  editPaperSize,
+        print_items: editItems.map((it, i) => ({
+          item_number: i + 1,
+          page_list:   it.page_list || "all",
+          colour:      it.colour    || "bw",
+          sides:       it.sides     || "ss",
+          layout:      it.layout    || "1-up",
+          copies:      it.copies    || 1,
+          paper_gsm:   it.paper_gsm || 70,
+          printer:     it.printer   || (it.colour === "col" ? "epson" : "konica"),
+          pages:       it.pages     || (selectedJob && selectedJob.page_count) || 1,
+        })),
+      }),
+    });
+    const saveData = await saveR.json();
+    if (!saveData.ok) {
+      if (btn) { btn.className = "pi-print-btn err"; btn.textContent = "Save failed — Retry"; btn.disabled = false; }
+      alert("Could not save specs before printing:\n" + (saveData.error || "Unknown error"));
+      return;
+    }
+    // Update quote display with server-calculated value
+    if (saveData.quote) {
+      document.getElementById("jp-quote-total").textContent = "Rs. " + saveData.quote.total.toFixed(0);
+      const brkdn = saveData.quote.breakdown || [];
+      document.getElementById("jp-quote-breakdown").innerHTML = brkdn.map(b => `<div>${esc(b)}</div>`).join("") || "<div>—</div>";
+      if (selectedJob) selectedJob.amount_quoted = saveData.quote.total;
+      const jj = allJobs.find(x => x.job_id === jobId);
+      if (jj) jj.amount_quoted = saveData.quote.total;
+    }
+  } catch (e) {
+    if (btn) { btn.className = "pi-print-btn err"; btn.textContent = "Offline — Retry"; btn.disabled = false; }
+    alert("Cannot reach print server (save step):\n" + e.message);
+    return;
+  }
+
+  // ── Step 2: send to printer ───────────────────────────────────────────────
+  if (btn) btn.textContent = "Sending to printer…";
+  try {
+    const r    = await fetch(`${STORE_PC_URL}/print`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: jobId, item_number: itemNumber,
+                             staff_id: sessionStorage.getItem("staff_id") }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      if (btn) { btn.className = "pi-print-btn printed"; btn.textContent = "✓ Sent to printer"; btn.disabled = false; }
+      if (editItems[idx]) editItems[idx].status = "Printed";
+      if (data.all_items_printed) {
+        const j = allJobs.find(x => x.job_id === jobId);
+        if (j) j.status = "Printed";
+        if (selectedJob && selectedJob.job_id === jobId) {
+          selectedJob.status = "Printed";
+          document.getElementById("jp-status").innerHTML = badge("Printed");
+          document.getElementById("jp-btn-notify").style.display  = "block";
+          document.getElementById("jp-btn-collect").style.display = "block";
+        }
+        renderTable();
+      }
+    } else {
+      if (btn) { btn.className = "pi-print-btn err"; btn.textContent = "Print Error — Retry"; btn.disabled = false; }
+      alert("Print failed: " + (data.error || JSON.stringify(data)));
+    }
+  } catch (e) {
+    if (btn) { btn.className = "pi-print-btn err"; btn.textContent = "Offline — Retry"; btn.disabled = false; }
+    alert("Cannot reach print server:\n" + e.message);
+  }
+}
+
+// ── Mark Ready → POST /mark-ready ────────────────────────────────────────────
+async function markReady() {
+  if (!STORE_PC_URL || !selectedJob) return;
+  const btn = document.getElementById("jp-btn-notify");
+  btn.disabled = true; btn.textContent = "Sending WhatsApp…";
+  try {
+    const r    = await fetch(`${STORE_PC_URL}/mark-ready`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: selectedJob.job_id,
+                             staff_id: sessionStorage.getItem("staff_id") }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      const msg = data.whatsapp_sent ? "WhatsApp Sent ✓" : "Notified (no phone)";
+      btn.textContent = msg; btn.disabled = false;
+      const j = allJobs.find(x => x.job_id === selectedJob.job_id);
+      if (j) j.status = "Ready";
+      if (selectedJob) selectedJob.status = "Ready";
+      document.getElementById("jp-status").innerHTML = badge("Ready");
+      renderTable();
+    } else {
+      alert("Mark Ready failed: " + (data.error || "Unknown"));
+      btn.textContent = "Notify Customer Ready →"; btn.disabled = false;
+    }
+  } catch (e) {
+    alert("Cannot reach print server:\n" + e.message);
+    btn.textContent = "Notify Customer Ready →"; btn.disabled = false;
+  }
+}
+
+// ── Payment Modal ─────────────────────────────────────────────────────────────
+function openPaymentModal() {
+  if (!selectedJob) return;
+  payJobId = selectedJob.job_id;
+  const quoted = selectedJob.amount_quoted || 0;
+  document.getElementById("pm-amount").value   = quoted ? Math.ceil(quoted) : "";
+  document.getElementById("pm-mode").value     = "Cash";
+  document.getElementById("pm-job-info").textContent =
+    `${payJobId}  ·  ${trim(selectedJob.filename || "—", 35)}  ·  Quoted: Rs.${quoted ? Math.ceil(quoted) : "—"}`;
+  document.getElementById("pm-confirm-btn").disabled = false;
+  document.getElementById("pm-confirm-btn").textContent = "Mark Complete";
+  document.getElementById("payment-modal").classList.add("open");
+  setTimeout(() => document.getElementById("pm-amount").focus(), 100);
+}
+
+function closePaymentModal() {
+  document.getElementById("payment-modal").classList.remove("open");
+  payJobId = null;
+}
+
+async function confirmPayment() {
+  if (!STORE_PC_URL || !payJobId) return;
+  const amount = parseFloat(document.getElementById("pm-amount").value) || 0;
+  const mode   = document.getElementById("pm-mode").value;
+  const btn    = document.getElementById("pm-confirm-btn");
+  btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const r    = await fetch(`${STORE_PC_URL}/complete-job`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: payJobId, amount_collected: amount,
+                             payment_mode: mode,
+                             staff_id: sessionStorage.getItem("staff_id") }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      closePaymentModal();
+      const j = allJobs.find(x => x.job_id === payJobId);
+      if (j) { j.status = "Completed"; j.amount_collected = amount; j.payment_mode = mode; }
+      if (selectedJob && selectedJob.job_id === payJobId) {
+        selectedJob.status           = "Completed";
+        selectedJob.amount_collected = amount;
+        selectedJob.payment_mode     = mode;
+        document.getElementById("jp-status").innerHTML           = badge("Completed");
+        document.getElementById("jp-btn-notify").style.display  = "none";
+        document.getElementById("jp-btn-collect").style.display = "none";
+      }
+      renderTable();
+    } else {
+      alert("Complete job failed: " + (data.error || "Unknown"));
+      btn.disabled = false; btn.textContent = "Mark Complete";
+    }
+  } catch (e) {
+    alert("Cannot reach print server:\n" + e.message);
+    btn.disabled = false; btn.textContent = "Mark Complete";
+  }
+}
+
+// ── Photocopy Modal ───────────────────────────────────────────────────────────
+function openPhotocopyModal() {
+  document.getElementById("pc-name").value   = "";
+  document.getElementById("pc-phone").value  = "";
+  document.getElementById("pc-pages").value  = "1";
+  document.getElementById("pc-copies").value = "1";
+  document.getElementById("pc-colour").value = "bw";
+  document.getElementById("pc-amount").value = "0";
+  document.getElementById("pc-mode").value   = "Cash";
+  document.getElementById("pc-confirm-btn").disabled = false;
+  document.getElementById("pc-confirm-btn").textContent = "Add & Complete";
+  document.getElementById("photocopy-modal").classList.add("open");
+}
+
+function closePhotocopyModal() {
+  document.getElementById("photocopy-modal").classList.remove("open");
+}
+
+// ── File Preview ────────────────────────────────────────────────────────────
+function openPreview() {
+  if (!selectedJob) return;
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const jid  = selectedJob.job_id;
+  const fname = selectedJob.filename || jid;
+  const ext   = (fname.split(".").pop() || "").toLowerCase();
+  const url   = `${PC}/file?job_id=${encodeURIComponent(jid)}`;
+
+  document.getElementById("preview-title").textContent = fname;
+  document.getElementById("preview-modal").classList.add("open");
+
+  const frame    = document.getElementById("preview-frame");
+  const fallback = document.getElementById("preview-fallback");
+  const fallMsg  = document.getElementById("preview-fallback-msg");
+  const fallLink = document.getElementById("preview-dl-link");
+
+  fallback.style.display = "none";
+  frame.style.display    = "block";
+  fallLink.href          = url;
+
+  if (["pdf","png","jpg","jpeg","gif","bmp","webp"].includes(ext)) {
+    frame.src = url;
+  } else if (["doc","docx","xls","xlsx","ppt","pptx"].includes(ext)) {
+    // Office viewer via Google Docs (needs public URL — show fallback for local files)
+    frame.style.display    = "none";
+    fallback.style.display = "flex";
+    fallMsg.textContent    = `Office file (.${ext}) — click below to open locally.`;
+    fallLink.href          = url;
+  } else {
+    frame.src = url;  // Let browser try; if blank, error handler will show fallback
+  }
+
+  frame.onerror = () => {
+    frame.style.display    = "none";
+    fallback.style.display = "flex";
+    fallMsg.textContent    = "Could not render preview. File may not be accessible from this browser.";
+  };
+}
+
+function closePreview() {
+  document.getElementById("preview-modal").classList.remove("open");
+  document.getElementById("preview-frame").src = "about:blank";
+}
+
+async function confirmPhotocopy() {
+  if (!STORE_PC_URL) { alert("Print server not configured — click PC Setup"); return; }
+  const btn = document.getElementById("pc-confirm-btn");
+  btn.disabled = true; btn.textContent = "Adding…";
+  try {
+    const body = {
+      staff_id:         sessionStorage.getItem("staff_id"),
+      customer_name:    document.getElementById("pc-name").value.trim(),
+      phone:            document.getElementById("pc-phone").value.trim(),
+      pages:            parseInt(document.getElementById("pc-pages").value) || 1,
+      copies:           parseInt(document.getElementById("pc-copies").value) || 1,
+      colour:           document.getElementById("pc-colour").value,
+      amount_collected: parseFloat(document.getElementById("pc-amount").value) || 0,
+      payment_mode:     document.getElementById("pc-mode").value,
+    };
+    const r    = await fetch(`${STORE_PC_URL}/new-photocopy`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      closePhotocopyModal();
+      loadAll(); // reload job list to show new entry
+    } else {
+      alert("Failed: " + (data.error || "Unknown error"));
+      btn.disabled = false; btn.textContent = "Add & Complete";
+    }
+  } catch (e) {
+    alert("Cannot reach print server:\n" + e.message);
+    btn.disabled = false; btn.textContent = "Add & Complete";
+  }
+}
+
+// Close modals on Escape key
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    closePaymentModal();
+    closePhotocopyModal();
+  }
+});
+</script>
+</body>
+</html>

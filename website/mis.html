@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Printosky MIS</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:      #0a0e13;
+    --surface: #111820;
+    --card:    #161d26;
+    --border:  #1e2a36;
+    --accent:  #00c8ff;
+    --green:   #00e676;
+    --amber:   #ffab40;
+    --red:     #ff5252;
+    --text:    #e0eaf5;
+    --muted:   #5a7080;
+    --mono:    'IBM Plex Mono', monospace;
+    --sans:    'IBM Plex Sans', sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+
+  /* ── Login ─────────────────────────────────────── */
+  #login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh;
+    background: radial-gradient(ellipse at 40% 50%, #001a2e 0%, var(--bg) 70%); }
+  .login-box { background: var(--surface); border: 1px solid var(--border);
+    border-top: 2px solid var(--amber); padding: 2.5rem; width: 360px; animation: fadeUp .4s ease; }
+  .login-logo { font-family: var(--mono); font-size: 1.3rem; font-weight: 600;
+    color: var(--amber); letter-spacing: .15em; margin-bottom: .25rem; }
+  .login-sub  { font-size: .75rem; color: var(--muted); font-family: var(--mono);
+    margin-bottom: 2rem; letter-spacing: .05em; }
+  label { display: block; font-size: .7rem; color: var(--muted); font-family: var(--mono);
+    letter-spacing: .1em; text-transform: uppercase; margin-bottom: .4rem; }
+  input[type="password"] { width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); font-family: var(--mono); font-size: .9rem; padding: .65rem .8rem;
+    outline: none; transition: border-color .2s; }
+  input[type="password"]:focus { border-color: var(--amber); }
+  .login-btn { display: block; width: 100%; margin-top: 1.2rem; padding: .7rem;
+    background: var(--amber); color: #000; font-family: var(--mono); font-weight: 600;
+    font-size: .85rem; letter-spacing: .1em; border: none; cursor: pointer; transition: opacity .2s; }
+  .login-btn:hover { opacity: .85; }
+  .login-err { margin-top: .8rem; font-size: .75rem; color: var(--red); font-family: var(--mono); display: none; }
+
+  /* ── Dashboard ─────────────────────────────────── */
+  #dashboard { display: none; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: .8rem 1.5rem; display: flex; align-items: center;
+    justify-content: space-between; position: sticky; top: 0; z-index: 10; }
+  .hdr-logo { font-family: var(--mono); font-size: 1rem; font-weight: 600;
+    color: var(--amber); letter-spacing: .12em; }
+  .hdr-sub  { font-family: var(--mono); font-size: .68rem; color: var(--muted); margin-top: .1rem; }
+  .hdr-right { display: flex; align-items: center; gap: 1rem; }
+  .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted);
+    display: inline-block; transition: background .3s; }
+  .sync-dot.ok  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .sync-dot.err { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+  .sync-label { font-family: var(--mono); font-size: .68rem; color: var(--muted); }
+  .refresh-btn { background: none; border: 1px solid var(--border); color: var(--muted);
+    font-family: var(--mono); font-size: .7rem; padding: .3rem .7rem; cursor: pointer; transition: all .2s; }
+  .refresh-btn:hover { border-color: var(--amber); color: var(--amber); }
+  .logout-btn { background: none; border: none; color: var(--muted); font-family: var(--mono);
+    font-size: .7rem; cursor: pointer; text-decoration: underline; }
+
+  main { padding: 1.5rem; max-width: 1400px; margin: 0 auto; }
+
+  /* ── Panel ─────────────────────────────────────── */
+  .panel { background: var(--card); border: 1px solid var(--border); border-top: 2px solid var(--border); margin-bottom: 1rem; }
+  .panel-hdr { display: flex; align-items: center; justify-content: space-between;
+    padding: .8rem 1rem; border-bottom: 1px solid var(--border); }
+  .panel-title { font-family: var(--mono); font-size: .72rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--text); }
+  .panel-sub { font-family: var(--mono); font-size: .62rem; color: var(--muted); }
+
+  /* ── Supply bars ───────────────────────────────── */
+  .supply-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+  @media (max-width: 700px) { .supply-grid { grid-template-columns: 1fr; } }
+
+  .supply-card { background: var(--card); border: 1px solid var(--border); padding: 1.2rem; }
+  .supply-printer-name { font-family: var(--mono); font-size: .72rem; font-weight: 600;
+    letter-spacing: .08em; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; }
+  .change-badge { font-size: .6rem; background: #1a2a1a; border: 1px solid var(--green);
+    color: var(--green); padding: .15rem .5rem; border-radius: 2px; }
+
+  .supply-row { margin-bottom: .9rem; }
+  .supply-label-row { display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: .68rem; margin-bottom: .3rem; }
+  .supply-name  { color: var(--muted); }
+  .supply-pct   { font-weight: 600; }
+  .supply-track { background: var(--border); height: 6px; border-radius: 3px; overflow: hidden; }
+  .supply-fill  { height: 100%; border-radius: 3px; transition: width .4s ease; }
+
+  /* Colour classes for ink bars */
+  .ink-black    { background: #888; }
+  .ink-black2   { background: #555; }
+  .ink-cyan     { background: #00bcd4; }
+  .ink-magenta  { background: #e91e8c; }
+  .ink-yellow   { background: #ffd600; }
+  .ink-lc       { background: #80deea; }
+  .ink-lm       { background: #f48fb1; }
+  .ink-toner    { background: var(--accent); }
+  .ink-drum     { background: var(--amber); }
+  .ink-maint    { background: #9c27b0; }
+  .ink-default  { background: var(--green); }
+
+  .supply-unknown { font-family: var(--mono); font-size: .68rem; color: var(--muted); font-style: italic; }
+
+  /* ── Period tabs ────────────────────────────────── */
+  .tab-bar { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  .tab-btn { background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--muted); font-family: var(--mono); font-size: .68rem; letter-spacing: .08em;
+    text-transform: uppercase; padding: .55rem .9rem; cursor: pointer; transition: all .15s; margin-bottom: -1px; }
+  .tab-btn:hover  { color: var(--text); }
+  .tab-btn.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+  /* ── Tables ─────────────────────────────────────── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: .72rem; }
+  thead th { text-align: left; padding: .5rem 1rem; background: var(--surface);
+    color: var(--muted); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase;
+    white-space: nowrap; font-weight: 500; border-bottom: 1px solid var(--border); }
+  tbody td { padding: .5rem 1rem; border-bottom: 1px solid #141c24; white-space: nowrap; }
+  tbody tr:hover td { background: #1a2430; }
+
+  .delta { font-size: .65rem; color: var(--green); }
+  .delta.neg { color: var(--red); }
+
+  /* ── Summary stats ──────────────────────────────── */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px; background: var(--border); margin-bottom: 1rem; border: 1px solid var(--border); }
+  .stat { background: var(--card); padding: 1rem 1.2rem; }
+  .stat-label { font-family: var(--mono); font-size: .63rem; color: var(--muted);
+    letter-spacing: .12em; text-transform: uppercase; margin-bottom: .4rem; }
+  .stat-value { font-family: var(--mono); font-size: 1.6rem; font-weight: 600; line-height: 1; }
+  .stat-sub   { font-family: var(--mono); font-size: .62rem; color: var(--muted); margin-top: .2rem; }
+  .green  { color: var(--green); }
+  .amber  { color: var(--amber); }
+  .accent { color: var(--accent); }
+
+  /* ── Konica jobs grid ───────────────────────────── */
+  .jobs-period-content { display: none; padding: 1rem; }
+  .jobs-period-content.active { display: block; }
+  .kj-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr));
+    gap: 1px; background: var(--border); margin-bottom: 1rem; border: 1px solid var(--border); }
+  .kj-stat { background: var(--card); padding: .9rem 1rem; }
+  .kj-label { font-family: var(--mono); font-size: .6rem; color: var(--muted);
+    letter-spacing: .1em; text-transform: uppercase; margin-bottom: .3rem; }
+  .kj-value { font-family: var(--mono); font-size: 1.3rem; font-weight: 600; }
+  .kj-sub   { font-family: var(--mono); font-size: .6rem; color: var(--muted); margin-top: .15rem; }
+
+  .kj-split { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 700px) { .kj-split { grid-template-columns: 1fr; } }
+
+  .kj-sub-panel { background: var(--surface); border: 1px solid var(--border); padding: .8rem 1rem; }
+  .kj-sub-title { font-family: var(--mono); font-size: .62rem; color: var(--muted);
+    letter-spacing: .1em; text-transform: uppercase; margin-bottom: .7rem; }
+  .kj-bar-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .5rem;
+    font-family: var(--mono); font-size: .65rem; }
+  .kj-bar-label { width: 60px; color: var(--muted); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; flex-shrink: 0; }
+  .kj-bar-track { flex: 1; background: var(--border); height: 5px; border-radius: 2px; overflow: hidden; }
+  .kj-bar-fill  { height: 100%; border-radius: 2px; }
+  .kj-bar-val   { width: 55px; text-align: right; color: var(--text); flex-shrink: 0; }
+
+  /* ── Staff performance ──────────────────────────── */
+  .staff-online { color: var(--green); }
+  .staff-offline { color: var(--muted); }
+  .staff-perf-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(120px,1fr));
+    gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 1rem; }
+  .sp-stat { background: var(--card); padding: .7rem 1rem; }
+  .sp-label { font-family: var(--mono); font-size: .58rem; color: var(--muted);
+    letter-spacing: .1em; text-transform: uppercase; margin-bottom: .25rem; }
+  .sp-value { font-family: var(--mono); font-size: 1.2rem; font-weight: 600; }
+
+  @keyframes spin   { to { transform: rotate(360deg); } }
+  @keyframes fadeUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:none; } }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border);
+    border-top-color: var(--amber); border-radius: 50%; animation: spin .7s linear infinite;
+    vertical-align: middle; margin-right: .4rem; }
+  .empty { text-align: center; padding: 2rem; color: var(--muted); font-family: var(--mono); font-size: .75rem; }
+</style>
+</head>
+<body>
+
+<!-- ══ LOGIN ═══════════════════════════════════════════════════════════════ -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">PRINTOSKY</div>
+    <div class="login-sub">MIS · MANAGEMENT INFORMATION SYSTEM</div>
+    <label for="pw">Access Password</label>
+    <input type="password" id="pw" placeholder="••••••••" autocomplete="current-password">
+    <button class="login-btn" onclick="tryLogin()">ENTER →</button>
+    <div class="login-err" id="login-err">Incorrect password</div>
+  </div>
+</div>
+
+<!-- ══ DASHBOARD ════════════════════════════════════════════════════════════ -->
+<div id="dashboard">
+  <header>
+    <div>
+      <div class="hdr-logo">PRINTOSKY MIS</div>
+      <div class="hdr-sub">Oxygen Students Paradise · Thriprayar · Thrissur</div>
+    </div>
+    <div class="hdr-right">
+      <span class="sync-dot" id="sync-dot"></span>
+      <span class="sync-label" id="sync-label">Loading…</span>
+      <button class="refresh-btn" onclick="loadAll()">↻ Refresh</button>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- Summary stats -->
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat"><div class="stat-label">Konica Total Pages</div>
+        <div class="stat-value accent" id="m-k-total">—</div>
+        <div class="stat-sub" id="m-k-today">last polled —</div></div>
+      <div class="stat"><div class="stat-label">Konica Print B&W</div>
+        <div class="stat-value" id="m-k-pbw">—</div></div>
+      <div class="stat"><div class="stat-label">Konica Copy B&W</div>
+        <div class="stat-value" id="m-k-cbw">—</div></div>
+      <div class="stat"><div class="stat-label">Epson Total Pages</div>
+        <div class="stat-value green" id="m-e-total">—</div>
+        <div class="stat-sub" id="m-e-today">last polled —</div></div>
+      <div class="stat"><div class="stat-label">Epson Colour</div>
+        <div class="stat-value" id="m-e-col">—</div></div>
+      <div class="stat"><div class="stat-label">Epson B&W</div>
+        <div class="stat-value" id="m-e-bw">—</div></div>
+    </div>
+
+    <!-- Ink / Toner levels -->
+    <div class="supply-grid">
+      <div class="supply-card">
+        <div class="supply-printer-name" style="color:var(--accent)">
+          <span>▣ KONICA — TONER / DRUM</span>
+        </div>
+        <div id="konica-supplies"><div class="empty"><span class="spinner"></span> Loading…</div></div>
+      </div>
+      <div class="supply-card">
+        <div class="supply-printer-name" style="color:var(--green)">
+          <span>▣ EPSON — INK CARTRIDGES</span>
+          <span class="change-badge" id="epson-change-badge" style="display:none"></span>
+        </div>
+        <div id="epson-supplies"><div class="empty"><span class="spinner"></span> Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- Supply change log -->
+    <div class="panel" id="supply-changes-panel" style="display:none">
+      <div class="panel-hdr">
+        <div class="panel-title">Cartridge Change Log</div>
+        <span class="panel-sub">detected by level increase between polls</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>When</th><th>Printer</th><th>Cartridge</th>
+              <th>Before</th><th>After</th>
+            </tr>
+          </thead>
+          <tbody id="changes-tbody">
+            <tr><td colspan="5" class="empty"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Period page count breakdown (SNMP-based, both printers) -->
+    <div class="panel">
+      <div class="panel-hdr">
+        <div class="panel-title">Page Count Breakdown — SNMP Counters</div>
+        <span class="panel-sub">delta from first reading in period to latest</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Period</th>
+              <th>Konica Total</th>
+              <th>Konica Print B&W</th>
+              <th>Konica Copy B&W</th>
+              <th>Epson Total</th>
+              <th>Epson Colour</th>
+              <th>Epson B&W</th>
+            </tr>
+          </thead>
+          <tbody id="breakdown-tbody">
+            <tr><td colspan="7" class="empty"><span class="spinner"></span> Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Konica Job Log details (from CSV imports) -->
+    <div class="panel">
+      <div class="panel-hdr" style="flex-wrap:wrap; gap:.5rem;">
+        <div class="panel-title">Konica Job Details — Print &amp; Copy Log</div>
+        <span class="panel-sub" id="kj-last-job"></span>
+      </div>
+      <div class="tab-bar" id="kj-tabs">
+        <button class="tab-btn active" onclick="setKJTab('today',this)">Today</button>
+        <button class="tab-btn"        onclick="setKJTab('week', this)">This Week</button>
+        <button class="tab-btn"        onclick="setKJTab('month',this)">This Month</button>
+        <button class="tab-btn"        onclick="setKJTab('year', this)">This Year</button>
+      </div>
+      <div id="kj-today" class="jobs-period-content active">
+        <div class="empty"><span class="spinner"></span> Loading…</div>
+      </div>
+      <div id="kj-week"  class="jobs-period-content">
+        <div class="empty"><span class="spinner"></span> Loading…</div>
+      </div>
+      <div id="kj-month" class="jobs-period-content">
+        <div class="empty"><span class="spinner"></span> Loading…</div>
+      </div>
+      <div id="kj-year"  class="jobs-period-content">
+        <div class="empty"><span class="spinner"></span> Loading…</div>
+      </div>
+    </div>
+
+    <!-- Staff Performance -->
+    <div class="panel">
+      <div class="panel-hdr">
+        <div class="panel-title">Staff Performance</div>
+        <span class="panel-sub" id="sp-online-count"></span>
+      </div>
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="setSPTab('today',this)">Today</button>
+        <button class="tab-btn"        onclick="setSPTab('week', this)">This Week</button>
+        <button class="tab-btn"        onclick="setSPTab('month',this)">This Month</button>
+      </div>
+      <div id="sp-today" class="jobs-period-content active">
+        <div class="empty"><span class="spinner"></span> Loading…</div>
+      </div>
+      <div id="sp-week"  class="jobs-period-content">
+        <div class="empty"><span class="spinner"></span> Loading…</div>
+      </div>
+      <div id="sp-month" class="jobs-period-content">
+        <div class="empty"><span class="spinner"></span> Loading…</div>
+      </div>
+    </div>
+
+    <!-- Counter history -->
+    <div class="panel">
+      <div class="panel-hdr">
+        <div class="panel-title">Counter History</div>
+        <span class="panel-sub" id="history-sub">last 30 readings per printer</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Printer</th>
+              <th>Total Pages</th>
+              <th>Print B&W</th>
+              <th>Copy B&W</th>
+              <th>Colour</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody">
+            <tr><td colspan="6" class="empty"><span class="spinner"></span> Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ── Config ───────────────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI";
+const MIS_HASH = "75c01f7c781b4a60e12186822248f8d86eb35c2dc80b74b87a494f581ba0856b";
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+async function sha256(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
+}
+async function tryLogin() {
+  const hash = await sha256(document.getElementById("pw").value);
+  if (hash === MIS_HASH) {
+    sessionStorage.setItem("mis_auth", "1");
+    showDashboard();
+  } else {
+    document.getElementById("login-err").style.display = "block";
+    document.getElementById("pw").value = "";
+  }
+}
+document.getElementById("pw").addEventListener("keydown", e => { if (e.key === "Enter") tryLogin(); });
+function logout() {
+  sessionStorage.removeItem("mis_auth");
+  document.getElementById("dashboard").style.display = "none";
+  document.getElementById("login-screen").style.display = "flex";
+}
+function showDashboard() {
+  document.getElementById("login-screen").style.display = "none";
+  document.getElementById("dashboard").style.display = "block";
+  loadAll();
+}
+window.addEventListener("DOMContentLoaded", () => {
+  if (sessionStorage.getItem("mis_auth") === "1") showDashboard();
+});
+
+// ── Supabase fetch ───────────────────────────────────────────────────────────
+async function sbFetch(table, params = "") {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
+    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+  });
+  if (!r.ok) throw new Error(`${table}: ${r.status}`);
+  return r.json();
+}
+
+// ── IST date helpers ─────────────────────────────────────────────────────────
+function todayIST()      { return new Date(Date.now() + 5.5*60*60*1000).toISOString().slice(0,10); }
+function weekStartIST()  {
+  const d   = new Date(Date.now() + 5.5*60*60*1000);
+  const day = d.getUTCDay();
+  const mon = new Date(d.getTime() + ((day===0 ? -6 : 1-day) * 86400000));
+  return mon.toISOString().slice(0,10);
+}
+function monthStartIST() { return todayIST().slice(0,8) + "01"; }
+function yearStartIST()  { return todayIST().slice(0,4) + "-01-01"; }
+
+// ── Load all ─────────────────────────────────────────────────────────────────
+let _kjRows = {};  // cache konica_jobs rows per period key
+
+async function loadAll() {
+  setSyncState("loading");
+  try {
+    const dToday = todayIST();
+    const dWeek  = weekStartIST();
+    const dMonth = monthStartIST();
+    const dYear  = yearStartIST();
+
+    const [
+      counters, supplies, history, changes,
+      todayFirst, weekFirst, monthFirst, yearFirst,
+      kjToday, kjWeek, kjMonth, kjYear, kjMeta,
+      spSessToday, spSessWeek, spSessMonth,
+      spJobsToday, spJobsWeek, spJobsMonth,
+      spOpen
+    ] = await Promise.all([
+      sbFetch("printer_counters", "order=polled_at.desc&limit=2"),
+      sbFetch("printer_supplies", "order=polled_at.desc&limit=30"),
+      sbFetch("printer_counters", "order=polled_at.desc&limit=60"),
+      sbFetch("supply_changes",   "order=changed_at.desc&limit=30"),
+      sbFetch("printer_counters", `order=polled_at.asc&limit=10&polled_at=gte.${dToday}`),
+      sbFetch("printer_counters", `order=polled_at.asc&limit=10&polled_at=gte.${dWeek}`),
+      sbFetch("printer_counters", `order=polled_at.asc&limit=10&polled_at=gte.${dMonth}`),
+      sbFetch("printer_counters", `order=polled_at.asc&limit=10&polled_at=gte.${dYear}`),
+      sbFetch("konica_jobs", `job_date=gte.${dToday}&result=eq.No Error&select=job_type,user_name,pages_printed,mono_pages,color_pages,paper_size,copies,attributed_to&limit=2000`),
+      sbFetch("konica_jobs", `job_date=gte.${dWeek}&result=eq.No Error&select=job_type,user_name,pages_printed,mono_pages,color_pages,paper_size,copies,attributed_to&limit=5000`),
+      sbFetch("konica_jobs", `job_date=gte.${dMonth}&result=eq.No Error&select=job_type,user_name,pages_printed,mono_pages,color_pages,paper_size,copies,attributed_to&limit=5000`),
+      sbFetch("konica_jobs", `job_date=gte.${dYear}&result=eq.No Error&select=job_type,user_name,pages_printed,mono_pages,color_pages,paper_size,copies&limit=10000`),
+      sbFetch("konica_jobs", "order=job_date.desc&limit=1&select=job_date,job_number"),
+      sbFetch("staff_sessions", `login_at=gte.${dToday}&select=staff_id,login_at,logout_at,pc_id`).catch(()=>[]),
+      sbFetch("staff_sessions", `login_at=gte.${dWeek}&select=staff_id,login_at,logout_at`).catch(()=>[]),
+      sbFetch("staff_sessions", `login_at=gte.${dMonth}&select=staff_id,login_at,logout_at`).catch(()=>[]),
+      sbFetch("jobs", `received_at=gte.${dToday}&printed_by=not.is.null&select=printed_by,amount_collected&limit=2000`).catch(()=>[]),
+      sbFetch("jobs", `received_at=gte.${dWeek}&printed_by=not.is.null&select=printed_by,amount_collected&limit=5000`).catch(()=>[]),
+      sbFetch("jobs", `received_at=gte.${dMonth}&printed_by=not.is.null&select=printed_by,amount_collected&limit=5000`).catch(()=>[]),
+      sbFetch("staff_sessions", "logout_at=is.null&select=staff_id,pc_id,login_at").catch(()=>[]),
+    ]);
+
+    renderCounterStats(counters);
+    renderSupplies(supplies);
+    renderSupplyChanges(changes);
+    renderHistory(history);
+    renderBreakdown(counters, todayFirst, weekFirst, monthFirst, yearFirst);
+
+    _kjRows = { today: kjToday, week: kjWeek, month: kjMonth, year: kjYear };
+    if (kjMeta && kjMeta.length) {
+      set("kj-last-job", "last job: #" + kjMeta[0].job_number + " · " + shortTime(kjMeta[0].job_date));
+    }
+    renderKJPeriod("today");
+    renderKJPeriod("week");
+    renderKJPeriod("month");
+    renderKJPeriod("year");
+
+    _spData = {
+      sessions: { today: spSessToday, week: spSessWeek, month: spSessMonth },
+      jobs:     { today: spJobsToday, week: spJobsWeek, month: spJobsMonth },
+      konica:   { today: kjToday,     week: kjWeek,     month: kjMonth },
+      open:     spOpen,
+    };
+    const onlineCount = (spOpen||[]).length;
+    set("sp-online-count", onlineCount ? `${onlineCount} online now` : "");
+    renderStaffPanel("today");
+    renderStaffPanel("week");
+    renderStaffPanel("month");
+
+    setSyncState("ok");
+  } catch(e) {
+    setSyncState("err", e.message);
+  }
+}
+
+// ── Sync indicator ───────────────────────────────────────────────────────────
+function setSyncState(s, msg) {
+  const dot   = document.getElementById("sync-dot");
+  const label = document.getElementById("sync-label");
+  dot.className = "sync-dot " + (s==="ok" ? "ok" : s==="err" ? "err" : "");
+  label.textContent = s==="ok"  ? "Live · " + new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})
+                    : s==="err" ? "Sync error: " + msg
+                    : "Refreshing…";
+}
+
+// ── Counter stats row ────────────────────────────────────────────────────────
+function renderCounterStats(counters) {
+  const k = counters.find(r => r.printer === "konica") || {};
+  const e = counters.find(r => r.printer === "epson")  || {};
+  set("m-k-total", fmt(k.total_pages));
+  set("m-k-pbw",   fmt(k.print_bw));
+  set("m-k-cbw",   fmt(k.copy_bw));
+  set("m-k-today", k.polled_at ? "polled " + shortTime(k.polled_at) : "—");
+  set("m-e-total", fmt(e.total_pages));
+  set("m-e-col",   fmt(e.print_colour));
+  set("m-e-bw",    fmt(e.print_bw));
+  set("m-e-today", e.polled_at ? "polled " + shortTime(e.polled_at) : "—");
+}
+
+// ── Supply bars ──────────────────────────────────────────────────────────────
+const INK_CLASS = {
+  "Ink Black 1 (K)": "ink-black",
+  "Ink Black 2 (K)": "ink-black2",
+  "Ink Black (K)":   "ink-black",
+  "Ink Cyan (C)":    "ink-cyan",
+  "Ink Magenta (M)": "ink-magenta",
+  "Ink Yellow (Y)":  "ink-yellow",
+  "Maintenance Box": "ink-maint",
+  "Ink Light Cyan":  "ink-lc",
+  "Ink Light Magenta": "ink-lm",
+  "Toner Black":     "ink-toner",
+  "Drum Black":      "ink-drum",
+};
+
+function renderSupplies(supplies) {
+  ["konica","epson"].forEach(p => {
+    const pSupplies = supplies.filter(s => s.printer === p);
+    const container = document.getElementById(`${p}-supplies`);
+    if (!container) return;
+
+    // Keep only latest reading per supply_index
+    const seen = {};
+    const latest = [];
+    for (const s of pSupplies) {
+      if (!seen[s.supply_index]) { seen[s.supply_index] = true; latest.push(s); }
+    }
+
+    if (!latest.length) {
+      container.innerHTML = `<div class="supply-unknown">No supply data yet.</div>`;
+      return;
+    }
+
+    container.innerHTML = latest.map(s => {
+      const pct  = s.pct != null ? s.pct : null;
+      const cls  = INK_CLASS[s.description] || "ink-default";
+      const lvlText = pct != null ? `${pct.toFixed(0)}%`
+                    : s.current_level === -3 ? "OK"
+                    : s.current_level === -2 ? "Unknown"
+                    : s.current_level != null ? `${s.current_level} / ${s.max_capacity ?? "?"}`
+                    : "—";
+      const barPct = pct != null ? Math.max(0, Math.min(100, pct)) : 0;
+      const barColour = pct == null ? "var(--muted)" : pct < 15 ? "var(--red)" : pct < 30 ? "var(--amber)" : null;
+      const fillStyle = barColour ? `background:${barColour}` : ``;
+      return `
+        <div class="supply-row">
+          <div class="supply-label-row">
+            <span class="supply-name">${esc(s.description || "Supply " + s.supply_index)}</span>
+            <span class="supply-pct" style="${pct != null && pct < 15 ? 'color:var(--red)' : pct != null && pct < 30 ? 'color:var(--amber)' : ''}">${lvlText}</span>
+          </div>
+          <div class="supply-track">
+            <div class="supply-fill ${fillStyle ? '' : cls}" style="width:${barPct}%;${fillStyle}"></div>
+          </div>
+        </div>`;
+    }).join("");
+  });
+}
+
+// ── Supply change log ────────────────────────────────────────────────────────
+function renderSupplyChanges(changes) {
+  const panel  = document.getElementById("supply-changes-panel");
+  const badge  = document.getElementById("epson-change-badge");
+  const tbody  = document.getElementById("changes-tbody");
+
+  if (!changes || !changes.length) {
+    panel.style.display = "none";
+    badge.style.display = "none";
+    return;
+  }
+
+  panel.style.display = "block";
+  const epsonChanges = changes.filter(c => c.printer === "epson").length;
+  if (epsonChanges > 0) {
+    badge.style.display = "";
+    badge.textContent   = `${epsonChanges} change${epsonChanges > 1 ? "s" : ""} recorded`;
+  }
+
+  tbody.innerHTML = changes.map(c => `
+    <tr>
+      <td style="color:var(--muted)">${shortTime(c.changed_at)}</td>
+      <td style="color:${c.printer==='epson'?'var(--green)':'var(--accent)'}; font-size:.65rem">${c.printer}</td>
+      <td>${esc(c.description || "Supply " + c.supply_index)}</td>
+      <td style="color:var(--red)">${c.pct_before != null ? c.pct_before.toFixed(0)+"%" : fmt(c.level_before)}</td>
+      <td style="color:var(--green)">${c.pct_after  != null ? c.pct_after.toFixed(0)+"%" : fmt(c.level_after)}</td>
+    </tr>`).join("");
+}
+
+// ── Counter history table ────────────────────────────────────────────────────
+function renderHistory(rows) {
+  const tbody = document.getElementById("history-tbody");
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">No history yet</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td style="color:var(--muted)">${shortTime(r.polled_at)}</td>
+      <td style="color:${r.printer==='epson'?'var(--green)':'var(--accent)'}; font-size:.65rem">${r.printer}</td>
+      <td style="font-weight:600">${fmt(r.total_pages)}</td>
+      <td>${fmt(r.print_bw)}</td>
+      <td>${fmt(r.copy_bw)}</td>
+      <td>${fmt(r.print_colour)}</td>
+    </tr>`).join("");
+}
+
+// ── Period breakdown (SNMP counters) ─────────────────────────────────────────
+function renderBreakdown(latest, todayFirst, weekFirst, monthFirst, yearFirst) {
+  const tbody = document.getElementById("breakdown-tbody");
+
+  function firstPer(rows) {
+    return {
+      k: rows.find(r => r.printer === "konica") || null,
+      e: rows.find(r => r.printer === "epson")  || null,
+    };
+  }
+  function delta(cur, start, field) {
+    if (!cur || cur[field] == null || !start || start[field] == null) return null;
+    const d = cur[field] - start[field];
+    return d >= 0 ? d : null;
+  }
+
+  const cur = {
+    k: latest.find(r => r.printer === "konica") || null,
+    e: latest.find(r => r.printer === "epson")  || null,
+  };
+
+  const periods = [
+    { label: "Today",      fp: firstPer(todayFirst) },
+    { label: "This Week",  fp: firstPer(weekFirst)  },
+    { label: "This Month", fp: firstPer(monthFirst) },
+    { label: "This Year",  fp: firstPer(yearFirst)  },
+  ];
+
+  tbody.innerHTML = periods.map(p => {
+    const kTotal = delta(cur.k, p.fp.k, "total_pages");
+    const kPBW   = delta(cur.k, p.fp.k, "print_bw");
+    const kCBW   = delta(cur.k, p.fp.k, "copy_bw");
+    const eTotal = delta(cur.e, p.fp.e, "total_pages");
+    const eCol   = delta(cur.e, p.fp.e, "print_colour");
+    const eBW    = delta(cur.e, p.fp.e, "print_bw");
+    const noData = !p.fp.k && !p.fp.e;
+    return `
+      <tr>
+        <td style="color:var(--amber);font-weight:600;font-size:.7rem;letter-spacing:.06em">${p.label}</td>
+        <td style="color:var(--accent);font-weight:600">${noData ? "—" : fmt(kTotal)}</td>
+        <td>${noData ? "—" : fmt(kPBW)}</td>
+        <td>${noData ? "—" : fmt(kCBW)}</td>
+        <td style="color:var(--green);font-weight:600">${noData ? "—" : fmt(eTotal)}</td>
+        <td>${noData ? "—" : fmt(eCol)}</td>
+        <td>${noData ? "—" : fmt(eBW)}</td>
+      </tr>`;
+  }).join("");
+}
+
+// ── Konica Job Details ────────────────────────────────────────────────────────
+function setKJTab(period, btn) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  document.querySelectorAll(".jobs-period-content").forEach(el => el.classList.remove("active"));
+  document.getElementById("kj-" + period).classList.add("active");
+}
+
+function renderKJPeriod(period) {
+  const container = document.getElementById("kj-" + period);
+  const rows = _kjRows[period] || [];
+
+  if (!rows.length) {
+    container.innerHTML = `<div class="empty">No job data for this period. Import a Konica CSV first.</div>`;
+    return;
+  }
+
+  // Aggregate
+  let totalPages = 0, totalMono = 0, totalColour = 0;
+  let printPages = 0, copyPages  = 0;
+  let printJobs  = 0, copyJobs   = 0;
+  const byUser   = {};
+  const bySize   = {};
+
+  for (const r of rows) {
+    const pp = r.pages_printed || 0;
+    const mp = r.mono_pages    || 0;
+    const cp = r.color_pages   || 0;
+    totalPages  += pp;
+    totalMono   += mp;
+    totalColour += cp;
+
+    if (r.job_type === "Print") { printPages += pp; printJobs++; }
+    if (r.job_type === "Copy")  { copyPages  += pp; copyJobs++;  }
+
+    const u = r.user_name || "(Copy / no user)";
+    byUser[u] = (byUser[u] || 0) + pp;
+
+    const sz = r.paper_size || "Unknown";
+    bySize[sz] = (bySize[sz] || 0) + pp;
+  }
+
+  const maxUser = Math.max(...Object.values(byUser), 1);
+  const maxSize = Math.max(...Object.values(bySize), 1);
+
+  const userBars = Object.entries(byUser)
+    .sort((a,b) => b[1]-a[1])
+    .map(([name, pages]) => barRow(name, pages, maxUser, "var(--amber)"))
+    .join("");
+
+  const sizeBars = Object.entries(bySize)
+    .sort((a,b) => b[1]-a[1])
+    .map(([sz, pages]) => barRow(sz, pages, maxSize, "var(--accent)"))
+    .join("");
+
+  container.innerHTML = `
+    <div style="padding:.8rem 0 .4rem 0">
+      <div class="kj-grid">
+        <div class="kj-stat">
+          <div class="kj-label">Total Pages Printed</div>
+          <div class="kj-value" style="color:var(--accent)">${fmt(totalPages)}</div>
+          <div class="kj-sub">mono ${fmt(totalMono)} · colour ${fmt(totalColour)}</div>
+        </div>
+        <div class="kj-stat">
+          <div class="kj-label">Print Jobs</div>
+          <div class="kj-value">${fmt(printJobs)}</div>
+          <div class="kj-sub">${fmt(printPages)} pages</div>
+        </div>
+        <div class="kj-stat">
+          <div class="kj-label">Copy Jobs</div>
+          <div class="kj-value">${fmt(copyJobs)}</div>
+          <div class="kj-sub">${fmt(copyPages)} pages</div>
+        </div>
+        <div class="kj-stat">
+          <div class="kj-label">Total Jobs</div>
+          <div class="kj-value" style="color:var(--green)">${fmt(rows.length)}</div>
+          <div class="kj-sub">print + copy combined</div>
+        </div>
+      </div>
+      <div class="kj-split">
+        <div class="kj-sub-panel">
+          <div class="kj-sub-title">Pages by Staff</div>
+          ${userBars || '<div style="color:var(--muted);font-family:var(--mono);font-size:.65rem">No user data</div>'}
+        </div>
+        <div class="kj-sub-panel">
+          <div class="kj-sub-title">Pages by Paper Size</div>
+          ${sizeBars}
+        </div>
+      </div>
+    </div>`;
+}
+
+function barRow(label, value, max, colour) {
+  const pct = max > 0 ? (value / max * 100).toFixed(1) : 0;
+  return `
+    <div class="kj-bar-row">
+      <span class="kj-bar-label" title="${esc(label)}">${esc(label)}</span>
+      <div class="kj-bar-track">
+        <div class="kj-bar-fill" style="width:${pct}%;background:${colour}"></div>
+      </div>
+      <span class="kj-bar-val">${fmt(value)}</span>
+    </div>`;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function fmt(n)    { return n != null ? Number(n).toLocaleString("en-IN") : "—"; }
+function esc(s)    { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+function set(id,v) { const el=document.getElementById(id); if(el) el.textContent=v; }
+function shortTime(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso.replace(" ","T"));
+    const today = new Date().toISOString().slice(0,10);
+    if (d.toISOString().slice(0,10) === today)
+      return d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+    return d.toLocaleDateString("en-IN",{day:"numeric",month:"short"}) + " " +
+           d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+  } catch { return iso.slice(0,16); }
+}
+
+// ── Staff Performance ─────────────────────────────────────────────────────────
+const KNOWN_STAFF = ["priya","revana","bini","anu","deepak"];
+const STAFF_NAMES = { priya:"Priya", revana:"Revana", bini:"Bini", anu:"Anu", deepak:"Deepak" };
+let _spData = { sessions:{}, jobs:{}, konica:{}, open:[] };
+let _spTab = "today";
+
+function setSPTab(period, btn) {
+  _spTab = period;
+  document.querySelectorAll("#sp-today,#sp-week,#sp-month").forEach(el => el.classList.remove("active"));
+  document.getElementById("sp-" + period).classList.add("active");
+  document.querySelectorAll(".tab-bar")[2] && document.querySelectorAll(".tab-bar")[2]
+    .querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+}
+
+function _durMins(login, logout) {
+  try {
+    const a = new Date(login.replace(" ","T"));
+    const b = logout ? new Date(logout.replace(" ","T")) : new Date();
+    return Math.max(0, Math.round((b - a) / 60000));
+  } catch { return 0; }
+}
+
+function _fmtDur(mins) {
+  if (!mins) return "—";
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+function renderStaffPanel(period) {
+  const container = document.getElementById("sp-" + period);
+  if (!container) return;
+  const sessions = (_spData.sessions[period] || []);
+  const jobs     = (_spData.jobs[period]     || []);
+  const konica   = (_spData.konica[period]   || []);
+  const open     = (_spData.open             || []);
+  const openIds  = new Set(open.map(s => s.staff_id));
+
+  // Aggregate per staff
+  const stats = {};
+  KNOWN_STAFF.forEach(id => {
+    stats[id] = { mins: 0, jobs: 0, revenue: 0, pages: 0 };
+  });
+
+  sessions.forEach(s => {
+    if (!stats[s.staff_id]) stats[s.staff_id] = { mins: 0, jobs: 0, revenue: 0, pages: 0 };
+    stats[s.staff_id].mins += _durMins(s.login_at, s.logout_at);
+  });
+  jobs.forEach(j => {
+    if (!j.printed_by) return;
+    if (!stats[j.printed_by]) stats[j.printed_by] = { mins: 0, jobs: 0, revenue: 0, pages: 0 };
+    stats[j.printed_by].jobs++;
+    stats[j.printed_by].revenue += j.amount_collected || 0;
+  });
+  konica.forEach(k => {
+    if (!k.attributed_to) return;
+    if (!stats[k.attributed_to]) stats[k.attributed_to] = { mins: 0, jobs: 0, revenue: 0, pages: 0 };
+    stats[k.attributed_to].pages += k.pages_printed || 0;
+  });
+
+  const ids = Object.keys(stats).sort((a,b) => stats[b].pages - stats[a].pages);
+  if (!ids.length) { container.innerHTML = '<div class="empty">No data yet</div>'; return; }
+
+  const rows = ids.map(id => {
+    const s = stats[id];
+    const isOnline = openIds.has(id);
+    const name = STAFF_NAMES[id] || id;
+    const statusDot = isOnline
+      ? `<span class="staff-online">● Online</span>`
+      : `<span class="staff-offline">○ Off</span>`;
+    return `<tr>
+      <td><strong>${name}</strong></td>
+      <td class="accent">${s.pages.toLocaleString()}</td>
+      <td>${s.jobs}</td>
+      <td class="green">${s.revenue ? "₹" + s.revenue.toLocaleString() : "—"}</td>
+      <td>${_fmtDur(s.mins)}</td>
+      <td>${statusDot}</td>
+    </tr>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Staff</th><th>Pages (Konica)</th><th>Jobs Handled</th>
+          <th>Revenue</th><th>On Duty</th><th>Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+// Auto-refresh every 5 min
+setInterval(() => { if (sessionStorage.getItem("mis_auth")==="1") loadAll(); }, 5*60*1000);
+</script>
+</body>
+</html>

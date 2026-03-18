@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Academic Project Builder — Printosky</title>
+<meta name="description" content="Build your academic project document online. AI-powered formatting and content assistance. Print with Printosky, Thriprayar.">
+<link rel="stylesheet" href="styles.css">
+<style>
+/* TOOL LAYOUT */
+.tool-hero {
+  background: linear-gradient(135deg, var(--blue) 0%, #0f2557 100%);
+  padding: 56px 60px;
+  position: relative;
+  overflow: hidden;
+}
+.tool-hero::before {
+  content: '';
+  position: absolute;
+  width: 500px; height: 500px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 50%;
+  top: -200px; right: -100px;
+}
+.tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(232,80,10,0.2);
+  border: 1px solid rgba(232,80,10,0.4);
+  color: #FFA07A;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  border-radius: 100px;
+  margin-bottom: 20px;
+  width: fit-content;
+}
+.ai-dot { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; animation: pulse 1.5s infinite; }
+
+.tool-layout {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 0;
+  min-height: 80vh;
+  background: var(--paper);
+}
+
+/* STEPS SIDEBAR */
+.steps-sidebar {
+  background: var(--white);
+  border-right: 1px solid rgba(0,0,0,0.07);
+  padding: 40px 32px;
+  position: sticky;
+  top: 68px;
+  height: fit-content;
+}
+
+.sidebar-heading {
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--mid);
+  margin-bottom: 24px;
+}
+
+.step-item {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.step-item:last-child { border-bottom: none; }
+.step-item.locked { opacity: 0.35; cursor: not-allowed; }
+
+.step-circle {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(0,0,0,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mid);
+  flex-shrink: 0;
+  transition: 0.2s;
+}
+.step-item.active .step-circle { background: var(--accent); border-color: var(--accent); color: var(--white); }
+.step-item.done .step-circle { background: #16A34A; border-color: #16A34A; color: var(--white); }
+
+.step-info-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.step-info-desc { font-size: 12px; color: var(--mid); }
+
+/* MAIN CONTENT AREA */
+.tool-main {
+  padding: 48px 56px;
+}
+
+.step-panel { display: none; }
+.step-panel.active { display: block; }
+
+.panel-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.panel-sub { font-size: 15px; color: var(--mid); font-weight: 300; margin-bottom: 36px; line-height: 1.5; }
+
+/* FORM ELEMENTS */
+.form-group { margin-bottom: 22px; }
+.form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 7px;
+}
+label .req { color: var(--accent); }
+label .opt { color: var(--mid); font-weight: 400; font-size: 12px; }
+
+input[type="text"], input[type="number"], select, textarea {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1.5px solid rgba(0,0,0,0.12);
+  border-radius: 8px;
+  font-size: 15px;
+  font-family: 'DM Sans', sans-serif;
+  color: var(--ink);
+  background: var(--white);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  outline: none;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(27,63,139,0.08);
+}
+textarea { resize: vertical; min-height: 110px; line-height: 1.6; }
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236B7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  padding-right: 40px;
+  cursor: pointer;
+}
+
+/* CHAPTER CARDS */
+.chapter-card {
+  background: var(--white);
+  border: 1.5px solid rgba(0,0,0,0.08);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 16px;
+  position: relative;
+}
+.chapter-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.chapter-num {
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.remove-btn {
+  background: none;
+  border: none;
+  color: var(--mid);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s, color 0.2s;
+}
+.remove-btn:hover { background: rgba(232,80,10,0.1); color: var(--accent); }
+
+.add-chapter-btn {
+  width: 100%;
+  padding: 14px;
+  border: 2px dashed rgba(27,63,139,0.2);
+  border-radius: 10px;
+  background: rgba(27,63,139,0.02);
+  color: var(--blue);
+  font-size: 14px;
+  font-weight: 500;
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.add-chapter-btn:hover { border-color: var(--blue); background: rgba(27,63,139,0.05); }
+
+/* AI ASSIST BUTTON */
+.ai-assist-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(27,63,139,0.07);
+  color: var(--blue);
+  border: 1px solid rgba(27,63,139,0.15);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-top: 8px;
+}
+.ai-assist-btn:hover { background: rgba(27,63,139,0.12); }
+.ai-assist-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ai-spinner { display: none; width: 14px; height: 14px; border: 2px solid rgba(27,63,139,0.2); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.ai-assist-btn.loading .ai-spinner { display: block; }
+.ai-assist-btn.loading .ai-btn-text { opacity: 0.6; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* NAVIGATION BUTTONS */
+.step-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 40px;
+  padding-top: 28px;
+  border-top: 1px solid rgba(0,0,0,0.07);
+}
+
+/* PREVIEW AREA */
+.preview-area {
+  background: var(--white);
+  border: 1.5px solid rgba(0,0,0,0.08);
+  border-radius: 12px;
+  padding: 48px;
+  font-family: 'Times New Roman', serif;
+  line-height: 1.8;
+  font-size: 14px;
+  color: #111;
+  max-height: 600px;
+  overflow-y: auto;
+  margin-bottom: 24px;
+}
+.preview-area h1 { font-size: 20px; text-align: center; margin-bottom: 8px; text-transform: uppercase; }
+.preview-area h2 { font-size: 16px; text-align: center; margin-bottom: 24px; font-weight: normal; }
+.preview-area h3 { font-size: 15px; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+.preview-area p { margin-bottom: 12px; text-align: justify; }
+.preview-area .page-break { border-top: 1px dashed rgba(0,0,0,0.2); margin: 32px 0; padding-top: 4px; font-size: 11px; color: var(--mid); text-align: center; font-family: 'DM Sans', sans-serif; }
+.preview-area .center { text-align: center; }
+.preview-area .toc-item { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted rgba(0,0,0,0.1); }
+
+/* GENERATING STATE */
+.generating-overlay {
+  display: none;
+  background: rgba(245,241,235,0.95);
+  border-radius: 12px;
+  padding: 60px;
+  text-align: center;
+  border: 1.5px solid rgba(27,63,139,0.1);
+  margin-bottom: 24px;
+}
+.generating-overlay.active { display: block; }
+.gen-icon { font-size: 48px; margin-bottom: 20px; animation: bounce 1s ease infinite; }
+@keyframes bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+.gen-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 700; color: var(--blue); margin-bottom: 8px; }
+.gen-sub { font-size: 14px; color: var(--mid); }
+.gen-progress { width: 200px; height: 3px; background: rgba(27,63,139,0.1); border-radius: 3px; margin: 20px auto 0; overflow: hidden; }
+.gen-bar { height: 100%; background: var(--blue); border-radius: 3px; animation: progress 2s ease-in-out infinite; }
+@keyframes progress { 0% { width: 0%; } 70% { width: 85%; } 100% { width: 85%; } }
+
+/* PRINT ACTIONS */
+.print-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .tool-layout { grid-template-columns: 1fr; }
+  .steps-sidebar { position: static; border-right: none; border-bottom: 1px solid rgba(0,0,0,0.07); padding: 24px 20px; }
+  .tool-main { padding: 32px 20px; }
+  .tool-hero { padding: 48px 20px; }
+  .form-row-2, .form-row-3 { grid-template-columns: 1fr; }
+  .preview-area { padding: 28px 20px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="logo">Print<span>osky</span></a>
+  <ul class="nav-links">
+    <li><a href="services.html">Services</a></li>
+    <li><a href="about.html">About</a></li>
+    <li><a href="contact.html">Contact</a></li>
+    <li><a href="order.html" class="nav-cta">Place Order →</a></li>
+  </ul>
+  <button class="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></button>
+</nav>
+<div class="mobile-menu" id="mobileMenu">
+  <a href="services.html">Services</a>
+  <a href="about.html">About</a>
+  <a href="contact.html">Contact</a>
+  <a href="order.html" class="mob-cta">Place Order →</a>
+</div>
+
+<!-- HERO -->
+<div class="tool-hero">
+  <div class="tool-badge"><span class="ai-dot"></span> AI-Powered Tool</div>
+  <h1 class="page-hero-title" style="font-size: 46px;">Academic Project Builder</h1>
+  <p class="page-hero-sub">Fill in your details and let AI help write and format your project document. Ready to print in minutes.</p>
+</div>
+
+<!-- TOOL LAYOUT -->
+<div class="tool-layout">
+
+  <!-- SIDEBAR -->
+  <div class="steps-sidebar">
+    <div class="sidebar-heading">Steps</div>
+
+    <div class="step-item active" id="nav-1" onclick="goToStep(1)">
+      <div class="step-circle" id="circle-1">1</div>
+      <div>
+        <div class="step-info-title">Project Details</div>
+        <div class="step-info-desc">Title, college, student info</div>
+      </div>
+    </div>
+    <div class="step-item locked" id="nav-2" onclick="goToStep(2)">
+      <div class="step-circle" id="circle-2">2</div>
+      <div>
+        <div class="step-info-title">Front Matter</div>
+        <div class="step-info-desc">Abstract & acknowledgement</div>
+      </div>
+    </div>
+    <div class="step-item locked" id="nav-3" onclick="goToStep(3)">
+      <div class="step-circle" id="circle-3">3</div>
+      <div>
+        <div class="step-info-title">Chapters</div>
+        <div class="step-info-desc">Content, AI writing assist</div>
+      </div>
+    </div>
+    <div class="step-item locked" id="nav-4" onclick="goToStep(4)">
+      <div class="step-circle" id="circle-4">4</div>
+      <div>
+        <div class="step-info-title">References</div>
+        <div class="step-info-desc">Bibliography</div>
+      </div>
+    </div>
+    <div class="step-item locked" id="nav-5" onclick="goToStep(5)">
+      <div class="step-circle" id="circle-5">5</div>
+      <div>
+        <div class="step-info-title">Preview & Print</div>
+        <div class="step-info-desc">Review and order</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="tool-main">
+
+    <!-- STEP 1: PROJECT DETAILS -->
+    <div class="step-panel active" id="panel-1">
+      <div class="panel-title">Project Details</div>
+      <p class="panel-sub">Tell us about your project. This information will appear on your title page and header.</p>
+
+      <div class="form-group">
+        <label>Project Title <span class="req">*</span></label>
+        <input type="text" id="projectTitle" placeholder="e.g. A Study on Consumer Behaviour in E-Commerce" oninput="saveData()">
+      </div>
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Student Name <span class="req">*</span></label>
+          <input type="text" id="studentName" placeholder="Your full name" oninput="saveData()">
+        </div>
+        <div class="form-group">
+          <label>Roll Number <span class="opt">(optional)</span></label>
+          <input type="text" id="rollNo" placeholder="e.g. 21CS001" oninput="saveData()">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>College / Institution Name <span class="req">*</span></label>
+        <input type="text" id="collegeName" placeholder="e.g. Government Arts and Science College, Thriprayar" oninput="saveData()">
+      </div>
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Department <span class="req">*</span></label>
+          <input type="text" id="department" placeholder="e.g. Department of Commerce" oninput="saveData()">
+        </div>
+        <div class="form-group">
+          <label>Course / Programme <span class="req">*</span></label>
+          <input type="text" id="course" placeholder="e.g. BCom, MBA, BSc Computer Science" oninput="saveData()">
+        </div>
+      </div>
+      <div class="form-row-3">
+        <div class="form-group">
+          <label>Academic Year</label>
+          <input type="text" id="academicYear" placeholder="e.g. 2024-25" oninput="saveData()">
+        </div>
+        <div class="form-group">
+          <label>Semester <span class="opt">(optional)</span></label>
+          <input type="text" id="semester" placeholder="e.g. 5th Semester" oninput="saveData()">
+        </div>
+        <div class="form-group">
+          <label>Guide / Supervisor <span class="opt">(optional)</span></label>
+          <input type="text" id="guideName" placeholder="Prof. Name" oninput="saveData()">
+        </div>
+      </div>
+
+      <div class="step-nav">
+        <div></div>
+        <button class="btn-primary" onclick="nextStep(1)">Continue → Front Matter</button>
+      </div>
+    </div>
+
+    <!-- STEP 2: FRONT MATTER -->
+    <div class="step-panel" id="panel-2">
+      <div class="panel-title">Front Matter</div>
+      <p class="panel-sub">Write your abstract and acknowledgement — or let AI generate them for you.</p>
+
+      <div class="form-group">
+        <label>Abstract <span class="req">*</span> <span class="opt">— Brief overview of your project (150–250 words)</span></label>
+        <textarea id="abstract" rows="6" placeholder="Write a brief summary of what your project is about, the methodology used, and key findings..." oninput="saveData()"></textarea>
+        <button class="ai-assist-btn" onclick="aiAssist('abstract')" id="btn-abstract">
+          <div class="ai-spinner"></div>
+          <span class="ai-btn-text">✨ AI: Generate abstract from project title</span>
+        </button>
+      </div>
+
+      <div class="form-group">
+        <label>Acknowledgement <span class="opt">(optional)</span></label>
+        <textarea id="acknowledgement" rows="5" placeholder="Thank your guide, institution, family, etc..." oninput="saveData()"></textarea>
+        <button class="ai-assist-btn" onclick="aiAssist('acknowledgement')" id="btn-acknowledgement">
+          <div class="ai-spinner"></div>
+          <span class="ai-btn-text">✨ AI: Generate acknowledgement</span>
+        </button>
+      </div>
+
+      <div class="step-nav">
+        <button class="btn-secondary" onclick="prevStep(2)">← Back</button>
+        <button class="btn-primary" onclick="nextStep(2)">Continue → Chapters</button>
+      </div>
+    </div>
+
+    <!-- STEP 3: CHAPTERS -->
+    <div class="step-panel" id="panel-3">
+      <div class="panel-title">Chapters</div>
+      <p class="panel-sub">Add your chapters. Type your content, paste it in, or let AI write it from your bullet points.</p>
+
+      <div id="chaptersContainer"></div>
+
+      <button class="add-chapter-btn" onclick="addChapter()">+ Add Chapter</button>
+
+      <div class="step-nav">
+        <button class="btn-secondary" onclick="prevStep(3)">← Back</button>
+        <button class="btn-primary" onclick="nextStep(3)">Continue → References</button>
+      </div>
+    </div>
+
+    <!-- STEP 4: REFERENCES -->
+    <div class="step-panel" id="panel-4">
+      <div class="panel-title">Bibliography & References</div>
+      <p class="panel-sub">List your references. One per line. AI can help format them correctly.</p>
+
+      <div class="form-group">
+        <label>References <span class="opt">(one per line)</span></label>
+        <textarea id="references" rows="10" placeholder="e.g.&#10;Kotler, P. (2016). Marketing Management. Pearson.&#10;https://www.example.com/article&#10;Sharma, R. (2022). Consumer Behaviour. Oxford Press." oninput="saveData()"></textarea>
+        <button class="ai-assist-btn" onclick="aiAssist('references')" id="btn-references">
+          <div class="ai-spinner"></div>
+          <span class="ai-btn-text">✨ AI: Format my references properly</span>
+        </button>
+      </div>
+
+      <div class="step-nav">
+        <button class="btn-secondary" onclick="prevStep(4)">← Back</button>
+        <button class="btn-primary" onclick="generateProject()">✨ Generate My Project Document</button>
+      </div>
+    </div>
+
+    <!-- STEP 5: PREVIEW -->
+    <div class="step-panel" id="panel-5">
+      <div class="panel-title">Preview & Print</div>
+      <p class="panel-sub">Your project document is ready. Review it below, then send it to Printosky for printing.</p>
+
+      <div class="generating-overlay" id="generatingOverlay">
+        <div class="gen-icon">📄</div>
+        <div class="gen-title">Building your project document...</div>
+        <div class="gen-sub">AI is formatting and assembling all sections</div>
+        <div class="gen-progress"><div class="gen-bar"></div></div>
+      </div>
+
+      <div id="previewArea" style="display:none">
+        <div class="preview-area" id="projectPreview"></div>
+
+        <div class="print-actions">
+          <button class="btn-primary" onclick="sendToWhatsApp()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+            Send to Printosky for Printing
+          </button>
+          <button class="btn-secondary" onclick="window.print()">🖨️ Print / Save as PDF</button>
+          <button class="btn-secondary" onclick="resetTool()">↩ Start Over</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<footer>
+  <div class="footer-grid">
+    <div>
+      <a href="index.html" class="footer-logo">Print<span>osky</span></a>
+      <div class="footer-tagline">Powered by Oxygen Students Paradise</div>
+      <div class="footer-contact-item">📞 +91 94957 06405</div>
+      <div class="footer-contact-item">📍 Thriprayar, Thrissur, Kerala</div>
+    </div>
+    <div>
+      <div class="footer-col-title">Tools</div>
+      <ul class="footer-links">
+        <li><a href="project-builder.html">Project Builder</a></li>
+        <li><a href="cv-builder.html">CV Builder</a></li>
+        <li><a href="order.html">Place Order</a></li>
+      </ul>
+    </div>
+    <div>
+      <div class="footer-col-title">Pages</div>
+      <ul class="footer-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="services.html">Services</a></li>
+        <li><a href="contact.html">Contact</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 Printosky. All rights reserved.</span>
+    <span>Powered by Oxygen Students Paradise · Thriprayar, Thrissur</span>
+  </div>
+</footer>
+
+<script>
+// ── STATE ──
+let currentStep = 1;
+let unlockedSteps = [1];
+let chapters = [];
+let projectData = {};
+
+function saveData() {
+  projectData = {
+    title: val('projectTitle'),
+    studentName: val('studentName'),
+    rollNo: val('rollNo'),
+    college: val('collegeName'),
+    department: val('department'),
+    course: val('course'),
+    year: val('academicYear'),
+    semester: val('semester'),
+    guide: val('guideName'),
+    abstract: val('abstract'),
+    acknowledgement: val('acknowledgement'),
+    references: val('references'),
+  };
+}
+
+function val(id) { return document.getElementById(id)?.value || ''; }
+
+// ── NAVIGATION ──
+function goToStep(n) {
+  if (!unlockedSteps.includes(n)) return;
+  document.getElementById('panel-' + currentStep).classList.remove('active');
+  document.getElementById('nav-' + currentStep).classList.remove('active');
+  currentStep = n;
+  document.getElementById('panel-' + n).classList.add('active');
+  document.getElementById('nav-' + n).classList.remove('locked');
+  document.getElementById('nav-' + n).classList.add('active');
+  window.scrollTo({ top: 200, behavior: 'smooth' });
+}
+
+function nextStep(from) {
+  if (from === 1) {
+    if (!val('projectTitle') || !val('studentName') || !val('collegeName') || !val('department') || !val('course')) {
+      alert('Please fill in all required fields before continuing.');
+      return;
+    }
+  }
+  saveData();
+  const next = from + 1;
+  if (!unlockedSteps.includes(next)) unlockedSteps.push(next);
+  markDone(from);
+  goToStep(next);
+  if (next === 3 && chapters.length === 0) addChapter();
+}
+
+function prevStep(from) { goToStep(from - 1); }
+
+function markDone(step) {
+  const circle = document.getElementById('circle-' + step);
+  circle.textContent = '✓';
+  document.getElementById('nav-' + step).classList.remove('active');
+  document.getElementById('nav-' + step).classList.add('done');
+}
+
+// ── CHAPTERS ──
+let chapterCount = 0;
+
+function addChapter() {
+  chapterCount++;
+  const id = chapterCount;
+  const div = document.createElement('div');
+  div.className = 'chapter-card';
+  div.id = 'chapter-' + id;
+  div.innerHTML = `
+    <div class="chapter-card-header">
+      <div class="chapter-num">Chapter ${id}</div>
+      <button class="remove-btn" onclick="removeChapter(${id})" title="Remove chapter">✕</button>
+    </div>
+    <div class="form-group">
+      <label>Chapter Title <span class="req">*</span></label>
+      <input type="text" id="ch-title-${id}" placeholder="e.g. Introduction, Literature Review, Methodology..." oninput="saveChapters()">
+    </div>
+    <div class="form-group">
+      <label>Content <span class="opt">— Write, paste, or enter bullet points for AI to expand</span></label>
+      <textarea id="ch-content-${id}" rows="6" placeholder="Write your chapter content here, or enter key points as bullet points and click AI Expand below..." oninput="saveChapters()"></textarea>
+      <button class="ai-assist-btn" onclick="aiExpandChapter(${id})" id="btn-ch-${id}">
+        <div class="ai-spinner"></div>
+        <span class="ai-btn-text">✨ AI: Expand my bullet points into paragraphs</span>
+      </button>
+    </div>
+  `;
+  document.getElementById('chaptersContainer').appendChild(div);
+  chapters.push({ id });
+}
+
+function removeChapter(id) {
+  document.getElementById('chapter-' + id)?.remove();
+  chapters = chapters.filter(c => c.id !== id);
+}
+
+function saveChapters() {
+  chapters = chapters.map(c => ({
+    ...c,
+    title: val('ch-title-' + c.id),
+    content: val('ch-content-' + c.id)
+  }));
+}
+
+// ── AI CALLS ──
+async function callClaude(prompt) {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+  const data = await response.json();
+  return data.content?.[0]?.text || '';
+}
+
+async function aiAssist(field) {
+  const btn = document.getElementById('btn-' + field);
+  btn.classList.add('loading');
+  btn.disabled = true;
+  saveData();
+
+  let prompt = '';
+  const title = projectData.title || 'academic project';
+  const course = projectData.course || 'degree programme';
+  const college = projectData.college || 'college';
+
+  if (field === 'abstract') {
+    prompt = `Write a professional academic project abstract for a ${course} student at ${college}. Project title: "${title}". Write 180-220 words. Cover: background, objectives, methodology, expected findings. Formal academic tone. Plain text only, no markdown.`;
+  } else if (field === 'acknowledgement') {
+    const name = projectData.studentName || 'the student';
+    const guide = projectData.guide ? `guided by ${projectData.guide}` : '';
+    prompt = `Write a standard academic project acknowledgement for ${name}, a ${course} student at ${college} ${guide}. Thank the guide, HOD, institution, family and friends. 120-150 words. Formal tone. Plain text only.`;
+  } else if (field === 'references') {
+    const refs = val('references');
+    prompt = `Format these references in standard APA style for an academic project. Each reference on a new line. Return only the formatted references, nothing else:\n${refs}`;
+  }
+
+  try {
+    const result = await callClaude(prompt);
+    document.getElementById(field).value = result;
+    saveData();
+  } catch (e) {
+    alert('AI assist failed. Please check your connection and try again.');
+  }
+
+  btn.classList.remove('loading');
+  btn.disabled = false;
+}
+
+async function aiExpandChapter(id) {
+  const btn = document.getElementById('btn-ch-' + id);
+  btn.classList.add('loading');
+  btn.disabled = true;
+  saveData();
+  saveChapters();
+
+  const title = val('ch-title-' + id);
+  const content = val('ch-content-' + id);
+  const projectTitle = projectData.title || 'the project';
+  const course = projectData.course || 'degree programme';
+
+  const prompt = `You are helping a ${course} student expand their academic project chapter.
+Project title: "${projectTitle}"
+Chapter title: "${title}"
+Student's notes/bullet points:
+${content}
+
+Expand this into well-written academic paragraphs (350-500 words). Maintain academic tone. Use proper paragraph structure. No markdown formatting, just plain paragraphs with line breaks between them.`;
+
+  try {
+    const result = await callClaude(prompt);
+    document.getElementById('ch-content-' + id).value = result;
+    saveChapters();
+  } catch (e) {
+    alert('AI assist failed. Please check your connection and try again.');
+  }
+
+  btn.classList.remove('loading');
+  btn.disabled = false;
+}
+
+// ── GENERATE PROJECT ──
+async function generateProject() {
+  saveData();
+  saveChapters();
+  if (!unlockedSteps.includes(5)) unlockedSteps.push(5);
+  markDone(4);
+  goToStep(5);
+
+  document.getElementById('generatingOverlay').classList.add('active');
+  document.getElementById('previewArea').style.display = 'none';
+
+  // Build the document HTML
+  const d = projectData;
+  const chaps = chapters.filter(c => val('ch-title-' + c.id));
+
+  // Rebuild chapter data with current values
+  const chapData = chaps.map(c => ({
+    title: val('ch-title-' + c.id),
+    content: val('ch-content-' + c.id)
+  }));
+
+  // If any chapter has no content, generate a placeholder
+  for (let i = 0; i < chapData.length; i++) {
+    if (!chapData[i].content.trim()) {
+      chapData[i].content = `[Content for ${chapData[i].title} — please add your content here]`;
+    }
+  }
+
+  setTimeout(() => {
+    const preview = buildPreviewHTML(d, chapData);
+    document.getElementById('projectPreview').innerHTML = preview;
+    document.getElementById('generatingOverlay').classList.remove('active');
+    document.getElementById('previewArea').style.display = 'block';
+  }, 2000);
+}
+
+function buildPreviewHTML(d, chapters) {
+  const today = new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'long' });
+
+  let html = `
+    <div class="center">
+      <p style="font-size:13px; letter-spacing:1px; text-transform:uppercase;">${d.college || 'Institution Name'}</p>
+      <p style="font-size:12px; color:#555;">${d.department || 'Department'}</p>
+    </div>
+    <br><br>
+    <h1>${d.title || 'Project Title'}</h1>
+    <br>
+    <div class="center">
+      <p><em>A project submitted in partial fulfilment of the requirements for the degree of</em></p>
+      <p><strong>${d.course || 'Degree Programme'}</strong></p>
+    </div>
+    <br><br>
+    <div class="center">
+      <p>Submitted by</p>
+      <p><strong>${d.studentName || 'Student Name'}</strong></p>
+      ${d.rollNo ? `<p>${d.rollNo}</p>` : ''}
+      ${d.semester ? `<p>${d.semester}</p>` : ''}
+    </div>
+    <br>
+    ${d.guide ? `<div class="center"><p>Under the guidance of</p><p><strong>${d.guide}</strong></p></div><br>` : ''}
+    <div class="center"><p>${today}</p></div>
+
+    <div class="page-break">— Page Break —</div>
+
+    ${d.acknowledgement ? `<h3>Acknowledgement</h3><p>${d.acknowledgement.replace(/\n/g, '</p><p>')}</p><div class="page-break">— Page Break —</div>` : ''}
+
+    ${d.abstract ? `<h3>Abstract</h3><p>${d.abstract.replace(/\n/g, '</p><p>')}</p><div class="page-break">— Page Break —</div>` : ''}
+
+    <h3>Table of Contents</h3>
+    ${chapters.map((ch, i) => `<div class="toc-item"><span>Chapter ${i+1}: ${ch.title}</span><span>${i+3}</span></div>`).join('')}
+    ${d.references ? `<div class="toc-item"><span>Bibliography</span><span>${chapters.length + 3}</span></div>` : ''}
+    <div class="page-break">— Page Break —</div>
+
+    ${chapters.map((ch, i) => `
+      <h3>Chapter ${i+1}: ${ch.title}</h3>
+      <p>${ch.content.replace(/\n/g, '</p><p>')}</p>
+      <div class="page-break">— Page Break —</div>
+    `).join('')}
+
+    ${d.references ? `<h3>Bibliography</h3>${d.references.split('\n').filter(r => r.trim()).map((r, i) => `<p>${i+1}. ${r}</p>`).join('')}` : ''}
+  `;
+
+  return html;
+}
+
+function sendToWhatsApp() {
+  const d = projectData;
+  const msg = `📚 *Project Print Request — Printosky*\n\n*Student:* ${d.studentName}\n*Project:* ${d.title}\n*College:* ${d.college}\n*Course:* ${d.course}\n${d.rollNo ? '*Roll No:* ' + d.rollNo + '\n' : ''}*Chapters:* ${chapters.length}\n\n_Built using Printosky Project Builder_\n\nPlease advise on printing options and cost.`;
+  window.open(`https://wa.me/919495706405?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+function resetTool() {
+  if (confirm('Start over? All your content will be cleared.')) location.reload();
+}
+
+function toggleMenu() { document.getElementById('mobileMenu').classList.toggle('open'); }
+</script>
+</body>
+</html>
