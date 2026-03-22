@@ -96,7 +96,8 @@
       "Bash(curl \"http://localhost:3005/vendors\")",
       "Bash(git push:*)",
       "Bash(gh repo:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(wc -l /c/PY/printosky/website/*.html /c/PY/printosky/website/*.js /c/PY/printosky/website/*.css)"
     ]
   }
 }
