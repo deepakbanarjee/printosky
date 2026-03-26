@@ -1,0 +1,32 @@
+{
+  "model": "claude-sonnet-4-6",
+  "env": {
+    "MAX_THINKING_TOKENS": "10000"
+  },
+  "hooks": {
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git add . && git commit -m \"Auto-save: session ended\" && git push origin sprint/session-7",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git pull origin sprint/session-7"
+          }
+        ]
+      }
+    ]
+  }
+}
+

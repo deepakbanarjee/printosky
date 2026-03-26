@@ -634,6 +634,63 @@
     background: none; border: 1px solid var(--border); color: var(--muted);
     font-family: var(--mono); font-size: .78rem; padding: .5rem 1rem; cursor: pointer;
   }
+
+  /* ── New Job Modal (wizard) ─────────────────────── */
+  .nj-modal-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-top: 2px solid var(--accent); padding: 1.5rem;
+    width: 460px; max-width: 96vw; animation: fadeUp .2s ease;
+  }
+  .nj-steps {
+    display: flex; gap: .3rem; margin-bottom: 1.2rem;
+  }
+  .nj-step-dot {
+    flex: 1; height: 3px; background: var(--border); border-radius: 2px;
+    transition: background .2s;
+  }
+  .nj-step-dot.active { background: var(--accent); }
+  .nj-step-dot.done   { background: var(--green); }
+  .nj-step-label {
+    font-family: var(--mono); font-size: .6rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .12em; margin-bottom: .6rem;
+  }
+  .nj-row { display: flex; gap: .5rem; }
+  .nj-row .modal-field { flex: 1; }
+  .nj-quote-box {
+    background: var(--bg); border: 1px solid var(--border); padding: .75rem 1rem;
+    margin: .8rem 0; display: flex; align-items: center; justify-content: space-between;
+  }
+  .nj-quote-lbl { font-family: var(--mono); font-size: .65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+  .nj-quote-val { font-family: var(--mono); font-size: 1.4rem; font-weight: 600; color: var(--green); }
+  .nj-pay-opts { display: flex; flex-direction: column; gap: .5rem; margin-bottom: .8rem; }
+  .nj-pay-opt  {
+    display: flex; align-items: center; gap: .6rem;
+    background: var(--bg); border: 1px solid var(--border);
+    padding: .55rem .8rem; cursor: pointer; transition: border-color .15s;
+  }
+  .nj-pay-opt:hover, .nj-pay-opt.selected { border-color: var(--accent); }
+  .nj-pay-opt input[type=radio] { accent-color: var(--accent); }
+  .nj-pay-opt-label { font-family: var(--mono); font-size: .75rem; color: var(--text); }
+  .nj-override-row { display: none; }
+  .nj-override-row.show { display: block; }
+  .nj-file-zone {
+    border: 1px dashed var(--border); padding: 1.2rem; text-align: center;
+    cursor: pointer; transition: border-color .15s; margin-bottom: .8rem;
+  }
+  .nj-file-zone:hover { border-color: var(--accent); }
+  .nj-file-zone-label { font-size: .75rem; color: var(--muted); font-family: var(--mono); }
+  .nj-file-name { font-size: .78rem; color: var(--green); font-family: var(--mono); margin-top: .4rem; word-break: break-all; }
+  .nj-file-uploading { font-size: .72rem; color: var(--amber); font-family: var(--mono); margin-top: .4rem; }
+  .nj-btn-new-job {
+    background: rgba(0,200,255,.1); border: 1px solid var(--accent);
+    color: var(--accent); font-family: var(--mono); font-size: .7rem;
+    padding: .3rem .7rem; cursor: pointer; transition: all .15s; letter-spacing: .05em;
+  }
+  .nj-btn-new-job:hover { background: rgba(0,200,255,.2); }
+
+  /* status badge additions */
+  .badge-queued { background: rgba(0,200,255,.12); color: var(--accent); border: 1px solid rgba(0,200,255,.3); }
+  .badge-draft  { background: rgba(90,112,128,.12); color: var(--muted); border: 1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -725,7 +782,8 @@
       <div class="panel-hdr">
         <div class="panel-title">Job Log</div>
         <span class="panel-badge" id="job-count">Loading…</span>
-        <button class="filter-btn" style="margin-left:auto" onclick="openPhotocopyModal()">+ Photocopy</button>
+        <button class="nj-btn-new-job" style="margin-left:auto" onclick="openNewJobModal()" title="Add walk-in or manual job (N)">+ New Job</button>
+        <button class="filter-btn" onclick="openPhotocopyModal()">+ Photocopy</button>
       </div>
       <div class="filter-bar">
         <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
@@ -759,6 +817,203 @@
 
     <!-- ── Job Print Panel (expands below table on row click) ── -->
   </main>
+</div>
+
+<!-- ── New Job Modal (walk-in wizard) ── -->
+<div class="modal-overlay" id="newjob-modal" onclick="if(event.target===this)closeNewJobModal()">
+  <div class="nj-modal-box">
+    <div class="modal-title" style="color:var(--accent)">New Job</div>
+
+    <!-- Step progress bar -->
+    <div class="nj-steps">
+      <div class="nj-step-dot active" id="nj-dot-1"></div>
+      <div class="nj-step-dot" id="nj-dot-2"></div>
+      <div class="nj-step-dot" id="nj-dot-3"></div>
+      <div class="nj-step-dot" id="nj-dot-4"></div>
+    </div>
+
+    <!-- Step 1 — Customer -->
+    <div id="nj-step-1">
+      <div class="nj-step-label">Step 1 of 4 — Customer Details</div>
+      <div class="modal-field">
+        <label>Customer Name (optional)</label>
+        <input type="text" id="nj-name" placeholder="Walk-in customer">
+      </div>
+      <div class="modal-field">
+        <label>Phone (optional)</label>
+        <input type="tel" id="nj-phone" placeholder="9xxxxxxxxx">
+      </div>
+      <div class="modal-field">
+        <label>Source</label>
+        <select id="nj-source">
+          <option value="Walk-in">Walk-in</option>
+          <option value="WhatsApp">WhatsApp (manual)</option>
+          <option value="Pen Drive">Pen Drive</option>
+          <option value="Remote">Remote / Online</option>
+          <option value="Email">Email</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label>Notes (optional)</label>
+        <input type="text" id="nj-notes" placeholder="Any special instructions…">
+      </div>
+      <div class="modal-btns">
+        <button class="modal-ok" style="border-color:var(--accent);color:var(--accent);background:rgba(0,200,255,.08)" onclick="njNext(2)">Next →</button>
+        <button class="modal-cancel" onclick="closeNewJobModal()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Step 2 — File -->
+    <div id="nj-step-2" style="display:none">
+      <div class="nj-step-label">Step 2 of 4 — File</div>
+      <div class="nj-file-zone" onclick="document.getElementById('nj-file-input').click()">
+        <div class="nj-file-zone-label">Click to select file from pen drive or PC</div>
+        <div class="nj-file-name" id="nj-file-name" style="display:none"></div>
+        <div class="nj-file-uploading" id="nj-file-uploading" style="display:none">⏳ Uploading…</div>
+      </div>
+      <input type="file" id="nj-file-input" style="display:none" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.xls,.xlsx,.ppt,.pptx" onchange="njHandleFile(this)">
+      <div style="text-align:center;margin:.4rem 0;font-size:.65rem;color:var(--muted);font-family:var(--mono)">— or —</div>
+      <button class="modal-cancel" style="width:100%;text-align:center" onclick="njSkipFile()">Skip — No file (photocopy / service only)</button>
+      <div class="modal-btns" style="margin-top:.8rem">
+        <button class="modal-ok" id="nj-btn-step2" style="border-color:var(--accent);color:var(--accent);background:rgba(0,200,255,.08)" onclick="njNext(3)" disabled>Next →</button>
+        <button class="modal-cancel" onclick="njBack(1)">← Back</button>
+      </div>
+    </div>
+
+    <!-- Step 3 — Print Specs + Quote -->
+    <div id="nj-step-3" style="display:none">
+      <div class="nj-step-label">Step 3 of 4 — Print Specs</div>
+      <div class="nj-row">
+        <div class="modal-field">
+          <label>Pages</label>
+          <input type="number" id="nj-pages" min="1" value="1" oninput="njFetchQuote()">
+        </div>
+        <div class="modal-field">
+          <label>Copies</label>
+          <input type="number" id="nj-copies" min="1" value="1" oninput="njFetchQuote()">
+        </div>
+      </div>
+      <div class="nj-row">
+        <div class="modal-field">
+          <label>Colour</label>
+          <select id="nj-colour" onchange="njFetchQuote()">
+            <option value="bw">B&amp;W</option>
+            <option value="col">Colour</option>
+          </select>
+        </div>
+        <div class="modal-field">
+          <label>Sides</label>
+          <select id="nj-sides" onchange="njFetchQuote()">
+            <option value="ss">Single Side</option>
+            <option value="ds">Double Side</option>
+          </select>
+        </div>
+      </div>
+      <div class="nj-row">
+        <div class="modal-field">
+          <label>Paper Size</label>
+          <select id="nj-paper" onchange="njFetchQuote()">
+            <option value="A4">A4</option>
+            <option value="A3">A3</option>
+            <option value="Legal">Legal</option>
+            <option value="A5">A5</option>
+          </select>
+        </div>
+        <div class="modal-field">
+          <label>Finishing</label>
+          <select id="nj-finishing" onchange="njFetchQuote()">
+            <option value="none">None</option>
+            <option value="spiral">Spiral Binding</option>
+            <option value="thermal">Thermal Binding</option>
+            <option value="staple">Staple</option>
+            <option value="soft">Soft Binding</option>
+            <option value="project">Project Binding (Outsourced)</option>
+            <option value="record">Record Binding (Outsourced)</option>
+            <option value="lam_cover">Cover Lamination (Outsourced)</option>
+            <option value="lam_roll">Roll Lamination (Outsourced)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-field">
+        <label>Service Type</label>
+        <input type="text" id="nj-service" placeholder="e.g. B&W Print, Colour Print, Binding…">
+      </div>
+      <label style="display:flex;align-items:center;gap:.5rem;font-size:.7rem;color:var(--muted);font-family:var(--mono);margin-bottom:.6rem;cursor:pointer">
+        <input type="checkbox" id="nj-student" onchange="njFetchQuote()"> Student discount
+      </label>
+      <div class="nj-quote-box">
+        <div>
+          <div class="nj-quote-lbl">Estimated Quote</div>
+          <div style="font-size:.6rem;color:var(--border);font-family:var(--mono)" id="nj-quote-breakdown">—</div>
+        </div>
+        <div class="nj-quote-val" id="nj-quote-val">₹—</div>
+      </div>
+      <div class="modal-btns">
+        <button class="modal-ok" style="border-color:var(--accent);color:var(--accent);background:rgba(0,200,255,.08)" onclick="njNext(4)">Next →</button>
+        <button class="modal-cancel" onclick="njBack(2)">← Back</button>
+      </div>
+    </div>
+
+    <!-- Step 4 — Payment Gate -->
+    <div id="nj-step-4" style="display:none">
+      <div class="nj-step-label">Step 4 of 4 — Payment</div>
+      <div class="nj-quote-box" style="margin-bottom:.8rem">
+        <div class="nj-quote-lbl">Quoted Amount</div>
+        <div class="nj-quote-val" id="nj-pay-quoted">₹—</div>
+      </div>
+      <div class="nj-pay-opts" id="nj-pay-opts">
+        <label class="nj-pay-opt selected" id="nj-opt-full" onclick="njSelectPayOpt('full')">
+          <input type="radio" name="nj-pay" value="full" checked>
+          <div><div class="nj-pay-opt-label">Full Payment</div></div>
+        </label>
+        <label class="nj-pay-opt" id="nj-opt-partial" onclick="njSelectPayOpt('partial')">
+          <input type="radio" name="nj-pay" value="partial">
+          <div><div class="nj-pay-opt-label">Partial Payment</div></div>
+        </label>
+        <label class="nj-pay-opt" id="nj-opt-override" onclick="njSelectPayOpt('override')">
+          <input type="radio" name="nj-pay" value="override">
+          <div><div class="nj-pay-opt-label" style="color:var(--amber)">Override (no payment)</div></div>
+        </label>
+      </div>
+      <!-- Full / Partial fields -->
+      <div id="nj-pay-fields">
+        <div class="nj-row">
+          <div class="modal-field">
+            <label id="nj-amount-lbl">Amount (Rs.)</label>
+            <input type="number" id="nj-amount" min="0" step="1" placeholder="0">
+          </div>
+          <div class="modal-field">
+            <label>Mode</label>
+            <select id="nj-mode">
+              <option value="Cash">Cash</option>
+              <option value="UPI">UPI</option>
+              <option value="Online">Online</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <!-- Override reason -->
+      <div class="nj-override-row" id="nj-override-row">
+        <div class="modal-field">
+          <label>Override Reason</label>
+          <select id="nj-override-reason">
+            <option value="">— select reason —</option>
+            <option value="Regular Customer">Regular Customer</option>
+            <option value="Prepaid Account">Prepaid Account</option>
+            <option value="B2B Account">B2B Account</option>
+            <option value="Owner Approved">Owner Approved</option>
+            <option value="Staff Credit">Staff Credit</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-btns">
+        <button class="modal-ok" id="nj-submit-btn" style="border-color:var(--green);color:var(--green);background:rgba(0,230,118,.08)" onclick="njSubmit()">Add to Queue ✓</button>
+        <button class="modal-cancel" onclick="njBack(3)">← Back</button>
+      </div>
+    </div>
+
+  </div>
 </div>
 
 <!-- ── Vendor Modal ── -->
@@ -881,15 +1136,28 @@
 // ── Config ─────────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI";
-const ADMIN_HASH   = "037589dcf5f165dc2ad53b6b453be08fd90aee611c71f822247023f1d7b5196d";
+const ADMIN_PBKDF2_SALT = "a9f3c1b2e8d74506a1b2c3d4e5f60718";
+const ADMIN_PBKDF2_HASH = "ad94950b6dbe616a9b0729dd2b58a298571ad9130d39696f2a5d973a26ba613a";
 // Store PC URL — update this to your current Cloudflare tunnel URL for port 3005
 // STORE_PC_URL is configured per-browser during first-time PC setup (localStorage)
 const STORE_PC_URL = localStorage.getItem("storePcUrl") || "";
 
+function storeHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "X-Store-Token": localStorage.getItem("storeToken") || "",
+  };
+}
+
 // ── Auth ───────────────────────────────────────────────────────────────────
-async function sha256(str) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+async function pbkdf2(password) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
+  const salt = new Uint8Array(ADMIN_PBKDF2_SALT.match(/../g).map(h => parseInt(h, 16)));
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations: 600000 }, key, 256
+  );
+  return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 // ── PC setup (one-time, saved in localStorage) ────────────────────────────
@@ -913,6 +1181,10 @@ function setupPC() {
     const url = (entered || hint).trim().replace(/\/$/, "");
     localStorage.setItem("storePcUrl", url);
     location.reload();
+  }
+  if (!localStorage.getItem("storeToken")) {
+    const token = (prompt("PC Setup (step 3/3)\nStore access token:\n(Copy from .env on the server PC — STORE_TOKEN value)") || "").trim();
+    localStorage.setItem("storeToken", token);
   }
 }
 
@@ -947,7 +1219,7 @@ async function tryPinLogin() {
   try {
     const r = await fetch(`${STORE_PC_URL}/staff-login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: storeHeaders(),
       body: JSON.stringify({ pin, pc_id: pcId }),
     });
     const data = await r.json();
@@ -974,8 +1246,8 @@ async function tryPinLogin() {
 // ── Admin override (master password) ──────────────────────────────────────
 async function tryAdminLogin() {
   const pw = document.getElementById("pw").value;
-  const hash = await sha256(pw);
-  if (hash === ADMIN_HASH) {
+  const hash = await pbkdf2(pw);
+  if (hash === ADMIN_PBKDF2_HASH) {
     sessionStorage.setItem("p_auth", "1");
     sessionStorage.removeItem("staff_id");
     sessionStorage.removeItem("staff_name");
@@ -1002,7 +1274,7 @@ async function logout() {
     try {
       await fetch(`${STORE_PC_URL}/staff-logout`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: storeHeaders(),
         body: JSON.stringify({ session_id: parseInt(sid), idle: false }),
       });
     } catch { /* ignore if offline */ }
@@ -1052,7 +1324,7 @@ async function idleLogout() {
     try {
       await fetch(`${STORE_PC_URL}/staff-logout`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: storeHeaders(),
         body: JSON.stringify({ session_id: parseInt(sid), idle: true }),
       });
     } catch { /* ignore */ }
@@ -1161,7 +1433,7 @@ function renderTable() {
 
   let rows = allJobs.filter(j => {
     if (activeFilter === "Completed" && j.status !== "Completed") return false;
-    if (activeFilter === "Received"  && !["Received","In Progress","Printed"].includes(j.status)) return false;
+    if (activeFilter === "Received"  && !["Received","In Progress","Printed","Queued","Draft"].includes(j.status)) return false;
     if (activeFilter === "today"     && !j.received_at?.startsWith(todayStr)) return false;
     if (search && !`${j.job_id} ${j.filename}`.toLowerCase().includes(search)) return false;
     return true;
@@ -1223,7 +1495,7 @@ async function printJob(jobId, filepath, printerKey, copies, colourMode) {
   try {
     const r = await fetch(`${STORE_PC_URL}/print`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: storeHeaders(),
       body: JSON.stringify({ job_id: jobId, filepath, printer: printerKey, copies, colour_mode: colourMode, staff_id: sessionStorage.getItem("staff_id") || null }),
     });
     const data = await r.json();
@@ -1286,6 +1558,8 @@ function badge(s) {
             : s === "At Vendor"   ? "badge-vendor"
             : s === "Received"    ? "badge-received"
             : s === "Paid"        ? "badge-paid"
+            : s === "Queued"      ? "badge-queued"
+            : s === "Draft"       ? "badge-draft"
             : s === "In Progress" || s === "Printed" ? "badge-progress"
             : "badge-pending";
   return `<span class="badge ${cls}">${esc(s || "Unknown")}</span>`;
@@ -1669,7 +1943,7 @@ async function saveJobSpecs() {
       })),
     };
     const r    = await fetch(`${STORE_PC_URL}/update-job`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify(body),
     });
     const data = await r.json();
@@ -1705,7 +1979,7 @@ async function printItem(jobId, itemNumber) {
   // ── Step 1: always save specs first so print_items row exists in DB ──────
   try {
     const saveR = await fetch(`${STORE_PC_URL}/update-job`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify({
         job_id:      jobId,
         staff_id:    sessionStorage.getItem("staff_id"),
@@ -1751,7 +2025,7 @@ async function printItem(jobId, itemNumber) {
   if (btn) btn.textContent = "Sending to printer…";
   try {
     const r    = await fetch(`${STORE_PC_URL}/print`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify({ job_id: jobId, item_number: itemNumber,
                              staff_id: sessionStorage.getItem("staff_id") }),
     });
@@ -1787,7 +2061,7 @@ async function markReady() {
   btn.disabled = true; btn.textContent = "Sending WhatsApp…";
   try {
     const r    = await fetch(`${STORE_PC_URL}/mark-ready`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify({ job_id: selectedJob.job_id,
                              staff_id: sessionStorage.getItem("staff_id") }),
     });
@@ -1899,7 +2173,7 @@ async function confirmPayment() {
   btn.disabled = true; btn.textContent = "Saving…";
   try {
     const r    = await fetch(`${STORE_PC_URL}/complete-job`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify({ job_id: payJobId, amount_collected: amount,
                              payment_mode: mode,
                              staff_id: sessionStorage.getItem("staff_id") }),
@@ -2007,7 +2281,7 @@ async function confirmPhotocopy() {
       payment_mode:     document.getElementById("pc-mode").value,
     };
     const r    = await fetch(`${STORE_PC_URL}/new-photocopy`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify(body),
     });
     const data = await r.json();
@@ -2029,8 +2303,251 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     closePaymentModal();
     closePhotocopyModal();
+    closeNewJobModal();
+  }
+  // N key opens New Job modal (when not in an input)
+  if (e.key === "n" || e.key === "N") {
+    const tag = (document.activeElement.tagName || "").toLowerCase();
+    if (tag !== "input" && tag !== "textarea" && tag !== "select") {
+      e.preventDefault();
+      openNewJobModal();
+    }
   }
 });
+
+// ── New Job Wizard ─────────────────────────────────────────────────────────────
+
+let njCurrentStep = 1;
+let njUploadedFile = null;   // { filename, filepath } after upload
+let njQuotedAmount = 0;
+let njPayMode = "full";       // "full" | "partial" | "override"
+let njQuoteTimer = null;
+
+function openNewJobModal() {
+  njCurrentStep = 1;
+  njUploadedFile = null;
+  njQuotedAmount = 0;
+  njPayMode = "full";
+  // Reset fields
+  document.getElementById("nj-name").value    = "";
+  document.getElementById("nj-phone").value   = "";
+  document.getElementById("nj-source").value  = "Walk-in";
+  document.getElementById("nj-notes").value   = "";
+  document.getElementById("nj-file-input").value = "";
+  document.getElementById("nj-file-name").style.display = "none";
+  document.getElementById("nj-file-uploading").style.display = "none";
+  document.getElementById("nj-btn-step2").disabled = true;
+  document.getElementById("nj-pages").value   = "1";
+  document.getElementById("nj-copies").value  = "1";
+  document.getElementById("nj-colour").value  = "bw";
+  document.getElementById("nj-sides").value   = "ss";
+  document.getElementById("nj-paper").value   = "A4";
+  document.getElementById("nj-finishing").value = "none";
+  document.getElementById("nj-service").value = "";
+  document.getElementById("nj-student").checked = false;
+  document.getElementById("nj-quote-val").textContent = "₹—";
+  document.getElementById("nj-quote-breakdown").textContent = "—";
+  document.getElementById("nj-amount").value  = "";
+  document.getElementById("nj-mode").value    = "Cash";
+  document.getElementById("nj-override-reason").value = "";
+  njSelectPayOpt("full");
+  njShowStep(1);
+  document.getElementById("newjob-modal").classList.add("open");
+  setTimeout(() => document.getElementById("nj-name").focus(), 100);
+}
+
+function closeNewJobModal() {
+  document.getElementById("newjob-modal").classList.remove("open");
+}
+
+function njShowStep(n) {
+  [1,2,3,4].forEach(i => {
+    document.getElementById(`nj-step-${i}`).style.display = i === n ? "" : "none";
+    const dot = document.getElementById(`nj-dot-${i}`);
+    dot.className = "nj-step-dot" + (i < n ? " done" : i === n ? " active" : "");
+  });
+  njCurrentStep = n;
+  // Trigger quote fetch when landing on step 3
+  if (n === 3) njFetchQuote();
+  // Sync quoted amount on step 4
+  if (n === 4) {
+    const disp = njQuotedAmount > 0 ? "₹" + njQuotedAmount.toFixed(0) : "₹—";
+    document.getElementById("nj-pay-quoted").textContent = disp;
+    if (njQuotedAmount > 0 && njPayMode !== "override") {
+      document.getElementById("nj-amount").value = njQuotedAmount.toFixed(0);
+    }
+  }
+}
+
+function njNext(to) {
+  if (to === 2) {
+    njShowStep(2);
+  } else if (to === 3) {
+    njShowStep(3);
+  } else if (to === 4) {
+    njShowStep(4);
+  }
+}
+
+function njBack(to) { njShowStep(to); }
+
+function njSkipFile() {
+  njUploadedFile = null;
+  document.getElementById("nj-file-name").style.display = "none";
+  document.getElementById("nj-btn-step2").disabled = false;
+  // Show "no file" indicator
+  document.getElementById("nj-file-name").textContent = "No file — service only";
+  document.getElementById("nj-file-name").style.display = "block";
+  njNext(3);
+}
+
+async function njHandleFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+
+  document.getElementById("nj-file-uploading").style.display = "block";
+  document.getElementById("nj-file-name").style.display = "none";
+  document.getElementById("nj-btn-step2").disabled = true;
+
+  // Read as base64
+  const b64 = await new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => res(reader.result.split(",")[1]);
+    reader.onerror = rej;
+    reader.readAsDataURL(file);
+  });
+
+  try {
+    const r = await fetch(`${PC}/upload-file`, {
+      method: "POST",
+      headers: storeHeaders(),
+      body: JSON.stringify({ filename: file.name, file_data: b64 }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      njUploadedFile = { filename: data.filename, filepath: data.filepath };
+      document.getElementById("nj-file-name").textContent = "✓ " + data.filename;
+      document.getElementById("nj-file-name").style.display = "block";
+      document.getElementById("nj-file-uploading").style.display = "none";
+      document.getElementById("nj-btn-step2").disabled = false;
+      // Auto-detect pages from name isn't possible, leave as 1
+    } else {
+      document.getElementById("nj-file-uploading").textContent = "Upload failed: " + (data.error || "unknown");
+    }
+  } catch (e) {
+    document.getElementById("nj-file-uploading").textContent = "Store PC offline — skip file or try again";
+  }
+}
+
+async function njFetchQuote() {
+  clearTimeout(njQuoteTimer);
+  njQuoteTimer = setTimeout(async () => {
+    const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+    const pages    = parseInt(document.getElementById("nj-pages").value) || 1;
+    const copies   = parseInt(document.getElementById("nj-copies").value) || 1;
+    const colour   = document.getElementById("nj-colour").value;
+    const sides    = document.getElementById("nj-sides").value;
+    const paper    = document.getElementById("nj-paper").value;
+    const finishing= document.getElementById("nj-finishing").value;
+    const student  = document.getElementById("nj-student").checked;
+
+    try {
+      const qs = `pages=${pages}&colour=${colour}&sides=${sides}&paper_size=${paper}&finishing=${finishing}&copies=${copies}&is_student=${student}`;
+      const r  = await fetch(`${PC}/quote?${qs}`);
+      const d  = await r.json();
+      njQuotedAmount = d.total || 0;
+      document.getElementById("nj-quote-val").textContent = "₹" + njQuotedAmount.toFixed(0);
+      document.getElementById("nj-quote-breakdown").textContent =
+        d.breakdown ? (d.breakdown.join ? d.breakdown.join(" + ") : String(d.breakdown)) : "";
+    } catch {
+      document.getElementById("nj-quote-val").textContent = "₹—";
+      document.getElementById("nj-quote-breakdown").textContent = "Store offline — enter manually";
+    }
+  }, 350);
+}
+
+function njSelectPayOpt(mode) {
+  njPayMode = mode;
+  ["full","partial","override"].forEach(m => {
+    document.getElementById(`nj-opt-${m}`).classList.toggle("selected", m === mode);
+    document.querySelector(`#nj-opt-${m} input`).checked = (m === mode);
+  });
+  document.getElementById("nj-pay-fields").style.display   = mode !== "override" ? "" : "none";
+  document.getElementById("nj-override-row").classList.toggle("show", mode === "override");
+  document.getElementById("nj-amount-lbl").textContent = mode === "partial" ? "Partial Amount (Rs.)" : "Amount (Rs.)";
+  if (mode === "full" && njQuotedAmount > 0) {
+    document.getElementById("nj-amount").value = njQuotedAmount.toFixed(0);
+  } else if (mode === "partial") {
+    document.getElementById("nj-amount").value = "";
+  }
+  document.getElementById("nj-submit-btn").textContent =
+    mode === "override" ? "Add to Queue (No Payment) ✓" : "Collect & Add to Queue ✓";
+}
+
+async function njSubmit() {
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const btn = document.getElementById("nj-submit-btn");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  const mode          = njPayMode;
+  const overrideReason= document.getElementById("nj-override-reason").value;
+
+  if (mode === "override" && !overrideReason) {
+    alert("Please select an override reason.");
+    btn.disabled = false;
+    btn.textContent = "Add to Queue (No Payment) ✓";
+    return;
+  }
+
+  const amountInput = parseFloat(document.getElementById("nj-amount").value) || 0;
+  const paymentMode = document.getElementById("nj-mode").value;
+
+  const body = {
+    customer_name:   document.getElementById("nj-name").value.trim(),
+    phone:           document.getElementById("nj-phone").value.trim(),
+    source:          document.getElementById("nj-source").value,
+    notes:           document.getElementById("nj-notes").value.trim(),
+    filename:        njUploadedFile ? njUploadedFile.filename : "",
+    filepath:        njUploadedFile ? njUploadedFile.filepath : "",
+    colour:          document.getElementById("nj-colour").value,
+    sides:           document.getElementById("nj-sides").value,
+    copies:          parseInt(document.getElementById("nj-copies").value) || 1,
+    pages:           parseInt(document.getElementById("nj-pages").value) || 1,
+    paper_size:      document.getElementById("nj-paper").value,
+    finishing:       document.getElementById("nj-finishing").value,
+    service_type:    document.getElementById("nj-service").value.trim(),
+    is_student:      document.getElementById("nj-student").checked,
+    amount_quoted:   njQuotedAmount,
+    amount_collected: mode === "full"    ? amountInput : 0,
+    amount_partial:   mode === "partial" ? amountInput : 0,
+    payment_mode:     paymentMode,
+    override_reason:  mode === "override" ? overrideReason : "",
+    staff_id:        sessionStorage.getItem("staff_id") || "",
+  };
+
+  try {
+    const r    = await fetch(`${PC}/create-job`, {
+      method: "POST", headers: storeHeaders(), body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      closeNewJobModal();
+      await loadAll();
+      // Highlight and open the new job
+      setTimeout(() => selectJob(data.job_id), 300);
+    } else {
+      alert("Error: " + (data.error || "Unknown"));
+      btn.disabled = false;
+      btn.textContent = mode === "override" ? "Add to Queue (No Payment) ✓" : "Collect & Add to Queue ✓";
+    }
+  } catch (e) {
+    alert("Cannot reach store PC:\n" + e.message);
+    btn.disabled = false;
+    btn.textContent = mode === "override" ? "Add to Queue (No Payment) ✓" : "Collect & Add to Queue ✓";
+  }
+}
 </script>
 </body>
 </html>

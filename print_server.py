@@ -11,9 +11,12 @@ Endpoints:
   GET  /status         — health check
   GET  /printers       — list configured printers
   GET  /health         — full system health
+  POST /create-job     — { customer_name, phone, source, colour, sides, copies, pages, paper_size, finishing, amount_collected|amount_partial, payment_mode, override_reason }
+  POST /upload-file    — { filename, file_data (base64) } → saves to hot folder
 """
 
 import hashlib
+import hmac
 import json
 import logging
 import math
@@ -28,6 +31,9 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Rate card engine (same directory)
 sys.path.insert(0, os.path.dirname(__file__))
@@ -56,6 +62,24 @@ _active_sessions = {}   # pc_id → {staff_id, name, session_id}  (in-memory cac
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+# Allowed directories for legacy /print filepath parameter
+_PRINT_ALLOWED_DIRS = [
+    Path(r"C:\Printosky\Jobs\Incoming"),
+    Path(r"C:\Printosky\Jobs\Archive"),
+]
+
+def _is_allowed_filepath(filepath: str) -> bool:
+    """Return True only if filepath resolves inside an allowed print directory."""
+    try:
+        resolved = Path(filepath).resolve()
+        return any(
+            resolved.parent == d.resolve()
+            for d in _PRINT_ALLOWED_DIRS
+        )
+    except Exception:
+        return False
 
 
 def init_staff_tables(db_path: str):
@@ -253,6 +277,9 @@ SUMATRA_PATHS = [
     r"C:\Program Files\SumatraPDF\SumatraPDF.exe",
     r"C:\Program Files (x86)\SumatraPDF\SumatraPDF.exe",
 ]
+
+# Shared secret — must match STORE_TOKEN in .env and storeToken in browser localStorage
+STORE_TOKEN = os.environ.get("STORE_TOKEN", "")
 
 # SQLite DB path
 if sys.platform == "win32":
@@ -658,6 +685,159 @@ def handle_new_photocopy(body: dict) -> dict:
     return {"ok": True, "job_id": job_id}
 
 
+# ── A6b: Upload file (base64 JSON) ────────────────────────────────────────────
+
+def handle_upload_file(body: dict) -> dict:
+    """
+    POST /upload-file
+    Accepts { filename, file_data (base64) }.
+    Saves to hot folder. Returns { ok, filename, filepath }.
+    """
+    import base64 as _b64
+    filename  = (body.get("filename") or "upload.bin").strip()
+    file_data = body.get("file_data", "")
+    if not filename or not file_data:
+        return {"ok": False, "error": "filename and file_data required"}
+
+    safe_name = Path(filename).name          # strip any path components
+    if not safe_name:
+        return {"ok": False, "error": "Invalid filename"}
+
+    dest_dir = Path(r"C:\Printosky\Jobs\Incoming")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    dest = dest_dir / safe_name
+    if dest.exists():
+        stem, ext, i = dest.stem, dest.suffix, 1
+        while dest.exists():
+            dest = dest_dir / f"{stem}_{i}{ext}"
+            i += 1
+
+    try:
+        raw = _b64.b64decode(file_data)
+    except Exception as exc:
+        return {"ok": False, "error": f"base64 decode failed: {exc}"}
+
+    dest.write_bytes(raw)
+    logging.info("Uploaded file: %s (%d bytes)", dest.name, len(raw))
+    return {"ok": True, "filename": dest.name, "filepath": str(dest)}
+
+
+# ── A6c: Create job — manual / walk-in entry ──────────────────────────────────
+
+def handle_create_job(body: dict) -> dict:
+    """
+    POST /create-job
+    Create a job from admin panel (walk-in, WhatsApp fallback, etc.).
+    Payment (full or partial) OR override_reason required to set status=Queued.
+    Without either, status=Draft (pending payment collection).
+    """
+    customer_name    = body.get("customer_name", "")
+    phone            = body.get("phone", "")
+    source           = body.get("source", "Walk-in")
+    notes            = body.get("notes", "")
+    filename         = body.get("filename", "")
+    filepath_stored  = body.get("filepath", "")
+    service_type     = body.get("service_type", "")
+    colour           = body.get("colour", "bw")
+    sides            = body.get("sides", "ss")
+    copies           = max(1, int(body.get("copies") or 1))
+    paper_size       = (body.get("paper_size") or "A4").upper()
+    finishing        = body.get("finishing", "none")
+    pages            = max(1, int(body.get("pages") or 1))
+    is_student       = bool(body.get("is_student", False))
+    urgent           = bool(body.get("urgent", False))
+    amount_quoted    = float(body.get("amount_quoted") or 0)
+    amount_collected = float(body.get("amount_collected") or 0)
+    amount_partial   = float(body.get("amount_partial") or 0)
+    payment_mode     = body.get("payment_mode", "Cash")
+    override_reason  = (body.get("override_reason") or "").strip()
+    staff_id         = body.get("staff_id", "")
+
+    if payment_mode not in ("Cash", "UPI", "Online"):
+        payment_mode = "Cash"
+
+    paid = amount_collected > 0 or amount_partial > 0
+    if not paid and not override_reason:
+        return {"ok": False, "error": "Payment or override reason required"}
+
+    # Generate job_id
+    today_str = datetime.now().strftime("%Y%m%d")
+    conn = _db()
+    row = conn.execute(
+        "SELECT job_id FROM jobs WHERE job_id LIKE ? ORDER BY job_id DESC LIMIT 1",
+        (f"OSP-{today_str}-%",)
+    ).fetchone()
+    seq = (int(row["job_id"].split("-")[-1]) + 1) if row else 1
+    job_id  = f"OSP-{today_str}-{seq:04d}"
+    now_str = _now()
+
+    status    = "Queued" if (paid or override_reason) else "Draft"
+    queued_at = now_str  if status == "Queued" else None
+
+    # Auto-calculate quote if not provided
+    if amount_quoted == 0 and _rc is not None:
+        paper_type_rc = f"{paper_size}_BW" if colour == "bw" else f"{paper_size}_col"
+        rc_items = [{"pages": pages, "paper_type": paper_type_rc,
+                     "sides": sides, "layout": "1-up", "copies": copies}]
+        try:
+            result = _rc.calculate_quote(rc_items, finishing, urgent, is_student, paper_size)
+            amount_quoted = result["total"]
+        except Exception as exc:
+            logging.warning("Quote calc failed for %s: %s", job_id, exc)
+
+    final_amount = amount_collected if amount_collected > 0 else (amount_partial if amount_partial > 0 else None)
+    final_mode   = payment_mode if final_amount else None
+
+    ext = Path(filename).suffix.lstrip(".") if filename else ""
+
+    conn.execute("""
+        INSERT INTO jobs
+          (job_id, received_at, filename, file_extension, source, sender,
+           customer_name, service_type, colour, sides, copies, finishing,
+           paper_size, page_count, amount_quoted, amount_collected, amount_partial,
+           payment_mode, override_reason, status, queued_at, filepath, notes, staff_notes)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (
+        job_id, now_str,
+        filename or "Manual Entry", ext,
+        source,
+        phone or None,
+        customer_name or None,
+        service_type or None,
+        colour, sides, copies, finishing,
+        paper_size, pages,
+        amount_quoted, final_amount,
+        amount_partial if amount_partial > 0 else None,
+        final_mode, override_reason or None,
+        status, queued_at,
+        filepath_stored or None,
+        notes or None,
+        f"Manual entry at {now_str} by {staff_id}",
+    ))
+    conn.commit()
+
+    # Insert a print_items row so the print panel loads specs immediately
+    if pages > 0:
+        paper_type = f"{paper_size}_BW" if colour == "bw" else f"{paper_size}_col"
+        printer    = "epson" if colour == "col" else "konica"
+        try:
+            conn.execute("""
+                INSERT INTO print_items
+                  (job_id, item_number, page_list, paper_type, colour, sides,
+                   layout, copies, paper_gsm, printer, status)
+                VALUES (?,1,'all',?,?,?,?,?,70,?,'Pending')
+            """, (job_id, paper_type, colour, sides, "1-up", copies, printer))
+            conn.commit()
+        except Exception as exc:
+            logging.warning("print_items insert skipped for %s: %s", job_id, exc)
+
+    conn.close()
+    logging.info("Manual job %s — %s — Rs.%.0f — status=%s — by %s",
+                 job_id, source, amount_quoted, status, staff_id)
+    return {"ok": True, "job_id": job_id, "status": status, "amount_quoted": amount_quoted}
+
+
 # ── A6: Send to vendor ────────────────────────────────────────────────────────
 
 def handle_vendor_send(body: dict) -> dict:
@@ -1047,7 +1227,7 @@ class PrintHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Store-Token")
         self.end_headers()
 
     def _read_body(self):
@@ -1151,6 +1331,16 @@ class PrintHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
+        # Verify shared secret on all mutation endpoints.
+        # /staff-login and /staff-logout are exempt (needed before token is available).
+        if path not in ("/staff-login", "/staff-logout"):
+            token = self.headers.get("X-Store-Token", "")
+            if not STORE_TOKEN or not hmac.compare_digest(
+                token.encode(), STORE_TOKEN.encode()
+            ):
+                self._json(403, {"error": "Forbidden"})
+                return
+
         if path == "/staff-login":
             body = self._read_body()
             pin   = body.get("pin", "")
@@ -1172,20 +1362,6 @@ class PrintHandler(BaseHTTPRequestHandler):
             self._json(200, staff_logout(DB_PATH, session_id, idle))
             return
 
-        # Legacy endpoints (kept for backward compatibility)
-        if path == "/session-start":
-            body = self._read_body()
-            sid = body.get("staff_id", "staff")
-            _active_sessions[sid] = {"staff_id": sid, "name": sid, "session_id": None}
-            self._json(200, {"ok": True, "staff_id": sid})
-            return
-
-        if path == "/session-end":
-            body = self._read_body()
-            sid = body.get("staff_id", "staff")
-            _active_sessions.pop(sid, None)
-            self._json(200, {"ok": True, "staff_id": sid})
-            return
 
         # ── Sprint 1 endpoints ────────────────────────────────────────────────
         if path == "/update-job":
@@ -1207,6 +1383,18 @@ class PrintHandler(BaseHTTPRequestHandler):
         if path == "/new-photocopy":
             body = self._read_body()
             self._json(200, handle_new_photocopy(body))
+            return
+
+        if path == "/upload-file":
+            body = self._read_body()
+            result = handle_upload_file(body)
+            self._json(200 if result.get("ok") else 400, result)
+            return
+
+        if path == "/create-job":
+            body = self._read_body()
+            result = handle_create_job(body)
+            self._json(200 if result.get("ok") else 400, result)
             return
 
         if path == "/vendor-send":
@@ -1257,6 +1445,11 @@ class PrintHandler(BaseHTTPRequestHandler):
 
         if not filepath:
             self._json(400, {"error": "filepath or item_number is required"})
+            return
+
+        if not _is_allowed_filepath(filepath):
+            logging.warning("Blocked /print with disallowed filepath: %s", filepath)
+            self._json(400, {"error": "Invalid filepath"})
             return
 
         logging.info("Print request (legacy): job=%s printer=%s copies=%d staff=%s file=%s",

@@ -229,6 +229,11 @@ def setup_database():
         ("colour",            "TEXT"),
         ("layout",            "TEXT"),
         ("delivery",          "INTEGER DEFAULT 0"),
+        ("override_reason",   "TEXT"),
+        ("amount_partial",    "REAL"),
+        ("queued_at",         "TEXT"),
+        ("printing_at",       "TEXT"),
+        ("printed_at",        "TEXT"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE jobs ADD COLUMN {col} {typedef}")

@@ -97,7 +97,10 @@
       "Bash(git push:*)",
       "Bash(gh repo:*)",
       "Bash(git checkout:*)",
-      "Bash(wc -l /c/PY/printosky/website/*.html /c/PY/printosky/website/*.js /c/PY/printosky/website/*.css)"
+      "Bash(wc -l /c/PY/printosky/website/*.html /c/PY/printosky/website/*.js /c/PY/printosky/website/*.css)",
+      "Bash(powershell -Command \"[Environment]::SetEnvironmentVariable\\('PATH', $env:PATH + ';C:\\\\Users\\\\user\\\\.local\\\\bin', 'User'\\)\")",
+      "Bash(powershell -Command \"[Environment]::SetEnvironmentVariable\\('PATH', [Environment]::GetEnvironmentVariable\\('PATH', 'User'\\) + ';C:\\\\Users\\\\user\\\\.local\\\\bin', 'User'\\)\")",
+      "Bash(python -c \"import sys,json; lines=[l for l in sys.stdin.read\\(\\).split\\(''''\\\\n''''\\) if l.strip\\(\\)]; [print\\(json.loads\\(l\\)[''''message''''][''''content''''][0].get\\(''''text'''',''''''''\\)\\) for l in lines[-3:] if ''''message'''' in json.loads\\(l\\) and json.loads\\(l\\)[''''message''''].get\\(''''role''''\\)==''''assistant'''' and json.loads\\(l\\)[''''message''''].get\\(''''content''''\\)]\")"
     ]
   },
   "model": "claude-sonnet-4-6",
