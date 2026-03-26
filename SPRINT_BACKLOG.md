@@ -52,7 +52,7 @@ Last updated: 2026-03-19 (Session 6)
 
 | # | Task | Details |
 |---|------|---------|
-| S10-1 | **AiSensy migration** | Move bot from personal 8943232033 to brand number 9495706405. 24hr cooldown on AiSensy SIM. |
+| S10-1 | **AiSensy migration** | Move bot from personal 8943232033 to brand number 9446903907. 24hr cooldown on AiSensy SIM. |
 | S10-2 | **Bot conversation flow review** | Run full customer journey test: file → 6 steps → payment → notification |
 | S10-3 | **WhatsApp group/channel filter** | Already patched in index.js. Verify after next bot restart |
 | S10-4 | **Delivery flow** | Bot asks delivery Y/N. Delivery charge Rs.30. Test end-to-end |

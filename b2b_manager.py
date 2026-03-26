@@ -387,7 +387,7 @@ def generate_invoice_pdf(db_path: str, phone: str, output_path: str = None) -> s
     story.append(Paragraph("<b>Payment Instructions</b>", style("pi_h", fontName="Helvetica-Bold", fontSize=9, textColor=TEAL)))
     story.append(Paragraph(
         "Please transfer to Oxygen Globally via NEFT/IMPS. "
-        "Share transaction reference to +91 8943232033 after payment.",
+        "Share transaction reference to +91 9446903907 after payment.",
         style("pi_b", fontSize=8, textColor=GREY)
     ))
     story.append(Spacer(1, 5*mm))

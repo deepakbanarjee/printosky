@@ -1,8 +1,13 @@
 """
 PRINTOSKY WHATSAPP NOTIFIER
 ============================
-Sends WhatsApp messages via the local whatsapp-web.js capture server.
-All messages go through port 3001 (send server in index.js).
+Sends WhatsApp messages via AiSensy Campaign API.
+Number: 9446903907 (WhatsApp Business API — WABA via AiSensy)
+
+AiSensy Campaign API:
+  POST https://backend.aisensy.com/campaign/t1/api/v2
+  Requires a campaign named AISENSY_CAMPAIGN in the AiSensy dashboard
+  with a single {{1}} body parameter.
 """
 
 import requests
@@ -10,24 +15,38 @@ import logging
 
 logger = logging.getLogger("whatsapp_notify")
 
-SEND_URL     = "http://localhost:3001/send"
-STORE_PHONE  = "8943232033"   # Test number — swap to 9495706405 for production
+# ── AiSensy config ─────────────────────────────────────────────────────────────
+AISENSY_API_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5YjY0YzFjYmNjYTFkMGRiYWZlYTBhNyIsIm5hbWUiOiJwcmludG9za3kuY29tICIsImFwcE5hbWUiOiJBaVNlbnN5IiwiY2xpZW50SWQiOiI2OWI2NGMxY2JjY2ExZDBkYmFmZWEwYTIiLCJhY3RpdmVQbGFuIjoiRlJFRV9GT1JFVkVSIiwiaWF0IjoxNzczNTU0NzE2fQ.zmX52sQvwxPiwnXA3G9i5qKdrUg0Yhg6BkuZxr-ePJA"
+AISENSY_API_URL  = "https://backend.aisensy.com/campaign/t1/api/v2"
+AISENSY_CAMPAIGN = "chatbot_reply"   # Campaign name in AiSensy dashboard (body = {{1}})
+STORE_PHONE      = "919446903907"    # Printosky AiSensy number (with country code)
 
 
 def _send(phone: str, message: str) -> bool:
-    """Send a WhatsApp message via the local capture server."""
+    """Send a WhatsApp message via AiSensy Campaign API."""
     if not phone:
         return False
+    # Normalise: strip + and @c.us, ensure 91 prefix for Indian numbers
     digits = phone.replace("@c.us", "").replace("+", "").strip()
+    if len(digits) == 10:
+        digits = "91" + digits
+
+    payload = {
+        "apiKey":         AISENSY_API_KEY,
+        "campaignName":   AISENSY_CAMPAIGN,
+        "destination":    digits,
+        "userName":       "Customer",
+        "templateParams": [message],
+    }
     try:
-        r = requests.post(SEND_URL, json={"phone": digits, "message": message}, timeout=10)
+        r = requests.post(AISENSY_API_URL, json=payload, timeout=15)
         if r.status_code == 200:
-            logger.info(f"WhatsApp sent to {digits}")
+            logger.info(f"AiSensy sent to {digits}")
             return True
-        logger.warning(f"WhatsApp send failed: {r.status_code} {r.text[:100]}")
+        logger.warning(f"AiSensy send failed: {r.status_code} {r.text[:200]}")
         return False
     except Exception as e:
-        logger.warning(f"WhatsApp notify error: {e}")
+        logger.warning(f"AiSensy notify error: {e}")
         return False
 
 

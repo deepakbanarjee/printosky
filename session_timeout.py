@@ -33,7 +33,7 @@ logger = logging.getLogger("session_timeout")
 
 TIMEOUT_MINUTES  = 15    # flag session if no reply for this long
 CHECK_INTERVAL_S = 60    # check every 60 seconds
-STORE_PHONE      = "918943232033"   # staff WhatsApp number for alerts
+STORE_PHONE      = "919446903907"   # Printosky brand number (AiSensy)
 
 def _get_timed_out_sessions(db_path: str, timeout_minutes: int) -> list:
     """Return bot sessions that haven't been updated in timeout_minutes."""
@@ -113,7 +113,7 @@ def _handle_timeout(session: dict, db_path: str):
             f"📋 Job ID: `{job_id}`\n"
             f"📄 File: {filename}\n\n"
             f"We noticed you didn't complete your order details.\n"
-            f"Reply here to continue, or call us at *8943232033*.\n\n"
+            f"Reply here to continue, or call us at *9446903907*.\n\n"
             f"_— Printosky / Oxygen Globally_ 🖨️"
         )
         _send(phone, customer_msg)
