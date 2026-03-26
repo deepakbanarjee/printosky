@@ -99,5 +99,34 @@
       "Bash(git checkout:*)",
       "Bash(wc -l /c/PY/printosky/website/*.html /c/PY/printosky/website/*.js /c/PY/printosky/website/*.css)"
     ]
+  },
+  "model": "claude-sonnet-4-6",
+  "env": {
+    "MAX_THINKING_TOKENS": "10000"
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /d C:\\PY\\printosky && git add . && git commit -m \"Auto-save: session ended\" && git push origin sprint/session-7",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /d C:\\PY\\printosky && git pull origin sprint/session-7"
+          }
+        ]
+      }
+    ]
   }
 }
