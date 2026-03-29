@@ -1,4 +1,7 @@
 {
+  "env": {
+    "MAX_THINKING_TOKENS": "10000"
+  },
   "permissions": {
     "allow": [
       "Bash(python -c \":*)",
@@ -100,13 +103,31 @@
       "Bash(wc -l /c/PY/printosky/website/*.html /c/PY/printosky/website/*.js /c/PY/printosky/website/*.css)",
       "Bash(powershell -Command \"[Environment]::SetEnvironmentVariable\\('PATH', $env:PATH + ';C:\\\\Users\\\\user\\\\.local\\\\bin', 'User'\\)\")",
       "Bash(powershell -Command \"[Environment]::SetEnvironmentVariable\\('PATH', [Environment]::GetEnvironmentVariable\\('PATH', 'User'\\) + ';C:\\\\Users\\\\user\\\\.local\\\\bin', 'User'\\)\")",
-      "Bash(python -c \"import sys,json; lines=[l for l in sys.stdin.read\\(\\).split\\(''''\\\\n''''\\) if l.strip\\(\\)]; [print\\(json.loads\\(l\\)[''''message''''][''''content''''][0].get\\(''''text'''',''''''''\\)\\) for l in lines[-3:] if ''''message'''' in json.loads\\(l\\) and json.loads\\(l\\)[''''message''''].get\\(''''role''''\\)==''''assistant'''' and json.loads\\(l\\)[''''message''''].get\\(''''content''''\\)]\")"
+      "Bash(python -c \"import sys,json; lines=[l for l in sys.stdin.read\\(\\).split\\(''''\\\\n''''\\) if l.strip\\(\\)]; [print\\(json.loads\\(l\\)[''''message''''][''''content''''][0].get\\(''''text'''',''''''''\\)\\) for l in lines[-3:] if ''''message'''' in json.loads\\(l\\) and json.loads\\(l\\)[''''message''''].get\\(''''role''''\\)==''''assistant'''' and json.loads\\(l\\)[''''message''''].get\\(''''content''''\\)]\")",
+      "WebSearch",
+      "WebFetch(domain:aisensy.com)",
+      "WebFetch(domain:developers.facebook.com)",
+      "WebFetch(domain:www.go4whatsup.com)",
+      "WebFetch(domain:www.wati.io)",
+      "WebFetch(domain:www.heltar.com)",
+      "WebFetch(domain:www.interakt.shop)",
+      "WebFetch(domain:www.greenadsglobal.com)",
+      "WebFetch(domain:authkey.io)",
+      "WebFetch(domain:www.chatondesk.com)",
+      "WebFetch(domain:360dialog.com)",
+      "Bash(python -c \"import rate_card; print\\(''rate_card OK''\\)\")",
+      "Bash(pip show:*)",
+      "Bash(python -m pytest --version)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Read(//c/py/printosky/**)",
+      "Bash(find C:/py/printosky -name *.md -not -path */node_modules/*)",
+      "WebFetch(domain:www.pdfsnake.com)",
+      "WebFetch(domain:github.com)"
     ]
   },
   "model": "claude-sonnet-4-6",
-  "env": {
-    "MAX_THINKING_TOKENS": "10000"
-  },
   "hooks": {
     "Stop": [
       {

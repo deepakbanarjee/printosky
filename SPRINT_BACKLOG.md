@@ -52,7 +52,7 @@ Last updated: 2026-03-19 (Session 6)
 
 | # | Task | Details |
 |---|------|---------|
-| S10-1 | **AiSensy migration** | Move bot from personal 8943232033 to brand number 9446903907. 24hr cooldown on AiSensy SIM. |
+| S10-1 | **Meta Cloud API migration** | Replace whatsapp-web.js with Meta Cloud API direct (free, zero ban risk). Steps: (1) Deregister 9446903907 from WA app — CONFIRMED no active account. (2) Create Meta Business Manager + WABA (needs GST cert). (3) Register number, get System User token. (4) Add `/whatsapp-webhook` route to webhook_receiver.py, point CloudFlare tunnel. (5) Migrate outbound calls in whatsapp_bot.py from WA Web socket to graph.facebook.com REST API. Monthly cost: ~₹0 (reactive flow = free service window). |
 | S10-2 | **Bot conversation flow review** | Run full customer journey test: file → 6 steps → payment → notification |
 | S10-3 | **WhatsApp group/channel filter** | Already patched in index.js. Verify after next bot restart |
 | S10-4 | **Delivery flow** | Bot asks delivery Y/N. Delivery charge Rs.30. Test end-to-end |

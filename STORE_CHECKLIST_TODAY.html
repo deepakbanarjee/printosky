@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Store PC Checklist — Today</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #f5f5f5; }
+  h1 { background: #1a1a2e; color: white; padding: 16px 20px; border-radius: 8px; margin-bottom: 8px; }
+  .date { color: #666; margin-bottom: 24px; font-size: 14px; }
+  .section { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+  .section h2 { margin-top: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .critical h2 { color: #c0392b; }
+  .important h2 { color: #e67e22; }
+  .normal h2 { color: #2c3e50; }
+  .item { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+  .item:last-child { border-bottom: none; padding-bottom: 0; }
+  input[type=checkbox] { width: 20px; height: 20px; flex-shrink: 0; cursor: pointer; margin-top: 2px; accent-color: #27ae60; }
+  .item label { cursor: pointer; line-height: 1.5; flex: 1; }
+  .item label.done { text-decoration: line-through; color: #999; }
+  code { background: #2d2d2d; color: #f8f8f2; padding: 2px 8px; border-radius: 4px; font-size: 13px; display: inline-block; }
+  pre { background: #2d2d2d; color: #f8f8f2; padding: 14px 16px; border-radius: 6px; font-size: 13px; overflow-x: auto; margin: 8px 0 4px; line-height: 1.6; }
+  .note { background: #fff9e6; border-left: 3px solid #f39c12; padding: 8px 12px; font-size: 13px; margin-top: 6px; border-radius: 0 4px 4px 0; }
+  .ok { background: #e8f8f0; border-left: 3px solid #27ae60; padding: 8px 12px; font-size: 13px; margin-top: 6px; border-radius: 0 4px 4px 0; }
+  .badge { font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 10px; }
+  .badge-red { background: #fde8e8; color: #c0392b; }
+  .badge-orange { background: #fef0e0; color: #e67e22; }
+  .badge-green { background: #e8f8f0; color: #27ae60; }
+  .progress-bar { background: #eee; border-radius: 10px; height: 10px; margin: 8px 0 4px; }
+  .progress-fill { background: #27ae60; height: 10px; border-radius: 10px; width: 0%; transition: width 0.3s; }
+  #progress-text { font-size: 13px; color: #666; }
+  .sub { font-size: 13px; color: #555; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<h1>🏪 Store PC Checklist</h1>
+<div class="date">Sunday maintenance — complete in order — tick each item as you go</div>
+
+<div style="background:white;border-radius:8px;padding:16px;margin-bottom:20px;box-shadow:0 2px 6px rgba(0,0,0,0.08);">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <strong>Progress</strong>
+    <span id="progress-text">0 / 0 done</span>
+  </div>
+  <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section critical">
+  <h2>🔴 CRITICAL FIXES <span class="badge badge-red">Do First</span></h2>
+
+  <div class="item">
+    <input type="checkbox" id="c1a" onchange="update(this)">
+    <label for="c1a">
+      <strong>C1 — Open Supabase SQL Editor</strong><br>
+      <span class="sub">Go to supabase.com → your project → SQL Editor (left sidebar)</span>
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="c1b" onchange="update(this)">
+    <label for="c1b">
+      <strong>C1 — Find the migration file on this PC</strong><br>
+      <span class="sub">Open File Explorer → navigate to:</span>
+      <pre>C:\py\printosky\SCHEMA_v3_migration.sql</pre>
+      Open it in Notepad, select all (Ctrl+A), copy (Ctrl+C)
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="c1c" onchange="update(this)">
+    <label for="c1c">
+      <strong>C1 — Paste and run in Supabase SQL Editor</strong><br>
+      <span class="sub">Paste the SQL into the editor → click Run<br>
+      ✅ Success = green "Success" banner<br>
+      ⚠️ "column already exists" errors = OK, ignore them — migration already partially ran</span>
+      <div class="note">After running: go to Table Editor → jobs table → confirm new columns exist</div>
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="c2a" onchange="update(this)">
+    <label for="c2a">
+      <strong>C2 — Fix Oxygen PC URL (do this ON THE OXYGEN PC, not this one)</strong><br>
+      <span class="sub">On the Oxygen PC: open <code>admin.html</code> in Chrome → press <strong>F12</strong> → Application tab → Local Storage (left panel) → look for any key with a URL in it</span>
+      <div class="note">Change the value to: <code>http://192.168.55.212:3005</code> → reload page → job list should load</div>
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="c2b" onchange="update(this)">
+    <label for="c2b">
+      <strong>C2 — If no Local Storage key found on Oxygen PC</strong><br>
+      <span class="sub">Open <code>C:\py\printosky\website\admin.html</code> in a text editor → search for the old IP → replace with <code>192.168.55.212</code> → save → re-upload to Netlify</span>
+    </label>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section important">
+  <h2>🟠 SERVICE HEALTH <span class="badge badge-orange">Check All</span></h2>
+
+  <div class="item">
+    <input type="checkbox" id="s1" onchange="update(this)">
+    <label for="s1">
+      <strong>Start all services</strong><br>
+      <span class="sub">Double-click <code>START_PRINTOSKY.bat</code> on the desktop (or in <code>C:\py\printosky\</code>)<br>
+      Wait 30 seconds — 3 terminal windows should open and stay open without crashing</span>
+      <div class="note">Write down any red error lines you see in any window</div>
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="s2" onchange="update(this)">
+    <label for="s2">
+      <strong>Check Konica is reachable</strong><br>
+      <span class="sub">Open Command Prompt (Win+R → type <code>cmd</code> → Enter)</span>
+      <pre>ping 192.168.55.110</pre>
+      ✅ Should show "Reply from 192.168.55.110" — 4 times<br>
+      ❌ If "Request timed out" — Konica is off or on wrong IP
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="s3" onchange="update(this)">
+    <label for="s3">
+      <strong>Check Epson is reachable</strong>
+      <pre>ping 192.168.55.201</pre>
+      ✅ Should show replies — 4 times
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="s4" onchange="update(this)">
+    <label for="s4">
+      <strong>Check print server is running</strong>
+      <pre>curl http://localhost:3005/printers</pre>
+      ✅ Should return JSON with printer info<br>
+      ❌ If "connection refused" — print_server.py not running
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="s5" onchange="update(this)">
+    <label for="s5">
+      <strong>Check webhook receiver is running</strong>
+      <pre>curl http://localhost:3002/health</pre>
+      ✅ Should return something (200 OK or any response)<br>
+      ❌ If "connection refused" — webhook_receiver.py not running
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="s6" onchange="update(this)">
+    <label for="s6">
+      <strong>Check jobs database exists</strong>
+      <pre>dir C:\Printosky\Data\jobs.db</pre>
+      ✅ Should show a file with a size (not 0 bytes)<br>
+      ❌ If not found — run <code>python watcher.py</code> once to create it
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="s7" onchange="update(this)">
+    <label for="s7">
+      <strong>Check CloudFlare Tunnel is running</strong><br>
+      <span class="sub">Look in system tray (bottom right) for the Cloudflare icon, or check Task Manager → look for <code>cloudflared.exe</code></span>
+      <div class="note">If not running: start it manually. Without this, Razorpay payment confirmations won't reach the store PC.</div>
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="s8" onchange="update(this)">
+    <label for="s8">
+      <strong>Check WhatsApp bot connected</strong><br>
+      <span class="sub">Look at the WhatsApp bot terminal window — it should show "Client is ready!" or similar. If it shows a QR code, scan it with your phone's WhatsApp → Linked Devices.</span>
+    </label>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section normal">
+  <h2>🟢 STAFF & DATA CHECKS <span class="badge badge-green">Verify</span></h2>
+
+  <div class="item">
+    <input type="checkbox" id="d1" onchange="update(this)">
+    <label for="d1">
+      <strong>Check staff list</strong>
+      <pre>cd C:\py\printosky
+python staff_setup.py list</pre>
+      ✅ All current staff should be listed with their IDs<br>
+      ❌ If empty: <code>python staff_setup.py seed</code>
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="d2" onchange="update(this)">
+    <label for="d2">
+      <strong>Verify admin panel loads</strong><br>
+      <span class="sub">Open Chrome on this PC → go to <code>printosky.com/admin</code> (or open <code>website/admin.html</code> locally)<br>
+      ✅ Job list loads, shows recent jobs<br>
+      ❌ If blank or error — Supabase URL/key may be wrong in admin.html</span>
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="d3" onchange="update(this)">
+    <label for="d3">
+      <strong>Test hot folder detection</strong><br>
+      <span class="sub">Copy any PDF file into:</span>
+      <pre>C:\Printosky\Jobs\Incoming\</pre>
+      ✅ watcher.py terminal should immediately print "New job detected: [filename]"<br>
+      ✅ Job should appear in admin panel within 30 seconds
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="d4" onchange="update(this)">
+    <label for="d4">
+      <strong>Check Supabase sync</strong><br>
+      <span class="sub">Open admin panel → pick any recent job → note its Job ID<br>
+      Go to Supabase → Table Editor → jobs → search for that Job ID<br>
+      ✅ Should exist in both places with same status</span>
+    </label>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section normal">
+  <h2>🔵 PYTHON DEPENDENCIES</h2>
+
+  <div class="item">
+    <input type="checkbox" id="p1" onchange="update(this)">
+    <label for="p1">
+      <strong>Run all tests — note pass/fail count</strong>
+      <pre>cd C:\py\printosky
+python -m pytest tests/ -v 2>&1 | tee test_results.txt</pre>
+      <span class="sub">This saves results to <code>test_results.txt</code> — share with me if anything unexpected fails</span>
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="p2" onchange="update(this)">
+    <label for="p2">
+      <strong>Check PyMuPDF (needed for PDF colour detection — Sprint 9)</strong>
+      <pre>python -c "import fitz; print('PyMuPDF OK:', fitz.__version__)"</pre>
+      ❌ If "ModuleNotFoundError":
+      <pre>pip install PyMuPDF</pre>
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="p3" onchange="update(this)">
+    <label for="p3">
+      <strong>Check pikepdf (needed for PDF merging/cover generation — Sprint 10)</strong>
+      <pre>python -c "import pikepdf; print('pikepdf OK')"</pre>
+      ❌ If missing:
+      <pre>pip install pikepdf</pre>
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="p4" onchange="update(this)">
+    <label for="p4">
+      <strong>Check reportlab (needed for cover generation — Sprint 10)</strong>
+      <pre>python -c "import reportlab; print('reportlab OK')"</pre>
+      ❌ If missing:
+      <pre>pip install reportlab</pre>
+    </label>
+  </div>
+
+  <div class="item">
+    <input type="checkbox" id="p5" onchange="update(this)">
+    <label for="p5">
+      <strong>Check LibreOffice installed (needed for .docx→PDF conversion — Sprint 9)</strong>
+      <pre>where soffice</pre>
+      ✅ Should return a path like <code>C:\Program Files\LibreOffice\program\soffice.exe</code><br>
+      ❌ If "not found": download and install LibreOffice from libreoffice.org (free, ~350MB)
+      <div class="note">LibreOffice is only needed for Sprint 9. Don't block on this today — just note if it's installed.</div>
+    </label>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section normal">
+  <h2>📋 REPORT BACK</h2>
+
+  <div class="item">
+    <input type="checkbox" id="r1" onchange="update(this)">
+    <label for="r1">
+      <strong>Take note of the following to report back:</strong><br>
+      <span class="sub">
+        □ Did C1 (Supabase migration) succeed? Any errors?<br>
+        □ Did C2 (Oxygen PC URL) succeed?<br>
+        □ Test results: how many passed / failed?<br>
+        □ Which pip installs were needed (PyMuPDF, pikepdf, etc.)?<br>
+        □ Is LibreOffice installed?<br>
+        □ Any startup errors in any of the 3 terminal windows?<br>
+        □ Any printers not reachable?<br>
+      </span>
+    </label>
+  </div>
+
+</div>
+
+<div style="background:#1a1a2e;color:white;border-radius:8px;padding:16px;text-align:center;font-size:13px;">
+  After completing this checklist, message the results back — then Sprint 8 starts immediately.
+</div>
+
+<script>
+function update(cb) {
+  const label = cb.nextElementSibling;
+  if (cb.checked) label.classList.add('done');
+  else label.classList.remove('done');
+  updateProgress();
+  localStorage.setItem(cb.id, cb.checked);
+}
+function updateProgress() {
+  const all = document.querySelectorAll('input[type=checkbox]');
+  const done = document.querySelectorAll('input[type=checkbox]:checked').length;
+  document.getElementById('progress-text').textContent = done + ' / ' + all.length + ' done';
+  document.getElementById('progress-fill').style.width = (done / all.length * 100) + '%';
+}
+// Restore saved state
+window.onload = function() {
+  document.querySelectorAll('input[type=checkbox]').forEach(function(cb) {
+    const saved = localStorage.getItem(cb.id);
+    if (saved === 'true') {
+      cb.checked = true;
+      cb.nextElementSibling.classList.add('done');
+    }
+  });
+  updateProgress();
+};
+</script>
+</body>
+</html>
