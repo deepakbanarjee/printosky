@@ -42,6 +42,20 @@ DROP POLICY IF EXISTS "anon upsert konica_jobs"    ON konica_jobs;
 DROP POLICY IF EXISTS "anon all partners"          ON partners;
 DROP POLICY IF EXISTS "service_role only"          ON staff_sessions;
 
+-- ── Drop new policies if partially applied (idempotent re-run) ───────────────
+
+DROP POLICY IF EXISTS "auth read jobs"               ON jobs;
+DROP POLICY IF EXISTS "auth read printer_counters"   ON printer_counters;
+DROP POLICY IF EXISTS "auth read daily_summary"      ON daily_summary;
+DROP POLICY IF EXISTS "auth read printer_supplies"   ON printer_supplies;
+DROP POLICY IF EXISTS "auth all b2b_clients"         ON b2b_clients;
+DROP POLICY IF EXISTS "auth all b2b_payments"        ON b2b_payments;
+DROP POLICY IF EXISTS "auth all rate_card"           ON rate_card;
+DROP POLICY IF EXISTS "auth read supply_changes"     ON supply_changes;
+DROP POLICY IF EXISTS "auth read konica_jobs"        ON konica_jobs;
+DROP POLICY IF EXISTS "auth read partners"           ON partners;
+DROP POLICY IF EXISTS "auth all staff_sessions"      ON staff_sessions;
+
 -- ── New policies: authenticated users can read/write ─────────────────────────
 -- Reads: admin/superadmin/mis pages (authenticated JWT from Netlify function)
 -- Writes: supabase_sync.py uses service_role key which bypasses RLS entirely
