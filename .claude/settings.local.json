@@ -118,7 +118,10 @@
       "WebFetch(domain:www.pdfsnake.com)",
       "WebFetch(domain:github.com)",
       "Bash(git:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Skill(update-config)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(grep:*)"
     ]
   },
   "model": "claude-sonnet-4-6",

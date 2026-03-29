@@ -50,16 +50,16 @@
   <h2>🔴 CRITICAL FIXES <span class="badge badge-red">Do First</span></h2>
 
   <div class="item">
-    <input type="checkbox" id="c1a" onchange="update(this)">
-    <label for="c1a">
+    <input type="checkbox" id="c1a" onchange="update(this)" checked>
+    <label for="c1a" class="done">
       <strong>C1 — Open Supabase SQL Editor</strong><br>
       <span class="sub">Go to supabase.com → your project → SQL Editor (left sidebar)</span>
     </label>
   </div>
 
   <div class="item">
-    <input type="checkbox" id="c1b" onchange="update(this)">
-    <label for="c1b">
+    <input type="checkbox" id="c1b" onchange="update(this)" checked>
+    <label for="c1b" class="done">
       <strong>C1 — Find the migration file on this PC</strong><br>
       <span class="sub">Open File Explorer → navigate to:</span>
       <pre>C:\py\printosky\SCHEMA_v3_migration.sql</pre>
@@ -68,8 +68,8 @@
   </div>
 
   <div class="item">
-    <input type="checkbox" id="c1c" onchange="update(this)">
-    <label for="c1c">
+    <input type="checkbox" id="c1c" onchange="update(this)" checked>
+    <label for="c1c" class="done">
       <strong>C1 — Paste and run in Supabase SQL Editor</strong><br>
       <span class="sub">Paste the SQL into the editor → click Run<br>
       ✅ Success = green "Success" banner<br>
@@ -79,8 +79,8 @@
   </div>
 
   <div class="item">
-    <input type="checkbox" id="c2a" onchange="update(this)">
-    <label for="c2a">
+    <input type="checkbox" id="c2a" onchange="update(this)" checked>
+    <label for="c2a" class="done">
       <strong>C2 — Fix Oxygen PC URL (do this ON THE OXYGEN PC, not this one)</strong><br>
       <span class="sub">On the Oxygen PC: open <code>admin.html</code> in Chrome → press <strong>F12</strong> → Application tab → Local Storage (left panel) → look for any key with a URL in it</span>
       <div class="note">Change the value to: <code>http://192.168.55.212:3005</code> → reload page → job list should load</div>
@@ -88,8 +88,8 @@
   </div>
 
   <div class="item">
-    <input type="checkbox" id="c2b" onchange="update(this)">
-    <label for="c2b">
+    <input type="checkbox" id="c2b" onchange="update(this)" checked>
+    <label for="c2b" class="done">
       <strong>C2 — If no Local Storage key found on Oxygen PC</strong><br>
       <span class="sub">Open <code>C:\py\printosky\website\admin.html</code> in a text editor → search for the old IP → replace with <code>192.168.55.212</code> → save → re-upload to Netlify</span>
     </label>
@@ -101,8 +101,8 @@
   <h2>🟠 SERVICE HEALTH <span class="badge badge-orange">Check All</span></h2>
 
   <div class="item">
-    <input type="checkbox" id="s1" onchange="update(this)">
-    <label for="s1">
+    <input type="checkbox" id="s1" onchange="update(this)" checked>
+    <label for="s1" class="done">
       <strong>Start all services</strong><br>
       <span class="sub">Double-click <code>START_PRINTOSKY.bat</code> on the desktop (or in <code>C:\py\printosky\</code>)<br>
       Wait 30 seconds — 3 terminal windows should open and stay open without crashing</span>
@@ -111,8 +111,8 @@
   </div>
 
   <div class="item">
-    <input type="checkbox" id="s2" onchange="update(this)">
-    <label for="s2">
+    <input type="checkbox" id="s2" onchange="update(this)" checked>
+    <label for="s2" class="done">
       <strong>Check Konica is reachable</strong><br>
       <span class="sub">Open Command Prompt (Win+R → type <code>cmd</code> → Enter)</span>
       <pre>ping 192.168.55.110</pre>
@@ -122,8 +122,8 @@
   </div>
 
   <div class="item">
-    <input type="checkbox" id="s3" onchange="update(this)">
-    <label for="s3">
+    <input type="checkbox" id="s3" onchange="update(this)" checked>
+    <label for="s3" class="done">
       <strong>Check Epson is reachable</strong>
       <pre>ping 192.168.55.201</pre>
       ✅ Should show replies — 4 times
@@ -131,8 +131,8 @@
   </div>
 
   <div class="item">
-    <input type="checkbox" id="s4" onchange="update(this)">
-    <label for="s4">
+    <input type="checkbox" id="s4" onchange="update(this)" checked>
+    <label for="s4" class="done">
       <strong>Check print server is running</strong>
       <pre>curl http://localhost:3005/printers</pre>
       ✅ Should return JSON with printer info<br>
@@ -141,8 +141,8 @@
   </div>
 
   <div class="item">
-    <input type="checkbox" id="s5" onchange="update(this)">
-    <label for="s5">
+    <input type="checkbox" id="s5" onchange="update(this)" checked>
+    <label for="s5" class="done">
       <strong>Check webhook receiver is running</strong>
       <pre>curl http://localhost:3002/health</pre>
       ✅ Should return something (200 OK or any response)<br>
@@ -151,8 +151,8 @@
   </div>
 
   <div class="item">
-    <input type="checkbox" id="s6" onchange="update(this)">
-    <label for="s6">
+    <input type="checkbox" id="s6" onchange="update(this)" checked>
+    <label for="s6" class="done">
       <strong>Check jobs database exists</strong>
       <pre>dir C:\Printosky\Data\jobs.db</pre>
       ✅ Should show a file with a size (not 0 bytes)<br>
@@ -161,8 +161,8 @@
   </div>
 
   <div class="item">
-    <input type="checkbox" id="s7" onchange="update(this)">
-    <label for="s7">
+    <input type="checkbox" id="s7" onchange="update(this)" checked>
+    <label for="s7" class="done">
       <strong>Check CloudFlare Tunnel is running</strong><br>
       <span class="sub">Look in system tray (bottom right) for the Cloudflare icon, or check Task Manager → look for <code>cloudflared.exe</code></span>
       <div class="note">If not running: start it manually. Without this, Razorpay payment confirmations won't reach the store PC.</div>
@@ -183,8 +183,8 @@
   <h2>🟢 STAFF & DATA CHECKS <span class="badge badge-green">Verify</span></h2>
 
   <div class="item">
-    <input type="checkbox" id="d1" onchange="update(this)">
-    <label for="d1">
+    <input type="checkbox" id="d1" onchange="update(this)" checked>
+    <label for="d1" class="done">
       <strong>Check staff list</strong>
       <pre>cd C:\py\printosky
 python staff_setup.py list</pre>
@@ -194,8 +194,8 @@ python staff_setup.py list</pre>
   </div>
 
   <div class="item">
-    <input type="checkbox" id="d2" onchange="update(this)">
-    <label for="d2">
+    <input type="checkbox" id="d2" onchange="update(this)" checked>
+    <label for="d2" class="done">
       <strong>Verify admin panel loads</strong><br>
       <span class="sub">Open Chrome on this PC → go to <code>printosky.com/admin</code> (or open <code>website/admin.html</code> locally)<br>
       ✅ Job list loads, shows recent jobs<br>
@@ -204,8 +204,8 @@ python staff_setup.py list</pre>
   </div>
 
   <div class="item">
-    <input type="checkbox" id="d3" onchange="update(this)">
-    <label for="d3">
+    <input type="checkbox" id="d3" onchange="update(this)" checked>
+    <label for="d3" class="done">
       <strong>Test hot folder detection</strong><br>
       <span class="sub">Copy any PDF file into:</span>
       <pre>C:\Printosky\Jobs\Incoming\</pre>
@@ -215,8 +215,8 @@ python staff_setup.py list</pre>
   </div>
 
   <div class="item">
-    <input type="checkbox" id="d4" onchange="update(this)">
-    <label for="d4">
+    <input type="checkbox" id="d4" onchange="update(this)" checked>
+    <label for="d4" class="done">
       <strong>Check Supabase sync</strong><br>
       <span class="sub">Open admin panel → pick any recent job → note its Job ID<br>
       Go to Supabase → Table Editor → jobs → search for that Job ID<br>
@@ -230,8 +230,8 @@ python staff_setup.py list</pre>
   <h2>🔵 PYTHON DEPENDENCIES</h2>
 
   <div class="item">
-    <input type="checkbox" id="p1" onchange="update(this)">
-    <label for="p1">
+    <input type="checkbox" id="p1" onchange="update(this)" checked>
+    <label for="p1" class="done">
       <strong>Run all tests — note pass/fail count</strong>
       <pre>cd C:\py\printosky
 python -m pytest tests/ -v 2>&1 | tee test_results.txt</pre>
@@ -240,8 +240,8 @@ python -m pytest tests/ -v 2>&1 | tee test_results.txt</pre>
   </div>
 
   <div class="item">
-    <input type="checkbox" id="p2" onchange="update(this)">
-    <label for="p2">
+    <input type="checkbox" id="p2" onchange="update(this)" checked>
+    <label for="p2" class="done">
       <strong>Check PyMuPDF (needed for PDF colour detection — Sprint 9)</strong>
       <pre>python -c "import fitz; print('PyMuPDF OK:', fitz.__version__)"</pre>
       ❌ If "ModuleNotFoundError":
@@ -250,8 +250,8 @@ python -m pytest tests/ -v 2>&1 | tee test_results.txt</pre>
   </div>
 
   <div class="item">
-    <input type="checkbox" id="p3" onchange="update(this)">
-    <label for="p3">
+    <input type="checkbox" id="p3" onchange="update(this)" checked>
+    <label for="p3" class="done">
       <strong>Check pikepdf (needed for PDF merging/cover generation — Sprint 10)</strong>
       <pre>python -c "import pikepdf; print('pikepdf OK')"</pre>
       ❌ If missing:
@@ -260,8 +260,8 @@ python -m pytest tests/ -v 2>&1 | tee test_results.txt</pre>
   </div>
 
   <div class="item">
-    <input type="checkbox" id="p4" onchange="update(this)">
-    <label for="p4">
+    <input type="checkbox" id="p4" onchange="update(this)" checked>
+    <label for="p4" class="done">
       <strong>Check reportlab (needed for cover generation — Sprint 10)</strong>
       <pre>python -c "import reportlab; print('reportlab OK')"</pre>
       ❌ If missing:
@@ -270,8 +270,8 @@ python -m pytest tests/ -v 2>&1 | tee test_results.txt</pre>
   </div>
 
   <div class="item">
-    <input type="checkbox" id="p5" onchange="update(this)">
-    <label for="p5">
+    <input type="checkbox" id="p5" onchange="update(this)" checked>
+    <label for="p5" class="done">
       <strong>Check LibreOffice installed (needed for .docx→PDF conversion — Sprint 9)</strong>
       <pre>where soffice</pre>
       ✅ Should return a path like <code>C:\Program Files\LibreOffice\program\soffice.exe</code><br>
@@ -286,8 +286,8 @@ python -m pytest tests/ -v 2>&1 | tee test_results.txt</pre>
   <h2>📋 REPORT BACK</h2>
 
   <div class="item">
-    <input type="checkbox" id="r1" onchange="update(this)">
-    <label for="r1">
+    <input type="checkbox" id="r1" onchange="update(this)" checked>
+    <label for="r1" class="done">
       <strong>Take note of the following to report back:</strong><br>
       <span class="sub">
         □ Did C1 (Supabase migration) succeed? Any errors?<br>

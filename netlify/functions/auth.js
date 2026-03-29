@@ -14,6 +14,7 @@ const ENV_KEY = {
   superadmin: "SUPERADMIN_SHA256_HASH",
   store:      "STORE_SHA256_HASH",
   mis:        "MIS_SHA256_HASH",
+  staff:      "STAFF_TOKEN_HASH",
 };
 
 exports.handler = async (event) => {

@@ -1215,6 +1215,16 @@ async function tryPinLogin() {
       sessionStorage.setItem("staff_id", data.staff_id);
       sessionStorage.setItem("staff_name", data.name);
       sessionStorage.setItem("session_id", data.session_id);
+      // Fetch Supabase JWT so sbFetch works with RLS-protected tables
+      try {
+        const jr = await fetch("/.netlify/functions/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "staff", password: localStorage.getItem("storeToken") || "" }),
+        });
+        const jd = await jr.json();
+        if (jd.supabase_jwt) sessionStorage.setItem("supabase_jwt", jd.supabase_jwt);
+      } catch { /* JWT optional — falls back to anon key */ }
       showDashboard();
     } else {
       document.getElementById("login-err").style.display = "block";

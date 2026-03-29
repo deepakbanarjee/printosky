@@ -4,7 +4,7 @@
 
 ---
 
-## What We Have Now (Sprints 1–7)
+## What We Have Now (Sprints 1–9)
 
 | Component | Status |
 |-----------|--------|
@@ -19,6 +19,19 @@
 | Konica job log CSV import | ✅ Done |
 | Floating print panel with saved specs | ✅ Done |
 | Outsourced vendor workflow (project/record/lam) | ✅ Done |
+| **Sprint 8 — Security hardening** | |
+| Supabase RLS (SCHEMA_v5) — anon key reads blocked | ✅ Done |
+| Netlify auth function (server-side password verify + JWT) | ✅ Done |
+| Admin sub-page auth (superadmin / store / MIS) | ✅ Done |
+| Staff PIN login acquires Supabase JWT via storeToken | ✅ Done |
+| All 7 Netlify env vars set (SUPABASE_URL, KEY, hashes) | ✅ Done |
+| STAFF_TOKEN_HASH added to Netlify | ✅ Done |
+| **Sprint 9 — Infrastructure fixes + Meta migration** | |
+| Immediate Supabase PATCH after print (no 5-min delay) | ✅ Done |
+| Konica job history shows filename only (not full path) | ✅ Done |
+| PyMuPDF (fitz) 1.27.2.2 installed | ✅ Done |
+| LibreOffice installed + added to system PATH | ✅ Done |
+| Meta WhatsApp Cloud API — code complete | ✅ Done (awaiting credentials) |
 
 ---
 
@@ -339,6 +352,74 @@ When components have different completion times (e.g. component A in-house done,
 - 4–5 stars → 10% off next job
 - No expiry on the discount code
 - Code auto-applied when same customer's phone places next order
+
+---
+
+## WhatsApp Infrastructure — Meta Cloud API Migration
+**Status:** Code complete — awaiting Meta Business Manager setup
+**Goal:** Replace whatsapp-web.js browser automation + AiSensy with official Meta WhatsApp Cloud API
+**Number:** 9446903907 (confirmed: no existing WhatsApp account — can register directly as WABA)
+
+### Why
+- whatsapp-web.js is reverse-engineered browser automation → active ban risk from Meta
+- Requires QR code re-scan whenever session drops or store PC restarts
+- Goes offline when the store PC is off
+- AiSensy costs money per message (third-party aggregator)
+- Meta Cloud API: official, free, zero ban risk, always-on
+
+### What Changed in Code (Sprint 9 — 2026-03-29)
+
+| File | Change |
+|------|--------|
+| `webhook_receiver.py` | Added GET `/whatsapp-webhook` (Meta verification challenge); POST `/whatsapp-webhook` (inbound messages); `_verify_meta_signature()` (HMAC-SHA256 with APP_SECRET); `process_meta_message()` (parses entry→changes→value→messages); `_download_meta_media()` (two-step Graph API fetch); `_handle_meta_media()` (saves file + .sender sidecar) |
+| `whatsapp_notify.py` | Replaced AiSensy API with `_send_meta()` using Meta Graph API via `urllib.request`; `_send()` now delegates to `_send_meta()` — all callers unchanged |
+| `.env` | Added 4 `META_*` placeholder vars |
+
+### Architecture
+```
+Customer sends WhatsApp to 9446903907
+  → Meta Cloud API receives it
+  → POSTs to https://pay.printosky.com/whatsapp-webhook
+       (CloudFlare Tunnel → localhost:3002)
+  → webhook_receiver.py verifies X-Hub-Signature-256
+  → text messages → _handle_aisensy_text() → port 3003/bot (watcher.py)
+  → file messages → _download_meta_media() → C:\Printosky\Jobs\Incoming\
+                  → .sender sidecar written
+                  → watcher.py picks up via Watchdog
+```
+
+### Outbound (notifications to customer)
+```
+whatsapp_notify.py → _send_meta()
+  → POST https://graph.facebook.com/v18.0/{META_PHONE_ID}/messages
+  → Authorization: Bearer {META_SYSTEM_USER_TOKEN}
+```
+
+### .env variables to fill after Meta setup
+```
+META_PHONE_NUMBER_ID=       ← App Dashboard → WhatsApp → Phone Numbers
+META_SYSTEM_USER_TOKEN=     ← Business Manager → System Users → Admin token (permanent)
+META_APP_SECRET=            ← App Dashboard → Basic Settings → App Secret
+META_WEBHOOK_VERIFY_TOKEN=PrintoskyMeta2026
+```
+
+### Manual Setup Steps (one-time)
+1. business.facebook.com → Create Business Manager (use GST cert for verification)
+2. developers.facebook.com → Create App → Type: Business → Add WhatsApp product
+3. App Dashboard → WhatsApp → Getting Started → Add phone number: 9446903907 → verify via SMS/voice OTP
+4. Business Manager → System Users → Add System User (Admin role) → assign WhatsApp App → generate permanent token
+5. Collect: Phone Number ID, System User Token, App Secret → fill `.env`
+6. App Dashboard → WhatsApp → Configuration → Webhook URL: `https://pay.printosky.com/whatsapp-webhook` → Verify token: `PrintoskyMeta2026`
+7. Restart `webhook_receiver.py` → Meta sends GET verify → green tick in dashboard
+8. Test: send file to 9446903907 from a test phone → file appears in `C:\Printosky\Jobs\Incoming\`
+9. Test: send text "1" → bot replies with colour question
+10. After confirmed working → remove `node index.js` line from `START_PRINTOSKY.bat`
+
+### Retirement of whatsapp-web.js
+Once Meta webhook is tested end-to-end:
+- Comment out `node index.js` in `START_PRINTOSKY.bat`
+- Ports 3001 and 3004 (Node.js) become unused
+- Port 3003 (watcher.py bot relay) stays — Meta webhook calls it identically
 
 ---
 
@@ -740,16 +821,19 @@ CREATE TABLE discount_codes (
 
 ## Implementation Sequence
 
-| Sprint | Phase | Key deliverables |
-|--------|-------|-----------------|
-| Sprint 8 | Phase 4 (partial) | job_events table, status machine, timeline view in admin |
-| Sprint 8 | Phase 3 | Walk-in job creation modal, USB hot folder |
-| Sprint 9 | Phase 1 | PDF colour detection, colour_page_map, mixed job split display |
-| Sprint 9 | Phase 2 | Cover page auto-generation (soft + project binding first) |
-| Sprint 10 | Phase 5 | Work session timer, DTP job type, TipTap integration |
-| Sprint 10 | Phase 6 (partial) | Job ready notification, review flow, discount codes |
-| Sprint 11 | Phase 6 (complete) | Full SOP checklists, training mode |
-| Sprint 12 | Phase 7 | Staff training materials, quick reference cards |
+| Sprint | Phase | Key deliverables | Status |
+|--------|-------|-----------------|--------|
+| Sprint 8 | Security | Supabase RLS, Netlify auth function, staff JWT, STAFF_TOKEN_HASH | ✅ Done |
+| Sprint 9 | Infrastructure | Immediate Supabase PATCH, Konica filename fix, PyMuPDF, LibreOffice, Meta WhatsApp code | ✅ Done |
+| Sprint 9 | Meta activation | Fill .env credentials, verify webhook, test end-to-end, retire Node.js | ⏳ Manual steps pending |
+| Sprint 10 | Phase 4 (partial) | job_events table, status machine, timeline view in admin | |
+| Sprint 10 | Phase 3 | Walk-in job creation modal, USB hot folder | |
+| Sprint 11 | Phase 1 | PDF colour detection, colour_page_map, mixed job split display | |
+| Sprint 11 | Phase 2 | Cover page auto-generation (soft + project binding first) | |
+| Sprint 12 | Phase 5 | Work session timer, DTP job type, TipTap integration | |
+| Sprint 12 | Phase 6 (partial) | Job ready notification, review flow, discount codes | |
+| Sprint 13 | Phase 6 (complete) | Full SOP checklists, training mode | |
+| Sprint 14 | Phase 7 | Staff training materials, quick reference cards | |
 
 ---
 

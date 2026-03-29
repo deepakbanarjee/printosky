@@ -59,6 +59,37 @@ KONICA_USER_PC_MAP = {
 # ── Staff session helpers ──────────────────────────────────────────────────────
 _active_sessions = {}   # pc_id → {staff_id, name, session_id}  (in-memory cache)
 
+# ── Supabase JWT cache (for returning to admin.html on staff login) ────────────
+_supabase_jwt_cache = {"token": None, "expires_at": 0}
+
+def _get_supabase_jwt() -> str:
+    """Return a cached Supabase JWT, refreshing if expired or missing."""
+    import time, json as _json
+    now = time.time()
+    if _supabase_jwt_cache["token"] and now < _supabase_jwt_cache["expires_at"] - 60:
+        return _supabase_jwt_cache["token"]
+    url  = os.environ.get("SUPABASE_URL", "")
+    email = os.environ.get("SUPABASE_AUTH_EMAIL", "")
+    pwd   = os.environ.get("SUPABASE_AUTH_PASSWORD", "")
+    if not (url and email and pwd):
+        return ""
+    try:
+        import urllib.request as _ur, urllib.error
+        body = _json.dumps({"email": email, "password": pwd}).encode()
+        req  = _ur.Request(f"{url}/auth/v1/token?grant_type=password", data=body,
+                           headers={"apikey": os.environ.get("SUPABASE_KEY", ""),
+                                    "Content-Type": "application/json"})
+        with _ur.urlopen(req, timeout=5) as resp:
+            data = _json.loads(resp.read())
+        token = data.get("access_token", "")
+        expires_in = data.get("expires_in", 3600)
+        _supabase_jwt_cache["token"] = token
+        _supabase_jwt_cache["expires_at"] = now + expires_in
+        return token
+    except Exception as e:
+        logging.warning(f"Supabase JWT refresh failed: {e}")
+        return ""
+
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
@@ -303,7 +334,7 @@ def find_sumatra():
 
 
 def update_job_status(job_id: str, status: str, printer: str, staff_id: str = None):
-    """Update job status, printer, printed_by, and notes in SQLite."""
+    """Update job status, printer, printed_by, and notes in SQLite, then push to Supabase immediately."""
     try:
         conn = sqlite3.connect(DB_PATH)
         note = f"Printed on {printer} at {datetime.now().strftime('%H:%M')}"
@@ -320,6 +351,36 @@ def update_job_status(job_id: str, status: str, printer: str, staff_id: str = No
         logging.info("Job %s status → %s (printer: %s, staff: %s)", job_id, status, printer, staff_id or "—")
     except Exception as e:
         logging.error("DB update failed for %s: %s", job_id, e)
+        return
+    # Immediately push status to Supabase so admin panel reflects change without waiting for sync cycle
+    threading.Thread(target=_push_job_status_supabase, args=(job_id, status, printer), daemon=True).start()
+
+
+def _push_job_status_supabase(job_id: str, status: str, printer: str):
+    """PATCH job status to Supabase using service key (bypasses RLS)."""
+    import json as _json
+    sb_url = os.environ.get("SUPABASE_URL", "")
+    sb_key = os.environ.get("SUPABASE_SERVICE_KEY", "") or os.environ.get("SUPABASE_KEY", "")
+    if not sb_url or not sb_key:
+        return
+    try:
+        payload = _json.dumps({"status": status, "printer": printer}).encode()
+        req = urllib.request.Request(
+            f"{sb_url}/rest/v1/jobs?job_id=eq.{job_id}",
+            data=payload,
+            method="PATCH",
+            headers={
+                "apikey": sb_key,
+                "Authorization": f"Bearer {sb_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5):
+            pass
+        logging.info("Supabase status push OK: %s → %s", job_id, status)
+    except Exception as e:
+        logging.warning("Supabase status push failed for %s: %s", job_id, e)
 
 
 def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 1, colour_mode: str = "auto", staff_id: str = None):
@@ -357,19 +418,21 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
         settings += ",color"
     # "auto" = let printer decide
 
+    file_dir  = os.path.dirname(os.path.abspath(filepath))
+    file_name = os.path.basename(filepath)
     cmd = [
         sumatra,
         "-print-to", printer_name,
         "-print-settings", settings,
         "-exit-when-done",
         "-silent",
-        filepath,
+        file_name,
     ]
 
     logging.info("Print command: %s", " ".join(cmd))
 
     try:
-        result = subprocess.run(cmd, timeout=60, capture_output=True, text=True)
+        result = subprocess.run(cmd, timeout=60, capture_output=True, text=True, cwd=file_dir)
         if result.returncode == 0:
             update_job_status(job_id, "Printed", printer_name, staff_id)
             return True, f"Sent to {printer_name} ({copies} cop{'y' if copies==1 else 'ies'})"
@@ -1145,20 +1208,22 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None) -> di
 
     settings_str = ",".join(settings_parts)
 
+    file_dir2  = os.path.dirname(os.path.abspath(filepath))
+    file_name2 = os.path.basename(filepath)
     cmd = [
         sumatra,
         "-print-to", printer_name,
         "-print-settings", settings_str,
         "-exit-when-done",
         "-silent",
-        filepath,
+        file_name2,
     ]
 
     logging.info("Print item %d of job %s: printer=%s settings=%s pages=%s",
                  item_number, job_id, printer_key, settings_str, page_list)
 
     try:
-        result = subprocess.run(cmd, timeout=90, capture_output=True, text=True)
+        result = subprocess.run(cmd, timeout=90, capture_output=True, text=True, cwd=file_dir2)
         if result.returncode != 0:
             err = result.stderr or result.stdout or "Unknown SumatraPDF error"
             logging.error("SumatraPDF error for item %d: %s", item_number, err)
@@ -1196,6 +1261,9 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None) -> di
 
     conn2.commit()
     conn2.close()
+
+    if all_items_printed:
+        threading.Thread(target=_push_job_status_supabase, args=(job_id, "Printed", printer_name), daemon=True).start()
 
     return {
         "ok": True,
@@ -1349,6 +1417,8 @@ class PrintHandler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "pin required"})
                 return
             result = staff_login(DB_PATH, pin, pc_id)
+            if result.get("ok"):
+                result["supabase_jwt"] = _get_supabase_jwt()
             self._json(200 if result["ok"] else 401, result)
             return
 
