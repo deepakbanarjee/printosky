@@ -682,11 +682,6 @@ td { padding: 11px 14px; font-size: 13px; color: var(--dark2); }
 const SUPABASE_URL = 'https://mlhuwlnwwwxdnqafelko.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI';
 
-// SHA-256 hashes — change passwords by updating hashes here
-const PASSWORDS = {
-  superadmin: '22b5bf6b3fb239527eae312609476110f2abd5ceac4df0c3b3270ecf39083518',  // Printosky@Super2026
-  store:      '037589dcf5f165dc2ad53b6b453be08fd90aee611c71f822247023f1d7b5196d',   // Printosky@1234
-};
 
 // ══════════════════════════════════════════════════════════════════
 // STATE
@@ -705,16 +700,21 @@ function selectRole(role) {
   event.target.classList.add('active');
 }
 
-async function sha256(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-}
-
 async function doLogin() {
-  const pw   = document.getElementById('pw-input').value;
-  const hash = await sha256(pw);
-  if (hash === PASSWORDS[currentRole]) {
+  const pw = document.getElementById('pw-input').value;
+  let ok = false, data = {};
+  try {
+    const r = await fetch('/.netlify/functions/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: currentRole, password: pw }),
+    });
+    data = await r.json();
+    ok = data.ok;
+  } catch { /* network error — ok stays false */ }
+  if (ok) {
     sessionStorage.setItem('role', currentRole);
+    if (data.supabase_jwt) sessionStorage.setItem('supabase_jwt', data.supabase_jwt);
     showApp(currentRole);
   } else {
     document.getElementById('login-error').textContent = 'Incorrect password. Try again.';
@@ -774,16 +774,18 @@ function closeSidebar() {
 // SUPABASE API
 // ══════════════════════════════════════════════════════════════════
 async function sbFetch(path, opts = {}) {
+  const jwt = sessionStorage.getItem('supabase_jwt') || SUPABASE_KEY;
   const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
     headers: {
       'apikey': SUPABASE_KEY,
-      'Authorization': 'Bearer ' + SUPABASE_KEY,
+      'Authorization': 'Bearer ' + jwt,
       'Content-Type': 'application/json',
       'Prefer': opts.prefer || 'return=representation',
       ...opts.headers
     },
     ...opts
   });
+  if (res.status === 401) { sessionStorage.clear(); location.reload(); return null; }
   if (!res.ok) throw new Error(await res.text());
   if (res.status === 204) return null;
   return res.json();

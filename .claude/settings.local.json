@@ -115,16 +115,10 @@
       "WebFetch(domain:authkey.io)",
       "WebFetch(domain:www.chatondesk.com)",
       "WebFetch(domain:360dialog.com)",
-      "Bash(python -c \"import rate_card; print\\(''rate_card OK''\\)\")",
-      "Bash(pip show:*)",
-      "Bash(python -m pytest --version)",
-      "Bash(python -m pytest tests/ -v)",
-      "Bash(for f:*)",
-      "Bash(do echo:*)",
-      "Read(//c/py/printosky/**)",
-      "Bash(find C:/py/printosky -name *.md -not -path */node_modules/*)",
       "WebFetch(domain:www.pdfsnake.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(git:*)",
+      "Bash(python:*)"
     ]
   },
   "model": "claude-sonnet-4-6",

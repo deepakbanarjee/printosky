@@ -7,32 +7,39 @@ The admin page at printosky.com/admin reads from Supabase.
 Setup:
 1. Create free project at supabase.com
 2. Go to Settings → API → copy Project URL and anon key
-3. Set SUPABASE_URL and SUPABASE_KEY below
+3. Add SUPABASE_URL and SUPABASE_KEY to .env (see .env.example)
 4. Run the SQL in SCHEMA.sql to create tables (once only)
 
 Runs as a background thread started by watcher.py.
 """
 
+import os
 import time
 import sqlite3
 import logging
 import threading
 import requests
 from datetime import datetime, date
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger("supabase_sync")
 
-# ── Config — fill these in after creating Supabase project ───────────────────
-SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI"
+# ── Config ────────────────────────────────────────────────────────────────────
+SUPABASE_URL         = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY         = os.environ.get("SUPABASE_KEY", "")          # anon key (project id)
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")  # service_role key (bypasses RLS)
 STORE_ID     = "OSP"       # Oxygen Students Paradise — change per store
 SYNC_INTERVAL = 300        # seconds (5 minutes)
 
 # ── Supabase REST API headers ─────────────────────────────────────────────────
 def _headers():
+    # Use service_role key if available — bypasses RLS for server-side writes
+    auth_key = SUPABASE_SERVICE_KEY or SUPABASE_KEY
     return {
         "apikey":        SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Authorization": f"Bearer {auth_key}",
         "Content-Type":  "application/json",
         "Prefer":        "resolution=merge-duplicates",   # upsert
     }

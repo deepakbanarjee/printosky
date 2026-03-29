@@ -3,6 +3,18 @@ Last updated: 2026-03-19 (Session 6)
 
 ---
 
+## 🔐 SPRINT SEC — Security Hardening
+
+| # | Task | Details |
+|---|------|---------|
+| SEC-1 | **Remove staff PINs from SPRINT_BACKLOG.md** | S8-1 lists PINs in plaintext committed to git repo. Delete the PIN values — staff can look up their PIN via `python staff_setup.py list` |
+| SEC-2 | ~~**Move Supabase credentials to env vars**~~ ✅ | Moved to `.env`; `supabase_sync.py` now uses `load_dotenv` + `os.environ` |
+| SEC-3 | ~~**Admin password hash exposed in Netlify JS**~~ ✅ | All password hashes moved to Netlify env vars; `netlify/functions/auth.js` verifies server-side. Covers admin (PBKDF2), superadmin, store, and MIS |
+| SEC-4 | ~~**Supabase anon key in admin.html**~~ ✅ | All `sbFetch` calls now use Supabase JWT from sessionStorage; `SCHEMA_v5_migration.sql` tightens RLS to `auth.role() = 'authenticated'`; `supabase_sync.py` uses `SUPABASE_SERVICE_KEY` |
+| SEC-5 | **Sequential staff PINs** | Current PINs are 1001–1005 (trivially guessable). Reset all to random 6-digit PINs via `python staff_setup.py reset` |
+
+---
+
 ## 🔴 CRITICAL / BLOCKERS
 
 | # | Task | Details |
@@ -28,7 +40,7 @@ Last updated: 2026-03-19 (Session 6)
 
 | # | Task | Details |
 |---|------|---------|
-| S8-1 | **Tell staff their PINs** | Priya=1001, Revana=1002, Bini=1003, Anu=1004, Deepak=1005 |
+| S8-1 | **Tell staff their PINs** | Run `python staff_setup.py list` to view current PINs — do not commit PIN values to this file |
 | S8-2 | **MIS dashboard — live test** | mis.html built but never live-tested. Verify staff sessions syncing to Supabase |
 | S8-3 | **Staff session Supabase sync** | `supabase_sync.py` syncs staff_sessions — verify after SCHEMA_v3 applied |
 | S8-4 | **Konica job attribution** | `KONICA_USER_PC_MAP` in print_server.py — map Konica usernames to staff. Test attribution flow |

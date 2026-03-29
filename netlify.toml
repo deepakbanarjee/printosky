@@ -1,0 +1,18 @@
+[build]
+  publish   = "website"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from   = "/admin"
+  to     = "/admin.html"
+  status = 200
+
+[[redirects]]
+  from   = "/superadmin"
+  to     = "/superadmin.html"
+  status = 200
+
+[[redirects]]
+  from   = "/mis"
+  to     = "/mis.html"
+  status = 200
