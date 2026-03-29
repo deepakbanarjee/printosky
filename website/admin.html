@@ -777,6 +777,56 @@
       </div>
     </div>
 
+    <!-- Printer Job Log panel -->
+    <div class="panel" id="printer-jobs-panel">
+      <div class="panel-hdr">
+        <div class="panel-title">▣ Printer Job Log</div>
+        <select id="pjl-filter" style="margin-left:auto;background:var(--bg2);color:var(--fg);border:1px solid var(--border);padding:2px 6px;font-size:.75rem;border-radius:4px" onchange="loadPrinterJobs()">
+          <option value="today">Today</option>
+          <option value="week">This Week</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+      <!-- Konica job log -->
+      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:6px 0 4px">Konica — B&amp;W</div>
+      <div class="table-wrap" style="max-height:220px">
+        <table>
+          <thead><tr>
+            <th style="width:56px">#</th>
+            <th>Date</th>
+            <th>User</th>
+            <th>File</th>
+            <th>Pages</th>
+            <th>Mono</th>
+            <th>Colour</th>
+            <th>Copies</th>
+            <th>Result</th>
+          </tr></thead>
+          <tbody id="konica-jobs-tbody">
+            <tr><td colspan="9" class="empty"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <!-- Epson job log -->
+      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px">Epson — Colour</div>
+      <div class="table-wrap" style="max-height:220px">
+        <table>
+          <thead><tr>
+            <th>Date</th>
+            <th>Source</th>
+            <th>Job / Attribution</th>
+            <th>Pages</th>
+            <th>Mono</th>
+            <th>Colour</th>
+            <th>Type</th>
+          </tr></thead>
+          <tbody id="epson-jobs-tbody">
+            <tr><td colspan="7" class="empty"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Jobs panel -->
     <div class="panel">
       <div class="panel-hdr">
@@ -1400,6 +1450,7 @@ async function loadAll() {
     renderStats(isDemo ? DEMO_SUMMARY : (summary[0] || {}));
     renderTable();
     renderPrinterBreakdown();
+    loadPrinterJobs();
     setSyncState(isDemo ? "demo" : "ok");
   } catch (e) {
     setSyncState("err", e.message);
@@ -1558,6 +1609,63 @@ function renderPrinterBreakdown() {
         <span>${badge(j.status)}</span>
       </div>`).join("");
   });
+}
+
+// ── Printer Job Log ───────────────────────────────────────────────────────────
+async function loadPrinterJobs() {
+  const filter = (document.getElementById("pjl-filter") || {}).value || "today";
+  let dateParam = "";
+  if (filter === "today") {
+    dateParam = `&job_date=gte.${today()}T00:00:00`;
+  } else if (filter === "week") {
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    dateParam = `&job_date=gte.${weekAgo}T00:00:00`;
+  }
+
+  const [konicaRows, epsonRows] = await Promise.all([
+    sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}`).catch(() => []),
+    sbFetch("epson_jobs",  `order=job_date.desc&limit=200${dateParam}`).catch(() => []),
+  ]);
+
+  // Konica table
+  const kt = document.getElementById("konica-jobs-tbody");
+  if (kt) {
+    if (!konicaRows || !konicaRows.length) {
+      kt.innerHTML = `<tr><td colspan="9" class="empty">No Konica job records for this period</td></tr>`;
+    } else {
+      kt.innerHTML = konicaRows.map(r => `
+        <tr>
+          <td style="color:var(--muted);font-family:monospace;font-size:.65rem">${r.job_number || "—"}</td>
+          <td style="color:var(--muted)">${shortTime(r.job_date)}</td>
+          <td>${esc(r.user_name || "—")}</td>
+          <td title="${esc(r.file_name || "")}">${esc(trim(r.file_name || "—", 22))}</td>
+          <td class="amount">${r.pages_printed ?? "—"}</td>
+          <td style="color:var(--muted)">${r.mono_pages ?? "—"}</td>
+          <td style="color:var(--amber)">${r.color_pages ?? "—"}</td>
+          <td style="color:var(--muted)">${r.copies ?? "—"}</td>
+          <td>${badge(r.result === "No Error" ? "Completed" : (r.result || "—"))}</td>
+        </tr>`).join("");
+    }
+  }
+
+  // Epson table
+  const et = document.getElementById("epson-jobs-tbody");
+  if (et) {
+    if (!epsonRows || !epsonRows.length) {
+      et.innerHTML = `<tr><td colspan="7" class="empty">No Epson job records yet — delta attribution populates after each print cycle</td></tr>`;
+    } else {
+      et.innerHTML = epsonRows.map(r => `
+        <tr>
+          <td style="color:var(--muted)">${shortTime(r.job_date)}</td>
+          <td style="color:var(--muted);font-family:monospace;font-size:.65rem">${esc(r.source || "delta")}</td>
+          <td style="color:var(--muted);font-size:.7rem">${esc(r.attributed_job_id || r.job_number || "—")}</td>
+          <td class="amount">${r.pages_printed ?? r.delta_pages ?? "—"}</td>
+          <td style="color:var(--muted)">${r.mono_pages ?? "—"}</td>
+          <td style="color:var(--amber)">${r.color_pages ?? "—"}</td>
+          <td style="color:var(--muted)">${esc(r.job_type || "delta")}</td>
+        </tr>`).join("");
+    }
+  }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

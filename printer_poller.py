@@ -14,8 +14,8 @@ KONICA SNMP OIDs (bizhub, enterprise 18334):
   Total pages:  1.3.6.1.4.1.18334.1.1.1.5.7.2.1.1.0
   Print B&W:    1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.2
   Copy B&W:     1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.1
-  Print Colour: 1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.2
-  Copy Colour:  1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.1
+  Print Colour: 1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.2  (returns None — Pro 1100 is B&W only)
+  Copy Colour:  1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.1  (returns None — Pro 1100 is B&W only)
 
 EPSON SNMP OIDs (confirmed via epson_snmp_discover.py 2026-03-15):
   Total pages:  1.3.6.1.2.1.43.10.2.1.4.1.1   (standard prtMarkerLifeCount)
@@ -219,7 +219,7 @@ def snmp_get(ip, oid):
             )
             errInd, errStat, _, varBinds = await get_cmd(
                 SnmpEngine(),
-                CommunityData(SNMP_COMMUNITY, mpModel=0),
+                CommunityData(SNMP_COMMUNITY, mpModel=1),
                 transport,
                 ContextData(),
                 ObjectType(ObjectIdentity(oid)),

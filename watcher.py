@@ -60,6 +60,13 @@ try:
 except ImportError:
     KONICA_FETCHER_AVAILABLE = False
 
+# ── Epson Job Log Auto-Fetcher (optional) ─────────────────────────────────────
+try:
+    from epson_jobs_fetcher import start_fetcher as _start_epson_fetcher
+    EPSON_FETCHER_AVAILABLE = True
+except ImportError:
+    EPSON_FETCHER_AVAILABLE = False
+
 # ── WhatsApp Notifications (optional — sends job tokens + ready alerts) ───────
 try:
     from whatsapp_notify import send_job_token, send_ready_alert, send_file_received
@@ -1290,6 +1297,13 @@ def main():
         logging.info("Konica job fetcher started — will auto-import job log every 30 min")
     else:
         logging.info("Konica job fetcher not loaded (konica_jobs_fetcher.py missing)")
+
+    # Epson job log fetcher (delta attribution + web log probe every 5 min)
+    if EPSON_FETCHER_AVAILABLE:
+        _start_epson_fetcher(DB_PATH)
+        logging.info("Epson job fetcher started — delta attribution every 5 min")
+    else:
+        logging.info("Epson job fetcher not loaded (epson_jobs_fetcher.py missing)")
 
     # Load live rate card from Supabase (falls back to hardcoded if unreachable)
     try:
