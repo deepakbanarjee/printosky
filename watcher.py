@@ -76,6 +76,15 @@ except ImportError:
     def _log_event(*a, **kw): pass
     def _setup_jevents(*a): pass
 
+# ── Colour Detector — PyMuPDF colour page detection ───────────────────────────
+try:
+    from colour_detector import build_colour_map as _build_colour_map, save_colour_map as _save_colour_map
+    COLOUR_DETECTOR_AVAILABLE = True
+except ImportError:
+    COLOUR_DETECTOR_AVAILABLE = False
+    def _build_colour_map(*a, **kw): return {}
+    def _save_colour_map(*a, **kw): pass
+
 # ── WhatsApp Notifications (optional — sends job tokens + ready alerts) ───────
 try:
     from whatsapp_notify import send_job_token, send_ready_alert, send_file_received
@@ -540,6 +549,23 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
 
     logging.info("NEW JOB [%s] %s | %.1f KB | Source: %s | Sender: %s",
                  job_id, filepath.name, size_kb, source, sender or "walk-in")
+
+    # Auto colour detection for PDFs (background thread — non-blocking)
+    if filepath.suffix.lower() == ".pdf" and COLOUR_DETECTOR_AVAILABLE:
+        import threading as _cd_thread
+        def _run_colour_detect(jid=job_id, fp=str(filepath)):
+            try:
+                cmap = _build_colour_map(fp)
+                _save_colour_map(DB_PATH, jid, cmap)
+                logging.info(
+                    "Colour detection done [%s]: %d colour / %d B&W pages (mixed=%s)",
+                    jid, len(cmap.get("colour", [])), len(cmap.get("bw", [])),
+                    cmap.get("is_mixed", False)
+                )
+            except Exception as exc:
+                logging.warning("Colour detection failed for %s: %s", jid, exc)
+        _cd_thread.Thread(target=_run_colour_detect, daemon=True).start()
+
     # Instant receipt + page count, then add to batch (60s timer fires bot)
     if sender:
         send_file_received(job_id, filepath.name, sender)

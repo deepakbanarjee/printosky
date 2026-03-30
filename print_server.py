@@ -54,6 +54,20 @@ except ImportError:
     def _jt_events(*a, **kw): return []
     def _jt_setup(*a): pass
 
+# Colour detector — PyMuPDF-based colour page detection
+try:
+    from colour_detector import (
+        build_colour_map as _cd_build,
+        save_colour_map as _cd_save,
+        confirm_colour_map as _cd_confirm,
+    )
+    COLOUR_DETECTOR_AVAILABLE = True
+except ImportError:
+    COLOUR_DETECTOR_AVAILABLE = False
+    def _cd_build(*a, **kw): return {"error": "colour_detector not available"}
+    def _cd_save(*a, **kw): pass
+    def _cd_confirm(*a, **kw): pass
+
 # ── Konica Windows username → PC identifier mapping ───────────────────────────
 # PC1 = Priya/Deepak/Anu  |  PC2 = Revana  |  PC3 = rarely used (Nirmal)
 KONICA_USER_PC_MAP = {
@@ -1081,6 +1095,74 @@ def handle_quote(qs: dict) -> dict:
     }
 
 
+# ── A10: Colour detection ─────────────────────────────────────────────────────
+
+def handle_detect_colour(body: dict) -> dict:
+    """
+    POST /detect-colour
+    Run colour page detection on the PDF for a job and save result to DB.
+    Returns the colour_map dict.
+    """
+    job_id   = body.get("job_id", "")
+    staff_id = body.get("staff_id", "")
+    if not job_id:
+        return {"ok": False, "error": "job_id required"}
+
+    conn = _db()
+    row = conn.execute(
+        "SELECT filepath, filename FROM jobs WHERE job_id=?", (job_id,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return {"ok": False, "error": "Job not found"}
+
+    filepath = row["filepath"] or ""
+    if not filepath or not os.path.exists(filepath):
+        # Try archive
+        archive = os.path.join(r"C:\Printosky\Jobs\Archive", row["filename"] or "")
+        if os.path.exists(archive):
+            filepath = archive
+        else:
+            return {"ok": False, "error": "PDF file not found on disk"}
+
+    if not filepath.lower().endswith(".pdf"):
+        return {"ok": False, "error": "Colour detection only supported for PDF files"}
+
+    cmap = _cd_build(filepath)
+    _cd_save(DB_PATH, job_id, cmap)
+    _jt_log(DB_PATH, job_id, "colour_detected",
+            staff_id=staff_id,
+            notes=f"colour={len(cmap.get('colour',[]))} bw={len(cmap.get('bw',[]))} mixed={cmap.get('is_mixed',False)}")
+    logging.info("Colour detection [%s]: %s", job_id, cmap)
+    return {"ok": True, "job_id": job_id, "colour_map": cmap}
+
+
+def handle_confirm_colour(body: dict) -> dict:
+    """
+    POST /confirm-colour
+    Staff confirms (or overrides) the colour page map for a job.
+    colour_pages: optional list[int] of 1-indexed page numbers staff marks as colour.
+    If omitted, confirms auto-detected result as-is.
+    """
+    job_id       = body.get("job_id", "")
+    staff_id     = body.get("staff_id", "")
+    colour_pages = body.get("colour_pages")   # None = confirm as-is; list = override
+    if not job_id:
+        return {"ok": False, "error": "job_id required"}
+
+    if colour_pages is not None:
+        try:
+            colour_pages = [int(p) for p in colour_pages]
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "colour_pages must be a list of integers"}
+
+    _cd_confirm(DB_PATH, job_id, colour_pages)
+    _jt_log(DB_PATH, job_id, "colour_confirmed",
+            staff_id=staff_id,
+            notes=f"override={colour_pages is not None} pages={colour_pages}")
+    return {"ok": True, "job_id": job_id}
+
+
 # ── A9: Print receipt (thermal printer stub) ──────────────────────────────────
 
 RECEIPT_PRINTER = None  # Set to {"vendor": 0xXXXX, "product": 0xXXXX} when hardware arrives
@@ -1528,6 +1610,18 @@ class PrintHandler(BaseHTTPRequestHandler):
         if path == "/print-receipt":
             body = self._read_body()
             self._json(200, handle_print_receipt(body))
+            return
+
+        if path == "/detect-colour":
+            body = self._read_body()
+            result = handle_detect_colour(body)
+            self._json(200 if result.get("ok") else 400, result)
+            return
+
+        if path == "/confirm-colour":
+            body = self._read_body()
+            result = handle_confirm_colour(body)
+            self._json(200 if result.get("ok") else 400, result)
             return
 
         # ── /print — supports both old-style (filepath in body) and

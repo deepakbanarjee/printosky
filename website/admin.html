@@ -1533,7 +1533,7 @@ function renderTable() {
       <td style="color:var(--accent);font-size:.68rem;font-family:var(--mono)">${esc(j.job_id)}</td>
       <td style="color:var(--muted)">${shortTime(j.received_at)}</td>
       <td style="color:var(--muted);font-size:.68rem;font-family:var(--mono)">${j.sender ? esc(j.sender.replace('@c.us','').replace('@lid','')) : '<span style="color:var(--border)">—</span>'}</td>
-      <td>${esc(trim(j.filename, 26))}${walkinTag}</td>
+      <td>${esc(trim(j.filename, 26))}${walkinTag}${colourBadge(j)}</td>
       <td style="color:var(--muted)">${esc(j.source || "—")}</td>
       <td>${badge(j.status)}</td>
       <td style="color:var(--muted);font-size:.68rem">${esc(j.service_type || "—")}</td>
@@ -1706,6 +1706,19 @@ function set(id,val)  { const el=document.getElementById(id); if(el) el.textCont
 function today()      { return new Date().toISOString().slice(0,10); }
 function now()        { return new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}); }
 
+function colourBadge(j) {
+  if (!j.colour_page_map) return "";
+  try {
+    const cmap = typeof j.colour_page_map === "string" ? JSON.parse(j.colour_page_map) : j.colour_page_map;
+    if (!cmap.has_colour) return "";
+    const confirmed = j.colour_confirmed ? "" : " ⚠";
+    const label = cmap.is_mixed
+      ? `${cmap.colour.length}col/${cmap.bw.length}BW${confirmed}`
+      : `${cmap.colour.length}col${confirmed}`;
+    return ` <span style="font-size:.56rem;background:rgba(255,171,64,.15);color:var(--amber);border:1px solid rgba(255,171,64,.3);border-radius:3px;padding:0 3px;vertical-align:middle">${label}</span>`;
+  } catch { return ""; }
+}
+
 function shortTime(iso) {
   if (!iso) return "—";
   try {
@@ -1799,6 +1812,12 @@ function panelHTML() {
         </div>
       </div>
     </div>
+    <!-- Colour Detection -->
+    <div id="jp-colour-section" style="display:none;padding:8px 16px 12px;border-top:1px solid var(--border)">
+      <div style="font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.06em;margin-bottom:6px">COLOUR DETECTION</div>
+      <div id="jp-colour-content"></div>
+      <div id="jp-colour-actions" style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"></div>
+    </div>
     <!-- Timeline -->
     <div id="jp-timeline-section" style="padding:8px 16px 16px;border-top:1px solid var(--border)">
       <div style="font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.06em;margin-bottom:6px">TIMELINE</div>
@@ -1884,6 +1903,107 @@ function selectJob(jobId) {
 }
 
 // ── Job Timeline ─────────────────────────────────────────────────────────────
+// ── Colour Detection Panel ────────────────────────────────────────────────────
+function renderColourPanel(j) {
+  const section = document.getElementById("jp-colour-section");
+  const content = document.getElementById("jp-colour-content");
+  const actions = document.getElementById("jp-colour-actions");
+  if (!section || !content || !actions) return;
+
+  // Only show for PDFs
+  const isPdf = (j.filename || "").toLowerCase().endsWith(".pdf");
+  if (!isPdf) { section.style.display = "none"; return; }
+  section.style.display = "";
+
+  if (!j.colour_page_map) {
+    content.innerHTML = '<span style="color:var(--muted);font-size:.72rem">Not yet detected.</span>';
+    actions.innerHTML = `<button class="jp-btn save" style="font-size:.7rem;padding:3px 10px" onclick="runColourDetect()">Run Detection</button>`;
+    return;
+  }
+
+  let cmap;
+  try { cmap = typeof j.colour_page_map === "string" ? JSON.parse(j.colour_page_map) : j.colour_page_map; }
+  catch { content.innerHTML = '<span style="color:var(--muted)">Invalid colour data</span>'; return; }
+
+  const confirmed = j.colour_confirmed;
+  const confirmedBadge = confirmed
+    ? '<span style="color:var(--green);font-size:.65rem">✓ Confirmed</span>'
+    : '<span style="color:var(--amber);font-size:.65rem">⚠ Awaiting staff confirmation</span>';
+
+  let html = `<div style="font-size:.72rem;margin-bottom:4px">${confirmedBadge} &nbsp; Total pages: <b>${cmap.total}</b></div>`;
+
+  if (!cmap.has_colour) {
+    html += '<div style="color:var(--muted);font-size:.72rem">All pages are B&amp;W — no colour detected.</div>';
+  } else if (!cmap.is_mixed) {
+    html += `<div style="font-size:.72rem">All <b>${cmap.colour.length}</b> pages are colour → <span style="color:#ff9a3c">Epson</span></div>`;
+  } else {
+    html += `<div style="font-size:.72rem;margin-bottom:4px">
+      <span style="color:#ff9a3c"><b>${cmap.colour.length} colour pages</b></span> → Epson &nbsp;|&nbsp;
+      <span style="color:var(--muted)"><b>${cmap.bw.length} B&amp;W pages</b></span> → Konica
+    </div>`;
+    if (cmap.colour.length <= 20) {
+      html += `<div style="font-size:.67rem;color:var(--amber)">Colour pages: ${cmap.colour.join(", ")}</div>`;
+    }
+    html += `<div style="font-size:.67rem;color:#e57373;margin-top:4px">⚠ Mixed job — collation required after printing</div>`;
+  }
+
+  if (cmap.staff_override) {
+    html += '<div style="font-size:.65rem;color:var(--muted);margin-top:3px">Staff override applied</div>';
+  }
+
+  content.innerHTML = html;
+
+  // Action buttons
+  let btns = "";
+  if (!confirmed) {
+    btns += `<button class="jp-btn save" style="font-size:.7rem;padding:3px 10px" onclick="confirmColour(false)">✓ Confirm</button>`;
+  }
+  btns += `<button class="jp-btn" style="font-size:.7rem;padding:3px 10px;border-color:var(--muted);color:var(--muted)" onclick="runColourDetect()">Re-run Detection</button>`;
+  actions.innerHTML = btns;
+}
+
+async function runColourDetect() {
+  if (!selectedJob) return;
+  const content = document.getElementById("jp-colour-content");
+  if (content) content.innerHTML = '<span style="color:var(--muted);font-size:.72rem">Detecting…</span>';
+  try {
+    const r = await fetch(`${STORE_PC_URL}/detect-colour`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify({ job_id: selectedJob.job_id, staff_id: activeStaff?.staff_id || "" }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      selectedJob.colour_page_map = data.colour_map;
+      selectedJob.colour_confirmed = 0;
+      renderColourPanel(selectedJob);
+      renderTable(); // refresh badge in list
+    } else {
+      if (content) content.innerHTML = `<span style="color:#e57373;font-size:.72rem">${data.error || "Detection failed"}</span>`;
+    }
+  } catch (e) {
+    if (content) content.innerHTML = '<span style="color:#e57373;font-size:.72rem">Network error</span>';
+  }
+}
+
+async function confirmColour(withOverride) {
+  if (!selectedJob) return;
+  const body = { job_id: selectedJob.job_id, staff_id: activeStaff?.staff_id || "" };
+  try {
+    const r = await fetch(`${STORE_PC_URL}/confirm-colour`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      selectedJob.colour_confirmed = 1;
+      renderColourPanel(selectedJob);
+      renderTable();
+    }
+  } catch { /* silent */ }
+}
+
 function loadTimeline(jobId) {
   const el = document.getElementById("jp-timeline");
   if (!el) return;
@@ -1961,6 +2081,7 @@ function renderJobPanel() {
   document.getElementById("jp-pages").textContent  = j.page_count ? j.page_count + "p" : "";
   document.getElementById("jp-source").textContent = j.source || "";
   document.getElementById("jp-status").innerHTML   = badge(j.status);
+  renderColourPanel(j);
 
   // Load preview iframe
   const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
