@@ -121,7 +121,10 @@
       "Bash(python:*)",
       "Skill(update-config)",
       "Bash(grep -E \"\\\\.py$\")",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "WebFetch(domain:manuals.konicaminolta.eu)",
+      "WebFetch(domain:kmbsmanuals.konicaminolta.us)",
+      "WebFetch(domain:www.advanceduninstaller.com)"
     ]
   },
   "model": "claude-sonnet-4-6",
