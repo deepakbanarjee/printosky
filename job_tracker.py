@@ -110,35 +110,36 @@ def log_event(
     """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    try:
+        # Ensure table exists (safe to call repeatedly)
+        setup_job_events_db(conn)
 
-    # Ensure table exists (safe to call repeatedly)
-    setup_job_events_db(conn)
+        # Calculate duration since last event on this job
+        prev = conn.execute(
+            "SELECT created_at FROM job_events WHERE job_id=? ORDER BY id DESC LIMIT 1",
+            (job_id,),
+        ).fetchone()
+        duration_sec: Optional[int] = None
+        if prev:
+            try:
+                prev_dt = datetime.strptime(prev["created_at"], "%Y-%m-%d %H:%M:%S")
+                duration_sec = int((datetime.now() - prev_dt).total_seconds())
+            except ValueError:
+                pass
 
-    # Calculate duration since last event on this job
-    prev = conn.execute(
-        "SELECT created_at FROM job_events WHERE job_id=? ORDER BY id DESC LIMIT 1",
-        (job_id,),
-    ).fetchone()
-    duration_sec: Optional[int] = None
-    if prev:
-        try:
-            prev_dt = datetime.strptime(prev["created_at"], "%Y-%m-%d %H:%M:%S")
-            duration_sec = int((datetime.now() - prev_dt).total_seconds())
-        except ValueError:
-            pass
-
-    cursor = conn.execute(
-        """
-        INSERT INTO job_events
-            (job_id, staff_id, action, from_status, to_status, notes, duration_sec, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (job_id, staff_id or None, action, from_status, to_status,
-         notes or None, duration_sec, _now()),
-    )
-    conn.commit()
-    event_id = cursor.lastrowid
-    conn.close()
+        cursor = conn.execute(
+            """
+            INSERT INTO job_events
+                (job_id, staff_id, action, from_status, to_status, notes, duration_sec, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (job_id, staff_id or None, action, from_status, to_status,
+             notes or None, duration_sec, _now()),
+        )
+        conn.commit()
+        event_id = cursor.lastrowid
+    finally:
+        conn.close()
 
     logger.info(
         "job_event job=%s action=%s %s→%s staff=%s",
@@ -162,32 +163,38 @@ def transition(
 
     Returns {"ok": True, "event_id": N} or {"ok": False, "error": "..."}
     """
+    # Reject entirely unknown target statuses (belt-and-suspenders)
+    _all_known = set(_TRANSITIONS.keys()) | {"Cancelled"} - {None}
+    for _vals in _TRANSITIONS.values():
+        _all_known |= _vals
+    if new_status not in _all_known:
+        return {"ok": False, "error": f"Unknown status {new_status!r}"}
+
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT status FROM jobs WHERE job_id=?", (job_id,)
+        ).fetchone()
+        if not row:
+            return {"ok": False, "error": f"Job {job_id} not found"}
 
-    row = conn.execute(
-        "SELECT status FROM jobs WHERE job_id=?", (job_id,)
-    ).fetchone()
-    if not row:
+        current = row["status"]
+        allowed = _TRANSITIONS.get(current, set())
+
+        if new_status not in allowed and new_status != "Cancelled":
+            return {
+                "ok": False,
+                "error": f"Invalid transition {current!r} → {new_status!r}",
+            }
+
+        # Update status
+        conn.execute(
+            "UPDATE jobs SET status=? WHERE job_id=?", (new_status, job_id)
+        )
+        conn.commit()
+    finally:
         conn.close()
-        return {"ok": False, "error": f"Job {job_id} not found"}
-
-    current = row["status"]
-    allowed = _TRANSITIONS.get(current, set())
-
-    if new_status not in allowed and new_status != "Cancelled":
-        conn.close()
-        return {
-            "ok": False,
-            "error": f"Invalid transition {current!r} → {new_status!r}",
-        }
-
-    # Update status
-    conn.execute(
-        "UPDATE jobs SET status=? WHERE job_id=?", (new_status, job_id)
-    )
-    conn.commit()
-    conn.close()
 
     action = _ACTION_LABELS.get((current, new_status), "status_change")
     event_id = log_event(
@@ -204,9 +211,11 @@ def get_events(db_path: str, job_id: str) -> list[dict]:
     """Return all events for a job, oldest first."""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    setup_job_events_db(conn)
-    rows = conn.execute(
-        "SELECT * FROM job_events WHERE job_id=? ORDER BY id ASC", (job_id,)
-    ).fetchall()
-    conn.close()
+    try:
+        setup_job_events_db(conn)
+        rows = conn.execute(
+            "SELECT * FROM job_events WHERE job_id=? ORDER BY id ASC", (job_id,)
+        ).fetchall()
+    finally:
+        conn.close()
     return [dict(r) for r in rows]

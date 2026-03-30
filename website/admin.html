@@ -1888,7 +1888,9 @@ function loadTimeline(jobId) {
   const el = document.getElementById("jp-timeline");
   if (!el) return;
   el.textContent = "Loading…";
-  fetch(`${STORE_PC_URL}/events?job_id=${encodeURIComponent(jobId)}`)
+  fetch(`${STORE_PC_URL}/events?job_id=${encodeURIComponent(jobId)}`, {
+    headers: { "X-Store-Token": localStorage.getItem("storeToken") || "" }
+  })
     .then(r => r.json())
     .then(data => renderTimeline(data.events || []))
     .catch(() => { el.textContent = "—"; });

@@ -1427,9 +1427,18 @@ class PrintHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         elif path == "/events":
+            # Require store token — audit trail contains staff IDs and action history
+            token = self.headers.get("X-Store-Token", "")
+            if not STORE_TOKEN or not hmac.compare_digest(token.encode(), STORE_TOKEN.encode()):
+                self._json(403, {"error": "Forbidden"})
+                return
             job_id = qs.get("job_id", [None])[0]
             if not job_id:
                 self._json(400, {"error": "job_id required"})
+                return
+            import re as _re
+            if not _re.match(r'^OSP-\d{8}-\d{4}$', job_id):
+                self._json(400, {"error": "invalid job_id format"})
                 return
             self._json(200, {"events": _jt_events(DB_PATH, job_id)})
         else:
