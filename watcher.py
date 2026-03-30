@@ -67,6 +67,15 @@ try:
 except ImportError:
     EPSON_FETCHER_AVAILABLE = False
 
+# ── Job Tracker — status machine + event log ──────────────────────────────────
+try:
+    from job_tracker import log_event as _log_event, setup_job_events_db as _setup_jevents
+    JOB_TRACKER_AVAILABLE = True
+except ImportError:
+    JOB_TRACKER_AVAILABLE = False
+    def _log_event(*a, **kw): pass
+    def _setup_jevents(*a): pass
+
 # ── WhatsApp Notifications (optional — sends job tokens + ready alerts) ───────
 try:
     from whatsapp_notify import send_job_token, send_ready_alert, send_file_received
@@ -304,11 +313,22 @@ def setup_database():
     for tbl_col_def in [
         ("jobs",        "printed_by TEXT"),
         ("konica_jobs", "attributed_to TEXT"),
+        # v7: job lifecycle tracking
+        ("jobs", "file_source TEXT"),
+        ("jobs", "colour_page_map TEXT"),
+        ("jobs", "colour_confirmed INTEGER DEFAULT 0"),
+        ("jobs", "parent_job_id TEXT"),
+        ("jobs", "is_sub_job INTEGER DEFAULT 0"),
+        ("jobs", "sub_job_type TEXT"),
+        ("jobs", "collation_warning INTEGER DEFAULT 0"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE {tbl_col_def[0]} ADD COLUMN {tbl_col_def[1]}")
         except Exception:
             pass  # column already exists
+
+    # v7: job_events audit table
+    _setup_jevents(conn)
 
     conn.commit()
     conn.close()
@@ -511,6 +531,12 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
     """, job)
     conn.commit()
     conn.close()
+
+    # Log file_received event in audit trail
+    _log_event(DB_PATH, job_id, "file_received",
+               from_status=None, to_status="Received",
+               staff_id=None,
+               notes=f"source={source} sender={sender or 'walk-in'} size={size_kb}KB")
 
     logging.info("NEW JOB [%s] %s | %.1f KB | Source: %s | Sender: %s",
                  job_id, filepath.name, size_kb, source, sender or "walk-in")

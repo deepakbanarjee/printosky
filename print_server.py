@@ -43,6 +43,17 @@ except ImportError:
     _rc = None
     logging.warning("rate_card.py not found — /quote will return 0")
 
+# Job tracker — status machine + audit log
+try:
+    from job_tracker import log_event as _jt_log, transition as _jt_transition, get_events as _jt_events, setup_job_events_db as _jt_setup
+    JOB_TRACKER_AVAILABLE = True
+except ImportError:
+    JOB_TRACKER_AVAILABLE = False
+    def _jt_log(*a, **kw): return 0
+    def _jt_transition(*a, **kw): return {"ok": False, "error": "job_tracker not available"}
+    def _jt_events(*a, **kw): return []
+    def _jt_setup(*a): pass
+
 # ── Konica Windows username → PC identifier mapping ───────────────────────────
 # PC1 = Priya/Deepak/Anu  |  PC2 = Revana  |  PC3 = rarely used (Nirmal)
 KONICA_USER_PC_MAP = {
@@ -337,6 +348,8 @@ def update_job_status(job_id: str, status: str, printer: str, staff_id: str = No
     """Update job status, printer, printed_by, and notes in SQLite, then push to Supabase immediately."""
     try:
         conn = sqlite3.connect(DB_PATH)
+        old_row = conn.execute("SELECT status FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        old_status = old_row[0] if old_row else None
         note = f"Printed on {printer} at {datetime.now().strftime('%H:%M')}"
         if staff_id:
             note += f" by {staff_id}"
@@ -352,6 +365,10 @@ def update_job_status(job_id: str, status: str, printer: str, staff_id: str = No
     except Exception as e:
         logging.error("DB update failed for %s: %s", job_id, e)
         return
+    # Log in audit trail
+    _jt_log(DB_PATH, job_id, "print_sent",
+            from_status=old_status, to_status=status,
+            staff_id=staff_id, notes=f"printer={printer}")
     # Immediately push status to Supabase so admin panel reflects change without waiting for sync cycle
     threading.Thread(target=_push_job_status_supabase, args=(job_id, status, printer), daemon=True).start()
 
@@ -650,6 +667,10 @@ def handle_mark_ready(body: dict) -> dict:
         whatsapp_sent = _send_whatsapp(phone, msg)
 
     logging.info("Job %s marked Ready (WhatsApp: %s)", job_id, "sent" if whatsapp_sent else "skipped")
+    _jt_log(DB_PATH, job_id, "job_ready",
+            from_status=None, to_status="Ready",
+            staff_id=staff_id,
+            notes=f"whatsapp={'sent' if whatsapp_sent else 'skipped'}")
     return {"ok": True, "whatsapp_sent": whatsapp_sent, "phone": phone or "walk-in"}
 
 
@@ -691,6 +712,10 @@ def handle_complete_job(body: dict) -> dict:
     conn.close()
 
     logging.info("Job %s COMPLETED — Rs.%.0f %s by %s", job_id, amount, mode, staff_id)
+    _jt_log(DB_PATH, job_id, "job_collected",
+            from_status="Ready", to_status="Completed",
+            staff_id=staff_id,
+            notes=f"Rs.{amount:.0f} {mode}")
     return {"ok": True, "job_id": job_id, "amount": amount, "mode": mode}
 
 
@@ -898,6 +923,14 @@ def handle_create_job(body: dict) -> dict:
     conn.close()
     logging.info("Manual job %s — %s — Rs.%.0f — status=%s — by %s",
                  job_id, source, amount_quoted, status, staff_id)
+
+    # Audit event
+    action = "job_created_queued" if status == "Queued" else "job_created_draft"
+    _jt_log(DB_PATH, job_id, action,
+            from_status=None, to_status=status,
+            staff_id=staff_id,
+            notes=f"source={source} amount={amount_quoted} payment={payment_mode or 'none'}")
+
     return {"ok": True, "job_id": job_id, "status": status, "amount_quoted": amount_quoted}
 
 
@@ -1393,6 +1426,12 @@ class PrintHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(data)
+        elif path == "/events":
+            job_id = qs.get("job_id", [None])[0]
+            if not job_id:
+                self._json(400, {"error": "job_id required"})
+                return
+            self._json(200, {"events": _jt_events(DB_PATH, job_id)})
         else:
             self._json(404, {"error": "Not found"})
 

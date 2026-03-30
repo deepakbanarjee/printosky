@@ -599,6 +599,23 @@
   .jp-btn.vendor:hover  { background: rgba(255,107,64,.08); }
   .jp-btn:disabled { opacity: .4; cursor: default; }
 
+  /* ── Job Timeline ─────────────────────────────── */
+  #jp-timeline { display: flex; flex-direction: column; gap: 2px; }
+  .tl-row {
+    display: flex; align-items: flex-start; gap: 8px;
+    font-size: .72rem; padding: 3px 0;
+  }
+  .tl-dot {
+    width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex-shrink: 0;
+    background: var(--accent);
+  }
+  .tl-dot.system { background: var(--muted); }
+  .tl-dot.alert  { background: var(--amber); }
+  .tl-content { flex: 1; }
+  .tl-action { font-weight: 600; color: var(--fg); }
+  .tl-meta   { color: var(--muted); font-size: .67rem; margin-top: 1px; }
+  .tl-dur    { color: var(--muted); font-size: .65rem; font-style: italic; }
+
   /* ── Payment / Photocopy Modal ─────────────────── */
   .modal-overlay {
     display: none; position: fixed; inset: 0;
@@ -1782,6 +1799,11 @@ function panelHTML() {
         </div>
       </div>
     </div>
+    <!-- Timeline -->
+    <div id="jp-timeline-section" style="padding:8px 16px 16px;border-top:1px solid var(--border)">
+      <div style="font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.06em;margin-bottom:6px">TIMELINE</div>
+      <div id="jp-timeline">—</div>
+    </div>
   </div>`;
 }
 
@@ -1856,6 +1878,68 @@ function selectJob(jobId) {
       }
     })
     .catch(() => {}); // silent — defaults already rendered
+
+  // Load job event timeline
+  loadTimeline(jobId);
+}
+
+// ── Job Timeline ─────────────────────────────────────────────────────────────
+function loadTimeline(jobId) {
+  const el = document.getElementById("jp-timeline");
+  if (!el) return;
+  el.textContent = "Loading…";
+  fetch(`${STORE_PC_URL}/events?job_id=${encodeURIComponent(jobId)}`)
+    .then(r => r.json())
+    .then(data => renderTimeline(data.events || []))
+    .catch(() => { el.textContent = "—"; });
+}
+
+const TL_ACTION_LABELS = {
+  file_received:        "File received",
+  job_created_queued:   "Job created (paid)",
+  job_created_draft:    "Job created (draft)",
+  quote_sent:           "Quote sent",
+  payment_received:     "Payment received",
+  print_sent:           "Sent to printer",
+  print_done:           "Print done",
+  binding_dispatched:   "Sent to binder",
+  binding_returned:     "Binding returned",
+  job_ready:            "Marked ready — customer notified",
+  job_collected:        "Job collected",
+  job_completed_legacy: "Completed",
+  status_change:        "Status changed",
+};
+
+function renderTimeline(events) {
+  const el = document.getElementById("jp-timeline");
+  if (!el) return;
+  if (!events.length) { el.innerHTML = '<span style="color:var(--muted);font-size:.72rem">No events yet</span>'; return; }
+  el.innerHTML = events.map(e => {
+    const label = TL_ACTION_LABELS[e.action] || e.action;
+    const isSystem = !e.staff_id;
+    const time = e.created_at ? e.created_at.slice(11, 16) : "";
+    const date = e.created_at ? e.created_at.slice(0, 10) : "";
+    const dur  = e.duration_sec != null ? fmtDuration(e.duration_sec) : "";
+    const meta = [
+      e.staff_id ? "by " + e.staff_id : "",
+      e.to_status ? "→ " + e.to_status : "",
+      e.notes     ? e.notes : "",
+    ].filter(Boolean).join(" · ");
+    return `<div class="tl-row">
+      <div class="tl-dot${isSystem ? " system" : ""}"></div>
+      <div class="tl-content">
+        <div class="tl-action">${label}</div>
+        <div class="tl-meta">${date} ${time}${meta ? " · " + meta : ""}</div>
+        ${dur ? `<div class="tl-dur">+${dur} since previous</div>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function fmtDuration(sec) {
+  if (sec < 60)  return sec + "s";
+  if (sec < 3600) return Math.round(sec / 60) + "m";
+  return (sec / 3600).toFixed(1) + "h";
 }
 
 function closeJobPanel() {
