@@ -2146,7 +2146,7 @@ async function dtpPause() {
     const r = await fetch(`${STORE_PC_URL}/session-pause`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
-      body: JSON.stringify({ session_id: dtpOpenSession.id }),
+      body: JSON.stringify({ session_id: dtpOpenSession.id, staff_id: activeStaff?.staff_id || "" }),
     });
     const data = await r.json();
     if (data.ok) {
@@ -2166,7 +2166,7 @@ async function dtpResume() {
     const r = await fetch(`${STORE_PC_URL}/session-resume`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
-      body: JSON.stringify({ session_id: dtpOpenSession.id }),
+      body: JSON.stringify({ session_id: dtpOpenSession.id, staff_id: activeStaff?.staff_id || "" }),
     });
     const data = await r.json();
     if (data.ok) {
@@ -2263,15 +2263,15 @@ function renderTimeline(events) {
   if (!el) return;
   if (!events.length) { el.innerHTML = '<span style="color:var(--muted);font-size:.72rem">No events yet</span>'; return; }
   el.innerHTML = events.map(e => {
-    const label = TL_ACTION_LABELS[e.action] || e.action;
+    const label = TL_ACTION_LABELS[e.action] || esc(e.action);
     const isSystem = !e.staff_id;
     const time = e.created_at ? e.created_at.slice(11, 16) : "";
     const date = e.created_at ? e.created_at.slice(0, 10) : "";
     const dur  = e.duration_sec != null ? fmtDuration(e.duration_sec) : "";
     const meta = [
-      e.staff_id ? "by " + e.staff_id : "",
-      e.to_status ? "→ " + e.to_status : "",
-      e.notes     ? e.notes : "",
+      e.staff_id  ? "by " + esc(e.staff_id)  : "",
+      e.to_status ? "→ "  + esc(e.to_status) : "",
+      e.notes     ? esc(e.notes)              : "",
     ].filter(Boolean).join(" · ");
     return `<div class="tl-row">
       <div class="tl-dot${isSystem ? " system" : ""}"></div>

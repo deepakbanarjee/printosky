@@ -1244,10 +1244,12 @@ def handle_session_pause(body: dict) -> dict:
         session_id = int(session_id)
     except (TypeError, ValueError):
         return {"ok": False, "error": "session_id must be an integer"}
+    if not staff_id:
+        return {"ok": False, "error": "staff_id required"}
     owner = _get_session_staff(session_id)
     if owner is None:
         return {"ok": False, "error": f"Session {session_id} not found"}
-    if staff_id and owner != staff_id:
+    if owner != staff_id:
         return {"ok": False, "error": "Not authorized to modify this session"}
     return _ws_pause(DB_PATH, session_id)
 
@@ -1266,10 +1268,12 @@ def handle_session_resume(body: dict) -> dict:
         session_id = int(session_id)
     except (TypeError, ValueError):
         return {"ok": False, "error": "session_id must be an integer"}
+    if not staff_id:
+        return {"ok": False, "error": "staff_id required"}
     owner = _get_session_staff(session_id)
     if owner is None:
         return {"ok": False, "error": f"Session {session_id} not found"}
-    if staff_id and owner != staff_id:
+    if owner != staff_id:
         return {"ok": False, "error": "Not authorized to modify this session"}
     return _ws_resume(DB_PATH, session_id)
 
@@ -1288,10 +1292,12 @@ def handle_session_end(body: dict) -> dict:
         session_id = int(session_id)
     except (TypeError, ValueError):
         return {"ok": False, "error": "session_id must be an integer"}
+    if not staff_id:
+        return {"ok": False, "error": "staff_id required"}
     owner = _get_session_staff(session_id)
     if owner is None:
         return {"ok": False, "error": f"Session {session_id} not found"}
-    if staff_id and owner != staff_id:
+    if owner != staff_id:
         return {"ok": False, "error": "Not authorized to end this session"}
 
     notes       = body.get("notes", "")
