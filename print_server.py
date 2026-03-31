@@ -68,6 +68,28 @@ except ImportError:
     def _cd_save(*a, **kw): pass
     def _cd_confirm(*a, **kw): pass
 
+# Work session tracker — DTP / editing timer
+try:
+    from work_session_tracker import (
+        start_session as _ws_start,
+        pause_session as _ws_pause,
+        resume_session as _ws_resume,
+        end_session as _ws_end,
+        get_sessions as _ws_get,
+        get_open_session as _ws_open,
+        setup_work_sessions_db as _ws_setup,
+    )
+    WORK_SESSION_AVAILABLE = True
+except ImportError:
+    WORK_SESSION_AVAILABLE = False
+    def _ws_start(*a, **kw): return {"ok": False, "error": "work_session_tracker not available"}
+    def _ws_pause(*a, **kw): return {"ok": False, "error": "work_session_tracker not available"}
+    def _ws_resume(*a, **kw): return {"ok": False, "error": "work_session_tracker not available"}
+    def _ws_end(*a, **kw): return {"ok": False, "error": "work_session_tracker not available"}
+    def _ws_get(*a, **kw): return []
+    def _ws_open(*a, **kw): return None
+    def _ws_setup(*a): pass
+
 # ── Konica Windows username → PC identifier mapping ───────────────────────────
 # PC1 = Priya/Deepak/Anu  |  PC2 = Revana  |  PC3 = rarely used (Nirmal)
 KONICA_USER_PC_MAP = {
@@ -139,7 +161,7 @@ def _is_allowed_filepath(filepath: str) -> bool:
 
 
 def init_staff_tables(db_path: str):
-    """Ensure staff and staff_sessions tables exist (idempotent)."""
+    """Ensure staff, staff_sessions, and work_sessions tables exist (idempotent)."""
     conn = sqlite3.connect(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS staff (
@@ -158,6 +180,7 @@ def init_staff_tables(db_path: str):
         )
     """)
     conn.commit()
+    _ws_setup(conn)
     conn.close()
 
 
@@ -1163,6 +1186,128 @@ def handle_confirm_colour(body: dict) -> dict:
     return {"ok": True, "job_id": job_id}
 
 
+# ── A11: Work session timer ───────────────────────────────────────────────────
+
+def handle_session_start(body: dict) -> dict:
+    """
+    POST /session-start
+    { job_id, staff_id }
+    Open a new work session for DTP / editing work.
+    """
+    import re as _re
+    job_id   = (body.get("job_id") or "").strip()
+    staff_id = (body.get("staff_id") or "").strip()
+    if not job_id or not staff_id:
+        return {"ok": False, "error": "job_id and staff_id required"}
+    if not _re.match(r'^OSP-\d{8}-\d{4}$', job_id):
+        return {"ok": False, "error": "invalid job_id format"}
+    # Verify job exists and staff is real
+    conn = _db()
+    job_row = conn.execute("SELECT job_id FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+    staff_row = conn.execute("SELECT id FROM staff WHERE id=? AND active=1", (staff_id,)).fetchone()
+    conn.close()
+    if not job_row:
+        return {"ok": False, "error": f"Job {job_id} not found"}
+    if not staff_row:
+        return {"ok": False, "error": "Staff not found or inactive"}
+    result = _ws_start(DB_PATH, job_id, staff_id)
+    if result.get("ok"):
+        _jt_log(DB_PATH, job_id, "work_session_started",
+                staff_id=staff_id,
+                notes=f"session_id={result['session_id']}")
+    return result
+
+
+def _get_session_staff(session_id: int) -> str | None:
+    """Return the staff_id that owns a work session, or None if not found."""
+    conn = _db()
+    try:
+        row = conn.execute(
+            "SELECT staff_id FROM work_sessions WHERE id=?", (session_id,)
+        ).fetchone()
+        return row["staff_id"] if row else None
+    finally:
+        conn.close()
+
+
+def handle_session_pause(body: dict) -> dict:
+    """
+    POST /session-pause
+    { session_id, staff_id }
+    Pause an open work session. Only the owning staff member may pause it.
+    """
+    session_id = body.get("session_id")
+    staff_id   = (body.get("staff_id") or "").strip()
+    if session_id is None:
+        return {"ok": False, "error": "session_id required"}
+    try:
+        session_id = int(session_id)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "session_id must be an integer"}
+    owner = _get_session_staff(session_id)
+    if owner is None:
+        return {"ok": False, "error": f"Session {session_id} not found"}
+    if staff_id and owner != staff_id:
+        return {"ok": False, "error": "Not authorized to modify this session"}
+    return _ws_pause(DB_PATH, session_id)
+
+
+def handle_session_resume(body: dict) -> dict:
+    """
+    POST /session-resume
+    { session_id, staff_id }
+    Resume a paused work session. Only the owning staff member may resume it.
+    """
+    session_id = body.get("session_id")
+    staff_id   = (body.get("staff_id") or "").strip()
+    if session_id is None:
+        return {"ok": False, "error": "session_id required"}
+    try:
+        session_id = int(session_id)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "session_id must be an integer"}
+    owner = _get_session_staff(session_id)
+    if owner is None:
+        return {"ok": False, "error": f"Session {session_id} not found"}
+    if staff_id and owner != staff_id:
+        return {"ok": False, "error": "Not authorized to modify this session"}
+    return _ws_resume(DB_PATH, session_id)
+
+
+def handle_session_end(body: dict) -> dict:
+    """
+    POST /session-end
+    { session_id, staff_id, notes?, dtp_pages?, graph_count? }
+    End a work session and calculate billing. Only the owning staff member may end it.
+    """
+    session_id = body.get("session_id")
+    staff_id   = (body.get("staff_id") or "").strip()
+    if session_id is None:
+        return {"ok": False, "error": "session_id required"}
+    try:
+        session_id = int(session_id)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "session_id must be an integer"}
+    owner = _get_session_staff(session_id)
+    if owner is None:
+        return {"ok": False, "error": f"Session {session_id} not found"}
+    if staff_id and owner != staff_id:
+        return {"ok": False, "error": "Not authorized to end this session"}
+
+    notes       = body.get("notes", "")
+    dtp_pages   = max(0, int(body.get("dtp_pages") or 0))
+    graph_count = max(0, int(body.get("graph_count") or 0))
+
+    result = _ws_end(DB_PATH, session_id, notes=notes,
+                     dtp_pages=dtp_pages, graph_count=graph_count)
+    if result.get("ok"):
+        _jt_log(DB_PATH, result["job_id"], "work_session_ended",
+                staff_id=result.get("staff_id"),
+                notes=(f"billing={result['billing_minutes']}min "
+                       f"dtp_pages={dtp_pages} graphs={graph_count}"))
+    return result
+
+
 # ── A9: Print receipt (thermal printer stub) ──────────────────────────────────
 
 RECEIPT_PRINTER = None  # Set to {"vendor": 0xXXXX, "product": 0xXXXX} when hardware arrives
@@ -1523,6 +1668,22 @@ class PrintHandler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "invalid job_id format"})
                 return
             self._json(200, {"events": _jt_events(DB_PATH, job_id)})
+        elif path == "/work-sessions":
+            token = self.headers.get("X-Store-Token", "")
+            if not STORE_TOKEN or not hmac.compare_digest(token.encode(), STORE_TOKEN.encode()):
+                self._json(403, {"error": "Forbidden"})
+                return
+            job_id = qs.get("job_id", [None])[0]
+            if not job_id:
+                self._json(400, {"error": "job_id required"})
+                return
+            import re as _re
+            if not _re.match(r'^OSP-\d{8}-\d{4}$', job_id):
+                self._json(400, {"error": "invalid job_id format"})
+                return
+            open_session = _ws_open(DB_PATH, job_id)
+            all_sessions = _ws_get(DB_PATH, job_id)
+            self._json(200, {"sessions": all_sessions, "open_session": open_session})
         else:
             self._json(404, {"error": "Not found"})
 
@@ -1623,6 +1784,33 @@ class PrintHandler(BaseHTTPRequestHandler):
             result = handle_confirm_colour(body)
             self._json(200 if result.get("ok") else 400, result)
             return
+
+        # ── Sprint 12: Work session timer ─────────────────────────────────────
+        if path == "/session-start":
+            body = self._read_body()
+            result = handle_session_start(body)
+            self._json(200 if result.get("ok") else 400, result)
+            return
+
+        if path == "/session-pause":
+            body = self._read_body()
+            result = handle_session_pause(body)
+            self._json(200 if result.get("ok") else 400, result)
+            return
+
+        if path == "/session-resume":
+            body = self._read_body()
+            result = handle_session_resume(body)
+            self._json(200 if result.get("ok") else 400, result)
+            return
+
+        if path == "/session-end":
+            body = self._read_body()
+            result = handle_session_end(body)
+            self._json(200 if result.get("ok") else 400, result)
+            return
+
+        # GET /work-sessions is handled in do_GET
 
         # ── /print — supports both old-style (filepath in body) and
         #            new-style (item_number in body — reads specs from DB) ────
