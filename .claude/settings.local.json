@@ -124,7 +124,11 @@
       "Bash(grep:*)",
       "WebFetch(domain:manuals.konicaminolta.eu)",
       "WebFetch(domain:kmbsmanuals.konicaminolta.us)",
-      "WebFetch(domain:www.advanceduninstaller.com)"
+      "WebFetch(domain:www.advanceduninstaller.com)",
+      "Bash(ls C:printosky_watcher/*.py)",
+      "Bash(ls:*)",
+      "WebFetch(domain:store.printosky.com)",
+      "Bash(curl:*)"
     ]
   },
   "model": "claude-sonnet-4-6",
