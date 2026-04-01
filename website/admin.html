@@ -723,8 +723,10 @@
       <div class="pin-dot" id="pd1"></div>
       <div class="pin-dot" id="pd2"></div>
       <div class="pin-dot" id="pd3"></div>
+      <div class="pin-dot" id="pd4"></div>
+      <div class="pin-dot" id="pd5"></div>
     </div>
-    <input type="password" id="pin-input" placeholder="4-digit PIN" maxlength="4"
+    <input type="password" id="pin-input" placeholder="6-digit PIN" maxlength="6"
            inputmode="numeric" pattern="[0-9]*" autocomplete="off"
            oninput="onPinInput()" style="text-align:center;letter-spacing:.4em;font-size:1.4rem;">
     <button class="login-btn" onclick="tryPinLogin()">ENTER →</button>
@@ -1253,11 +1255,11 @@ function resetPCSetup() {
 // ── PIN input visual feedback ──────────────────────────────────────────────
 function onPinInput() {
   const len = document.getElementById("pin-input").value.length;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     document.getElementById("pd" + i).classList.toggle("filled", i < len);
   }
   document.getElementById("login-err").style.display = "none";
-  if (len === 4) tryPinLogin();
+  if (len === 6) tryPinLogin();
 }
 
 function toggleAdminOverride() {
@@ -1268,7 +1270,7 @@ function toggleAdminOverride() {
 // ── Staff PIN login ────────────────────────────────────────────────────────
 async function tryPinLogin() {
   const pin = document.getElementById("pin-input").value;
-  if (pin.length !== 4) return;
+  if (pin.length !== 6) return;
   const pcId = getPcId();
   try {
     const r = await fetch(`${STORE_PC_URL}/staff-login`, {
