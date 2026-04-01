@@ -1296,9 +1296,10 @@ async function tryPinLogin() {
       } catch { /* JWT optional — falls back to anon key */ }
       showDashboard();
     } else {
+      document.getElementById("login-err").textContent = "Incorrect PIN";
       document.getElementById("login-err").style.display = "block";
       document.getElementById("pin-input").value = "";
-      onPinInput();
+      for (let i = 0; i < 6; i++) document.getElementById("pd" + i).classList.remove("filled");
     }
   } catch {
     // Store PC offline — fall back to admin override only
@@ -2459,7 +2460,7 @@ async function fetchAndShowQuote() {
       if (fr.ok) {
         const fq = await fr.json();
         finCost = fq.finishing_cost || 0;
-        if (fq.breakdown) breakdown.push(...fq.breakdown.filter(b => !/sheet|per sheet/i.test(b)));
+        if (fq.breakdown) breakdown.push(...fq.breakdown.filter(b => !/sheet|per sheet/i.test(b) && !b.startsWith("---")));
       }
     }
     const total = totalPrint + finCost;
