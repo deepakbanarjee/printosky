@@ -68,6 +68,20 @@ except ImportError:
     def _cd_save(*a, **kw): pass
     def _cd_confirm(*a, **kw): pass
 
+# Review manager — post-collection review requests + discount codes
+try:
+    from review_manager import (
+        schedule_review as _rv_schedule,
+        setup_review_db as _rv_setup,
+        record_rating as _rv_record,
+    )
+    REVIEW_MANAGER_AVAILABLE = True
+except ImportError:
+    REVIEW_MANAGER_AVAILABLE = False
+    def _rv_schedule(*a, **kw): pass
+    def _rv_setup(*a): pass
+    def _rv_record(*a, **kw): return {"ok": False, "error": "review_manager not available"}
+
 # Work session tracker — DTP / editing timer
 try:
     from work_session_tracker import (
@@ -181,6 +195,7 @@ def init_staff_tables(db_path: str):
     """)
     conn.commit()
     _ws_setup(conn)
+    _rv_setup(conn)
     conn.close()
 
 
@@ -734,6 +749,8 @@ def handle_complete_job(body: dict) -> dict:
         return {"ok": False, "error": "amount_collected must be a number"}
 
     conn = _db()
+    row = conn.execute("SELECT sender FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+    phone = row["sender"] if row else None
     conn.execute("""
         UPDATE jobs SET
             status='Completed',
@@ -753,6 +770,11 @@ def handle_complete_job(body: dict) -> dict:
             from_status="Ready", to_status="Completed",
             staff_id=staff_id,
             notes=f"Rs.{amount:.0f} {mode}")
+
+    # Schedule review request 30 min after collection
+    if phone:
+        _rv_schedule(DB_PATH, job_id, phone, _send_whatsapp)
+
     return {"ok": True, "job_id": job_id, "amount": amount, "mode": mode}
 
 
@@ -1184,6 +1206,28 @@ def handle_confirm_colour(body: dict) -> dict:
             staff_id=staff_id,
             notes=f"override={colour_pages is not None} pages={colour_pages}")
     return {"ok": True, "job_id": job_id}
+
+
+# ── A12: Review rating ────────────────────────────────────────────────────────
+
+def handle_review_rating(body: dict) -> dict:
+    """
+    POST /review-rating
+    Record a customer's 1-5 star rating after collection.
+    Called by the WhatsApp bot when customer replies to the review request.
+    { phone, rating }
+    """
+    phone  = (body.get("phone") or "").strip()
+    rating = body.get("rating")
+    if not phone:
+        return {"ok": False, "error": "phone required"}
+    try:
+        rating = int(rating)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "rating must be an integer 1-5"}
+    if rating not in range(1, 6):
+        return {"ok": False, "error": "rating must be 1-5"}
+    return _rv_record(DB_PATH, phone, rating, _send_whatsapp)
 
 
 # ── A11: Work session timer ───────────────────────────────────────────────────
@@ -1788,6 +1832,13 @@ class PrintHandler(BaseHTTPRequestHandler):
         if path == "/confirm-colour":
             body = self._read_body()
             result = handle_confirm_colour(body)
+            self._json(200 if result.get("ok") else 400, result)
+            return
+
+        # ── Sprint 12B: Review rating ─────────────────────────────────────────
+        if path == "/review-rating":
+            body = self._read_body()
+            result = handle_review_rating(body)
             self._json(200 if result.get("ok") else 400, result)
             return
 

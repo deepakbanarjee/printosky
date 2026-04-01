@@ -601,6 +601,34 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     text    = text.strip()
     session = get_session(db_path, phone)
 
+    # ── Review reply (1-5) — checked before session flow ─────────────────────
+    # If no active conversation and message is a digit 1-5, treat as review rating.
+    if not session and text in ("1", "2", "3", "4", "5"):
+        try:
+            from review_manager import record_rating, setup_review_db
+            conn = sqlite3.connect(db_path)
+            try:
+                setup_review_db(conn)
+                pending = conn.execute(
+                    "SELECT id FROM job_reviews WHERE phone=? AND rating IS NULL AND review_sent=1 LIMIT 1",
+                    (phone,)
+                ).fetchone()
+            finally:
+                conn.close()
+            if pending:
+                from whatsapp_notify import send_whatsapp_message as _swm
+                def _send(p, m):
+                    try:
+                        return _swm(p, m)
+                    except Exception:
+                        return False
+                result = record_rating(db_path, phone, int(text), _send)
+                if result.get("ok"):
+                    logger.info("Review recorded via bot: phone=%s rating=%s", phone, text)
+                    return []   # review_manager already sent the reply
+        except ImportError:
+            pass
+
     # ── New job (legacy direct path — batch flow uses start_batch_conversation) ─
     if job_id and not session:
         save_session(db_path, phone, job_id=job_id, step="size", page_count=page_count)
