@@ -459,3 +459,138 @@ class TestLegacyCalculatePrintCost:
         for key in ("sheets", "print_cost", "finishing_cost", "delivery_cost",
                     "total", "finishing_label", "breakdown"):
             assert key in r
+
+    def test_2up_layout(self):
+        # 2up branch in calculate_print_cost
+        r = rc.calculate_print_cost(20, "A4", "bw", "2up", "single", 1, "none", False)
+        assert r["sheets"] == rc.calc_sheets(20, "ss", "2-up")
+
+    def test_4up_layout(self):
+        # 4up branch in calculate_print_cost
+        r = rc.calculate_print_cost(40, "A4", "bw", "4up", "single", 1, "none", False)
+        assert r["sheets"] == rc.calc_sheets(40, "ss", "4-up")
+
+
+class TestLegacyCalculateSheets4up:
+    def test_4up_single(self):
+        # 4up branch in calculate_sheets (lines 446-448)
+        result = rc.calculate_sheets(40, "4up", "single")
+        assert result == rc.calc_sheets(40, "ss", "4-up")
+
+    def test_4up_double(self):
+        result = rc.calculate_sheets(40, "4up", "double")
+        assert result == rc.calc_sheets(40, "ds", "4-up")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# load_rates_from_supabase — mocked HTTP
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestLoadRatesFromSupabase:
+    def _make_mock_urlopen(self, payload: list):
+        """Return a context-manager mock that yields payload as JSON bytes."""
+        import io
+        import json
+        from unittest.mock import MagicMock
+
+        cm = MagicMock()
+        cm.__enter__ = lambda s: MagicMock(read=lambda: json.dumps(payload).encode())
+        cm.__exit__ = MagicMock(return_value=False)
+        return cm
+
+    def test_returns_true_on_success(self, monkeypatch):
+        import urllib.request
+        payload = [{"key": "a4_bw_single", "price": 3.0, "staff_quote": False}]
+        monkeypatch.setattr(
+            urllib.request, "urlopen",
+            lambda req, timeout=5: self._make_mock_urlopen(payload)
+        )
+        result = rc.load_rates_from_supabase("https://example.supabase.co", "fake-key")
+        assert result is True
+
+    def test_updates_rates_dict(self, monkeypatch):
+        import urllib.request
+        payload = [{"key": "a4_bw_single", "price": 5.0, "staff_quote": False}]
+        monkeypatch.setattr(
+            urllib.request, "urlopen",
+            lambda req, timeout=5: self._make_mock_urlopen(payload)
+        )
+        rc.load_rates_from_supabase("https://example.supabase.co", "fake-key")
+        assert rc.RATES["A4"]["bw"]["single"] == 5.0
+        # Restore default
+        rc.RATES["A4"]["bw"]["single"] = 3.0
+
+    def test_updates_finishing_rate(self, monkeypatch):
+        import urllib.request
+        payload = [{"key": "finishing_spiral", "price": 99.0, "staff_quote": False}]
+        monkeypatch.setattr(
+            urllib.request, "urlopen",
+            lambda req, timeout=5: self._make_mock_urlopen(payload)
+        )
+        rc.load_rates_from_supabase("https://example.supabase.co", "fake-key")
+        assert rc.FINISHING_RATES["spiral"]["price"] == 99.0
+        rc.FINISHING_RATES["spiral"]["price"] = 30  # restore
+
+    def test_updates_delivery_charge(self, monkeypatch):
+        import urllib.request
+        payload = [{"key": "delivery", "price": 50.0, "staff_quote": False}]
+        monkeypatch.setattr(
+            urllib.request, "urlopen",
+            lambda req, timeout=5: self._make_mock_urlopen(payload)
+        )
+        rc.load_rates_from_supabase("https://example.supabase.co", "fake-key")
+        assert rc.DELIVERY_CHARGE == 50.0
+        rc.DELIVERY_CHARGE = 30  # restore
+
+    def test_returns_false_on_empty_response(self, monkeypatch):
+        import urllib.request
+        monkeypatch.setattr(
+            urllib.request, "urlopen",
+            lambda req, timeout=5: self._make_mock_urlopen([])
+        )
+        result = rc.load_rates_from_supabase("https://example.supabase.co", "fake-key")
+        assert result is False
+
+    def test_returns_false_on_network_error(self, monkeypatch):
+        import urllib.request
+        def _raise(*a, **kw):
+            raise OSError("no network")
+        monkeypatch.setattr(urllib.request, "urlopen", _raise)
+        result = rc.load_rates_from_supabase("https://example.supabase.co", "fake-key")
+        assert result is False
+
+    def test_unknown_key_ignored(self, monkeypatch):
+        import urllib.request
+        payload = [{"key": "nonexistent_key", "price": 999.0, "staff_quote": False}]
+        monkeypatch.setattr(
+            urllib.request, "urlopen",
+            lambda req, timeout=5: self._make_mock_urlopen(payload)
+        )
+        # Should not raise, just skip unknown key
+        result = rc.load_rates_from_supabase("https://example.supabase.co", "fake-key")
+        assert result is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# get_pdf_page_count — mocked imports
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestGetPdfPageCount:
+    def test_returns_zero_when_all_libs_unavailable(self, monkeypatch):
+        # Simulate all PDF libs absent
+        import builtins
+        real_import = builtins.__import__
+
+        def _block_pdf(name, *args, **kwargs):
+            if name in ("pikepdf", "pypdf", "PyPDF2"):
+                raise ImportError(f"blocked: {name}")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _block_pdf)
+        result = rc.get_pdf_page_count("/nonexistent/file.pdf")
+        assert result == 0
+
+    def test_returns_zero_for_bad_path(self):
+        # All libs present but file doesn't exist → all raise → returns 0
+        result = rc.get_pdf_page_count("/this/path/does/not/exist.pdf")
+        assert result == 0
