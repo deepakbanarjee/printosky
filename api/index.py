@@ -125,10 +125,8 @@ def _handle_text(sender: str, text: str) -> None:
 def _handle_media(sender: str, msg_type: str, media_id: str,
                   mime_type: str, orig_filename: str) -> None:
     """Download a WhatsApp attachment, upload to Supabase Storage, create job row."""
-    import time
-    from db_cloud import upload_file, insert_job_from_webhook, clear_session
-    from whatsapp_notify import send_file_received, _send
-    from whatsapp_bot import start_batch_conversation
+    from db_cloud import upload_file, insert_job_from_webhook, clear_session, save_session
+    from whatsapp_notify import send_file_received_with_quote_start
 
     ext = FILE_MIME_TYPES.get(mime_type, "")
     ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -141,35 +139,37 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
     dest_name = f"{sender}_{ts}_{base_name}"   # unique storage key
     job_id    = f"OSP-{datetime.now().strftime('%Y%m%d')}-{sender[-4:]}-{ts[-4:]}"
 
-    # ── Step 1: acknowledge receipt immediately ───────────────────────────────
+    # ── Step 1: ONE Meta API call — receipt + size question combined ─────────
+    # This stays within Vercel's 10s Hobby timeout. Splitting into two calls
+    # caused the second to be killed by the timeout.
     insert_job_from_webhook(job_id, sender, base_name, "")   # file_url filled after upload
-    send_file_received(job_id, base_name, sender)
-    logger.info(f"Job created and receipt sent: {job_id} for {sender}")
+    sent = send_file_received_with_quote_start(job_id, base_name, sender)
+    logger.info(f"Job created, combined receipt+question sent ({sent}): {job_id} for {sender}")
 
-    # ── Step 2: start quote conversation (brief pause so Meta doesn't rate-limit)
-    time.sleep(1)
+    # ── Step 2: save bot session so handle_message can process the reply ────
     try:
         clear_session("supabase", sender)
-        jobs = [{"job_id": job_id, "filename": base_name, "page_count": 0}]
-        msgs = start_batch_conversation(sender, job_id, jobs, None, "supabase")
-        for msg in msgs:
-            if isinstance(msg, str):
-                time.sleep(0.5)   # small gap between messages
-                _send(sender, msg)
-        logger.info(f"Conversation started for {sender} job {job_id}")
+        save_session("supabase", sender,
+                     job_id=job_id,
+                     batch_id=job_id,
+                     step="size",
+                     current_job_index=0,
+                     jobs_json=json.dumps([{"job_id": job_id,
+                                            "filename": base_name,
+                                            "page_count": 0}]),
+                     saved_json=None,
+                     job_settings_json="{}")
+        logger.info(f"Session saved step=size for {sender}")
     except Exception as e:
-        import traceback
-        logger.error(f"start_batch_conversation error for {sender}: {e}\n{traceback.format_exc()}")
-        _send(sender, f"⚠️ Bot error (err: {type(e).__name__}: {e})")
+        logger.error(f"Session save error for {sender}: {e}")
 
-    # ── Step 3: download file and upload to Supabase Storage (slow — runs last) ─
+    # ── Step 3: download + upload to Supabase Storage (slow — runs last) ────
     content = _download_meta_media(media_id)
     if content is None:
         logger.error(f"Failed to download {media_id} from {sender}")
         return
     file_url = upload_file(dest_name, content, mime_type or "application/octet-stream")
-    # Update job row with real file URL now that upload is done
-    insert_job_from_webhook(job_id, sender, base_name, file_url)
+    insert_job_from_webhook(job_id, sender, base_name, file_url)   # update with real URL
     logger.info(f"Uploaded {dest_name} ({len(content)} bytes) → {file_url}")
 
 

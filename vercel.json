@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "api/index.py": { "maxDuration": 60 }
+  },
+  "routes": [
+    { "src": "/whatsapp-webhook", "dest": "/api/index.py" },
+    { "src": "/webhook/razorpay",  "dest": "/api/index.py" },
+    { "src": "/",                  "dest": "/api/index.py" }
+  ]
+}

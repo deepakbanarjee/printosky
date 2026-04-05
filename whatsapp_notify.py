@@ -19,8 +19,8 @@ logger = logging.getLogger("whatsapp_notify")
 # ── Meta Cloud API config ──────────────────────────────────────────────────────
 META_PHONE_ID = os.environ.get("META_PHONE_NUMBER_ID", "")
 META_TOKEN    = os.environ.get("META_SYSTEM_USER_TOKEN", "")
-GRAPH_URL     = "https://graph.facebook.com/v18.0"
-STORE_PHONE   = "919446903907"    # Printosky WABA number (with country code)
+GRAPH_URL     = "https://graph.facebook.com/v21.0"
+STORE_PHONE   = os.environ.get("STORE_WHATSAPP_PHONE", "919495706405")  # Oxygen WABA number (with country code)
 
 
 def _send_meta(phone: str, message: str) -> bool:
@@ -81,6 +81,27 @@ def send_file_received(job_id: str, filename: str, sender: str):
         "— Printosky / Oxygen Globally 🖨️"
     )
     _send(sender, msg)
+
+
+def send_file_received_with_quote_start(job_id: str, filename: str, sender: str) -> bool:
+    """Single combined message: receipt + first quote question.
+
+    Sends ONE Meta API call instead of two, staying safely within
+    Vercel's 10-second function timeout on Hobby plan.
+    """
+    if not sender:
+        return False
+    msg = (
+        "✅ *File received!*\n\n"
+        f"📋 Job ID: `{job_id}`\n"
+        f"📄 File: {filename}\n\n"
+        "📄 *What paper size do you need?*\n\n"
+        "1️⃣  A4 (standard)\n"
+        "2️⃣  A3 (large)\n"
+        "3️⃣  Other (we'll quote manually)\n\n"
+        "_Reply with 1, 2, or 3_"
+    )
+    return _send(sender, msg)
 
 
 def send_payment_link(sender: str, job_id: str, amount: float,
