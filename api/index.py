@@ -168,6 +168,8 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
         logger.error(f"Failed to download {media_id} from {sender}")
         return
     file_url = upload_file(dest_name, content, mime_type or "application/octet-stream")
+    # Update job row with real file URL now that upload is done
+    insert_job_from_webhook(job_id, sender, base_name, file_url)
     logger.info(f"Uploaded {dest_name} ({len(content)} bytes) → {file_url}")
 
 
