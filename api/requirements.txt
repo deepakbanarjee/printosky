@@ -1,0 +1,3 @@
+requests==2.33.1
+supabase==2.15.0
+python-dotenv==1.2.2
