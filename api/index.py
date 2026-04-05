@@ -125,7 +125,8 @@ def _handle_text(sender: str, text: str) -> None:
 def _handle_media(sender: str, msg_type: str, media_id: str,
                   mime_type: str, orig_filename: str) -> None:
     """Download a WhatsApp attachment, upload to Supabase Storage, create job row."""
-    from db_cloud import upload_file, insert_job_from_webhook
+    import time
+    from db_cloud import upload_file, insert_job_from_webhook, clear_session
     from whatsapp_notify import send_file_received, _send
     from whatsapp_bot import start_batch_conversation
 
@@ -138,41 +139,36 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
         base_name = f"{sender}_{ts}{ext or '.bin'}"
 
     dest_name = f"{sender}_{ts}_{base_name}"   # unique storage key
+    job_id    = f"OSP-{datetime.now().strftime('%Y%m%d')}-{sender[-4:]}-{ts[-4:]}"
 
-    content = _download_meta_media(media_id)
-    if content is None:
-        logger.error(f"Failed to download {media_id} from {sender}")
-        return
-
-    file_url = upload_file(dest_name, content, mime_type or "application/octet-stream")
-    logger.info(f"Uploaded {dest_name} ({len(content)} bytes)")
-
-    # Generate a stable job ID: OSP-YYYYMMDD-<last4phone>-<last4ts>
-    job_id = f"OSP-{datetime.now().strftime('%Y%m%d')}-{sender[-4:]}-{ts[-4:]}"
-    insert_job_from_webhook(job_id, sender, base_name, file_url)
-    logger.info(f"Job created: {job_id} for {sender}")
-
+    # ── Step 1: acknowledge receipt immediately ───────────────────────────────
+    insert_job_from_webhook(job_id, sender, base_name, "")   # file_url filled after upload
     send_file_received(job_id, base_name, sender)
+    logger.info(f"Job created and receipt sent: {job_id} for {sender}")
 
-    # DIAGNOSTIC: confirm _send works for a second message in same function call
-    _send(sender, "🔍 DEBUG: reached conversation start")
-
-    # Start the quote conversation immediately (no 60s wait in cloud mode).
-    # A new file upload always starts a fresh session — clear any stale session first.
+    # ── Step 2: start quote conversation (brief pause so Meta doesn't rate-limit)
+    time.sleep(1)
     try:
-        from db_cloud import clear_session
         clear_session("supabase", sender)
         jobs = [{"job_id": job_id, "filename": base_name, "page_count": 0}]
         msgs = start_batch_conversation(sender, job_id, jobs, None, "supabase")
-        _send(sender, f"🔍 DEBUG: msgs count={len(msgs)}")
         for msg in msgs:
             if isinstance(msg, str):
+                time.sleep(0.5)   # small gap between messages
                 _send(sender, msg)
         logger.info(f"Conversation started for {sender} job {job_id}")
     except Exception as e:
         import traceback
         logger.error(f"start_batch_conversation error for {sender}: {e}\n{traceback.format_exc()}")
-        _send(sender, f"⚠️ Bot error — please resend your file. (err: {type(e).__name__}: {e})")
+        _send(sender, f"⚠️ Bot error (err: {type(e).__name__}: {e})")
+
+    # ── Step 3: download file and upload to Supabase Storage (slow — runs last) ─
+    content = _download_meta_media(media_id)
+    if content is None:
+        logger.error(f"Failed to download {media_id} from {sender}")
+        return
+    file_url = upload_file(dest_name, content, mime_type or "application/octet-stream")
+    logger.info(f"Uploaded {dest_name} ({len(content)} bytes) → {file_url}")
 
 
 def _process_meta_webhook(data: dict) -> None:
