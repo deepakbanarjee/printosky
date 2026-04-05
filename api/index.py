@@ -166,7 +166,9 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
                 _send(sender, msg)
         logger.info(f"Conversation started for {sender} job {job_id}")
     except Exception as e:
-        logger.error(f"start_batch_conversation error for {sender}: {e}")
+        import traceback
+        logger.error(f"start_batch_conversation error for {sender}: {e}\n{traceback.format_exc()}")
+        _send(sender, f"⚠️ Bot error — please resend your file. (err: {type(e).__name__}: {e})")
 
 
 def _process_meta_webhook(data: dict) -> None:
