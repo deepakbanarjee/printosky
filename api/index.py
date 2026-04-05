@@ -125,7 +125,7 @@ def _handle_text(sender: str, text: str) -> None:
 def _handle_media(sender: str, msg_type: str, media_id: str,
                   mime_type: str, orig_filename: str) -> None:
     """Download a WhatsApp attachment, upload to Supabase Storage, create job row."""
-    from db_cloud import upload_file, insert_job_from_webhook, get_session
+    from db_cloud import upload_file, insert_job_from_webhook
     from whatsapp_notify import send_file_received, _send
     from whatsapp_bot import start_batch_conversation
 
@@ -154,16 +154,17 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
 
     send_file_received(job_id, base_name, sender)
 
-    # Start the quote conversation immediately (no 60s wait in cloud mode)
+    # Start the quote conversation immediately (no 60s wait in cloud mode).
+    # A new file upload always starts a fresh session — clear any stale session first.
     try:
-        existing_session = get_session("supabase", sender)
-        if not existing_session:
-            jobs = [{"job_id": job_id, "filename": base_name, "page_count": 0}]
-            msgs = start_batch_conversation(sender, job_id, jobs, None, "supabase")
-            for msg in msgs:
-                if isinstance(msg, str):
-                    _send(sender, msg)
-            logger.info(f"Conversation started for {sender} job {job_id}")
+        from db_cloud import clear_session
+        clear_session("supabase", sender)
+        jobs = [{"job_id": job_id, "filename": base_name, "page_count": 0}]
+        msgs = start_batch_conversation(sender, job_id, jobs, None, "supabase")
+        for msg in msgs:
+            if isinstance(msg, str):
+                _send(sender, msg)
+        logger.info(f"Conversation started for {sender} job {job_id}")
     except Exception as e:
         logger.error(f"start_batch_conversation error for {sender}: {e}")
 
