@@ -154,6 +154,9 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
 
     send_file_received(job_id, base_name, sender)
 
+    # DIAGNOSTIC: confirm _send works for a second message in same function call
+    _send(sender, "🔍 DEBUG: reached conversation start")
+
     # Start the quote conversation immediately (no 60s wait in cloud mode).
     # A new file upload always starts a fresh session — clear any stale session first.
     try:
@@ -161,6 +164,7 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
         clear_session("supabase", sender)
         jobs = [{"job_id": job_id, "filename": base_name, "page_count": 0}]
         msgs = start_batch_conversation(sender, job_id, jobs, None, "supabase")
+        _send(sender, f"🔍 DEBUG: msgs count={len(msgs)}")
         for msg in msgs:
             if isinstance(msg, str):
                 _send(sender, msg)
