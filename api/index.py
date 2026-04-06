@@ -246,6 +246,99 @@ def _process_razorpay_payment(data: dict) -> None:
     logger.info(f"Job {ref_id} marked Paid")
 
 
+# ── Staff PIN endpoints ───────────────────────────────────────────────────────
+
+ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
+
+
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _json_response(h, status: int, data: dict) -> None:
+    body = json.dumps(data).encode()
+    h.send_response(status)
+    h.send_header("Content-Type", "application/json")
+    h.end_headers()
+    h.wfile.write(body)
+
+
+def _handle_staff_set_pin(h, body: bytes) -> None:
+    """POST /staff/set-pin — staff changes own PIN using current PIN as auth."""
+    try:
+        payload = json.loads(body)
+        staff_id  = payload.get("staff_id", "").strip().lower()
+        current   = payload.get("current_pin", "").strip()
+        new_pin   = payload.get("new_pin", "").strip()
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+
+    if not staff_id or not current or not new_pin:
+        _json_response(h, 400, {"error": "staff_id, current_pin, new_pin required"})
+        return
+    if not new_pin.isdigit() or len(new_pin) != 4:
+        _json_response(h, 400, {"error": "new_pin must be 4 digits"})
+        return
+
+    from db_cloud import _client
+    try:
+        result = _client().table("staff").select("pin_hash,active").eq("id", staff_id).execute()
+        if not result.data:
+            _json_response(h, 404, {"error": "Staff not found"})
+            return
+        row = result.data[0]
+        if not row.get("active"):
+            _json_response(h, 403, {"error": "Account inactive"})
+            return
+        if row["pin_hash"] != _sha256(current):
+            _json_response(h, 403, {"error": "Current PIN incorrect"})
+            return
+        _client().table("staff").update({"pin_hash": _sha256(new_pin)}).eq("id", staff_id).execute()
+        _json_response(h, 200, {"ok": True, "message": "PIN updated"})
+        logger.info(f"Staff {staff_id} changed own PIN")
+    except Exception as e:
+        logger.error(f"set-pin error: {e}")
+        _json_response(h, 500, {"error": "Server error"})
+
+
+def _handle_admin_reset_pin(h, body: bytes) -> None:
+    """POST /admin/reset-pin — admin resets any staff PIN using admin password."""
+    try:
+        payload = json.loads(body)
+        admin_pw  = payload.get("admin_password", "").strip()
+        staff_id  = payload.get("staff_id", "").strip().lower()
+        new_pin   = payload.get("new_pin", "").strip()
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+
+    if not ADMIN_PASSWORD_HASH:
+        _json_response(h, 503, {"error": "Admin auth not configured"})
+        return
+    if _sha256(admin_pw) != ADMIN_PASSWORD_HASH:
+        _json_response(h, 403, {"error": "Invalid admin password"})
+        return
+    if not staff_id or not new_pin:
+        _json_response(h, 400, {"error": "staff_id, new_pin required"})
+        return
+    if not new_pin.isdigit() or len(new_pin) != 4:
+        _json_response(h, 400, {"error": "new_pin must be 4 digits"})
+        return
+
+    from db_cloud import _client
+    try:
+        result = _client().table("staff").update({"pin_hash": _sha256(new_pin)}).eq("id", staff_id).execute()
+        if not result.data:
+            _json_response(h, 404, {"error": "Staff not found"})
+            return
+        _json_response(h, 200, {"ok": True, "message": f"PIN reset for {staff_id}"})
+        logger.info(f"Admin reset PIN for {staff_id}")
+    except Exception as e:
+        logger.error(f"admin reset-pin error: {e}")
+        _json_response(h, 500, {"error": "Server error"})
+
+
 # ── Vercel request handler ────────────────────────────────────────────────────
 
 class handler(BaseHTTPRequestHandler):
@@ -287,7 +380,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(b"OK")
 
             sig = self.headers.get("X-Hub-Signature-256", "")
-            if META_APP_SECRET and not _verify_meta_sig(body, sig):
+            if not _verify_meta_sig(body, sig):
                 logger.warning("Meta signature verification failed — dropping")
                 return
             try:
@@ -312,6 +405,15 @@ class handler(BaseHTTPRequestHandler):
                 _process_razorpay_payment(json.loads(body))
             except Exception as e:
                 logger.error(f"Razorpay webhook processing error: {e}")
+            return
+
+        # ── Staff PIN self-service ───────────────────────────────────────────
+        if self.path == "/staff/set-pin":
+            _handle_staff_set_pin(self, body)
+            return
+
+        if self.path == "/admin/reset-pin":
+            _handle_admin_reset_pin(self, body)
             return
 
         self.send_response(404)

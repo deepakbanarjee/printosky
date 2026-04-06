@@ -429,7 +429,7 @@ def build_story():
             p("One-time utility to seed and manage staff. Commands: <i>list</i>, "
               "<i>add &lt;name&gt; &lt;pin&gt;</i>, <i>reset-pin</i>, <i>deactivate</i>, <i>activate</i>."),
             b("Stores PINs as SHA256 hashes. PIN must be exactly 4 digits."),
-            b("Default staff seeded: Priya=1001, Revana=1002, Bini=1003, Anu=1004, Deepak=1005."),
+            b("Default staff seeded with temporary PINs — reset via: python staff_setup.py reset-pin &lt;id&gt; &lt;new_pin&gt;"),
         ]),
         sp(8),
     ]

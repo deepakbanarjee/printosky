@@ -63,11 +63,11 @@ def cmd_seed():
     conn.close()
     if seeded:
         print("\nStaff seeded:")
-        print(f"  {'Name':<12} {'PIN':<6} {'ID'}")
-        print(f"  {'-'*30}")
+        print(f"  {'Name':<12} {'ID'}")
+        print(f"  {'-'*25}")
         for name, pin in seeded:
-            print(f"  {name:<12} {pin:<6} {name.lower()}")
-        print("\n  IMPORTANT: Share PINs privately. Admin can change with reset-pin.")
+            print(f"  {name:<12} {name.lower()}")
+        print("\n  Default PINs are set. Reset immediately: python staff_setup.py reset-pin <id> <new_pin>")
     if skipped:
         print(f"\nAlready existed (skipped): {', '.join(skipped)}")
 

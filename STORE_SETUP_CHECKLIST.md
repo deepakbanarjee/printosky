@@ -79,15 +79,41 @@ Check each item off as it's completed.
 
 ---
 
-## D. CloudFlare Tunnel (Razorpay webhook delivery to store PC)
-- [ ] Confirm tunnel is running: open `http://localhost:3002/health` from store PC — should return OK
-- [ ] Confirm public URL is still pointing to store PC:
-  - Razorpay dashboard → Settings → Webhooks → check the URL ends in `.trycloudflare.com` or your custom tunnel domain
-- [ ] If tunnel URL changed: update Razorpay webhook URL in dashboard
+## D. Razorpay Webhook — point to Vercel (NOT CloudFlare)
+> Vercel `api/index.py` already handles `/webhook/razorpay` and writes to Supabase.
+> CloudFlare tunnel to store PC is no longer needed — stop it if running.
+
+- [ ] Go to Razorpay dashboard → Settings → Webhooks
+  - Set webhook URL to: `https://printosky.vercel.app/webhook/razorpay`
+  - Ensure events: `payment.captured` and `payment_link.paid` are checked
+- [ ] Stop CloudFlare tunnel on store PC (if running) — no longer needed
+- [ ] Verify: make a test payment → Razorpay dashboard → Webhook logs → should show 200 from Vercel
 
 ---
 
-## E. Admin Dashboard
+## E. Staff PINs — Reset from Temporary Values
+> Default PINs (1001–1005) are temporary. Reset before going live.
+> No store PC needed — all done via Vercel API.
+
+- [ ] Run SCHEMA_v12 in Supabase SQL Editor (adds `staff` table to Supabase)
+- [ ] Add `ADMIN_PASSWORD_HASH` to Vercel env vars:
+  - Generate: `python -c "import hashlib; print(hashlib.sha256(b'YourAdminPassword').hexdigest())"`
+  - Add as `ADMIN_PASSWORD_HASH` in Vercel → Settings → Environment Variables
+- [ ] Reset each staff PIN via API (run from any terminal):
+  ```
+  curl -X POST https://printosky.vercel.app/admin/reset-pin \
+    -H "Content-Type: application/json" \
+    -d '{"admin_password":"YourAdminPassword","staff_id":"priya","new_pin":"XXXX"}'
+  ```
+  Repeat for: revana, bini, anu, deepak
+- [ ] Staff can self-change their PIN anytime:
+  ```
+  POST /staff/set-pin  {"staff_id":"priya","current_pin":"XXXX","new_pin":"YYYY"}
+  ```
+
+---
+
+## F. Admin Dashboard
 - [ ] Open https://printosky.vercel.app (or Netlify URL) → confirm "Conversations" tab appears
 - [ ] Click Conversations → should load inbox (will be empty until first message after SCHEMA_v11 is applied)
 - [ ] Send a test WhatsApp message → refresh Conversations tab → message should appear
