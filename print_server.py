@@ -543,21 +543,11 @@ def _now() -> str:
 
 
 def _send_whatsapp(phone: str, message: str) -> bool:
-    """POST to Node WhatsApp bridge on port 3001. Returns True on success."""
+    """Send WhatsApp message via Meta Cloud API. Returns True on success."""
     if not phone:
         return False
-    try:
-        payload = json.dumps({"phone": phone, "message": message}).encode()
-        req = urllib.request.Request(
-            "http://localhost:3001/send",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.status == 200
-    except Exception as e:
-        logging.warning("WhatsApp send failed for %s: %s", phone, e)
-        return False
+    from whatsapp_notify import _send
+    return _send(phone, message)
 
 
 def _job_quote(print_items: list, finishing: str, is_student: bool,

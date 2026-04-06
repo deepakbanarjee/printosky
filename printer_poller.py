@@ -426,6 +426,45 @@ def save_supplies(conn, printer, supplies):
     logger.info(f"Saved {len(supplies)} supply readings for {printer}")
 
 
+# ── Ink alert thresholds ──────────────────────────────────────────────────────
+
+INK_ALERT_PCT = 10   # alert when level drops to or below this %
+
+
+def _send_ink_alerts(printer: str, supplies: list, conn) -> None:
+    """
+    Send a WhatsApp staff alert when an ink/toner level crosses a threshold.
+    Fires once on the crossing poll (prev > threshold, current <= threshold).
+    0% gets its own EMPTY alert distinct from the LOW alert.
+    """
+    alerts = []
+    for s in supplies:
+        pct = s.get("pct")
+        if pct is None:
+            continue
+
+        # Two most-recent rows: [0] = just inserted, [1] = previous reading
+        rows = conn.execute("""
+            SELECT pct FROM printer_supplies
+            WHERE printer=? AND supply_index=?
+            ORDER BY polled_at DESC LIMIT 2
+        """, (printer, s["supply_index"])).fetchall()
+        prev_pct = rows[1][0] if len(rows) >= 2 else None
+
+        label = s["description"]
+        if pct == 0 and (prev_pct is None or prev_pct > 0):
+            alerts.append(f"🔴 {label}: EMPTY (0%) — replace immediately")
+        elif 0 < pct <= INK_ALERT_PCT and (prev_pct is None or prev_pct > INK_ALERT_PCT):
+            alerts.append(f"🟡 {label}: LOW ({pct}%) — order replacement soon")
+
+    if alerts:
+        from whatsapp_notify import send_staff_alert
+        printer_name = "Epson WF-C21000" if printer == "epson" else "Konica Bizhub"
+        msg = f"🖨️ *{printer_name} ink alert*\n\n" + "\n".join(alerts)
+        send_staff_alert(msg)
+        logger.warning(f"Ink alert sent for {printer}: {alerts}")
+
+
 # ── Main poll loop ────────────────────────────────────────────────────────────
 
 def poll_once(db_path):
@@ -439,12 +478,16 @@ def poll_once(db_path):
         logger.info("Konica XML gave no counters — trying SNMP fallback")
         konica_data = poll_konica_snmp()
     save_reading(conn, "konica", konica_data)
-    save_supplies(conn, "konica", poll_supplies(KONICA_IP, "konica"))
+    konica_supplies = poll_supplies(KONICA_IP, "konica")
+    save_supplies(conn, "konica", konica_supplies)
+    _send_ink_alerts("konica", konica_supplies, conn)
 
     # Epson: SNMP only
     epson_data = poll_epson_snmp()
     save_reading(conn, "epson", epson_data)
-    save_supplies(conn, "epson", poll_supplies(EPSON_IP, "epson"))
+    epson_supplies = poll_supplies(EPSON_IP, "epson")
+    save_supplies(conn, "epson", epson_supplies)
+    _send_ink_alerts("epson", epson_supplies, conn)
 
     conn.close()
 
