@@ -708,6 +708,30 @@
   /* status badge additions */
   .badge-queued { background: rgba(0,200,255,.12); color: var(--accent); border: 1px solid rgba(0,200,255,.3); }
   .badge-draft  { background: rgba(90,112,128,.12); color: var(--muted); border: 1px solid var(--border); }
+
+  /* ── Conversations Tab ─────────────────────────────────────────────────── */
+  .conv-tab-bar { display:flex; gap:4px; padding:10px 16px 0; border-bottom:1px solid var(--border); background:var(--bg); }
+  .conv-tab-btn { background:none; border:none; color:var(--muted); font-family:var(--mono); font-size:.75rem; padding:6px 14px; cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; letter-spacing:.05em; }
+  .conv-tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .conv-tab-btn:hover:not(.active) { color:var(--fg); }
+  #conv-panel { display:none; padding:12px 16px; }
+  .conv-toolbar { display:flex; gap:8px; margin-bottom:10px; }
+  .conv-search { flex:1; background:var(--bg2); border:1px solid var(--border); color:var(--fg); font-size:.78rem; padding:5px 10px; outline:none; border-radius:4px; }
+  .conv-search:focus { border-color:var(--accent); }
+  .conv-container { display:flex; gap:0; border:1px solid var(--border); border-radius:4px; height:calc(100vh - 240px); min-height:400px; overflow:hidden; }
+  .conv-inbox { width:280px; min-width:200px; border-right:1px solid var(--border); overflow-y:auto; background:var(--bg); }
+  .conv-inbox-item { padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; transition:background .1s; }
+  .conv-inbox-item:hover { background:var(--bg2); }
+  .conv-inbox-item.active { background:rgba(0,200,255,.08); border-left:2px solid var(--accent); }
+  .conv-phone { font-family:var(--mono); font-size:.78rem; color:var(--accent); font-weight:600; }
+  .conv-preview { font-size:.72rem; color:var(--muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
+  .conv-time { font-size:.65rem; color:var(--muted); float:right; margin-top:1px; }
+  .conv-thread { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:6px; background:var(--bg2); }
+  .conv-bubble { max-width:70%; padding:8px 12px; border-radius:8px; font-size:.8rem; line-height:1.45; word-break:break-word; }
+  .conv-bubble.inbound  { align-self:flex-start; background:var(--bg); border:1px solid var(--border); color:var(--fg); }
+  .conv-bubble.outbound { align-self:flex-end; background:rgba(0,200,100,.15); border:1px solid rgba(0,200,100,.3); color:var(--fg); }
+  .conv-meta { font-size:.62rem; color:var(--muted); margin-top:4px; }
+  .conv-empty { color:var(--muted); font-size:.78rem; padding:20px; text-align:center; }
 </style>
 </head>
 <body>
@@ -757,7 +781,14 @@
     </div>
   </header>
 
+  <!-- Tab bar -->
+  <div class="conv-tab-bar">
+    <button class="conv-tab-btn active" id="tab-jobs" onclick="switchTab('jobs')">Jobs</button>
+    <button class="conv-tab-btn"        id="tab-conv" onclick="switchTab('conv')">Conversations</button>
+  </div>
+
   <main>
+  <div id="jobs-view">
     <!-- Stats row -->
     <div class="stats-grid" id="stats-grid">
       <div class="stat"><div class="stat-label">Today's Jobs</div><div class="stat-value accent" id="s-jobs">—</div></div>
@@ -885,6 +916,20 @@
     </div>
 
     <!-- ── Job Print Panel (expands below table on row click) ── -->
+  </div><!-- /#jobs-view -->
+
+  <!-- Conversations panel -->
+  <div id="conv-panel">
+    <div class="conv-toolbar">
+      <input class="conv-search" id="conv-search" placeholder="Search by phone…" oninput="filterInbox()">
+      <button class="refresh-btn" onclick="loadInbox()">↻ Refresh</button>
+    </div>
+    <div class="conv-container">
+      <div class="conv-inbox"  id="conv-inbox-list"><div class="conv-empty">Loading…</div></div>
+      <div class="conv-thread" id="conv-thread-view"><div class="conv-empty">Select a contact to view messages</div></div>
+    </div>
+  </div>
+
   </main>
 </div>
 
@@ -2852,6 +2897,121 @@ async function confirmPhotocopy() {
     alert("Cannot reach print server:\n" + e.message);
     btn.disabled = false; btn.textContent = "Add & Complete";
   }
+}
+
+// ── Conversations Tab ─────────────────────────────────────────────────────────
+
+let convRows    = [];   // all log rows loaded
+let convPhone   = null; // currently selected phone
+let convRefresh = null; // setInterval handle
+
+function switchTab(tab) {
+  document.getElementById("jobs-view").style.display  = tab === "jobs" ? "" : "none";
+  document.getElementById("conv-panel").style.display = tab === "conv" ? "" : "none";
+  document.getElementById("tab-jobs").classList.toggle("active", tab === "jobs");
+  document.getElementById("tab-conv").classList.toggle("active", tab === "conv");
+
+  if (tab === "conv") {
+    loadInbox();
+    if (!convRefresh) convRefresh = setInterval(loadInbox, 30000);
+  } else {
+    if (convRefresh) { clearInterval(convRefresh); convRefresh = null; }
+  }
+}
+
+async function loadInbox() {
+  try {
+    const rows = await sbFetch("conversation_log",
+      "select=phone,body,created_at,direction,message_type,filename&order=created_at.desc&limit=500");
+    if (!rows) return;
+    convRows = rows;
+    renderInbox(rows);
+    if (convPhone) loadThread(convPhone);
+  } catch (e) {
+    document.getElementById("conv-inbox-list").innerHTML =
+      `<div class="conv-empty">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderInbox(rows) {
+  const seen = new Map();
+  for (const r of rows) {
+    if (!seen.has(r.phone)) seen.set(r.phone, r);
+  }
+  const phones = Array.from(seen.values());
+
+  const q        = (document.getElementById("conv-search")?.value || "").toLowerCase();
+  const filtered = q ? phones.filter(r => r.phone.includes(q)) : phones;
+
+  if (filtered.length === 0) {
+    document.getElementById("conv-inbox-list").innerHTML =
+      `<div class="conv-empty">No conversations yet</div>`;
+    return;
+  }
+
+  document.getElementById("conv-inbox-list").innerHTML = filtered.map(r => {
+    const active   = r.phone === convPhone ? " active" : "";
+    const preview  = r.filename
+      ? `[${escHtml(r.message_type || "file")}: ${escHtml(r.filename)}]`
+      : escHtml((r.body || "").slice(0, 60));
+    const ts       = (r.created_at || "").replace("T", " ").slice(11, 16);
+    const ph       = escHtml(r.phone);
+    return `<div class="conv-inbox-item${active}" onclick="loadThread('${ph}')">
+      <span class="conv-time">${ts}</span>
+      <div class="conv-phone">${ph}</div>
+      <div class="conv-preview">${preview}</div>
+    </div>`;
+  }).join("");
+}
+
+async function loadThread(phone) {
+  convPhone = phone;
+  document.querySelectorAll(".conv-inbox-item").forEach(el => {
+    el.classList.toggle("active",
+      el.querySelector(".conv-phone")?.textContent === phone);
+  });
+
+  const view = document.getElementById("conv-thread-view");
+  view.innerHTML = `<div class="conv-empty"><span class="spinner"></span></div>`;
+
+  try {
+    const rows = await sbFetch("conversation_log",
+      `phone=eq.${encodeURIComponent(phone)}&order=created_at.asc&limit=200`);
+    if (!rows) return;
+
+    if (rows.length === 0) {
+      view.innerHTML = `<div class="conv-empty">No messages</div>`;
+      return;
+    }
+
+    view.innerHTML = rows.map(r => {
+      const dir  = r.direction === "outbound" ? "outbound" : "inbound";
+      const body = r.filename
+        ? `[${escHtml(r.message_type || "file")}: ${escHtml(r.filename)}]`
+        : escHtml(r.body || "");
+      const ts   = (r.created_at || "").replace("T", " ").slice(0, 16);
+      return `<div class="conv-bubble ${dir}">
+        ${body}
+        <div class="conv-meta">${ts} · ${r.direction}</div>
+      </div>`;
+    }).join("");
+
+    view.scrollTop = view.scrollHeight;
+  } catch (e) {
+    view.innerHTML = `<div class="conv-empty">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function filterInbox() {
+  renderInbox(convRows);
+}
+
+function escHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // Close modals on Escape key

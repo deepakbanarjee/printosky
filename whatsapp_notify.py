@@ -55,6 +55,11 @@ def _send_meta(phone: str, message: str) -> bool:
         with urllib.request.urlopen(req, timeout=15) as r:
             if r.status == 200:
                 logger.info(f"Meta sent to {digits}")
+                try:
+                    from db_cloud import log_message
+                    log_message(digits, "outbound", message[:500], message_type="text")
+                except Exception:
+                    pass
                 return True
             body = r.read().decode()
             logger.warning(f"Meta send failed: {r.status} {body[:200]}")

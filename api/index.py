@@ -186,6 +186,11 @@ def _process_meta_webhook(data: dict) -> None:
                     text = (msg.get("text") or {}).get("body", "").strip()
                     if text:
                         _handle_text(sender, text)
+                        try:
+                            from db_cloud import log_message
+                            log_message(sender, "inbound", text, message_type="text")
+                        except Exception:
+                            pass
 
                 elif msg_type in ("document", "image", "video", "audio"):
                     blk      = msg.get(msg_type, {})
@@ -194,6 +199,13 @@ def _process_meta_webhook(data: dict) -> None:
                     fname    = blk.get("filename", "")
                     if media_id:
                         _handle_media(sender, msg_type, media_id, mime, fname)
+                        try:
+                            from db_cloud import log_message
+                            log_message(sender, "inbound",
+                                        fname or f"[{msg_type}]",
+                                        message_type=msg_type, filename=fname)
+                        except Exception:
+                            pass
 
 
 def _process_razorpay_payment(data: dict) -> None:

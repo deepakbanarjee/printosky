@@ -247,3 +247,22 @@ def upload_file(filename: str, content: bytes, mime_type: str) -> str:
     except Exception as e:
         logger.error(f"upload_file error for {filename}: {e}")
         return ""
+
+
+# ── conversation_log ──────────────────────────────────────────────────────────
+
+def log_message(phone: str, direction: str, body: str,
+                message_type: str = "text", filename: str | None = None,
+                job_id: str | None = None) -> None:
+    """Insert a row into conversation_log. Silent on error — never raises."""
+    try:
+        _client().table("conversation_log").insert({
+            "phone":        phone,
+            "direction":    direction,
+            "message_type": message_type,
+            "body":         (body or "")[:2000],
+            "filename":     filename,
+            "job_id":       job_id,
+        }).execute()
+    except Exception as e:
+        logger.warning(f"log_message error ({direction} {phone}): {e}")
