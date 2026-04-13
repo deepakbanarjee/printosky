@@ -66,6 +66,9 @@ FILE_MIME_TYPES = {
 # ── Signature helpers ─────────────────────────────────────────────────────────
 
 def _verify_meta_sig(body: bytes, sig_header: str) -> bool:
+    if not META_APP_SECRET:
+        logger.error("META_APP_SECRET not configured — rejecting all webhooks")
+        return False
     if not sig_header.startswith("sha256="):
         return False
     expected = hmac.new(META_APP_SECRET.encode(), body, hashlib.sha256).hexdigest()
@@ -115,6 +118,11 @@ def _handle_text(sender: str, text: str) -> None:
     for reply in replies:
         if isinstance(reply, str):
             _send(sender, reply)
+            try:
+                from db_cloud import log_message
+                log_message(sender, "outbound", reply, message_type="text")
+            except Exception:
+                pass
         elif isinstance(reply, tuple) and reply:
             tag = reply[0]
             if tag in ("STAFF_QUOTE", "STAFF_MIXED_TIMEOUT"):
@@ -137,7 +145,7 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
         base_name = f"{sender}_{ts}{ext or '.bin'}"
 
     dest_name = f"{sender}_{ts}_{base_name}"   # unique storage key
-    job_id    = f"OSP-{datetime.now().strftime('%Y%m%d')}-{sender[-4:]}-{ts[-4:]}"
+    job_id    = f"OSP-{datetime.now().strftime('%Y%m%d')}-{sender[-4:]}-{ts[-4:]}-{os.urandom(3).hex()}"
 
     # ── Step 1: ONE Meta API call — receipt + size question combined ─────────
     # This stays within Vercel's 10s Hobby timeout. Splitting into two calls
@@ -291,7 +299,7 @@ def _handle_staff_set_pin(h, body: bytes) -> None:
         if not row.get("active"):
             _json_response(h, 403, {"error": "Account inactive"})
             return
-        if row["pin_hash"] != _sha256(current):
+        if not hmac.compare_digest(row["pin_hash"], _sha256(current)):
             _json_response(h, 403, {"error": "Current PIN incorrect"})
             return
         _client().table("staff").update({"pin_hash": _sha256(new_pin)}).eq("id", staff_id).execute()
@@ -299,6 +307,34 @@ def _handle_staff_set_pin(h, body: bytes) -> None:
         logger.info(f"Staff {staff_id} changed own PIN")
     except Exception as e:
         logger.error(f"set-pin error: {e}")
+        _json_response(h, 500, {"error": "Server error"})
+
+
+def _handle_staff_resume(h, body: bytes) -> None:
+    """POST /staff/resume — resume bot for a customer held by staff."""
+    try:
+        payload = json.loads(body)
+        phone   = payload.get("phone", "").strip()
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+
+    if not phone:
+        _json_response(h, 400, {"error": "phone required"})
+        return
+
+    from db_cloud import _client, save_session
+    try:
+        result = _client().table("bot_sessions").select("prev_step").eq("phone", phone).execute()
+        if not result.data:
+            _json_response(h, 404, {"error": "No session found for this phone"})
+            return
+        prev_step = result.data[0].get("prev_step") or "size"
+        save_session("supabase", phone, step=prev_step)
+        _json_response(h, 200, {"ok": True, "message": f"Bot resumed for {phone} at step={prev_step}"})
+        logger.info(f"Staff resumed bot for {phone} at step={prev_step}")
+    except Exception as e:
+        logger.error(f"staff-resume error: {e}")
         _json_response(h, 500, {"error": "Server error"})
 
 
@@ -316,7 +352,7 @@ def _handle_admin_reset_pin(h, body: bytes) -> None:
     if not ADMIN_PASSWORD_HASH:
         _json_response(h, 503, {"error": "Admin auth not configured"})
         return
-    if _sha256(admin_pw) != ADMIN_PASSWORD_HASH:
+    if not hmac.compare_digest(_sha256(admin_pw), ADMIN_PASSWORD_HASH):
         _json_response(h, 403, {"error": "Invalid admin password"})
         return
     if not staff_id or not new_pin:
@@ -336,6 +372,45 @@ def _handle_admin_reset_pin(h, body: bytes) -> None:
         logger.info(f"Admin reset PIN for {staff_id}")
     except Exception as e:
         logger.error(f"admin reset-pin error: {e}")
+        _json_response(h, 500, {"error": "Server error"})
+
+
+def _handle_admin_send(h, body: bytes) -> None:
+    """POST /admin/send — staff manually sends a WhatsApp message to a customer."""
+    try:
+        payload  = json.loads(body)
+        admin_pw = payload.get("admin_password", "").strip()
+        phone    = payload.get("phone", "").strip()
+        message  = payload.get("message", "").strip()
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+
+    if not ADMIN_PASSWORD_HASH:
+        _json_response(h, 503, {"error": "Admin auth not configured"})
+        return
+    if not hmac.compare_digest(_sha256(admin_pw), ADMIN_PASSWORD_HASH):
+        _json_response(h, 403, {"error": "Invalid admin password"})
+        return
+    if not phone or not message:
+        _json_response(h, 400, {"error": "phone and message required"})
+        return
+
+    from whatsapp_notify import _send
+    try:
+        ok = _send(phone, message)
+        if ok:
+            try:
+                from db_cloud import log_message
+                log_message(phone, "outbound", message, message_type="text")
+            except Exception:
+                pass
+            _json_response(h, 200, {"ok": True})
+            logger.info(f"Admin manually sent message to {phone}")
+        else:
+            _json_response(h, 502, {"error": "WhatsApp send failed"})
+    except Exception as e:
+        logger.error(f"admin-send error: {e}")
         _json_response(h, 500, {"error": "Server error"})
 
 
@@ -414,6 +489,14 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/admin/reset-pin":
             _handle_admin_reset_pin(self, body)
+            return
+
+        if self.path == "/staff/resume":
+            _handle_staff_resume(self, body)
+            return
+
+        if self.path == "/admin/send":
+            _handle_admin_send(self, body)
             return
 
         self.send_response(404)

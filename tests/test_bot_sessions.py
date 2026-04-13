@@ -25,14 +25,15 @@ def db(tmp_path):
     conn = sqlite3.connect(path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS customer_profiles (
-            phone        TEXT PRIMARY KEY,
-            last_size    TEXT,
-            last_colour  TEXT,
-            last_layout  TEXT,
-            last_copies  INTEGER,
-            last_finishing TEXT,
-            last_delivery  INTEGER DEFAULT 0,
-            updated_at   TEXT
+            phone             TEXT PRIMARY KEY,
+            last_size         TEXT,
+            last_colour       TEXT,
+            last_layout       TEXT,
+            last_copies       INTEGER,
+            last_finishing    TEXT,
+            last_delivery     INTEGER DEFAULT 0,
+            last_multiup_sided TEXT,
+            updated_at        TEXT
         )
     """)
     conn.commit()

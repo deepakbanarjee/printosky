@@ -1,5 +1,5 @@
 # Printosky Sprint Backlog
-Last updated: 2026-03-19 (Session 6)
+Last updated: 2026-04-09 (Session 9)
 
 ---
 
@@ -7,11 +7,11 @@ Last updated: 2026-03-19 (Session 6)
 
 | # | Task | Details |
 |---|------|---------|
-| SEC-1 | **Remove staff PINs from SPRINT_BACKLOG.md** | S8-1 lists PINs in plaintext committed to git repo. Delete the PIN values — staff can look up their PIN via `python staff_setup.py list` |
+| SEC-1 | ~~**Remove staff PINs from SPRINT_BACKLOG.md**~~ ✅ | PIN values removed from file; staff can look up via `python staff_setup.py list` |
 | SEC-2 | ~~**Move Supabase credentials to env vars**~~ ✅ | Moved to `.env`; `supabase_sync.py` now uses `load_dotenv` + `os.environ` |
 | SEC-3 | ~~**Admin password hash exposed in Netlify JS**~~ ✅ | All password hashes moved to Netlify env vars; `netlify/functions/auth.js` verifies server-side. Covers admin (PBKDF2), superadmin, store, and MIS |
 | SEC-4 | ~~**Supabase anon key in admin.html**~~ ✅ | All `sbFetch` calls now use Supabase JWT from sessionStorage; `SCHEMA_v5_migration.sql` tightens RLS to `auth.role() = 'authenticated'`; `supabase_sync.py` uses `SUPABASE_SERVICE_KEY` |
-| SEC-5 | **Sequential staff PINs** | Current PINs are 1001–1005 (trivially guessable). Reset all to random 6-digit PINs via `python staff_setup.py reset` |
+| SEC-5 | ~~**Sequential staff PINs**~~ ✅ | Reset all staff PINs to random non-sequential values on store PC (2026-04-09) |
 
 ---
 
@@ -19,8 +19,8 @@ Last updated: 2026-03-19 (Session 6)
 
 | # | Task | Details |
 |---|------|---------|
-| C1 | **Run SCHEMA_v3 in Supabase** | `CREATE TABLE staff_sessions`, `ALTER TABLE jobs ADD printed_by`, `ALTER TABLE konica_jobs ADD attributed_to` — SQL in project_status.md |
-| C2 | **OXYGEN PC server URL** | Currently set to own IP (217). Fix: reset localStorage, enter `192.168.55.212:3005` |
+| C1 | ~~**Run SCHEMA_v3 in Supabase**~~ ✅ | Done |
+| C2 | ~~**OXYGEN PC server URL**~~ ✅ | Fixed: `192.168.55.212:3005` |
 
 ---
 
@@ -28,9 +28,9 @@ Last updated: 2026-03-19 (Session 6)
 
 | # | Task | Details |
 |---|------|---------|
-| S7-1 | **Quote endpoint: `colour=col` param** | `/quote?colour=col` ignored — maps nothing. Fix: detect `colour=col` param, set `paper_type=A4_col` |
+| S7-1 | ~~**Quote endpoint: `colour=col` param**~~ ✅ | Fixed in print_server.py handle_quote(); `colour=col/colour/color` → `paper_type=A4_col`. Tests in test_quote_endpoint.py |
 | S7-2 | **Print panel: deploy & test** | New floating panel inserted under job row — deploy to Netlify + test on all PCs |
-| S7-3 | **Print panel: item specs loaded from DB** | When job already has saved specs, load them into editItems (currently resets to defaults) |
+| S7-3 | ~~**Print panel: item specs loaded from DB**~~ ✅ | Fixed: handle_update_job derived paper_type from colour when not sent by frontend; was always defaulting to A4_BW so colour quotes were billed at B&W rates. 6 tests in test_update_job.py. |
 | S7-4 | **Outsourced vendor workflow** | When finishing=project/record/lam_roll, show vendor selection; send job to vendor via WhatsApp |
 | S7-5 | **Thermal binding** listed in admin but rate not tested | Test `finishing=thermal` in quote endpoint |
 
@@ -52,9 +52,9 @@ Last updated: 2026-03-19 (Session 6)
 
 | # | Task | Details |
 |---|------|---------|
-| S9-1 | **Konica supply levels** | Parse bizhub XML at `192.168.55.110` for toner %. Currently returns None |
+| S9-1 | ~~**Konica supply levels**~~ ✅ | `parse_konica_xml_supplies()` + `poll_konica_xml_supplies()` in printer_poller.py. Parses TnrBlkRmng/DrmBlkRmng tags (and alternates); poll_once() tries XML first, falls back to SNMP. 14 tests in test_konica_supplies.py. |
 | S9-2 | **Konica job export URL** | Auto-discovery failed. Manual: open `192.168.55.110` → job log → CSV export → inspect URL in DevTools → set `KONICA_JOB_EXPORT_URL` in konica_jobs_fetcher.py |
-| S9-3 | **Epson ink alerts** | Ink Black 2: 0% (EMPTY), Cyan: 2%. Add WhatsApp alert when ink < 10% |
+| S9-3 | ~~**Epson ink alerts**~~ ✅ | `_send_ink_alerts()` in printer_poller.py:434. Fires on threshold crossing (EMPTY at 0%, LOW at ≤10%). Called in poll_once() for both printers. |
 | S9-4 | **A3 printing** | Test A3 job end-to-end (bot → quote → print) |
 | S9-5 | **Receipt printer** | `RECEIPT_PRINTER = None` in print_server.py. Hardware pending. |
 
@@ -64,10 +64,10 @@ Last updated: 2026-03-19 (Session 6)
 
 | # | Task | Details |
 |---|------|---------|
-| S10-1 | **Meta Cloud API migration** | Replace whatsapp-web.js with Meta Cloud API direct (free, zero ban risk). Steps: (1) Deregister 9446903907 from WA app — CONFIRMED no active account. (2) Create Meta Business Manager + WABA (needs GST cert). (3) Register number, get System User token. (4) Add `/whatsapp-webhook` route to webhook_receiver.py, point CloudFlare tunnel. (5) Migrate outbound calls in whatsapp_bot.py from WA Web socket to graph.facebook.com REST API. Monthly cost: ~₹0 (reactive flow = free service window). |
-| S10-2 | **Bot conversation flow review** | Run full customer journey test: file → 6 steps → payment → notification |
-| S10-3 | **WhatsApp group/channel filter** | Already patched in index.js. Verify after next bot restart |
-| S10-4 | **Delivery flow** | Bot asks delivery Y/N. Delivery charge Rs.30. Test end-to-end |
+| S10-1 | ~~**Meta Cloud API migration**~~ ✅ | Live on 9495706405 via Vercel. App review submitted. Token rotated 2026-04-09. |
+| S10-2 | ~~**Bot conversation flow review**~~ ✅ | Full journey tested: file → 6 steps → payment → notification (2026-04-09) |
+| S10-3 | ~~**WhatsApp group/channel filter**~~ ✅ | Filters @g.us, @newsletter, @broadcast, isGroupMsg in index.js:165-170. Confirmed in code. |
+| S10-4 | ~~**Delivery flow**~~ ✅ | Verified working (2026-04-09) |
 | S10-5 | **B2B bot** | `b2b_bot.py` and `b2b_manager.py` exist. Status unknown. Define scope and test |
 
 ---
@@ -81,6 +81,17 @@ Last updated: 2026-03-19 (Session 6)
 | S11-3 | **Job Centro DB** | Investigate silent auto-export of Konica job logs from Job Centro local DB |
 | S11-4 | **Second store setup** | Multi-store architecture. Each store needs own PC + tunnel + Supabase store_id |
 | S11-5 | **Netlify OXYGEN team credit** | Monitor plan limit. Upgrade if needed or keep deploying via personal account |
+
+---
+
+## 🟣 SPRINT 12 — Advanced Print Automation (WFManager Port)
+
+| # | Task | Details |
+|---|------|---------|
+| S12-1 | **Operator Dashboard GUI** | Build a local Tkinter desktop dashboard on the store PC to view incoming jobs, DB status, and control the watcher. |
+| S12-2 | **Rule-Based Auto-Print** | Bypass the holding queue and auto-print specific workflows (e.g., B2B drops) directly to the OS spooler using `lpr` or shell commands. |
+| S12-3 | **Filename Auto-Pricing** | Match specific module filenames (e.g., "PHYSICS MODULE 1") to fixed-price packages in the DB to skip per-page counting. |
+| S12-4 | **Live Hardware Web Scraper** | Integrate `printer_poller.py` with Konica XML scraping to actively read printer meters before/after jobs to verify completion. |
 
 ---
 

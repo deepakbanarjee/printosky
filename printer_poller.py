@@ -426,6 +426,99 @@ def save_supplies(conn, printer, supplies):
     logger.info(f"Saved {len(supplies)} supply readings for {printer}")
 
 
+# ── Konica: XML supply parsing ───────────────────────────────────────────────
+
+# Tag-name → (supply_index, description) mappings for known bizhub XML variants
+_KONICA_SUPPLY_TAGS = {
+    # Pro 1100 flat-tag format (confirmed via HTTP walk)
+    "tnrblkrmng": (1, "Toner Black"),
+    "drmblkrmng": (2, "Drum Black"),
+    # Alternate firmware tag style
+    "tonerblack": (1, "Toner Black"),
+    "drumblack":  (2, "Drum Black"),
+    "toner_black_remaining": (1, "Toner Black"),
+    "drum_black_remaining":  (2, "Drum Black"),
+}
+
+
+def parse_konica_xml_supplies(xml_text: str) -> list:
+    """
+    Parse toner/drum supply levels from Konica bizhub XML text.
+    Returns list of supply dicts compatible with save_supplies().
+    Returns [] on parse failure or if no supply fields found.
+
+    Handles:
+    - Flat tags: <TnrBlkRmng>72</TnrBlkRmng>
+    - Alternate tags: <TonerBlack>68</TonerBlack>
+    - Values with '%' sign: <TnrBlkRmng>33%</TnrBlkRmng>
+    """
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        logger.debug("parse_konica_xml_supplies: XML parse error")
+        return []
+
+    found = {}  # supply_index → dict
+    for elem in root.iter():
+        tag = (elem.tag or "").lower().replace("-", "_")
+        raw = (elem.text or "").strip().rstrip("%")
+        try:
+            pct = float(raw)
+        except (ValueError, TypeError):
+            continue
+        if not (0.0 <= pct <= 100.0):
+            continue
+        if tag in _KONICA_SUPPLY_TAGS:
+            idx, desc = _KONICA_SUPPLY_TAGS[tag]
+            if idx not in found:
+                found[idx] = {
+                    "supply_index":  idx,
+                    "description":   desc,
+                    "pct":           pct,
+                    "max_capacity":  100,
+                    "current_level": int(pct),
+                }
+
+    return list(found.values())
+
+
+def poll_konica_xml_supplies() -> list:
+    """
+    Fetch Konica supply levels from HTTP XML (same session as counter poll).
+    Returns list of supply dicts, or [] if unavailable.
+    Falls back to empty list — caller should use poll_supplies() SNMP as backup.
+    """
+    import requests as _req
+    session = _req.Session()
+    try:
+        login_data = {
+            "func": "PSL_LP_SLOGIN",
+            "S_LoginName": KONICA_USER,
+            "S_Password": KONICA_PASS,
+            "S_Permissions": "",
+        }
+        session.post(KONICA_LOGIN_URL, data=login_data, timeout=HTTP_TIMEOUT)
+    except Exception:
+        pass
+
+    urls_to_try = [KONICA_XML_URL, KONICA_COUNTER_URL]
+    for url in urls_to_try:
+        try:
+            r = session.get(url, timeout=HTTP_TIMEOUT)
+            if r.status_code != 200:
+                continue
+            supplies = parse_konica_xml_supplies(r.text)
+            if supplies:
+                logger.info("Konica XML supplies OK (%s): %s",
+                            url, [(s["description"], s["pct"]) for s in supplies])
+                return supplies
+        except Exception as e:
+            logger.debug("Konica XML supply fetch %s: %s", url, e)
+
+    logger.warning("Konica XML supplies: no data from any endpoint")
+    return []
+
+
 # ── Ink alert thresholds ──────────────────────────────────────────────────────
 
 INK_ALERT_PCT = 10   # alert when level drops to or below this %
@@ -478,7 +571,7 @@ def poll_once(db_path):
         logger.info("Konica XML gave no counters — trying SNMP fallback")
         konica_data = poll_konica_snmp()
     save_reading(conn, "konica", konica_data)
-    konica_supplies = poll_supplies(KONICA_IP, "konica")
+    konica_supplies = poll_konica_xml_supplies() or poll_supplies(KONICA_IP, "konica")
     save_supplies(conn, "konica", konica_supplies)
     _send_ink_alerts("konica", konica_supplies, conn)
 
