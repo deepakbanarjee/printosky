@@ -393,7 +393,7 @@ def build_story():
             b("<b>POST /staff-logout</b>: closes the session, records on-duty time."),
             b("<b>GET /active-staff</b>: returns which staff member is logged in on this PC."),
             b("<b>GET /health</b>: checks internet connectivity + printer reachability (port 9100)."),
-            b("Printers: Konica bizhub (192.168.55.110) and Epson WF-C21000 (192.168.55.201)."),
+            b("Printers: Konica bizhub (192.168.55.110) and Epson WF-C21000 (192.168.55.202)."),
         ]),
         sp(8),
     ]

@@ -36,7 +36,7 @@ import requests
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 KONICA_IP            = "192.168.55.110"
-EPSON_IP             = "192.168.55.201"
+EPSON_IP             = "192.168.55.202"
 POLL_INTERVAL        = 300          # seconds (5 minutes)
 SNMP_COMMUNITY       = "public"
 SNMP_TIMEOUT         = 3            # seconds

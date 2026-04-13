@@ -50,7 +50,7 @@ Check each item off as it's completed.
 - [ ] Redeploy with `vercel --prod` and re-verify the webhook in Meta dashboard
 
 ### B3. Epson printer — change default password
-- [ ] Open browser on store PC: http://192.168.55.201
+- [ ] Open browser on store PC: http://192.168.55.202
   - Log in with current: admin / admin
   - Settings → Security → Change Password → set a strong password
 - [ ] Update the new password in `epson_jobs_fetcher.py` (currently hardcoded as `admin`)
@@ -68,7 +68,7 @@ Check each item off as it's completed.
 
 - [ ] **Confirm `printer_poller.py` is running** and reaching the Konica at 192.168.55.110
   - Run: `python printer_poller.py` — should show ink/toner levels without error
-- [ ] **Confirm `epson_jobs_fetcher.py`** can reach http://192.168.55.201
+- [ ] **Confirm `epson_jobs_fetcher.py`** can reach http://192.168.55.202
 - [ ] **Test Supabase file download** — send a PDF via WhatsApp, confirm it appears
   in `C:\Printosky\Jobs\Incoming\` on the store PC within ~60 seconds
 - [ ] **Run database migration** — if `jobs.db` exists, run:

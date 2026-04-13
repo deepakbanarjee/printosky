@@ -124,7 +124,11 @@
       "Bash(grep:*)",
       "WebFetch(domain:manuals.konicaminolta.eu)",
       "WebFetch(domain:kmbsmanuals.konicaminolta.us)",
-      "WebFetch(domain:www.advanceduninstaller.com)"
+      "WebFetch(domain:www.advanceduninstaller.com)",
+      "Bash(pip show:*)",
+      "Bash(netlify status:*)",
+      "Bash(netlify env:list)",
+      "Bash(netlify env:set ADMIN_PBKDF2_HASH ad94950b6dbe616a9b0729dd2b58a298571ad9130d39696f2a5d973a26ba613a)"
     ]
   },
   "model": "claude-sonnet-4-6",

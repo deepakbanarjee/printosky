@@ -322,7 +322,7 @@ def check_printer_reachable(ip: str, timeout=2) -> bool:
 
 PRINTER_IPS = {
     "konica": "192.168.55.110",
-    "epson":  "192.168.55.201",
+    "epson":  "192.168.55.202",
 }
 
 def get_system_health() -> dict:

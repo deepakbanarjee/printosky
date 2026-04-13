@@ -148,8 +148,8 @@ GSHEETS_WORKSHEET_NAME = "Job Log"
 
 # ── Phase 3: Printer IPs (confirmed 2026-03-12 via arp -a) ───────────────────
 KONICA_IP  = "192.168.55.110"   # Konica Bizhub Pro 1100 (MAC: 00-50-aa-2c-78-4c)
-EPSON_IP   = "192.168.55.201"   # Epson WF-C21000       (MAC: e0-bb-9e-d6-52-2e)
-# Access EWS at: http://192.168.55.110  and  http://192.168.55.201
+EPSON_IP   = "192.168.55.202"   # Epson WF-C21000       (MAC: e0-bb-9e-d6-52-2e)
+# Access EWS at: http://192.168.55.110  and  http://192.168.55.202
 # Phase 3 will poll these for page counts to cross-check jobs received vs printed
 
 # File types to track (ignore temp files, system files)
