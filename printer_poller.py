@@ -224,14 +224,12 @@ def poll_konica_supplies_xml():
     try:
         r = session.get(KONICA_CONSUMABLE_URL, timeout=HTTP_TIMEOUT)
         if r.status_code != 200:
-            logger.warning(f"Konica consumable XML: HTTP {r.status_code}")
+            logger.debug(f"Konica consumable XML: HTTP {r.status_code}")
             return []
         # Konica prepends a UTF-8 BOM — decode with utf-8-sig to strip it
         raw_xml = r.content.decode("utf-8-sig", errors="replace").strip()
-        snippet = raw_xml[:300].replace("\n", " ")
-        logger.info(f"Konica consumable XML: status=200 body={snippet!r}")
         if not raw_xml.startswith("<"):
-            logger.warning(f"Konica consumable XML: response is not XML after BOM strip")
+            logger.debug(f"Konica consumable XML: response is not XML after BOM strip")
             return []
 
         root = ET.fromstring(raw_xml)
@@ -315,15 +313,14 @@ def poll_konica_supplies_xml():
         if supplies:
             logger.info(f"Konica consumable XML (flat fallback): {[(s['description'], s['pct']) for s in supplies]}")
         else:
-            all_tags = sorted({e.tag for e in root.iter()})
-            logger.warning(f"Konica consumable XML: no supply data found. All XML tags: {all_tags}")
+            logger.debug("Konica consumable XML: no supply data (public access returns no levels — expected)")
         return supplies
 
     except ET.ParseError as e:
-        logger.warning(f"Konica consumable XML parse error: {e}")
+        logger.debug(f"Konica consumable XML parse error: {e}")
         return []
     except Exception as e:
-        logger.warning(f"Konica consumable XML error: {e}")
+        logger.debug(f"Konica consumable XML error: {e}")
         return []
 
 
