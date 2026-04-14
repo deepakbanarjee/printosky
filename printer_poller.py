@@ -58,6 +58,10 @@ OID_KONICA_PRINT_BW  = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.2"
 OID_KONICA_COPY_BW   = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.1"
 OID_KONICA_PRINT_COL = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.2"
 OID_KONICA_COPY_COL  = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.1"
+# Konica vendor supply OIDs — confirmed via SNMP walk 2026-04-14
+# Drum level not accessible via SNMP on this model (returns no data)
+OID_KONICA_TONER_PCT = "1.3.6.1.4.1.18334.1.1.1.5.7.2.3.1.1.1"   # toner remaining %
+OID_KONICA_TONER_STS = "1.3.6.1.4.1.18334.1.1.1.5.7.2.3.1.2.1"   # toner status code
 OID_EPSON_TOTAL      = "1.3.6.1.2.1.43.10.2.1.4.1.1"
 # Epson WF-C21000 vendor OIDs — confirmed via epson_snmp_discover.py 2026-03-15
 # 6.1.1.4.1.X = print pages by media type; .4.1.2 = A4 (all sizes sum = total)
@@ -404,6 +408,45 @@ def poll_konica_snmp():
     return result
 
 
+def poll_konica_supplies_vendor_snmp():
+    """
+    Poll Konica toner level via confirmed vendor SNMP OIDs.
+    OID_KONICA_TONER_PCT returns 0-100 (percent remaining).
+    Drum level is not accessible via SNMP on the Bizhub Pro 1100.
+
+    Returns list of supply dicts compatible with save_supplies().
+    """
+    toner_pct = snmp_get(KONICA_IP, OID_KONICA_TONER_PCT)
+    toner_sts = snmp_get(KONICA_IP, OID_KONICA_TONER_STS)
+
+    if toner_pct is None:
+        logger.warning("Konica vendor SNMP: toner OID returned no data")
+        return []
+
+    # Status codes observed: 4 = normal/OK; other values may indicate warnings
+    TONER_STATUS = {1: "OK", 2: "Low", 3: "Near-empty", 4: "OK", 5: "Empty"}
+    status_str = TONER_STATUS.get(toner_sts, f"status={toner_sts}")
+
+    supplies = [
+        {
+            "supply_index":  1,
+            "description":   "Toner Black",
+            "max_capacity":  100,
+            "current_level": toner_pct,
+            "pct":           float(toner_pct),
+        },
+        {
+            "supply_index":  2,
+            "description":   "Drum Black",
+            "max_capacity":  None,
+            "current_level": None,
+            "pct":           None,   # drum OID not accessible on this model
+        },
+    ]
+    logger.info(f"Konica vendor SNMP supplies: Toner={toner_pct}% ({status_str}), Drum=unknown")
+    return supplies
+
+
 # ── Epson: SNMP ───────────────────────────────────────────────────────────────
 
 def poll_epson_snmp():
@@ -603,10 +646,10 @@ def poll_once(db_path):
         logger.info("Konica XML gave no counters — trying SNMP fallback")
         konica_data = poll_konica_snmp()
     save_reading(conn, "konica", konica_data)
+    # Try XML first (requires admin auth — usually falls through), then vendor SNMP
     konica_supplies = poll_konica_supplies_xml()
     if not konica_supplies:
-        logger.info("Konica consumable XML gave no supplies — falling back to SNMP")
-        konica_supplies = poll_supplies(KONICA_IP, "konica")
+        konica_supplies = poll_konica_supplies_vendor_snmp()
     save_supplies(conn, "konica", konica_supplies)
     _send_ink_alerts("konica", konica_supplies, conn)
 
