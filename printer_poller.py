@@ -219,11 +219,18 @@ def poll_konica_supplies_xml():
 
     try:
         r = session.get(KONICA_CONSUMABLE_URL, timeout=HTTP_TIMEOUT)
-        if r.status_code != 200 or not r.text.strip().startswith("<"):
-            logger.debug(f"Konica consumable XML: bad response (status={r.status_code})")
+        if r.status_code != 200:
+            logger.warning(f"Konica consumable XML: HTTP {r.status_code}")
+            return []
+        # Konica prepends a UTF-8 BOM — decode with utf-8-sig to strip it
+        raw_xml = r.content.decode("utf-8-sig", errors="replace").strip()
+        snippet = raw_xml[:300].replace("\n", " ")
+        logger.info(f"Konica consumable XML: status=200 body={snippet!r}")
+        if not raw_xml.startswith("<"):
+            logger.warning(f"Konica consumable XML: response is not XML after BOM strip")
             return []
 
-        root = ET.fromstring(r.text)
+        root = ET.fromstring(raw_xml)
         labels = SUPPLY_LABELS.get("konica", {})
         supplies = []
 
@@ -239,30 +246,39 @@ def poll_konica_supplies_xml():
             desc = None
             max_cap = None
             current = None
+            level_pct = None   # direct percentage from LevelPer
             for child in elem:
                 ctag = child.tag.lower().replace("_", "").replace("-", "")
                 ctext = (child.text or "").strip()
-                if ctag in ("description", "name", "type", "supplyname"):
-                    desc = ctext
+                if ctag in ("description", "name", "type", "supplyname", "color", "colour"):
+                    if ctext and ctext not in ("Black", "Cyan", "Magenta", "Yellow"):
+                        desc = ctext   # prefer descriptive name over colour label
+                    elif ctext and desc is None:
+                        desc = ctext
                 elif ctag in ("maxcapacity", "fullcapacity", "capacity", "max"):
                     try:
                         max_cap = int(ctext)
                     except ValueError:
                         pass
-                elif ctag in ("currentlevel", "level", "remaining", "remainpct", "currentvalue"):
+                elif ctag in ("levelper", "levelpercent", "remainpct", "percent", "pct"):
+                    # LevelPer is a direct 0-100 percentage — Konica confirmed
+                    try:
+                        level_pct = float(ctext)
+                    except ValueError:
+                        pass
+                elif ctag in ("currentlevel", "level", "remaining", "currentvalue"):
                     try:
                         current = int(ctext)
                     except ValueError:
                         pass
 
-            if current is not None or max_cap is not None:
+            if level_pct is not None or current is not None or max_cap is not None:
                 supply_idx = len(supplies) + 1
                 label = desc or labels.get(supply_idx, f"Supply {supply_idx}")
-                pct = None
-                if max_cap and max_cap > 0 and current is not None and current >= 0:
+                pct = level_pct  # use direct pct if available
+                if pct is None and max_cap and max_cap > 0 and current is not None and current >= 0:
                     pct = round(current / max_cap * 100, 1)
-                elif current is not None and 0 <= current <= 100 and max_cap in (None, 100):
-                    # Some firmwares report level directly as percentage (0-100)
+                elif pct is None and current is not None and 0 <= current <= 100 and max_cap in (None, 100):
                     pct = float(current)
                 supplies.append({
                     "supply_index":  supply_idx,
@@ -295,14 +311,15 @@ def poll_konica_supplies_xml():
         if supplies:
             logger.info(f"Konica consumable XML (flat fallback): {[(s['description'], s['pct']) for s in supplies]}")
         else:
-            logger.debug("Konica consumable XML: no supply data found — will use SNMP")
+            all_tags = sorted({e.tag for e in root.iter()})
+            logger.warning(f"Konica consumable XML: no supply data found. All XML tags: {all_tags}")
         return supplies
 
     except ET.ParseError as e:
-        logger.debug(f"Konica consumable XML parse error: {e}")
+        logger.warning(f"Konica consumable XML parse error: {e}")
         return []
     except Exception as e:
-        logger.debug(f"Konica consumable XML: {e}")
+        logger.warning(f"Konica consumable XML error: {e}")
         return []
 
 

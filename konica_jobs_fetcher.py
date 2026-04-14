@@ -30,7 +30,6 @@ import csv as csv_mod
 import time
 import logging
 import threading
-import xml.etree.ElementTree as ET
 import requests
 from datetime import datetime
 
@@ -47,9 +46,11 @@ KONICA_PASS         = ""           # blank by default; set if changed
 # Leave as None to enable auto-discovery from _CANDIDATE_URLS.
 KONICA_JOB_EXPORT_URL = None   # e.g. "http://192.168.55.110/wcd/joblist_export.csv"
 
-KONICA_LOGIN_URL         = f"http://{KONICA_IP}/wcd/index.html"
-KONICA_JOB_HISTORY_XML   = f"http://{KONICA_IP}/wcd/job_history.xml"   # confirmed endpoint
-HTTP_TIMEOUT             = 30       # seconds — job log can be large
+KONICA_LOGIN_URL  = f"http://{KONICA_IP}/wcd/index.html"
+HTTP_TIMEOUT      = 30       # seconds — job log can be large
+# NOTE: job_history.xml is a device settings page, not job records.
+# Job history CSV export is not available via the web UI on this model.
+# Use Job Centro 2.0 to export CSVs and drop them into data/imports/.
 FETCH_INTERVAL      = 1800     # seconds (30 minutes)
 
 # Cache file — persists discovered URL across restarts
@@ -139,115 +140,6 @@ def _try_download(session, url):
         return None
 
 
-def _try_download_xml(session, url):
-    """
-    Fetch Konica job_history.xml and convert it to the CSV format that
-    konica_csv_importer expects.  Returns a CSV text string, or None on failure.
-
-    Konica XML job history uses elements like <Job> (or <Record>) inside a
-    <JobHistory> (or root) wrapper.  Child tag names vary by firmware — this
-    function maps the common variants to the importer's CSV column names.
-    """
-    CSV_HEADERS = [
-        "Job Number", "Job Type", "User Name", "File Name", "Result",
-        "Number of Pages", "Number of Pages Printed",
-        "Number of Monochrome Pages Printed", "Number of Color Pages Printed",
-        "Number of Copies Printed", "Job Reception Date", "RIP Start Date",
-        "RIP End Date", "Print Start Date", "Print End Date",
-        "Paper Size", "Paper Type",
-    ]
-    # Normalised child tag → CSV column name
-    TAG_MAP = {
-        "jobnumber":                         "Job Number",
-        "jobno":                             "Job Number",
-        "number":                            "Job Number",
-        "jobtype":                           "Job Type",
-        "type":                              "Job Type",
-        "username":                          "User Name",
-        "userid":                            "User Name",
-        "user":                              "User Name",
-        "filename":                          "File Name",
-        "documentname":                      "File Name",
-        "docname":                           "File Name",
-        "result":                            "Result",
-        "status":                            "Result",
-        "numberofpages":                     "Number of Pages",
-        "numpages":                          "Number of Pages",
-        "pages":                             "Number of Pages",
-        "numberpagesprinted":                "Number of Pages Printed",
-        "pagespainted":                      "Number of Pages Printed",
-        "printedpages":                      "Number of Pages Printed",
-        "numberofmonochromaticpagesprinted": "Number of Monochrome Pages Printed",
-        "monopages":                         "Number of Monochrome Pages Printed",
-        "bwpages":                           "Number of Monochrome Pages Printed",
-        "numberofcolorpagesprinted":         "Number of Color Pages Printed",
-        "colorpages":                        "Number of Color Pages Printed",
-        "colourpages":                       "Number of Color Pages Printed",
-        "numberofcopies":                    "Number of Copies Printed",
-        "copies":                            "Number of Copies Printed",
-        "jobreceptiondate":                  "Job Reception Date",
-        "receptiondate":                     "Job Reception Date",
-        "startdate":                         "Job Reception Date",
-        "ripstartdate":                      "RIP Start Date",
-        "ripenddate":                        "RIP End Date",
-        "printstartdate":                    "Print Start Date",
-        "printenddate":                      "Print End Date",
-        "papersize":                         "Paper Size",
-        "paper":                             "Paper Size",
-        "papertype":                         "Paper Type",
-    }
-
-    try:
-        r = session.get(url, timeout=HTTP_TIMEOUT)
-        if r.status_code != 200:
-            return None
-        content = r.text.strip()
-        if not content.startswith("<"):
-            return None
-
-        root = ET.fromstring(content)
-
-        # Find job record elements — try common wrapper tag names
-        job_elems = (
-            list(root.iter("Job")) or
-            list(root.iter("Record")) or
-            list(root.iter("JobRecord")) or
-            list(root.iter("JobInfo")) or
-            list(root.iter("JobLog"))
-        )
-        if not job_elems:
-            logger.debug("Konica job_history.xml: no job elements found")
-            return None
-
-        rows = []
-        for job in job_elems:
-            row = {h: "" for h in CSV_HEADERS}
-            for child in job:
-                key = child.tag.lower().replace("_", "").replace("-", "").replace(" ", "")
-                mapped = TAG_MAP.get(key)
-                if mapped and child.text:
-                    row[mapped] = child.text.strip()
-            if row.get("Job Number"):
-                rows.append(row)
-
-        if not rows:
-            logger.debug("Konica job_history.xml: parsed 0 rows with a Job Number")
-            return None
-
-        out = io.StringIO()
-        writer = csv_mod.DictWriter(out, fieldnames=CSV_HEADERS)
-        writer.writeheader()
-        writer.writerows(rows)
-        logger.info(f"Konica job_history.xml: parsed {len(rows)} jobs → CSV")
-        return out.getvalue()
-
-    except ET.ParseError as e:
-        logger.debug(f"Konica job_history.xml parse error: {e}")
-        return None
-    except Exception as e:
-        logger.debug(f"Konica job_history.xml: {e}")
-        return None
-
 
 def discover_export_url():
     """
@@ -296,11 +188,17 @@ def fetch_and_import(db_path):
         url, csv_text = discover_export_url()
 
     if not csv_text:
-        # CSV discovery failed — try confirmed XML endpoint
-        logger.info(f"Trying XML job history endpoint: {KONICA_JOB_HISTORY_XML}")
-        csv_text = _try_download_xml(session, KONICA_JOB_HISTORY_XML)
-        if not csv_text:
-            return None
+        # job_history.xml is a settings page — it does not contain job records.
+        # Job history is only available as a CSV export via the browser UI.
+        # To fix: open http://192.168.55.110 → Job Log → Download CSV → F12 Network
+        # → copy the download URL → set KONICA_JOB_EXPORT_URL above.
+        logger.warning(
+            "Konica job history unavailable: no CSV export URL found.\n"
+            "  Fix: open http://192.168.55.110 in browser → Job Log page\n"
+            "       → click Download/Export → F12 Network tab → copy the URL\n"
+            "       → paste into KONICA_JOB_EXPORT_URL in konica_jobs_fetcher.py"
+        )
+        return None
 
     # Feed the in-memory CSV string to the importer (no temp file needed)
     try:
