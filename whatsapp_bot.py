@@ -261,16 +261,18 @@ def save_customer_profile(phone: str, settings: dict, db_path: str):
     conn = sqlite3.connect(db_path)
     conn.execute("""
         INSERT INTO customer_profiles(phone, last_size, last_colour, last_layout,
-            last_copies, last_finishing, last_delivery, updated_at)
-        VALUES(?,?,?,?,?,?,?,datetime('now'))
+            last_copies, last_finishing, last_delivery, last_multiup_sided, updated_at)
+        VALUES(?,?,?,?,?,?,?,?,datetime('now'))
         ON CONFLICT(phone) DO UPDATE SET
             last_size=excluded.last_size, last_colour=excluded.last_colour,
             last_layout=excluded.last_layout, last_copies=excluded.last_copies,
             last_finishing=excluded.last_finishing, last_delivery=excluded.last_delivery,
+            last_multiup_sided=excluded.last_multiup_sided,
             updated_at=excluded.updated_at
     """, (
         phone, settings["size"], settings["colour"], settings["layout"],
-        settings["copies"], settings["finishing"], int(settings["delivery"])
+        settings["copies"], settings["finishing"], int(settings["delivery"]),
+        settings.get("sided", "single"),
     ))
     conn.commit()
     conn.close()
@@ -314,8 +316,7 @@ def _build_job_settings(session: dict, job: dict) -> dict:
 def _build_job_settings_from_saved(saved: dict, job: dict) -> dict:
     """Build a settings dict for one job using saved profile settings."""
     layout = saved["layout"]
-    # multiup sided is not stored in profile — default single
-    sided = "single"
+    sided  = saved.get("multiup_sided") or "single"
     return {
         "size":       saved["size"],
         "colour":     saved["colour"],
@@ -646,6 +647,21 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     text    = text.strip()
     session = get_session(db_path, phone)
 
+    # ── Staff hold: customer requests human agent ─────────────────────────────
+    if text.lower() in ("agent", "help", "staff"):
+        prev_step = (session or {}).get("step", "")
+        save_session(db_path, phone, step="staff_hold", prev_step=prev_step)
+        return [
+            "Our staff will contact you shortly. Please wait.",
+            ("STAFF_QUOTE", f"[HOLD] Customer {phone} requested a staff agent. "
+             f"Reply via WhatsApp Business Suite. To resume bot: POST /staff/resume "
+             f"{{\"phone\":\"{phone}\"}}", phone, 0)
+        ]
+
+    # ── Staff hold: ignore all messages until staff resumes ───────────────────
+    if session and session.get("step") == "staff_hold":
+        return []
+
     # ── Review reply (1-5) — checked before session flow ─────────────────────
     # If no active conversation and message is a digit 1-5, treat as review rating.
     if not session and text in ("1", "2", "3", "4", "5"):
@@ -713,13 +729,13 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
             if saved and idx < len(jobs):
                 return [msg_batch_confirm(idx, len(jobs),
                                           jobs[idx]["filename"], jobs[idx]["page_count"], saved)]
-            return ["_Please reply with 1 or 2_ 👆"]
+            return ["_Please reply with 1 or 2_ 👆\n\nType *AGENT* to speak to our staff."]
 
     # ── Step 1: Size ──────────────────────────────────────────────────────────
     if step == "size":
         size = SIZE_MAP.get(text)
         if not size:
-            return ["_Please reply with 1, 2, or 3_ 👆"]
+            return ["_Please reply with 1, 2, or 3_ 👆\n\nType *AGENT* to speak to our staff."]
         if size == "other":
             clear_session(db_path, phone)
             return [msg_other_size(s_jobid)]
@@ -730,7 +746,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     elif step == "colour":
         colour = COLOUR_MAP.get(text)
         if not colour:
-            return ["_Please reply with 1, 2, or 3_ 👆"]
+            return ["_Please reply with 1, 2, or 3_ 👆\n\nType *AGENT* to speak to our staff."]
         save_session(db_path, phone, colour=colour, step="layout")
         return [msg_step3_layout()]
 
@@ -738,7 +754,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     elif step == "layout":
         layout = LAYOUT_MAP.get(text)
         if not layout:
-            return ["_Please reply with 1, 2, or 3_ 👆"]
+            return ["_Please reply with 1, 2, or 3_ 👆\n\nType *AGENT* to speak to our staff."]
         if layout == "multiup":
             save_session(db_path, phone, layout="multiup", step="multiup_per")
             return [msg_step3b_multiup()]
@@ -749,7 +765,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     elif step == "multiup_per":
         mup = MULTIUP_MAP.get(text)
         if not mup:
-            return ["_Please reply with 1, 2, 3, or 4_ 👆"]
+            return ["_Please reply with 1, 2, 3, or 4_ 👆\n\nType *AGENT* to speak to our staff."]
         save_session(db_path, phone, multiup_per=mup, step="multiup_sided")
         return [msg_step3c_multiup_sided()]
 
@@ -757,7 +773,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     elif step == "multiup_sided":
         sided = SIDED_MAP.get(text)
         if not sided:
-            return ["_Please reply with 1 or 2_ 👆"]
+            return ["_Please reply with 1 or 2_ 👆\n\nType *AGENT* to speak to our staff."]
         save_session(db_path, phone, multiup_sided=sided, step="copies")
         return [msg_step4_copies()]
 
@@ -768,7 +784,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
             if copies < 1 or copies > 999:
                 raise ValueError
         except ValueError:
-            return ["_Please reply with a valid number (e.g. 1, 2, 5)_ 👆"]
+            return ["_Please reply with a valid number (e.g. 1, 2, 5)_ 👆\n\nType *AGENT* to speak to our staff."]
         save_session(db_path, phone, copies=copies, step="finishing")
         return [msg_step5_finishing()]
 
@@ -776,7 +792,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     elif step == "finishing":
         finishing = FINISHING_MAP.get(text)
         if not finishing:
-            return ["_Please reply with a number from 1 to 9_ 👆"]
+            return ["_Please reply with a number from 1 to 9_ 👆\n\nType *AGENT* to speak to our staff."]
         save_session(db_path, phone, finishing=finishing)
 
         if batch_id:
@@ -799,7 +815,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     # ── Step 6: Delivery → Calculate/Summary ─────────────────────────────────
     elif step == "delivery":
         if text not in ("1", "2"):
-            return ["_Please reply with 1 or 2_ 👆"]
+            return ["_Please reply with 1 or 2_ 👆\n\nType *AGENT* to speak to our staff."]
         delivery = text == "2"
         save_session(db_path, phone, delivery=int(delivery), step="done")
 
@@ -926,7 +942,11 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
 
         return [msg_payment_link(s_jobid, result["breakdown"], pay["url"])]
 
-    return []
+    # ── Fallthrough: unrecognised input for current step ─────────────────────
+    return [
+        "Sorry, I didn't understand that. Please reply with one of the options above.\n\n"
+        "Type *AGENT* to speak to our staff. 🙏"
+    ]
 
 
 # ── Cloud mode: swap SQLite DB functions to Supabase backend ──────────────────

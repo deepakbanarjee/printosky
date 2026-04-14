@@ -613,8 +613,8 @@ def handle_update_job(body: dict) -> dict:
     for item in items_raw:
         item_number = int(item.get("item_number", 1))
         page_list   = item.get("page_list", "all")
-        paper_type  = item.get("paper_type", "A4_BW")
         colour      = item.get("colour", "bw")
+        paper_type  = item.get("paper_type") or (f"{paper_size}_col" if colour == "col" else f"{paper_size}_BW")
         sides       = item.get("sides", "ss")
         layout      = item.get("layout", "1-up")
         copies      = int(item.get("copies", 1))
