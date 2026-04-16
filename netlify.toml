@@ -4,6 +4,7 @@
 
 [build.environment]
   NODE_VERSION = "18"
+  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_KEY,SUPABASE_URL,ADMIN_PBKDF2_HASH"
 
 [[redirects]]
   from   = "/admin"
