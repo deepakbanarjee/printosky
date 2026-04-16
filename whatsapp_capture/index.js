@@ -1,7 +1,7 @@
 /**
  * PRINTOSKY WHATSAPP AUTO-CAPTURE
  * ================================
- * Monitors WhatsApp (8943232033 - Oxygen) for incoming files.
+ * Monitors WhatsApp (9446903907 - Oxygen) for incoming files.
  * Auto-saves every attachment to C:\Printosky\Jobs\Incoming\
  * Hot folder watcher picks it up instantly → logged to DB.
  * Also sends auto-reply to customer confirming receipt.
@@ -28,7 +28,7 @@ Your print job has been registered at Printosky / Oxygen Students Paradise.
 
 📋 Job ID will be confirmed shortly
 ⏱ Ready time will be shared once we review your file
-📞 Questions? Reply here or call: 8943232033
+📞 Questions? Reply here or call: 9446903907
 
 _Thank you for choosing Printosky!_ 🖨️`;
 
@@ -106,7 +106,7 @@ const client = new Client({
 client.on("qr", (qr) => {
   console.log("\n========================================");
   console.log("  SCAN THIS QR CODE WITH WHATSAPP");
-  console.log("  (Store phone: 8943232033)");
+  console.log("  (Store phone: 9446903907)");
   console.log("  Open WhatsApp → Linked Devices → Link a Device");
   console.log("========================================\n");
   qrcode.generate(qr, { small: true });
@@ -121,7 +121,7 @@ client.on("auth_failure", (msg) => {
 });
 
 client.on("ready", () => {
-  log("✅ WhatsApp capture READY — monitoring 8943232033 for incoming files");
+  log("✅ WhatsApp capture READY — monitoring 9446903907 for incoming files");
   console.log("\n  All incoming files will be auto-saved to:");
   console.log(`  ${HOT_FOLDER}\n`);
 });

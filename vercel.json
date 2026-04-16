@@ -1,0 +1,11 @@
+{
+  "routes": [
+    { "src": "/whatsapp-webhook", "dest": "/api/index.py" },
+    { "src": "/webhook/razorpay",  "dest": "/api/index.py" },
+    { "src": "/staff/set-pin",    "dest": "/api/index.py" },
+    { "src": "/staff/resume",     "dest": "/api/index.py" },
+    { "src": "/admin/reset-pin",  "dest": "/api/index.py" },
+    { "src": "/admin/send",       "dest": "/api/index.py" },
+    { "src": "/",                  "dest": "/api/index.py" }
+  ]
+}

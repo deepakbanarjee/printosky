@@ -393,7 +393,7 @@ def build_story():
             b("<b>POST /staff-logout</b>: closes the session, records on-duty time."),
             b("<b>GET /active-staff</b>: returns which staff member is logged in on this PC."),
             b("<b>GET /health</b>: checks internet connectivity + printer reachability (port 9100)."),
-            b("Printers: Konica bizhub (192.168.55.110) and Epson WF-C21000 (192.168.55.201)."),
+            b("Printers: Konica bizhub (192.168.55.110) and Epson WF-C21000 (192.168.55.202)."),
         ]),
         sp(8),
     ]
@@ -429,7 +429,7 @@ def build_story():
             p("One-time utility to seed and manage staff. Commands: <i>list</i>, "
               "<i>add &lt;name&gt; &lt;pin&gt;</i>, <i>reset-pin</i>, <i>deactivate</i>, <i>activate</i>."),
             b("Stores PINs as SHA256 hashes. PIN must be exactly 4 digits."),
-            b("Default staff seeded: Priya=1001, Revana=1002, Bini=1003, Anu=1004, Deepak=1005."),
+            b("Default staff seeded with temporary PINs — reset via: python staff_setup.py reset-pin &lt;id&gt; &lt;new_pin&gt;"),
         ]),
         sp(8),
     ]

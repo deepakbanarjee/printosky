@@ -60,6 +60,31 @@ try:
 except ImportError:
     KONICA_FETCHER_AVAILABLE = False
 
+# ── Epson Job Log Auto-Fetcher (optional) ─────────────────────────────────────
+try:
+    from epson_jobs_fetcher import start_fetcher as _start_epson_fetcher
+    EPSON_FETCHER_AVAILABLE = True
+except ImportError:
+    EPSON_FETCHER_AVAILABLE = False
+
+# ── Job Tracker — status machine + event log ──────────────────────────────────
+try:
+    from job_tracker import log_event as _log_event, setup_job_events_db as _setup_jevents
+    JOB_TRACKER_AVAILABLE = True
+except ImportError:
+    JOB_TRACKER_AVAILABLE = False
+    def _log_event(*a, **kw): pass
+    def _setup_jevents(*a): pass
+
+# ── Colour Detector — PyMuPDF colour page detection ───────────────────────────
+try:
+    from colour_detector import build_colour_map as _build_colour_map, save_colour_map as _save_colour_map
+    COLOUR_DETECTOR_AVAILABLE = True
+except ImportError:
+    COLOUR_DETECTOR_AVAILABLE = False
+    def _build_colour_map(*a, **kw): return {}
+    def _save_colour_map(*a, **kw): pass
+
 # ── WhatsApp Notifications (optional — sends job tokens + ready alerts) ───────
 try:
     from whatsapp_notify import send_job_token, send_ready_alert, send_file_received
@@ -105,10 +130,10 @@ except ImportError as _bot_err:
 
 # Folder to watch — change this to match the actual path on the store PC
 if platform.system() == "Windows":
-    WATCH_FOLDER = r"C:\\Printosky\Jobs\Incoming"
-    ARCHIVE_FOLDER = r"C:\\Printosky\Jobs\Archive"
-    DB_PATH = r"C:\\Printosky\Data\jobs.db"
-    LOG_PATH = r"C:\\Printosky\Data\watcher.log"
+    WATCH_FOLDER = r"C:\Printosky\Jobs\Incoming"
+    ARCHIVE_FOLDER = r"C:\Printosky\Jobs\Archive"
+    DB_PATH = r"C:\Printosky\Data\jobs.db"
+    LOG_PATH = r"C:\Printosky\Data\watcher.log"
 else:
     # Development / Linux paths
     WATCH_FOLDER = str(Path.home() / "Printosky" / "Jobs" / "Incoming")
@@ -123,8 +148,8 @@ GSHEETS_WORKSHEET_NAME = "Job Log"
 
 # ── Phase 3: Printer IPs (confirmed 2026-03-12 via arp -a) ───────────────────
 KONICA_IP  = "192.168.55.110"   # Konica Bizhub Pro 1100 (MAC: 00-50-aa-2c-78-4c)
-EPSON_IP   = "192.168.55.201"   # Epson WF-C21000       (MAC: e0-bb-9e-d6-52-2e)
-# Access EWS at: http://192.168.55.110  and  http://192.168.55.201
+EPSON_IP   = "192.168.55.202"   # Epson WF-C21000       (MAC: e0-bb-9e-d6-52-2e)
+# Access EWS at: http://192.168.55.110  and  http://192.168.55.202
 # Phase 3 will poll these for page counts to cross-check jobs received vs printed
 
 # File types to track (ignore temp files, system files)
@@ -229,6 +254,11 @@ def setup_database():
         ("colour",            "TEXT"),
         ("layout",            "TEXT"),
         ("delivery",          "INTEGER DEFAULT 0"),
+        ("override_reason",   "TEXT"),
+        ("amount_partial",    "REAL"),
+        ("queued_at",         "TEXT"),
+        ("printing_at",       "TEXT"),
+        ("printed_at",        "TEXT"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE jobs ADD COLUMN {col} {typedef}")
@@ -292,11 +322,24 @@ def setup_database():
     for tbl_col_def in [
         ("jobs",        "printed_by TEXT"),
         ("konica_jobs", "attributed_to TEXT"),
+        # v7: job lifecycle tracking
+        ("jobs", "file_source TEXT"),
+        ("jobs", "colour_page_map TEXT"),
+        ("jobs", "colour_confirmed INTEGER DEFAULT 0"),
+        ("jobs", "parent_job_id TEXT"),
+        ("jobs", "is_sub_job INTEGER DEFAULT 0"),
+        ("jobs", "sub_job_type TEXT"),
+        ("jobs", "collation_warning INTEGER DEFAULT 0"),
+        # v10: multiup_sided stored in customer profile
+        ("customer_profiles", "last_multiup_sided TEXT"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE {tbl_col_def[0]} ADD COLUMN {tbl_col_def[1]}")
         except Exception:
             pass  # column already exists
+
+    # v7: job_events audit table
+    _setup_jevents(conn)
 
     conn.commit()
     conn.close()
@@ -306,21 +349,33 @@ def setup_database():
 # JOB ID GENERATOR
 # ══════════════════════════════════════════════════════════════════════════════
 
+_job_id_lock     = __import__("threading").Lock()
+_job_id_counters = {}   # date-string → last issued sequence number (int)
+
+
 def generate_job_id():
     """
     Generates a job ID like: OSP-20260311-0042
     Date-based, sequential within each day.
+
+    Uses an in-memory counter (seeded from DB once per day) protected by a
+    lock, so concurrent watchdog threads always receive distinct IDs without
+    hitting the COUNT→INSERT gap of the old approach.
     """
     today = datetime.now().strftime("%Y%m%d")
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT COUNT(*) FROM jobs WHERE job_id LIKE ?",
-        (f"OSP-{today}-%",)
-    )
-    count = cursor.fetchone()[0] + 1
-    conn.close()
-    return f"OSP-{today}-{count:04d}"
+    with _job_id_lock:
+        if today not in _job_id_counters:
+            # Seed from DB on the first call of the day (or first call ever)
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM jobs WHERE job_id LIKE ?",
+                (f"OSP-{today}-%",)
+            )
+            _job_id_counters[today] = cursor.fetchone()[0]
+            conn.close()
+        _job_id_counters[today] += 1
+        return f"OSP-{today}-{_job_id_counters[today]:04d}"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FILE HASH (detect duplicates)
@@ -500,8 +555,31 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
     conn.commit()
     conn.close()
 
+    # Log file_received event in audit trail
+    _log_event(DB_PATH, job_id, "file_received",
+               from_status=None, to_status="Received",
+               staff_id=None,
+               notes=f"source={source} sender={sender or 'walk-in'} size={size_kb}KB")
+
     logging.info("NEW JOB [%s] %s | %.1f KB | Source: %s | Sender: %s",
                  job_id, filepath.name, size_kb, source, sender or "walk-in")
+
+    # Auto colour detection for PDFs (background thread — non-blocking)
+    if filepath.suffix.lower() == ".pdf" and COLOUR_DETECTOR_AVAILABLE:
+        import threading as _cd_thread
+        def _run_colour_detect(jid=job_id, fp=str(filepath)):
+            try:
+                cmap = _build_colour_map(fp)
+                _save_colour_map(DB_PATH, jid, cmap)
+                logging.info(
+                    "Colour detection done [%s]: %d colour / %d B&W pages (mixed=%s)",
+                    jid, len(cmap.get("colour", [])), len(cmap.get("bw", [])),
+                    cmap.get("is_mixed", False)
+                )
+            except Exception as exc:
+                logging.warning("Colour detection failed for %s: %s", jid, exc)
+        _cd_thread.Thread(target=_run_colour_detect, daemon=True).start()
+
     # Instant receipt + page count, then add to batch (60s timer fires bot)
     if sender:
         send_file_received(job_id, filepath.name, sender)
@@ -1030,7 +1108,8 @@ def _fire_batch_conversation(batch_id: str, phone: str, job_ids_str: str):
 
     # Load customer profile (saved settings)
     profile = conn.execute(
-        "SELECT last_size, last_colour, last_layout, last_copies, last_finishing, last_delivery "
+        "SELECT last_size, last_colour, last_layout, last_copies, last_finishing, "
+        "last_delivery, last_multiup_sided "
         "FROM customer_profiles WHERE phone=?", (phone,)
     ).fetchone()
     conn.commit(); conn.close()
@@ -1041,6 +1120,7 @@ def _fire_batch_conversation(batch_id: str, phone: str, job_ids_str: str):
             "size": profile[0], "colour": profile[1], "layout": profile[2],
             "copies": profile[3] or 1, "finishing": profile[4] or "none",
             "delivery": profile[5] or 0,
+            "multiup_sided": profile[6] or "single",
         }
 
     logging.info(f"Firing batch {batch_id}: {len(jobs)} job(s), phone={phone}, saved={bool(saved)}")
@@ -1050,6 +1130,11 @@ def _fire_batch_conversation(batch_id: str, phone: str, job_ids_str: str):
     for r in replies:
         if isinstance(r, str):
             _send(phone, r)
+            try:
+                from db_cloud import log_message as _log_msg
+                _log_msg(phone, "outbound", r, message_type="text")
+            except Exception:
+                pass
 
 
 def start_bot_relay_server(db_path):
@@ -1136,6 +1221,15 @@ def start_bot_relay_server(db_path):
                 # Return replies as JSON — Node's sendBotReply will send them via WhatsApp
                 # (do NOT also call _send here — that would cause duplicate messages)
                 reply_list = [r for r in (replies or []) if isinstance(r, str)]
+
+                # Log inbound + outbound to conversation_log
+                try:
+                    from db_cloud import log_message as _log
+                    _log(phone, "inbound", text, message_type="text")
+                    for r in reply_list:
+                        _log(phone, "outbound", r, message_type="text")
+                except Exception:
+                    pass
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -1285,6 +1379,13 @@ def main():
         logging.info("Konica job fetcher started — will auto-import job log every 30 min")
     else:
         logging.info("Konica job fetcher not loaded (konica_jobs_fetcher.py missing)")
+
+    # Epson job log fetcher (delta attribution + web log probe every 5 min)
+    if EPSON_FETCHER_AVAILABLE:
+        _start_epson_fetcher(DB_PATH)
+        logging.info("Epson job fetcher started — delta attribution every 5 min")
+    else:
+        logging.info("Epson job fetcher not loaded (epson_jobs_fetcher.py missing)")
 
     # Load live rate card from Supabase (falls back to hardcoded if unreachable)
     try:

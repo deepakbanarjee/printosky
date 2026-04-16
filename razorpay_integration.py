@@ -4,21 +4,25 @@ PRINTOSKY RAZORPAY INTEGRATION
 Creates Razorpay payment links for print jobs.
 Verifies webhook signatures from Razorpay.
 
-Live keys active — personal account for testing.
+Credentials are loaded from .env (see .env.example).
 """
 
 import hmac
 import hashlib
 import logging
+import os
 import requests
 from requests.auth import HTTPBasicAuth
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger("razorpay_integration")
 
-# ── Credentials ───────────────────────────────────────────────────────────────
-RAZORPAY_KEY_ID     = "rzp_live_SRCqJs1O8YNluT"
-RAZORPAY_KEY_SECRET = "7FdfMBM57uXU1NBvwmRGEKHm"
-WEBHOOK_SECRET      = "PrintoskyWebhook2026"   # set this same value in Razorpay dashboard
+# ── Credentials (loaded from .env) ────────────────────────────────────────────
+RAZORPAY_KEY_ID     = os.environ["RAZORPAY_KEY_ID"]
+RAZORPAY_KEY_SECRET = os.environ["RAZORPAY_KEY_SECRET"]
+WEBHOOK_SECRET      = os.environ["RAZORPAY_WEBHOOK_SECRET"]  # must match Razorpay dashboard
 
 BASE_URL = "https://api.razorpay.com/v1"
 

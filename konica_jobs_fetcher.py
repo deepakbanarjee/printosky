@@ -26,6 +26,7 @@ On first successful import, subsequent runs only import new job numbers (deduped
 
 import os
 import io
+import csv as csv_mod
 import time
 import logging
 import threading
@@ -41,20 +42,48 @@ KONICA_IP           = "192.168.55.110"
 KONICA_USER         = "Admin"
 KONICA_PASS         = ""           # blank by default; set if changed
 
-# Set this once you've found the correct URL via browser DevTools (see above).
-# Leave as None to disable auto-fetch (manual CSV import still works).
+# Set this once you've found the correct URL via browser DevTools (see module docstring).
+# Leave as None to enable auto-discovery from _CANDIDATE_URLS.
 KONICA_JOB_EXPORT_URL = None   # e.g. "http://192.168.55.110/wcd/joblist_export.csv"
 
-KONICA_LOGIN_URL    = f"http://{KONICA_IP}/wcd/index.html"
-HTTP_TIMEOUT        = 30       # seconds — job log can be large
+KONICA_LOGIN_URL  = f"http://{KONICA_IP}/wcd/index.html"
+HTTP_TIMEOUT      = 30       # seconds — job log can be large
+# NOTE: job_history.xml is a device settings page, not job records.
+# Job history CSV export is not available via the web UI on this model.
+# Use Job Centro 2.0 to export CSVs and drop them into data/imports/.
 FETCH_INTERVAL      = 1800     # seconds (30 minutes)
 
-# Fallback URLs to try automatically if KONICA_JOB_EXPORT_URL is None
+# Cache file — persists discovered URL across restarts
+_URL_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "konica_export_url.txt")
+
+def _load_cached_url():
+    try:
+        with open(_URL_CACHE_FILE) as f:
+            return f.read().strip() or None
+    except FileNotFoundError:
+        return None
+
+def _save_cached_url(url):
+    try:
+        with open(_URL_CACHE_FILE, "w") as f:
+            f.write(url)
+    except Exception:
+        pass
+
+# Load cached URL on module import (overridden by hardcoded value above if set)
+KONICA_JOB_EXPORT_URL = KONICA_JOB_EXPORT_URL or _load_cached_url()
+
+# Candidate URLs/POSTs to try automatically
+# Prefix "POST:<url>|<form_key>=<val>&..." for POST-based exports
 _CANDIDATE_URLS = [
     f"http://{KONICA_IP}/wcd/joblist_export.csv",
     f"http://{KONICA_IP}/wcd/job_log_export.csv",
     f"http://{KONICA_IP}/wcd/AccountTrack/Export.csv",
     f"http://{KONICA_IP}/wcd/jobhistory.csv",
+    f"POST:http://{KONICA_IP}/wcd/index.html|func=PSL_JL_EXPORT",
+    f"POST:http://{KONICA_IP}/wcd/index.html|func=PSL_JL_CSV",
+    f"POST:http://{KONICA_IP}/wcd/index.html|func=PSL_JH_EXPORT",
+    f"POST:http://{KONICA_IP}/wcd/index.html|func=PSL_JH_CSV",
 ]
 
 # ── HTTP session helper ───────────────────────────────────────────────────────
@@ -78,21 +107,38 @@ def _make_session():
 
 def _try_download(session, url):
     """
-    Try to GET a URL and return the response text if it looks like a CSV.
+    Try to GET (or POST) a URL and return the response text if it looks like a CSV.
+    Handles "POST:<url>|<form_data>" prefix for POST-based Konica exports.
+    Uses utf-8-sig decoding to strip the BOM that Bizhub sometimes prepends.
     Returns None if the URL doesn't return CSV content.
     """
     try:
-        r = session.get(url, timeout=HTTP_TIMEOUT)
+        if url.startswith("POST:"):
+            _, rest = url.split("POST:", 1)
+            endpoint, form_str = rest.split("|", 1)
+            form_data = dict(kv.split("=", 1) for kv in form_str.split("&"))
+            r = session.post(endpoint, data=form_data, timeout=HTTP_TIMEOUT)
+        else:
+            r = session.get(url, timeout=HTTP_TIMEOUT)
+
         if r.status_code != 200:
             return None
-        content = r.text.strip()
-        # Must start with "Job Number" header or at least have commas and digits
-        if "Job Number" in content[:200] or (content.count(",") > 10 and content[0].isdigit()):
+
+        # Decode with utf-8-sig to strip BOM; fall back to utf-16 if garbage
+        try:
+            content = r.content.decode("utf-8-sig", errors="replace").strip()
+        except Exception:
+            content = r.text.strip()
+
+        # Must look like a CSV — "Job Number" header or commas + digits
+        if ("Job Number" in content[:500]
+                or (content.count(",") > 10 and any(c.isdigit() for c in content[:50]))):
             return content
         return None
     except Exception as e:
         logger.debug(f"  {url}: {e}")
         return None
+
 
 
 def discover_export_url():
@@ -109,6 +155,7 @@ def discover_export_url():
         if csv_text:
             logger.info(f"  Found export URL: {url}")
             KONICA_JOB_EXPORT_URL = url
+            _save_cached_url(url)
             return url, csv_text
     logger.warning(
         "Could not auto-discover Konica job export URL.\n"
@@ -139,13 +186,23 @@ def fetch_and_import(db_path):
 
     if not csv_text:
         url, csv_text = discover_export_url()
-        if not csv_text:
-            return None
+
+    if not csv_text:
+        # job_history.xml is a settings page — it does not contain job records.
+        # Job history is only available as a CSV export via the browser UI.
+        # To fix: open http://192.168.55.110 → Job Log → Download CSV → F12 Network
+        # → copy the download URL → set KONICA_JOB_EXPORT_URL above.
+        logger.warning(
+            "Konica job history unavailable: no CSV export URL found.\n"
+            "  Fix: open http://192.168.55.110 in browser → Job Log page\n"
+            "       → click Download/Export → F12 Network tab → copy the URL\n"
+            "       → paste into KONICA_JOB_EXPORT_URL in konica_jobs_fetcher.py"
+        )
+        return None
 
     # Feed the in-memory CSV string to the importer (no temp file needed)
     try:
         csv_file = io.StringIO(csv_text)
-        import csv as csv_mod
         reader = csv_mod.DictReader(csv_file)
         rows = list(reader)
 

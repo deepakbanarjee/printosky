@@ -7,32 +7,39 @@ The admin page at printosky.com/admin reads from Supabase.
 Setup:
 1. Create free project at supabase.com
 2. Go to Settings → API → copy Project URL and anon key
-3. Set SUPABASE_URL and SUPABASE_KEY below
+3. Add SUPABASE_URL and SUPABASE_KEY to .env (see .env.example)
 4. Run the SQL in SCHEMA.sql to create tables (once only)
 
 Runs as a background thread started by watcher.py.
 """
 
+import os
 import time
 import sqlite3
 import logging
 import threading
 import requests
 from datetime import datetime, date
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger("supabase_sync")
 
-# ── Config — fill these in after creating Supabase project ───────────────────
-SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI"
+# ── Config ────────────────────────────────────────────────────────────────────
+SUPABASE_URL         = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY         = os.environ.get("SUPABASE_KEY", "")          # anon key (project id)
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")  # service_role key (bypasses RLS)
 STORE_ID     = "OSP"       # Oxygen Students Paradise — change per store
 SYNC_INTERVAL = 300        # seconds (5 minutes)
 
 # ── Supabase REST API headers ─────────────────────────────────────────────────
 def _headers():
+    # Use service_role key if available — bypasses RLS for server-side writes
+    auth_key = SUPABASE_SERVICE_KEY or SUPABASE_KEY
     return {
         "apikey":        SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Authorization": f"Bearer {auth_key}",
         "Content-Type":  "application/json",
         "Prefer":        "resolution=merge-duplicates",   # upsert
     }
@@ -193,6 +200,33 @@ def collect_konica_jobs(db_path):
         return []
 
 
+def collect_epson_jobs(db_path):
+    """Pull epson job log rows (last 2000)."""
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("""
+            SELECT source, job_number, job_type, user_name, file_name, result,
+                   pages_printed, mono_pages, color_pages, copies, paper_size,
+                   job_date, print_end_date,
+                   snmp_total_before, snmp_total_after, delta_pages,
+                   attributed_job_id, imported_at
+            FROM epson_jobs
+            ORDER BY job_date DESC LIMIT 2000
+        """)
+        rows = []
+        for row in c.fetchall():
+            d = dict(row)
+            d["store_id"] = STORE_ID
+            rows.append(d)
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.warning(f"collect_epson_jobs: {e}")
+        return []
+
+
 def collect_staff_sessions(db_path):
     """Pull recent staff sessions for Supabase sync."""
     try:
@@ -262,6 +296,7 @@ def sync_once(db_path):
     supplies      = collect_printer_supplies(db_path)
     sup_changes   = collect_supply_changes(db_path)
     konica_jobs   = collect_konica_jobs(db_path)
+    epson_jobs    = collect_epson_jobs(db_path)
     staff_sess    = collect_staff_sessions(db_path)
 
     ok_jobs       = upsert("jobs",             jobs,        on_conflict="job_id")                       if jobs        else True
@@ -270,12 +305,14 @@ def sync_once(db_path):
     ok_supplies   = upsert("printer_supplies", supplies)                                                 if supplies    else True
     ok_changes    = upsert("supply_changes",   sup_changes, on_conflict="store_id,id")                  if sup_changes else True
     ok_konica     = upsert("konica_jobs",      konica_jobs, on_conflict="store_id,job_number")          if konica_jobs else True
+    ok_epson      = upsert("epson_jobs",       epson_jobs,  on_conflict="store_id,id")                  if epson_jobs  else True
     ok_sessions   = upsert("staff_sessions",   staff_sess,  on_conflict="id")                           if staff_sess  else True
 
-    if ok_jobs and ok_printers and ok_summary and ok_supplies and ok_changes and ok_konica and ok_sessions:
+    if ok_jobs and ok_printers and ok_summary and ok_supplies and ok_changes and ok_konica and ok_epson and ok_sessions:
         logger.info(f"Supabase sync OK — {len(jobs)} jobs, {len(printers)} printers, "
                     f"{len(supplies)} supplies, {len(sup_changes)} supply_changes, "
-                    f"{len(konica_jobs)} konica_jobs, {len(staff_sess)} staff_sessions")
+                    f"{len(konica_jobs)} konica_jobs, {len(epson_jobs)} epson_jobs, "
+                    f"{len(staff_sess)} staff_sessions")
     else:
         logger.warning("Supabase sync had errors — check warnings above")
 

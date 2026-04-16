@@ -1,4 +1,7 @@
 {
+  "env": {
+    "MAX_THINKING_TOKENS": "10000"
+  },
   "permissions": {
     "allow": [
       "Bash(python -c \":*)",
@@ -89,7 +92,77 @@
       "Bash(ls C:/printosky_watcher/*.bat)",
       "Bash(findstr /n \"storePcUrl store_pc_url\" \"C:\\\\printosky_watcher\\\\website\\\\admin.html\")",
       "Bash(findstr /n \"storePcUrl\" \"C:\\\\printosky_watcher\\\\website\\\\admin.html\")",
-      "Bash(git -C C:printosky_watcher status)"
+      "Bash(git -C C:printosky_watcher status)",
+      "Bash(git commit:*)",
+      "Bash(curl \"http://localhost:3005/job-items?job_id=OSP-20260318-0001\")",
+      "Bash(curl \"http://localhost:3005/job-items?job_id=OSP-20260313-0011\")",
+      "Bash(curl \"http://localhost:3005/vendors\")",
+      "Bash(git push:*)",
+      "Bash(gh repo:*)",
+      "Bash(git checkout:*)",
+      "Bash(wc -l /c/PY/printosky/website/*.html /c/PY/printosky/website/*.js /c/PY/printosky/website/*.css)",
+      "Bash(powershell -Command \"[Environment]::SetEnvironmentVariable\\('PATH', $env:PATH + ';C:\\\\Users\\\\user\\\\.local\\\\bin', 'User'\\)\")",
+      "Bash(powershell -Command \"[Environment]::SetEnvironmentVariable\\('PATH', [Environment]::GetEnvironmentVariable\\('PATH', 'User'\\) + ';C:\\\\Users\\\\user\\\\.local\\\\bin', 'User'\\)\")",
+      "Bash(python -c \"import sys,json; lines=[l for l in sys.stdin.read\\(\\).split\\(''''\\\\n''''\\) if l.strip\\(\\)]; [print\\(json.loads\\(l\\)[''''message''''][''''content''''][0].get\\(''''text'''',''''''''\\)\\) for l in lines[-3:] if ''''message'''' in json.loads\\(l\\) and json.loads\\(l\\)[''''message''''].get\\(''''role''''\\)==''''assistant'''' and json.loads\\(l\\)[''''message''''].get\\(''''content''''\\)]\")",
+      "WebSearch",
+      "WebFetch(domain:aisensy.com)",
+      "WebFetch(domain:developers.facebook.com)",
+      "WebFetch(domain:www.go4whatsup.com)",
+      "WebFetch(domain:www.wati.io)",
+      "WebFetch(domain:www.heltar.com)",
+      "WebFetch(domain:www.interakt.shop)",
+      "WebFetch(domain:www.greenadsglobal.com)",
+      "WebFetch(domain:authkey.io)",
+      "WebFetch(domain:www.chatondesk.com)",
+      "WebFetch(domain:360dialog.com)",
+      "WebFetch(domain:www.pdfsnake.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(git:*)",
+      "Bash(python:*)",
+      "Skill(update-config)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(grep:*)",
+      "WebFetch(domain:manuals.konicaminolta.eu)",
+      "WebFetch(domain:kmbsmanuals.konicaminolta.us)",
+      "WebFetch(domain:www.advanceduninstaller.com)",
+      "Bash(pip show:*)",
+      "Bash(netlify status:*)",
+      "Bash(netlify env:list)",
+      "Bash(netlify env:set ADMIN_PBKDF2_HASH ad94950b6dbe616a9b0729dd2b58a298571ad9130d39696f2a5d973a26ba613a)",
+      "Bash(ls C:printosky_watcher/*.py)",
+      "Bash(ls:*)",
+      "WebFetch(domain:store.printosky.com)",
+      "Bash(curl:*)",
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Read(//c/Users/user/AppData/Local/Temp/claude/C--py-printosky/81f62190-4c4d-4f09-b11a-84b8efb55ea9/**)",
+      "Bash(done)"
+    ]
+  },
+  "model": "claude-sonnet-4-6",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /d C:\\PY\\printosky && git add . && git commit -m \"Auto-save: session ended\" && git push origin sprint/session-7",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /d C:\\PY\\printosky && git pull origin sprint/session-7"
+          }
+        ]
+      }
     ]
   }
 }

@@ -595,7 +595,26 @@
   .jp-btn.notify:hover { background: rgba(255,171,64,.08); }
   .jp-btn.collect { border-color: var(--green); color: var(--green); }
   .jp-btn.collect:hover { background: rgba(0,230,118,.08); }
+  .jp-btn.vendor  { border-color: #ff7a52; color: #ff7a52; }
+  .jp-btn.vendor:hover  { background: rgba(255,107,64,.08); }
   .jp-btn:disabled { opacity: .4; cursor: default; }
+
+  /* ── Job Timeline ─────────────────────────────── */
+  #jp-timeline { display: flex; flex-direction: column; gap: 2px; }
+  .tl-row {
+    display: flex; align-items: flex-start; gap: 8px;
+    font-size: .72rem; padding: 3px 0;
+  }
+  .tl-dot {
+    width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex-shrink: 0;
+    background: var(--accent);
+  }
+  .tl-dot.system { background: var(--muted); }
+  .tl-dot.alert  { background: var(--amber); }
+  .tl-content { flex: 1; }
+  .tl-action { font-weight: 600; color: var(--fg); }
+  .tl-meta   { color: var(--muted); font-size: .67rem; margin-top: 1px; }
+  .tl-dur    { color: var(--muted); font-size: .65rem; font-style: italic; }
 
   /* ── Payment / Photocopy Modal ─────────────────── */
   .modal-overlay {
@@ -632,6 +651,93 @@
     background: none; border: 1px solid var(--border); color: var(--muted);
     font-family: var(--mono); font-size: .78rem; padding: .5rem 1rem; cursor: pointer;
   }
+
+  /* ── New Job Modal (wizard) ─────────────────────── */
+  .nj-modal-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-top: 2px solid var(--accent); padding: 1.5rem;
+    width: 460px; max-width: 96vw; animation: fadeUp .2s ease;
+  }
+  .nj-steps {
+    display: flex; gap: .3rem; margin-bottom: 1.2rem;
+  }
+  .nj-step-dot {
+    flex: 1; height: 3px; background: var(--border); border-radius: 2px;
+    transition: background .2s;
+  }
+  .nj-step-dot.active { background: var(--accent); }
+  .nj-step-dot.done   { background: var(--green); }
+  .nj-step-label {
+    font-family: var(--mono); font-size: .6rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .12em; margin-bottom: .6rem;
+  }
+  .nj-row { display: flex; gap: .5rem; }
+  .nj-row .modal-field { flex: 1; }
+  .nj-quote-box {
+    background: var(--bg); border: 1px solid var(--border); padding: .75rem 1rem;
+    margin: .8rem 0; display: flex; align-items: center; justify-content: space-between;
+  }
+  .nj-quote-lbl { font-family: var(--mono); font-size: .65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+  .nj-quote-val { font-family: var(--mono); font-size: 1.4rem; font-weight: 600; color: var(--green); }
+  .nj-pay-opts { display: flex; flex-direction: column; gap: .5rem; margin-bottom: .8rem; }
+  .nj-pay-opt  {
+    display: flex; align-items: center; gap: .6rem;
+    background: var(--bg); border: 1px solid var(--border);
+    padding: .55rem .8rem; cursor: pointer; transition: border-color .15s;
+  }
+  .nj-pay-opt:hover, .nj-pay-opt.selected { border-color: var(--accent); }
+  .nj-pay-opt input[type=radio] { accent-color: var(--accent); }
+  .nj-pay-opt-label { font-family: var(--mono); font-size: .75rem; color: var(--text); }
+  .nj-override-row { display: none; }
+  .nj-override-row.show { display: block; }
+  .nj-file-zone {
+    border: 1px dashed var(--border); padding: 1.2rem; text-align: center;
+    cursor: pointer; transition: border-color .15s; margin-bottom: .8rem;
+  }
+  .nj-file-zone:hover { border-color: var(--accent); }
+  .nj-file-zone-label { font-size: .75rem; color: var(--muted); font-family: var(--mono); }
+  .nj-file-name { font-size: .78rem; color: var(--green); font-family: var(--mono); margin-top: .4rem; word-break: break-all; }
+  .nj-file-uploading { font-size: .72rem; color: var(--amber); font-family: var(--mono); margin-top: .4rem; }
+  .nj-btn-new-job {
+    background: rgba(0,200,255,.1); border: 1px solid var(--accent);
+    color: var(--accent); font-family: var(--mono); font-size: .7rem;
+    padding: .3rem .7rem; cursor: pointer; transition: all .15s; letter-spacing: .05em;
+  }
+  .nj-btn-new-job:hover { background: rgba(0,200,255,.2); }
+
+  /* status badge additions */
+  .badge-queued { background: rgba(0,200,255,.12); color: var(--accent); border: 1px solid rgba(0,200,255,.3); }
+  .badge-draft  { background: rgba(90,112,128,.12); color: var(--muted); border: 1px solid var(--border); }
+
+  /* ── Conversations Tab ─────────────────────────────────────────────────── */
+  .conv-tab-bar { display:flex; gap:4px; padding:10px 16px 0; border-bottom:1px solid var(--border); background:var(--bg); }
+  .conv-tab-btn { background:none; border:none; color:var(--muted); font-family:var(--mono); font-size:.75rem; padding:6px 14px; cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; letter-spacing:.05em; }
+  .conv-tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .conv-tab-btn:hover:not(.active) { color:var(--fg); }
+  #conv-panel { display:none; padding:12px 16px; }
+  .conv-toolbar { display:flex; gap:8px; margin-bottom:10px; }
+  .conv-search { flex:1; background:var(--bg2); border:1px solid var(--border); color:var(--fg); font-size:.78rem; padding:5px 10px; outline:none; border-radius:4px; }
+  .conv-search:focus { border-color:var(--accent); }
+  .conv-container { display:flex; gap:0; border:1px solid var(--border); border-radius:4px; height:calc(100vh - 240px); min-height:400px; overflow:hidden; }
+  .conv-inbox { width:280px; min-width:200px; border-right:1px solid var(--border); overflow-y:auto; background:var(--bg); }
+  .conv-inbox-item { padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; transition:background .1s; }
+  .conv-inbox-item:hover { background:var(--bg2); }
+  .conv-inbox-item.active { background:rgba(0,200,255,.08); border-left:2px solid var(--accent); }
+  .conv-phone { font-family:var(--mono); font-size:.78rem; color:var(--accent); font-weight:600; }
+  .conv-preview { font-size:.72rem; color:var(--muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
+  .conv-time { font-size:.65rem; color:var(--muted); float:right; margin-top:1px; }
+  .conv-right { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+  .conv-thread { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:6px; background:var(--bg2); }
+  .conv-reply-bar { display:flex; gap:8px; padding:8px 10px; border-top:1px solid var(--border); background:var(--bg); }
+  .conv-reply-input { flex:1; background:var(--bg2); border:1px solid var(--border); color:var(--fg); font-size:.8rem; padding:6px 10px; outline:none; border-radius:4px; resize:none; height:38px; font-family:inherit; }
+  .conv-reply-input:focus { border-color:var(--accent); }
+  .conv-send-btn { background:var(--accent); color:#000; border:none; padding:0 18px; font-size:.78rem; font-weight:700; border-radius:4px; cursor:pointer; letter-spacing:.05em; }
+  .conv-send-btn:disabled { opacity:.4; cursor:not-allowed; }
+  .conv-bubble { max-width:70%; padding:8px 12px; border-radius:8px; font-size:.8rem; line-height:1.45; word-break:break-word; }
+  .conv-bubble.inbound  { align-self:flex-start; background:var(--bg); border:1px solid var(--border); color:var(--fg); }
+  .conv-bubble.outbound { align-self:flex-end; background:rgba(0,200,100,.15); border:1px solid rgba(0,200,100,.3); color:var(--fg); }
+  .conv-meta { font-size:.62rem; color:var(--muted); margin-top:4px; }
+  .conv-empty { color:var(--muted); font-size:.78rem; padding:20px; text-align:center; }
 </style>
 </head>
 <body>
@@ -647,8 +753,10 @@
       <div class="pin-dot" id="pd1"></div>
       <div class="pin-dot" id="pd2"></div>
       <div class="pin-dot" id="pd3"></div>
+      <div class="pin-dot" id="pd4"></div>
+      <div class="pin-dot" id="pd5"></div>
     </div>
-    <input type="password" id="pin-input" placeholder="4-digit PIN" maxlength="4"
+    <input type="password" id="pin-input" placeholder="6-digit PIN" maxlength="6"
            inputmode="numeric" pattern="[0-9]*" autocomplete="off"
            oninput="onPinInput()" style="text-align:center;letter-spacing:.4em;font-size:1.4rem;">
     <button class="login-btn" onclick="tryPinLogin()">ENTER →</button>
@@ -679,7 +787,14 @@
     </div>
   </header>
 
+  <!-- Tab bar -->
+  <div class="conv-tab-bar">
+    <button class="conv-tab-btn active" id="tab-jobs" onclick="switchTab('jobs')">Jobs</button>
+    <button class="conv-tab-btn"        id="tab-conv" onclick="switchTab('conv')">Conversations</button>
+  </div>
+
   <main>
+  <div id="jobs-view">
     <!-- Stats row -->
     <div class="stats-grid" id="stats-grid">
       <div class="stat"><div class="stat-label">Today's Jobs</div><div class="stat-value accent" id="s-jobs">—</div></div>
@@ -718,12 +833,63 @@
       </div>
     </div>
 
+    <!-- Printer Job Log panel -->
+    <div class="panel" id="printer-jobs-panel">
+      <div class="panel-hdr">
+        <div class="panel-title">▣ Printer Job Log</div>
+        <select id="pjl-filter" style="margin-left:auto;background:var(--bg2);color:var(--fg);border:1px solid var(--border);padding:2px 6px;font-size:.75rem;border-radius:4px" onchange="loadPrinterJobs()">
+          <option value="today">Today</option>
+          <option value="week">This Week</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+      <!-- Konica job log -->
+      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:6px 0 4px">Konica — B&amp;W</div>
+      <div class="table-wrap" style="max-height:220px">
+        <table>
+          <thead><tr>
+            <th style="width:56px">#</th>
+            <th>Date</th>
+            <th>User</th>
+            <th>File</th>
+            <th>Pages</th>
+            <th>Mono</th>
+            <th>Colour</th>
+            <th>Copies</th>
+            <th>Result</th>
+          </tr></thead>
+          <tbody id="konica-jobs-tbody">
+            <tr><td colspan="9" class="empty"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <!-- Epson job log -->
+      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px">Epson — Colour</div>
+      <div class="table-wrap" style="max-height:220px">
+        <table>
+          <thead><tr>
+            <th>Date</th>
+            <th>Source</th>
+            <th>Job / Attribution</th>
+            <th>Pages</th>
+            <th>Mono</th>
+            <th>Colour</th>
+            <th>Type</th>
+          </tr></thead>
+          <tbody id="epson-jobs-tbody">
+            <tr><td colspan="7" class="empty"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Jobs panel -->
     <div class="panel">
       <div class="panel-hdr">
         <div class="panel-title">Job Log</div>
         <span class="panel-badge" id="job-count">Loading…</span>
-        <button class="filter-btn" style="margin-left:auto" onclick="openPhotocopyModal()">+ Photocopy</button>
+        <button class="nj-btn-new-job" style="margin-left:auto" onclick="openNewJobModal()" title="Add walk-in or manual job (N)">+ New Job</button>
+        <button class="filter-btn" onclick="openPhotocopyModal()">+ Photocopy</button>
       </div>
       <div class="filter-bar">
         <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
@@ -756,7 +922,250 @@
     </div>
 
     <!-- ── Job Print Panel (expands below table on row click) ── -->
+  </div><!-- /#jobs-view -->
+
+  <!-- Conversations panel -->
+  <div id="conv-panel">
+    <div class="conv-toolbar">
+      <input class="conv-search" id="conv-search" placeholder="Search by phone…" oninput="filterInbox()">
+      <button class="refresh-btn" onclick="loadInbox()">↻ Refresh</button>
+    </div>
+    <div class="conv-container">
+      <div class="conv-inbox"  id="conv-inbox-list"><div class="conv-empty">Loading…</div></div>
+      <div class="conv-right">
+        <div class="conv-thread" id="conv-thread-view"><div class="conv-empty">Select a contact to view messages</div></div>
+        <div class="conv-reply-bar" id="conv-reply-bar" style="display:none">
+          <textarea class="conv-reply-input" id="conv-reply-input" placeholder="Type a message…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendConvReply();}"></textarea>
+          <button class="conv-send-btn" id="conv-send-btn" onclick="sendConvReply()">SEND</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   </main>
+</div>
+
+<!-- ── New Job Modal (walk-in wizard) ── -->
+<div class="modal-overlay" id="newjob-modal" onclick="if(event.target===this)closeNewJobModal()">
+  <div class="nj-modal-box">
+    <div class="modal-title" style="color:var(--accent)">New Job</div>
+
+    <!-- Step progress bar -->
+    <div class="nj-steps">
+      <div class="nj-step-dot active" id="nj-dot-1"></div>
+      <div class="nj-step-dot" id="nj-dot-2"></div>
+      <div class="nj-step-dot" id="nj-dot-3"></div>
+      <div class="nj-step-dot" id="nj-dot-4"></div>
+    </div>
+
+    <!-- Step 1 — Customer -->
+    <div id="nj-step-1">
+      <div class="nj-step-label">Step 1 of 4 — Customer Details</div>
+      <div class="modal-field">
+        <label>Customer Name (optional)</label>
+        <input type="text" id="nj-name" placeholder="Walk-in customer">
+      </div>
+      <div class="modal-field">
+        <label>Phone (optional)</label>
+        <input type="tel" id="nj-phone" placeholder="9xxxxxxxxx">
+      </div>
+      <div class="modal-field">
+        <label>Source</label>
+        <select id="nj-source">
+          <option value="Walk-in">Walk-in</option>
+          <option value="WhatsApp">WhatsApp (manual)</option>
+          <option value="Pen Drive">Pen Drive</option>
+          <option value="Remote">Remote / Online</option>
+          <option value="Email">Email</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label>Notes (optional)</label>
+        <input type="text" id="nj-notes" placeholder="Any special instructions…">
+      </div>
+      <div class="modal-btns">
+        <button class="modal-ok" style="border-color:var(--accent);color:var(--accent);background:rgba(0,200,255,.08)" onclick="njNext(2)">Next →</button>
+        <button class="modal-cancel" onclick="closeNewJobModal()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Step 2 — File -->
+    <div id="nj-step-2" style="display:none">
+      <div class="nj-step-label">Step 2 of 4 — File</div>
+      <div class="nj-file-zone" onclick="document.getElementById('nj-file-input').click()">
+        <div class="nj-file-zone-label">Click to select file from pen drive or PC</div>
+        <div class="nj-file-name" id="nj-file-name" style="display:none"></div>
+        <div class="nj-file-uploading" id="nj-file-uploading" style="display:none">⏳ Uploading…</div>
+      </div>
+      <input type="file" id="nj-file-input" style="display:none" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.xls,.xlsx,.ppt,.pptx" onchange="njHandleFile(this)">
+      <div style="text-align:center;margin:.4rem 0;font-size:.65rem;color:var(--muted);font-family:var(--mono)">— or —</div>
+      <button class="modal-cancel" style="width:100%;text-align:center" onclick="njSkipFile()">Skip — No file (photocopy / service only)</button>
+      <div class="modal-btns" style="margin-top:.8rem">
+        <button class="modal-ok" id="nj-btn-step2" style="border-color:var(--accent);color:var(--accent);background:rgba(0,200,255,.08)" onclick="njNext(3)" disabled>Next →</button>
+        <button class="modal-cancel" onclick="njBack(1)">← Back</button>
+      </div>
+    </div>
+
+    <!-- Step 3 — Print Specs + Quote -->
+    <div id="nj-step-3" style="display:none">
+      <div class="nj-step-label">Step 3 of 4 — Print Specs</div>
+      <div class="nj-row">
+        <div class="modal-field">
+          <label>Pages</label>
+          <input type="number" id="nj-pages" min="1" value="1" oninput="njFetchQuote()">
+        </div>
+        <div class="modal-field">
+          <label>Copies</label>
+          <input type="number" id="nj-copies" min="1" value="1" oninput="njFetchQuote()">
+        </div>
+      </div>
+      <div class="nj-row">
+        <div class="modal-field">
+          <label>Colour</label>
+          <select id="nj-colour" onchange="njFetchQuote()">
+            <option value="bw">B&amp;W</option>
+            <option value="col">Colour</option>
+          </select>
+        </div>
+        <div class="modal-field">
+          <label>Sides</label>
+          <select id="nj-sides" onchange="njFetchQuote()">
+            <option value="ss">Single Side</option>
+            <option value="ds">Double Side</option>
+          </select>
+        </div>
+      </div>
+      <div class="nj-row">
+        <div class="modal-field">
+          <label>Paper Size</label>
+          <select id="nj-paper" onchange="njFetchQuote()">
+            <option value="A4">A4</option>
+            <option value="A3">A3</option>
+            <option value="Legal">Legal</option>
+            <option value="A5">A5</option>
+          </select>
+        </div>
+        <div class="modal-field">
+          <label>Finishing</label>
+          <select id="nj-finishing" onchange="njFetchQuote()">
+            <option value="none">None</option>
+            <option value="spiral">Spiral Binding</option>
+            <option value="thermal">Thermal Binding</option>
+            <option value="staple">Staple</option>
+            <option value="soft">Soft Binding</option>
+            <option value="project">Project Binding (Outsourced)</option>
+            <option value="record">Record Binding (Outsourced)</option>
+            <option value="lam_cover">Cover Lamination (Outsourced)</option>
+            <option value="lam_roll">Roll Lamination (Outsourced)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-field">
+        <label>Service Type</label>
+        <input type="text" id="nj-service" placeholder="e.g. B&W Print, Colour Print, Binding…">
+      </div>
+      <label style="display:flex;align-items:center;gap:.5rem;font-size:.7rem;color:var(--muted);font-family:var(--mono);margin-bottom:.6rem;cursor:pointer">
+        <input type="checkbox" id="nj-student" onchange="njFetchQuote()"> Student discount
+      </label>
+      <div class="nj-quote-box">
+        <div>
+          <div class="nj-quote-lbl">Estimated Quote</div>
+          <div style="font-size:.6rem;color:var(--border);font-family:var(--mono)" id="nj-quote-breakdown">—</div>
+        </div>
+        <div class="nj-quote-val" id="nj-quote-val">₹—</div>
+      </div>
+      <div class="modal-btns">
+        <button class="modal-ok" style="border-color:var(--accent);color:var(--accent);background:rgba(0,200,255,.08)" onclick="njNext(4)">Next →</button>
+        <button class="modal-cancel" onclick="njBack(2)">← Back</button>
+      </div>
+    </div>
+
+    <!-- Step 4 — Payment Gate -->
+    <div id="nj-step-4" style="display:none">
+      <div class="nj-step-label">Step 4 of 4 — Payment</div>
+      <div class="nj-quote-box" style="margin-bottom:.8rem">
+        <div class="nj-quote-lbl">Quoted Amount</div>
+        <div class="nj-quote-val" id="nj-pay-quoted">₹—</div>
+      </div>
+      <div class="nj-pay-opts" id="nj-pay-opts">
+        <label class="nj-pay-opt selected" id="nj-opt-full" onclick="njSelectPayOpt('full')">
+          <input type="radio" name="nj-pay" value="full" checked>
+          <div><div class="nj-pay-opt-label">Full Payment</div></div>
+        </label>
+        <label class="nj-pay-opt" id="nj-opt-partial" onclick="njSelectPayOpt('partial')">
+          <input type="radio" name="nj-pay" value="partial">
+          <div><div class="nj-pay-opt-label">Partial Payment</div></div>
+        </label>
+        <label class="nj-pay-opt" id="nj-opt-override" onclick="njSelectPayOpt('override')">
+          <input type="radio" name="nj-pay" value="override">
+          <div><div class="nj-pay-opt-label" style="color:var(--amber)">Override (no payment)</div></div>
+        </label>
+      </div>
+      <!-- Full / Partial fields -->
+      <div id="nj-pay-fields">
+        <div class="nj-row">
+          <div class="modal-field">
+            <label id="nj-amount-lbl">Amount (Rs.)</label>
+            <input type="number" id="nj-amount" min="0" step="1" placeholder="0">
+          </div>
+          <div class="modal-field">
+            <label>Mode</label>
+            <select id="nj-mode">
+              <option value="Cash">Cash</option>
+              <option value="UPI">UPI</option>
+              <option value="Online">Online</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <!-- Override reason -->
+      <div class="nj-override-row" id="nj-override-row">
+        <div class="modal-field">
+          <label>Override Reason</label>
+          <select id="nj-override-reason">
+            <option value="">— select reason —</option>
+            <option value="Regular Customer">Regular Customer</option>
+            <option value="Prepaid Account">Prepaid Account</option>
+            <option value="B2B Account">B2B Account</option>
+            <option value="Owner Approved">Owner Approved</option>
+            <option value="Staff Credit">Staff Credit</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-btns">
+        <button class="modal-ok" id="nj-submit-btn" style="border-color:var(--green);color:var(--green);background:rgba(0,230,118,.08)" onclick="njSubmit()">Add to Queue ✓</button>
+        <button class="modal-cancel" onclick="njBack(3)">← Back</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Vendor Modal ── -->
+<div class="modal-overlay" id="vendor-modal">
+  <div class="modal-box" style="border-top-color:#ff7a52">
+    <div class="modal-title" style="color:#ff7a52">Send to Vendor</div>
+    <div id="vm-job-info" style="font-size:.68rem;color:var(--muted);font-family:var(--mono);margin-bottom:.8rem"></div>
+    <div class="modal-field">
+      <label>Vendor</label>
+      <select id="vm-vendor" style="width:100%">
+        <option value="">— select vendor —</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>Cost to Vendor (Rs.)</label>
+      <input type="number" id="vm-cost" min="0" step="1" placeholder="0">
+    </div>
+    <div class="modal-field">
+      <label>Expected Return Date</label>
+      <input type="date" id="vm-return-date">
+    </div>
+    <div class="modal-btns">
+      <button class="modal-ok" onclick="confirmVendorSend()" style="border-color:#ff7a52;color:#ff7a52;background:rgba(255,107,64,.08)">Send →</button>
+      <button class="modal-cancel" onclick="closeVendorModal()">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <!-- ── Payment Modal ── -->
@@ -853,15 +1262,15 @@
 // ── Config ─────────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI";
-const ADMIN_HASH   = "037589dcf5f165dc2ad53b6b453be08fd90aee611c71f822247023f1d7b5196d";
 // Store PC URL — update this to your current Cloudflare tunnel URL for port 3005
 // STORE_PC_URL is configured per-browser during first-time PC setup (localStorage)
 const STORE_PC_URL = localStorage.getItem("storePcUrl") || "";
 
-// ── Auth ───────────────────────────────────────────────────────────────────
-async function sha256(str) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+function storeHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "X-Store-Token": localStorage.getItem("storeToken") || "",
+  };
 }
 
 // ── PC setup (one-time, saved in localStorage) ────────────────────────────
@@ -886,6 +1295,10 @@ function setupPC() {
     localStorage.setItem("storePcUrl", url);
     location.reload();
   }
+  if (!localStorage.getItem("storeToken")) {
+    const token = (prompt("PC Setup (step 3/3)\nStore access token:\n(Copy from .env on the server PC — STORE_TOKEN value)") || "").trim();
+    localStorage.setItem("storeToken", token);
+  }
 }
 
 function resetPCSetup() {
@@ -899,11 +1312,11 @@ function resetPCSetup() {
 // ── PIN input visual feedback ──────────────────────────────────────────────
 function onPinInput() {
   const len = document.getElementById("pin-input").value.length;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     document.getElementById("pd" + i).classList.toggle("filled", i < len);
   }
   document.getElementById("login-err").style.display = "none";
-  if (len === 4) tryPinLogin();
+  if (len === 6) tryPinLogin();
 }
 
 function toggleAdminOverride() {
@@ -914,12 +1327,12 @@ function toggleAdminOverride() {
 // ── Staff PIN login ────────────────────────────────────────────────────────
 async function tryPinLogin() {
   const pin = document.getElementById("pin-input").value;
-  if (pin.length !== 4) return;
+  if (pin.length !== 6) return;
   const pcId = getPcId();
   try {
     const r = await fetch(`${STORE_PC_URL}/staff-login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: storeHeaders(),
       body: JSON.stringify({ pin, pc_id: pcId }),
     });
     const data = await r.json();
@@ -928,11 +1341,22 @@ async function tryPinLogin() {
       sessionStorage.setItem("staff_id", data.staff_id);
       sessionStorage.setItem("staff_name", data.name);
       sessionStorage.setItem("session_id", data.session_id);
+      // Fetch Supabase JWT so sbFetch works with RLS-protected tables
+      try {
+        const jr = await fetch("/.netlify/functions/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "staff", password: localStorage.getItem("storeToken") || "" }),
+        });
+        const jd = await jr.json();
+        if (jd.supabase_jwt) sessionStorage.setItem("supabase_jwt", jd.supabase_jwt);
+      } catch { /* JWT optional — falls back to anon key */ }
       showDashboard();
     } else {
+      document.getElementById("login-err").textContent = "Incorrect PIN";
       document.getElementById("login-err").style.display = "block";
       document.getElementById("pin-input").value = "";
-      onPinInput();
+      for (let i = 0; i < 6; i++) document.getElementById("pd" + i).classList.remove("filled");
     }
   } catch {
     // Store PC offline — fall back to admin override only
@@ -946,9 +1370,19 @@ async function tryPinLogin() {
 // ── Admin override (master password) ──────────────────────────────────────
 async function tryAdminLogin() {
   const pw = document.getElementById("pw").value;
-  const hash = await sha256(pw);
-  if (hash === ADMIN_HASH) {
+  let ok = false, data = {};
+  try {
+    const r = await fetch("/.netlify/functions/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "admin", password: pw }),
+    });
+    data = await r.json();
+    ok = data.ok;
+  } catch { /* network error — ok stays false */ }
+  if (ok) {
     sessionStorage.setItem("p_auth", "1");
+    if (data.supabase_jwt) sessionStorage.setItem("supabase_jwt", data.supabase_jwt);
     sessionStorage.removeItem("staff_id");
     sessionStorage.removeItem("staff_name");
     sessionStorage.removeItem("session_id");
@@ -974,7 +1408,7 @@ async function logout() {
     try {
       await fetch(`${STORE_PC_URL}/staff-logout`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: storeHeaders(),
         body: JSON.stringify({ session_id: parseInt(sid), idle: false }),
       });
     } catch { /* ignore if offline */ }
@@ -1024,7 +1458,7 @@ async function idleLogout() {
     try {
       await fetch(`${STORE_PC_URL}/staff-logout`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: storeHeaders(),
         body: JSON.stringify({ session_id: parseInt(sid), idle: true }),
       });
     } catch { /* ignore */ }
@@ -1052,12 +1486,14 @@ window.addEventListener("DOMContentLoaded", () => {
 
 // ── Supabase fetch ─────────────────────────────────────────────────────────
 async function sbFetch(table, params = "") {
+  const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
     headers: {
       "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Authorization": `Bearer ${jwt}`,
     }
   });
+  if (r.status === 401) { logout(); return null; }
   if (!r.ok) throw new Error(`${table}: ${r.status}`);
   return r.json();
 }
@@ -1091,6 +1527,7 @@ async function loadAll() {
     renderStats(isDemo ? DEMO_SUMMARY : (summary[0] || {}));
     renderTable();
     renderPrinterBreakdown();
+    loadPrinterJobs();
     setSyncState(isDemo ? "demo" : "ok");
   } catch (e) {
     setSyncState("err", e.message);
@@ -1133,7 +1570,7 @@ function renderTable() {
 
   let rows = allJobs.filter(j => {
     if (activeFilter === "Completed" && j.status !== "Completed") return false;
-    if (activeFilter === "Received"  && !["Received","In Progress","Printed"].includes(j.status)) return false;
+    if (activeFilter === "Received"  && !["Received","In Progress","Printed","Queued","Draft"].includes(j.status)) return false;
     if (activeFilter === "today"     && !j.received_at?.startsWith(todayStr)) return false;
     if (search && !`${j.job_id} ${j.filename}`.toLowerCase().includes(search)) return false;
     return true;
@@ -1156,7 +1593,7 @@ function renderTable() {
       <td style="color:var(--accent);font-size:.68rem;font-family:var(--mono)">${esc(j.job_id)}</td>
       <td style="color:var(--muted)">${shortTime(j.received_at)}</td>
       <td style="color:var(--muted);font-size:.68rem;font-family:var(--mono)">${j.sender ? esc(j.sender.replace('@c.us','').replace('@lid','')) : '<span style="color:var(--border)">—</span>'}</td>
-      <td>${esc(trim(j.filename, 26))}${walkinTag}</td>
+      <td>${esc(trim(j.filename, 26))}${walkinTag}${colourBadge(j)}</td>
       <td style="color:var(--muted)">${esc(j.source || "—")}</td>
       <td>${badge(j.status)}</td>
       <td style="color:var(--muted);font-size:.68rem">${esc(j.service_type || "—")}</td>
@@ -1195,7 +1632,7 @@ async function printJob(jobId, filepath, printerKey, copies, colourMode) {
   try {
     const r = await fetch(`${STORE_PC_URL}/print`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: storeHeaders(),
       body: JSON.stringify({ job_id: jobId, filepath, printer: printerKey, copies, colour_mode: colourMode, staff_id: sessionStorage.getItem("staff_id") || null }),
     });
     const data = await r.json();
@@ -1251,6 +1688,63 @@ function renderPrinterBreakdown() {
   });
 }
 
+// ── Printer Job Log ───────────────────────────────────────────────────────────
+async function loadPrinterJobs() {
+  const filter = (document.getElementById("pjl-filter") || {}).value || "today";
+  let dateParam = "";
+  if (filter === "today") {
+    dateParam = `&job_date=gte.${today()}T00:00:00`;
+  } else if (filter === "week") {
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    dateParam = `&job_date=gte.${weekAgo}T00:00:00`;
+  }
+
+  const [konicaRows, epsonRows] = await Promise.all([
+    sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}`).catch(() => []),
+    sbFetch("epson_jobs",  `order=job_date.desc&limit=200${dateParam}`).catch(() => []),
+  ]);
+
+  // Konica table
+  const kt = document.getElementById("konica-jobs-tbody");
+  if (kt) {
+    if (!konicaRows || !konicaRows.length) {
+      kt.innerHTML = `<tr><td colspan="9" class="empty">No Konica job records for this period</td></tr>`;
+    } else {
+      kt.innerHTML = konicaRows.map(r => `
+        <tr>
+          <td style="color:var(--muted);font-family:monospace;font-size:.65rem">${r.job_number || "—"}</td>
+          <td style="color:var(--muted)">${shortTime(r.job_date)}</td>
+          <td>${esc(r.user_name || "—")}</td>
+          <td title="${esc(r.file_name || "")}">${esc(trim(r.file_name || "—", 22))}</td>
+          <td class="amount">${r.pages_printed ?? "—"}</td>
+          <td style="color:var(--muted)">${r.mono_pages ?? "—"}</td>
+          <td style="color:var(--amber)">${r.color_pages ?? "—"}</td>
+          <td style="color:var(--muted)">${r.copies ?? "—"}</td>
+          <td>${badge(r.result === "No Error" ? "Completed" : (r.result || "—"))}</td>
+        </tr>`).join("");
+    }
+  }
+
+  // Epson table
+  const et = document.getElementById("epson-jobs-tbody");
+  if (et) {
+    if (!epsonRows || !epsonRows.length) {
+      et.innerHTML = `<tr><td colspan="7" class="empty">No Epson job records yet — delta attribution populates after each print cycle</td></tr>`;
+    } else {
+      et.innerHTML = epsonRows.map(r => `
+        <tr>
+          <td style="color:var(--muted)">${shortTime(r.job_date)}</td>
+          <td style="color:var(--muted);font-family:monospace;font-size:.65rem">${esc(r.source || "delta")}</td>
+          <td style="color:var(--muted);font-size:.7rem">${esc(r.attributed_job_id || r.job_number || "—")}</td>
+          <td class="amount">${r.pages_printed ?? r.delta_pages ?? "—"}</td>
+          <td style="color:var(--muted)">${r.mono_pages ?? "—"}</td>
+          <td style="color:var(--amber)">${r.color_pages ?? "—"}</td>
+          <td style="color:var(--muted)">${esc(r.job_type || "delta")}</td>
+        </tr>`).join("");
+    }
+  }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function badge(s) {
   const cls = s === "Completed"   ? "badge-completed"
@@ -1258,6 +1752,8 @@ function badge(s) {
             : s === "At Vendor"   ? "badge-vendor"
             : s === "Received"    ? "badge-received"
             : s === "Paid"        ? "badge-paid"
+            : s === "Queued"      ? "badge-queued"
+            : s === "Draft"       ? "badge-draft"
             : s === "In Progress" || s === "Printed" ? "badge-progress"
             : "badge-pending";
   return `<span class="badge ${cls}">${esc(s || "Unknown")}</span>`;
@@ -1269,6 +1765,19 @@ function trim(s,n)    { s=String(s||""); return s.length>n ? s.slice(0,n-1)+"…
 function set(id,val)  { const el=document.getElementById(id); if(el) el.textContent=val; }
 function today()      { return new Date().toISOString().slice(0,10); }
 function now()        { return new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}); }
+
+function colourBadge(j) {
+  if (!j.colour_page_map) return "";
+  try {
+    const cmap = typeof j.colour_page_map === "string" ? JSON.parse(j.colour_page_map) : j.colour_page_map;
+    if (!cmap.has_colour) return "";
+    const confirmed = j.colour_confirmed ? "" : " ⚠";
+    const label = cmap.is_mixed
+      ? `${cmap.colour.length}col/${cmap.bw.length}BW${confirmed}`
+      : `${cmap.colour.length}col${confirmed}`;
+    return ` <span style="font-size:.56rem;background:rgba(255,171,64,.15);color:var(--amber);border:1px solid rgba(255,171,64,.3);border-radius:3px;padding:0 3px;vertical-align:middle">${label}</span>`;
+  } catch { return ""; }
+}
 
 function shortTime(iso) {
   if (!iso) return "—";
@@ -1324,7 +1833,7 @@ function panelHTML() {
         <div class="jp-opts-section">
           <div class="pp-field">
             <label>Finishing</label>
-            <select class="pp-sel" id="jp-finishing" style="width:100%" onchange="editFinishing=this.value; scheduleQuote()">
+            <select class="pp-sel" id="jp-finishing" style="width:100%" onchange="editFinishing=this.value; scheduleQuote(); document.getElementById('jp-btn-vendor').style.display=OUTSOURCED_FINISHING.includes(this.value)?'block':'none'">
               <option value="none">None</option>
               <option value="staple">Staple</option>
               <option value="spiral">Spiral Binding</option>
@@ -1356,11 +1865,28 @@ function panelHTML() {
           </div>
           <div class="jp-action-bar">
             <button class="jp-btn save"    id="jp-btn-save"    onclick="saveJobSpecs()">Save Specs &amp; Quote</button>
+            <button class="jp-btn vendor"  id="jp-btn-vendor"  onclick="openVendorModal()" style="display:none">Send to Vendor →</button>
             <button class="jp-btn notify"  id="jp-btn-notify"  onclick="markReady()" style="display:none">Notify Customer Ready →</button>
             <button class="jp-btn collect" id="jp-btn-collect" onclick="openPaymentModal()" style="display:none">Collect Payment</button>
           </div>
         </div>
       </div>
+    </div>
+    <!-- Colour Detection -->
+    <div id="jp-colour-section" style="display:none;padding:8px 16px 12px;border-top:1px solid var(--border)">
+      <div style="font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.06em;margin-bottom:6px">COLOUR DETECTION</div>
+      <div id="jp-colour-content"></div>
+      <div id="jp-colour-actions" style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"></div>
+    </div>
+    <!-- DTP / Work Session Timer -->
+    <div id="jp-dtp-section" style="display:none;padding:8px 16px 12px;border-top:1px solid var(--border)">
+      <div style="font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.06em;margin-bottom:6px">DTP / EDITING TIMER</div>
+      <div id="jp-dtp-content"></div>
+    </div>
+    <!-- Timeline -->
+    <div id="jp-timeline-section" style="padding:8px 16px 16px;border-top:1px solid var(--border)">
+      <div style="font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.06em;margin-bottom:6px">TIMELINE</div>
+      <div id="jp-timeline">—</div>
     </div>
   </div>`;
 }
@@ -1413,10 +1939,421 @@ function selectJob(jobId) {
 
   renderJobPanel();
   setTimeout(() => panelRow.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
+
+  // Load saved print_items from DB if they exist
+  fetch(`${STORE_PC_URL}/job-items?job_id=${encodeURIComponent(jobId)}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.items && data.items.length > 0) {
+        editItems = data.items.map(it => ({
+          item_number: it.item_number,
+          page_list:   it.page_list || "all",
+          colour:      it.colour    || "bw",
+          sides:       it.sides     || "ss",
+          layout:      it.layout    || "1-up",
+          copies:      it.copies    || 1,
+          paper_gsm:   it.paper_gsm || 70,
+          printer:     it.printer   || "",
+          status:      it.status    || "Pending",
+          pages:       it.pages     || (selectedJob && selectedJob.page_count) || 1,
+        }));
+        renderItems();
+        scheduleQuote();
+      }
+    })
+    .catch(() => {}); // silent — defaults already rendered
+
+  // Load job event timeline
+  loadTimeline(jobId);
+}
+
+// ── Job Timeline ─────────────────────────────────────────────────────────────
+// ── Colour Detection Panel ────────────────────────────────────────────────────
+function renderColourPanel(j) {
+  const section = document.getElementById("jp-colour-section");
+  const content = document.getElementById("jp-colour-content");
+  const actions = document.getElementById("jp-colour-actions");
+  if (!section || !content || !actions) return;
+
+  // Only show for PDFs
+  const isPdf = (j.filename || "").toLowerCase().endsWith(".pdf");
+  if (!isPdf) { section.style.display = "none"; return; }
+  section.style.display = "";
+
+  if (!j.colour_page_map) {
+    content.innerHTML = '<span style="color:var(--muted);font-size:.72rem">Not yet detected.</span>';
+    actions.innerHTML = `<button class="jp-btn save" style="font-size:.7rem;padding:3px 10px" onclick="runColourDetect()">Run Detection</button>`;
+    return;
+  }
+
+  let cmap;
+  try { cmap = typeof j.colour_page_map === "string" ? JSON.parse(j.colour_page_map) : j.colour_page_map; }
+  catch { content.innerHTML = '<span style="color:var(--muted)">Invalid colour data</span>'; return; }
+
+  const confirmed = j.colour_confirmed;
+  const confirmedBadge = confirmed
+    ? '<span style="color:var(--green);font-size:.65rem">✓ Confirmed</span>'
+    : '<span style="color:var(--amber);font-size:.65rem">⚠ Awaiting staff confirmation</span>';
+
+  let html = `<div style="font-size:.72rem;margin-bottom:4px">${confirmedBadge} &nbsp; Total pages: <b>${cmap.total}</b></div>`;
+
+  if (!cmap.has_colour) {
+    html += '<div style="color:var(--muted);font-size:.72rem">All pages are B&amp;W — no colour detected.</div>';
+  } else if (!cmap.is_mixed) {
+    html += `<div style="font-size:.72rem">All <b>${cmap.colour.length}</b> pages are colour → <span style="color:#ff9a3c">Epson</span></div>`;
+  } else {
+    html += `<div style="font-size:.72rem;margin-bottom:4px">
+      <span style="color:#ff9a3c"><b>${cmap.colour.length} colour pages</b></span> → Epson &nbsp;|&nbsp;
+      <span style="color:var(--muted)"><b>${cmap.bw.length} B&amp;W pages</b></span> → Konica
+    </div>`;
+    if (cmap.colour.length <= 20) {
+      html += `<div style="font-size:.67rem;color:var(--amber)">Colour pages: ${cmap.colour.join(", ")}</div>`;
+    }
+    html += `<div style="font-size:.67rem;color:#e57373;margin-top:4px">⚠ Mixed job — collation required after printing</div>`;
+  }
+
+  if (cmap.staff_override) {
+    html += '<div style="font-size:.65rem;color:var(--muted);margin-top:3px">Staff override applied</div>';
+  }
+
+  content.innerHTML = html;
+
+  // Action buttons
+  let btns = "";
+  if (!confirmed) {
+    btns += `<button class="jp-btn save" style="font-size:.7rem;padding:3px 10px" onclick="confirmColour(false)">✓ Confirm</button>`;
+  }
+  btns += `<button class="jp-btn" style="font-size:.7rem;padding:3px 10px;border-color:var(--muted);color:var(--muted)" onclick="runColourDetect()">Re-run Detection</button>`;
+  actions.innerHTML = btns;
+}
+
+async function runColourDetect() {
+  if (!selectedJob) return;
+  const content = document.getElementById("jp-colour-content");
+  if (content) content.innerHTML = '<span style="color:var(--muted);font-size:.72rem">Detecting…</span>';
+  try {
+    const r = await fetch(`${STORE_PC_URL}/detect-colour`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify({ job_id: selectedJob.job_id, staff_id: activeStaff?.staff_id || "" }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      selectedJob.colour_page_map = data.colour_map;
+      selectedJob.colour_confirmed = 0;
+      renderColourPanel(selectedJob);
+      renderTable(); // refresh badge in list
+    } else {
+      if (content) content.innerHTML = `<span style="color:#e57373;font-size:.72rem">${data.error || "Detection failed"}</span>`;
+    }
+  } catch (e) {
+    if (content) content.innerHTML = '<span style="color:#e57373;font-size:.72rem">Network error</span>';
+  }
+}
+
+async function confirmColour(withOverride) {
+  if (!selectedJob) return;
+  const body = { job_id: selectedJob.job_id, staff_id: activeStaff?.staff_id || "" };
+  try {
+    const r = await fetch(`${STORE_PC_URL}/confirm-colour`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      selectedJob.colour_confirmed = 1;
+      renderColourPanel(selectedJob);
+      renderTable();
+    }
+  } catch { /* silent */ }
+}
+
+// ── DTP / Work Session Timer ──────────────────────────────────────────────────
+
+let dtpTimerInterval = null;   // running clock interval
+let dtpOpenSession   = null;   // { id, started_at, paused_at }
+
+const DTP_SERVICE_TYPES = ["dtp", "editing", "graph", "mixed"];
+
+function renderDtpPanel(j) {
+  const section = document.getElementById("jp-dtp-section");
+  if (!section) return;
+  const svc = (j.service_type || "print").toLowerCase();
+  const isDtp = DTP_SERVICE_TYPES.some(t => svc.includes(t));
+  if (!isDtp) { section.style.display = "none"; stopDtpClock(); return; }
+  section.style.display = "";
+  loadDtpSessions(j.job_id);
+}
+
+async function loadDtpSessions(jobId) {
+  const el = document.getElementById("jp-dtp-content");
+  if (!el) return;
+  try {
+    const r = await fetch(`${STORE_PC_URL}/work-sessions?job_id=${encodeURIComponent(jobId)}`, {
+      headers: { "X-Store-Token": localStorage.getItem("storeToken") || "" }
+    });
+    const data = await r.json();
+    dtpOpenSession = data.open_session || null;
+    renderDtpContent(data.sessions || [], dtpOpenSession, jobId);
+  } catch {
+    if (el) el.innerHTML = '<span style="color:#e57373;font-size:.72rem">Could not load sessions</span>';
+  }
+}
+
+function renderDtpContent(sessions, open, jobId) {
+  const el = document.getElementById("jp-dtp-content");
+  if (!el) return;
+
+  // Summary of past closed sessions
+  const closed = sessions.filter(s => s.ended_at);
+  const totalBilledMin = closed.reduce((acc, s) => {
+    if (!s.total_sec) return acc;
+    const slot = 15;
+    return acc + Math.max(1, Math.ceil(s.total_sec / 60 / slot)) * slot;
+  }, 0);
+
+  let html = "";
+
+  if (closed.length) {
+    const hrs = (totalBilledMin / 60).toFixed(2);
+    html += `<div style="font-size:.72rem;margin-bottom:6px">
+      Past sessions: <b>${closed.length}</b> &nbsp;|&nbsp;
+      Total billed: <b>${totalBilledMin} min (${hrs} h)</b>
+    </div>`;
+    html += `<div style="font-size:.67rem;color:var(--muted);margin-bottom:8px">`;
+    closed.forEach((s, i) => {
+      const billedMin = s.total_sec ? Math.max(1, Math.ceil(s.total_sec / 60 / 15)) * 15 : "?";
+      html += `Session ${i + 1}: ${esc(s.staff_id)} — ${billedMin} min`;
+      if (s.notes) html += ` (${esc(s.notes)})`;
+      html += "<br>";
+    });
+    html += "</div>";
+  }
+
+  if (open) {
+    const isPaused = !!open.paused_at;
+    html += `<div style="font-size:.72rem;margin-bottom:6px">
+      <span style="color:${isPaused ? "var(--amber)" : "var(--green)"}">
+        ${isPaused ? "⏸ Paused" : "▶ Running"}
+      </span>
+      &nbsp; Session #${open.id} — staff: <b>${esc(String(open.staff_id || ""))}</b>
+      &nbsp; <span id="dtp-clock" style="font-family:monospace;font-weight:600">00:00:00</span>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${!isPaused ? `<button class="jp-btn" style="font-size:.7rem;padding:3px 10px;border-color:var(--amber);color:var(--amber)" onclick="dtpPause()">⏸ Pause</button>` : ""}
+      ${isPaused  ? `<button class="jp-btn save" style="font-size:.7rem;padding:3px 10px" onclick="dtpResume()">▶ Resume</button>` : ""}
+      <button class="jp-btn collect" style="font-size:.7rem;padding:3px 10px" onclick="openDtpEndModal()">✓ Done</button>
+    </div>`;
+    startDtpClock(open);
+  } else {
+    stopDtpClock();
+    html += `<button class="jp-btn save" style="font-size:.7rem;padding:3px 10px" onclick="dtpStart()">▶ Start Work</button>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function startDtpClock(session) {
+  stopDtpClock();
+  function tick() {
+    const el = document.getElementById("dtp-clock");
+    if (!el) { stopDtpClock(); return; }
+    const start   = new Date(session.started_at.replace(" ", "T"));
+    let elapsed   = Math.floor((Date.now() - start.getTime()) / 1000);
+    // Subtract all previously accumulated pause time (from past pause/resume cycles)
+    elapsed -= (session.paused_sec || 0);
+    // If currently paused, also subtract the ongoing pause interval
+    if (session.paused_at) {
+      const paused = new Date(session.paused_at.replace(" ", "T"));
+      elapsed -= Math.floor((Date.now() - paused.getTime()) / 1000);
+    }
+    elapsed = Math.max(0, elapsed);
+    const h = String(Math.floor(elapsed / 3600)).padStart(2, "0");
+    const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0");
+    const s = String(elapsed % 60).padStart(2, "0");
+    el.textContent = `${h}:${m}:${s}`;
+  }
+  tick();
+  dtpTimerInterval = setInterval(tick, 1000);
+}
+
+function stopDtpClock() {
+  if (dtpTimerInterval) { clearInterval(dtpTimerInterval); dtpTimerInterval = null; }
+}
+
+async function dtpStart() {
+  if (!selectedJob || !activeStaff) { showToast("Login first", "error"); return; }
+  try {
+    const r = await fetch(`${STORE_PC_URL}/session-start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify({ job_id: selectedJob.job_id, staff_id: activeStaff.staff_id }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showToast("Timer started", "ok");
+      await loadDtpSessions(selectedJob.job_id);
+    } else {
+      showToast(data.error || "Failed to start", "error");
+    }
+  } catch { showToast("Network error", "error"); }
+}
+
+async function dtpPause() {
+  if (!dtpOpenSession) return;
+  try {
+    const r = await fetch(`${STORE_PC_URL}/session-pause`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify({ session_id: dtpOpenSession.id, staff_id: activeStaff?.staff_id || "" }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showToast("Paused", "ok");
+      stopDtpClock();
+      dtpOpenSession.paused_at = new Date().toISOString().slice(0, 19).replace("T", " ");
+      await loadDtpSessions(selectedJob.job_id);
+    } else {
+      showToast(data.error || "Failed to pause", "error");
+    }
+  } catch { showToast("Network error", "error"); }
+}
+
+async function dtpResume() {
+  if (!dtpOpenSession) return;
+  try {
+    const r = await fetch(`${STORE_PC_URL}/session-resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify({ session_id: dtpOpenSession.id, staff_id: activeStaff?.staff_id || "" }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showToast("Resumed", "ok");
+      await loadDtpSessions(selectedJob.job_id);
+    } else {
+      showToast(data.error || "Failed to resume", "error");
+    }
+  } catch { showToast("Network error", "error"); }
+}
+
+// End session modal
+function openDtpEndModal() {
+  if (!dtpOpenSession) return;
+  const overlay = document.getElementById("modal-overlay");
+  const modal   = document.getElementById("modal-content");
+  if (!overlay || !modal) return;
+  overlay.style.display = "flex";
+  modal.innerHTML = `
+    <h3 style="margin:0 0 12px">End Work Session</h3>
+    <div class="pp-field">
+      <label>Pages completed (DTP)</label>
+      <input class="pp-inp" type="number" min="0" id="dtp-end-pages" value="0" style="width:100%">
+    </div>
+    <div class="pp-field">
+      <label>Graphs created</label>
+      <input class="pp-inp" type="number" min="0" id="dtp-end-graphs" value="0" style="width:100%">
+    </div>
+    <div class="pp-field">
+      <label>Notes (optional)</label>
+      <input class="pp-inp" type="text" id="dtp-end-notes" placeholder="e.g. Cover design done" style="width:100%">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="jp-btn collect" onclick="dtpEnd()">✓ End &amp; Calculate Bill</button>
+      <button class="jp-btn" onclick="document.getElementById('modal-overlay').style.display='none'">Cancel</button>
+    </div>
+  `;
+}
+
+async function dtpEnd() {
+  if (!dtpOpenSession || !selectedJob) return;
+  const dtp_pages   = parseInt(document.getElementById("dtp-end-pages")?.value || "0");
+  const graph_count = parseInt(document.getElementById("dtp-end-graphs")?.value || "0");
+  const notes       = document.getElementById("dtp-end-notes")?.value || "";
+  document.getElementById("modal-overlay").style.display = "none";
+  try {
+    const r = await fetch(`${STORE_PC_URL}/session-end`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify({ session_id: dtpOpenSession.id, dtp_pages, graph_count, notes }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showToast(`Done — ${data.billing_minutes} min billed (${data.billing_hours}h)`, "ok");
+      dtpOpenSession = null;
+      stopDtpClock();
+      await loadDtpSessions(selectedJob.job_id);
+    } else {
+      showToast(data.error || "Failed to end session", "error");
+    }
+  } catch { showToast("Network error", "error"); }
+}
+
+function loadTimeline(jobId) {
+  const el = document.getElementById("jp-timeline");
+  if (!el) return;
+  el.textContent = "Loading…";
+  fetch(`${STORE_PC_URL}/events?job_id=${encodeURIComponent(jobId)}`, {
+    headers: { "X-Store-Token": localStorage.getItem("storeToken") || "" }
+  })
+    .then(r => r.json())
+    .then(data => renderTimeline(data.events || []))
+    .catch(() => { el.textContent = "—"; });
+}
+
+const TL_ACTION_LABELS = {
+  file_received:        "File received",
+  job_created_queued:   "Job created (paid)",
+  job_created_draft:    "Job created (draft)",
+  quote_sent:           "Quote sent",
+  payment_received:     "Payment received",
+  print_sent:           "Sent to printer",
+  print_done:           "Print done",
+  binding_dispatched:   "Sent to binder",
+  binding_returned:     "Binding returned",
+  job_ready:            "Marked ready — customer notified",
+  job_collected:        "Job collected",
+  job_completed_legacy: "Completed",
+  status_change:        "Status changed",
+};
+
+function renderTimeline(events) {
+  const el = document.getElementById("jp-timeline");
+  if (!el) return;
+  if (!events.length) { el.innerHTML = '<span style="color:var(--muted);font-size:.72rem">No events yet</span>'; return; }
+  el.innerHTML = events.map(e => {
+    const label = TL_ACTION_LABELS[e.action] || esc(e.action);
+    const isSystem = !e.staff_id;
+    const time = e.created_at ? e.created_at.slice(11, 16) : "";
+    const date = e.created_at ? e.created_at.slice(0, 10) : "";
+    const dur  = e.duration_sec != null ? fmtDuration(e.duration_sec) : "";
+    const meta = [
+      e.staff_id  ? "by " + esc(e.staff_id)  : "",
+      e.to_status ? "→ "  + esc(e.to_status) : "",
+      e.notes     ? esc(e.notes)              : "",
+    ].filter(Boolean).join(" · ");
+    return `<div class="tl-row">
+      <div class="tl-dot${isSystem ? " system" : ""}"></div>
+      <div class="tl-content">
+        <div class="tl-action">${label}</div>
+        <div class="tl-meta">${date} ${time}${meta ? " · " + meta : ""}</div>
+        ${dur ? `<div class="tl-dur">+${dur} since previous</div>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function fmtDuration(sec) {
+  if (sec < 60)  return sec + "s";
+  if (sec < 3600) return Math.round(sec / 60) + "m";
+  return (sec / 3600).toFixed(1) + "h";
 }
 
 function closeJobPanel() {
   selectedJob = null;
+  dtpOpenSession = null;
+  stopDtpClock();
   const panelRow = document.getElementById("job-panel-row");
   if (panelRow) panelRow.remove();
   document.querySelectorAll("tr.job-row").forEach(r => r.classList.remove("active-row"));
@@ -1432,6 +2369,8 @@ function renderJobPanel() {
   document.getElementById("jp-pages").textContent  = j.page_count ? j.page_count + "p" : "";
   document.getElementById("jp-source").textContent = j.source || "";
   document.getElementById("jp-status").innerHTML   = badge(j.status);
+  renderColourPanel(j);
+  renderDtpPanel(j);
 
   // Load preview iframe
   const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
@@ -1449,8 +2388,10 @@ function renderJobPanel() {
   document.getElementById("jp-student").checked   = editIsStudent;
   document.getElementById("jp-urgent").checked    = editUrgent;
 
-  const done    = j.status === "Completed";
-  const printed = ["Printed","Ready","At Vendor"].includes(j.status);
+  const done       = j.status === "Completed";
+  const printed    = ["Printed","Ready","At Vendor"].includes(j.status);
+  const outsourced = OUTSOURCED_FINISHING.includes(editFinishing);
+  document.getElementById("jp-btn-vendor").style.display  = (outsourced && !done) ? "block" : "none";
   document.getElementById("jp-btn-notify").style.display  = (printed && !done) ? "block" : "none";
   document.getElementById("jp-btn-collect").style.display = (printed && !done) ? "block" : "none";
 
@@ -1576,7 +2517,7 @@ async function fetchAndShowQuote() {
       if (fr.ok) {
         const fq = await fr.json();
         finCost = fq.finishing_cost || 0;
-        if (fq.breakdown) breakdown.push(...fq.breakdown.filter(b => !/sheet|per sheet/i.test(b)));
+        if (fq.breakdown) breakdown.push(...fq.breakdown.filter(b => !/sheet|per sheet/i.test(b) && !b.startsWith("---")));
       }
     }
     const total = totalPrint + finCost;
@@ -1615,7 +2556,7 @@ async function saveJobSpecs() {
       })),
     };
     const r    = await fetch(`${STORE_PC_URL}/update-job`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify(body),
     });
     const data = await r.json();
@@ -1651,7 +2592,7 @@ async function printItem(jobId, itemNumber) {
   // ── Step 1: always save specs first so print_items row exists in DB ──────
   try {
     const saveR = await fetch(`${STORE_PC_URL}/update-job`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify({
         job_id:      jobId,
         staff_id:    sessionStorage.getItem("staff_id"),
@@ -1697,7 +2638,7 @@ async function printItem(jobId, itemNumber) {
   if (btn) btn.textContent = "Sending to printer…";
   try {
     const r    = await fetch(`${STORE_PC_URL}/print`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify({ job_id: jobId, item_number: itemNumber,
                              staff_id: sessionStorage.getItem("staff_id") }),
     });
@@ -1733,7 +2674,7 @@ async function markReady() {
   btn.disabled = true; btn.textContent = "Sending WhatsApp…";
   try {
     const r    = await fetch(`${STORE_PC_URL}/mark-ready`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify({ job_id: selectedJob.job_id,
                              staff_id: sessionStorage.getItem("staff_id") }),
     });
@@ -1757,6 +2698,67 @@ async function markReady() {
 }
 
 // ── Payment Modal ─────────────────────────────────────────────────────────────
+// ── Vendor Modal ─────────────────────────────────────────────────────────────
+const OUTSOURCED_FINISHING = ["project","record","lam_roll","lam_cover","thermal","soft"];
+
+async function openVendorModal() {
+  if (!selectedJob) return;
+  const j = selectedJob;
+  document.getElementById("vm-job-info").textContent = `${j.job_id} — ${j.finishing || ""}`;
+  // Default return date = tomorrow
+  const tom = new Date(); tom.setDate(tom.getDate() + 1);
+  document.getElementById("vm-return-date").value = tom.toISOString().slice(0,10);
+  document.getElementById("vm-cost").value = "";
+  // Load vendors
+  const sel = document.getElementById("vm-vendor");
+  sel.innerHTML = '<option value="">— select vendor —</option>';
+  try {
+    const r = await fetch(`${STORE_PC_URL}/vendors?finishing_type=${encodeURIComponent(j.finishing || "")}`);
+    const d = await r.json();
+    (d.vendors || []).forEach(v => {
+      const opt = document.createElement("option");
+      opt.value = v.name; opt.textContent = v.name;
+      sel.appendChild(opt);
+    });
+    if (sel.options.length === 2) sel.selectedIndex = 1; // auto-select if only one
+  } catch(e) {}
+  document.getElementById("vendor-modal").classList.add("open");
+}
+
+function closeVendorModal() {
+  document.getElementById("vendor-modal").classList.remove("open");
+}
+
+async function confirmVendorSend() {
+  if (!selectedJob) return;
+  const vendor_name  = document.getElementById("vm-vendor").value;
+  const cost         = parseFloat(document.getElementById("vm-cost").value) || 0;
+  const return_date  = document.getElementById("vm-return-date").value;
+  if (!vendor_name) { alert("Select a vendor"); return; }
+  const btn = document.querySelector("#vendor-modal .modal-ok");
+  btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    const r = await fetch(`${STORE_PC_URL}/vendor-send`, {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        job_id: selectedJob.job_id,
+        vendor_type: selectedJob.finishing,
+        vendor_name,
+        cost_to_vendor: cost,
+        expected_return_date: return_date,
+        staff_id: localStorage.getItem("staff_id") || ""
+      })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      closeVendorModal();
+      selectedJob.status = "At Vendor";
+      closeJobPanel();
+    } else { alert("Error: " + (d.error || "unknown")); }
+  } catch(e) { alert("Network error"); }
+  btn.disabled = false; btn.textContent = "Send →";
+}
+
 function openPaymentModal() {
   if (!selectedJob) return;
   payJobId = selectedJob.job_id;
@@ -1784,7 +2786,7 @@ async function confirmPayment() {
   btn.disabled = true; btn.textContent = "Saving…";
   try {
     const r    = await fetch(`${STORE_PC_URL}/complete-job`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify({ job_id: payJobId, amount_collected: amount,
                              payment_mode: mode,
                              staff_id: sessionStorage.getItem("staff_id") }),
@@ -1892,7 +2894,7 @@ async function confirmPhotocopy() {
       payment_mode:     document.getElementById("pc-mode").value,
     };
     const r    = await fetch(`${STORE_PC_URL}/new-photocopy`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: storeHeaders(),
       body: JSON.stringify(body),
     });
     const data = await r.json();
@@ -1909,13 +2911,410 @@ async function confirmPhotocopy() {
   }
 }
 
+// ── Conversations Tab ─────────────────────────────────────────────────────────
+
+let convRows    = [];   // all log rows loaded
+let convPhone   = null; // currently selected phone
+let convRefresh = null; // setInterval handle
+
+function switchTab(tab) {
+  document.getElementById("jobs-view").style.display  = tab === "jobs" ? "" : "none";
+  document.getElementById("conv-panel").style.display = tab === "conv" ? "" : "none";
+  document.getElementById("tab-jobs").classList.toggle("active", tab === "jobs");
+  document.getElementById("tab-conv").classList.toggle("active", tab === "conv");
+
+  if (tab === "conv") {
+    loadInbox();
+    if (!convRefresh) convRefresh = setInterval(loadInbox, 30000);
+  } else {
+    if (convRefresh) { clearInterval(convRefresh); convRefresh = null; }
+  }
+}
+
+async function loadInbox() {
+  try {
+    const rows = await sbFetch("conversation_log",
+      "select=phone,body,created_at,direction,message_type,filename&order=created_at.desc&limit=500");
+    if (!rows) return;
+    convRows = rows;
+    renderInbox(rows);
+    if (convPhone) loadThread(convPhone);
+  } catch (e) {
+    document.getElementById("conv-inbox-list").innerHTML =
+      `<div class="conv-empty">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderInbox(rows) {
+  const seen = new Map();
+  for (const r of rows) {
+    if (!seen.has(r.phone)) seen.set(r.phone, r);
+  }
+  const phones = Array.from(seen.values());
+
+  const q        = (document.getElementById("conv-search")?.value || "").toLowerCase();
+  const filtered = q ? phones.filter(r => r.phone.includes(q)) : phones;
+
+  if (filtered.length === 0) {
+    document.getElementById("conv-inbox-list").innerHTML =
+      `<div class="conv-empty">No conversations yet</div>`;
+    return;
+  }
+
+  document.getElementById("conv-inbox-list").innerHTML = filtered.map(r => {
+    const active   = r.phone === convPhone ? " active" : "";
+    const preview  = r.filename
+      ? `[${escHtml(r.message_type || "file")}: ${escHtml(r.filename)}]`
+      : escHtml((r.body || "").slice(0, 60));
+    const ts       = (r.created_at || "").replace("T", " ").slice(11, 16);
+    const ph       = escHtml(r.phone);
+    return `<div class="conv-inbox-item${active}" onclick="loadThread('${ph}')">
+      <span class="conv-time">${ts}</span>
+      <div class="conv-phone">${ph}</div>
+      <div class="conv-preview">${preview}</div>
+    </div>`;
+  }).join("");
+}
+
+async function loadThread(phone) {
+  convPhone = phone;
+  document.querySelectorAll(".conv-inbox-item").forEach(el => {
+    el.classList.toggle("active",
+      el.querySelector(".conv-phone")?.textContent === phone);
+  });
+
+  const view = document.getElementById("conv-thread-view");
+  view.innerHTML = `<div class="conv-empty"><span class="spinner"></span></div>`;
+
+  try {
+    const rows = await sbFetch("conversation_log",
+      `phone=eq.${encodeURIComponent(phone)}&order=created_at.asc&limit=200`);
+    if (!rows) return;
+
+    if (rows.length === 0) {
+      view.innerHTML = `<div class="conv-empty">No messages</div>`;
+      return;
+    }
+
+    view.innerHTML = rows.map(r => {
+      const dir  = r.direction === "outbound" ? "outbound" : "inbound";
+      const body = r.filename
+        ? `[${escHtml(r.message_type || "file")}: ${escHtml(r.filename)}]`
+        : escHtml(r.body || "");
+      const ts   = (r.created_at || "").replace("T", " ").slice(0, 16);
+      return `<div class="conv-bubble ${dir}">
+        ${body}
+        <div class="conv-meta">${ts} · ${r.direction}</div>
+      </div>`;
+    }).join("");
+
+    view.scrollTop = view.scrollHeight;
+    document.getElementById("conv-reply-bar").style.display = "";
+  } catch (e) {
+    view.innerHTML = `<div class="conv-empty">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function sendConvReply() {
+  const input = document.getElementById("conv-reply-input");
+  const btn   = document.getElementById("conv-send-btn");
+  const msg   = (input.value || "").trim();
+  if (!msg || !convPhone) return;
+
+  const pw = sessionStorage.getItem("admin_pw_cache");
+  if (!pw) {
+    const entered = prompt("Enter admin password to send message:");
+    if (!entered) return;
+    sessionStorage.setItem("admin_pw_cache", entered);
+  }
+  const adminPw = sessionStorage.getItem("admin_pw_cache");
+
+  btn.disabled = true;
+  btn.textContent = "…";
+  try {
+    const res = await fetch("https://printosky.vercel.app/admin/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ admin_password: adminPw, phone: convPhone, message: msg })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (res.status === 403) sessionStorage.removeItem("admin_pw_cache");
+      alert("Error: " + (data.error || res.status));
+      return;
+    }
+    input.value = "";
+    await loadThread(convPhone);
+  } catch (e) {
+    alert("Send failed: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "SEND";
+  }
+}
+
+function filterInbox() {
+  renderInbox(convRows);
+}
+
+function escHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 // Close modals on Escape key
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     closePaymentModal();
     closePhotocopyModal();
+    closeNewJobModal();
+  }
+  // N key opens New Job modal (when not in an input)
+  if (e.key === "n" || e.key === "N") {
+    const tag = (document.activeElement.tagName || "").toLowerCase();
+    if (tag !== "input" && tag !== "textarea" && tag !== "select") {
+      e.preventDefault();
+      openNewJobModal();
+    }
   }
 });
+
+// ── New Job Wizard ─────────────────────────────────────────────────────────────
+
+let njCurrentStep = 1;
+let njUploadedFile = null;   // { filename, filepath } after upload
+let njQuotedAmount = 0;
+let njPayMode = "full";       // "full" | "partial" | "override"
+let njQuoteTimer = null;
+
+function openNewJobModal() {
+  njCurrentStep = 1;
+  njUploadedFile = null;
+  njQuotedAmount = 0;
+  njPayMode = "full";
+  // Reset fields
+  document.getElementById("nj-name").value    = "";
+  document.getElementById("nj-phone").value   = "";
+  document.getElementById("nj-source").value  = "Walk-in";
+  document.getElementById("nj-notes").value   = "";
+  document.getElementById("nj-file-input").value = "";
+  document.getElementById("nj-file-name").style.display = "none";
+  document.getElementById("nj-file-uploading").style.display = "none";
+  document.getElementById("nj-btn-step2").disabled = true;
+  document.getElementById("nj-pages").value   = "1";
+  document.getElementById("nj-copies").value  = "1";
+  document.getElementById("nj-colour").value  = "bw";
+  document.getElementById("nj-sides").value   = "ss";
+  document.getElementById("nj-paper").value   = "A4";
+  document.getElementById("nj-finishing").value = "none";
+  document.getElementById("nj-service").value = "";
+  document.getElementById("nj-student").checked = false;
+  document.getElementById("nj-quote-val").textContent = "₹—";
+  document.getElementById("nj-quote-breakdown").textContent = "—";
+  document.getElementById("nj-amount").value  = "";
+  document.getElementById("nj-mode").value    = "Cash";
+  document.getElementById("nj-override-reason").value = "";
+  njSelectPayOpt("full");
+  njShowStep(1);
+  document.getElementById("newjob-modal").classList.add("open");
+  setTimeout(() => document.getElementById("nj-name").focus(), 100);
+}
+
+function closeNewJobModal() {
+  document.getElementById("newjob-modal").classList.remove("open");
+}
+
+function njShowStep(n) {
+  [1,2,3,4].forEach(i => {
+    document.getElementById(`nj-step-${i}`).style.display = i === n ? "" : "none";
+    const dot = document.getElementById(`nj-dot-${i}`);
+    dot.className = "nj-step-dot" + (i < n ? " done" : i === n ? " active" : "");
+  });
+  njCurrentStep = n;
+  // Trigger quote fetch when landing on step 3
+  if (n === 3) njFetchQuote();
+  // Sync quoted amount on step 4
+  if (n === 4) {
+    const disp = njQuotedAmount > 0 ? "₹" + njQuotedAmount.toFixed(0) : "₹—";
+    document.getElementById("nj-pay-quoted").textContent = disp;
+    if (njQuotedAmount > 0 && njPayMode !== "override") {
+      document.getElementById("nj-amount").value = njQuotedAmount.toFixed(0);
+    }
+  }
+}
+
+function njNext(to) {
+  if (to === 2) {
+    njShowStep(2);
+  } else if (to === 3) {
+    njShowStep(3);
+  } else if (to === 4) {
+    njShowStep(4);
+  }
+}
+
+function njBack(to) { njShowStep(to); }
+
+function njSkipFile() {
+  njUploadedFile = null;
+  document.getElementById("nj-file-name").style.display = "none";
+  document.getElementById("nj-btn-step2").disabled = false;
+  // Show "no file" indicator
+  document.getElementById("nj-file-name").textContent = "No file — service only";
+  document.getElementById("nj-file-name").style.display = "block";
+  njNext(3);
+}
+
+async function njHandleFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+
+  document.getElementById("nj-file-uploading").style.display = "block";
+  document.getElementById("nj-file-name").style.display = "none";
+  document.getElementById("nj-btn-step2").disabled = true;
+
+  // Read as base64
+  const b64 = await new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => res(reader.result.split(",")[1]);
+    reader.onerror = rej;
+    reader.readAsDataURL(file);
+  });
+
+  try {
+    const r = await fetch(`${PC}/upload-file`, {
+      method: "POST",
+      headers: storeHeaders(),
+      body: JSON.stringify({ filename: file.name, file_data: b64 }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      njUploadedFile = { filename: data.filename, filepath: data.filepath };
+      document.getElementById("nj-file-name").textContent = "✓ " + data.filename;
+      document.getElementById("nj-file-name").style.display = "block";
+      document.getElementById("nj-file-uploading").style.display = "none";
+      document.getElementById("nj-btn-step2").disabled = false;
+      // Auto-detect pages from name isn't possible, leave as 1
+    } else {
+      document.getElementById("nj-file-uploading").textContent = "Upload failed: " + (data.error || "unknown");
+    }
+  } catch (e) {
+    document.getElementById("nj-file-uploading").textContent = "Store PC offline — skip file or try again";
+  }
+}
+
+async function njFetchQuote() {
+  clearTimeout(njQuoteTimer);
+  njQuoteTimer = setTimeout(async () => {
+    const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+    const pages    = parseInt(document.getElementById("nj-pages").value) || 1;
+    const copies   = parseInt(document.getElementById("nj-copies").value) || 1;
+    const colour   = document.getElementById("nj-colour").value;
+    const sides    = document.getElementById("nj-sides").value;
+    const paper    = document.getElementById("nj-paper").value;
+    const finishing= document.getElementById("nj-finishing").value;
+    const student  = document.getElementById("nj-student").checked;
+
+    try {
+      const qs = `pages=${pages}&colour=${colour}&sides=${sides}&paper_size=${paper}&finishing=${finishing}&copies=${copies}&is_student=${student}`;
+      const r  = await fetch(`${PC}/quote?${qs}`);
+      const d  = await r.json();
+      njQuotedAmount = d.total || 0;
+      document.getElementById("nj-quote-val").textContent = "₹" + njQuotedAmount.toFixed(0);
+      document.getElementById("nj-quote-breakdown").textContent =
+        d.breakdown ? (d.breakdown.join ? d.breakdown.join(" + ") : String(d.breakdown)) : "";
+    } catch {
+      document.getElementById("nj-quote-val").textContent = "₹—";
+      document.getElementById("nj-quote-breakdown").textContent = "Store offline — enter manually";
+    }
+  }, 350);
+}
+
+function njSelectPayOpt(mode) {
+  njPayMode = mode;
+  ["full","partial","override"].forEach(m => {
+    document.getElementById(`nj-opt-${m}`).classList.toggle("selected", m === mode);
+    document.querySelector(`#nj-opt-${m} input`).checked = (m === mode);
+  });
+  document.getElementById("nj-pay-fields").style.display   = mode !== "override" ? "" : "none";
+  document.getElementById("nj-override-row").classList.toggle("show", mode === "override");
+  document.getElementById("nj-amount-lbl").textContent = mode === "partial" ? "Partial Amount (Rs.)" : "Amount (Rs.)";
+  if (mode === "full" && njQuotedAmount > 0) {
+    document.getElementById("nj-amount").value = njQuotedAmount.toFixed(0);
+  } else if (mode === "partial") {
+    document.getElementById("nj-amount").value = "";
+  }
+  document.getElementById("nj-submit-btn").textContent =
+    mode === "override" ? "Add to Queue (No Payment) ✓" : "Collect & Add to Queue ✓";
+}
+
+async function njSubmit() {
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const btn = document.getElementById("nj-submit-btn");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  const mode          = njPayMode;
+  const overrideReason= document.getElementById("nj-override-reason").value;
+
+  if (mode === "override" && !overrideReason) {
+    alert("Please select an override reason.");
+    btn.disabled = false;
+    btn.textContent = "Add to Queue (No Payment) ✓";
+    return;
+  }
+
+  const amountInput = parseFloat(document.getElementById("nj-amount").value) || 0;
+  const paymentMode = document.getElementById("nj-mode").value;
+
+  const body = {
+    customer_name:   document.getElementById("nj-name").value.trim(),
+    phone:           document.getElementById("nj-phone").value.trim(),
+    source:          document.getElementById("nj-source").value,
+    notes:           document.getElementById("nj-notes").value.trim(),
+    filename:        njUploadedFile ? njUploadedFile.filename : "",
+    filepath:        njUploadedFile ? njUploadedFile.filepath : "",
+    colour:          document.getElementById("nj-colour").value,
+    sides:           document.getElementById("nj-sides").value,
+    copies:          parseInt(document.getElementById("nj-copies").value) || 1,
+    pages:           parseInt(document.getElementById("nj-pages").value) || 1,
+    paper_size:      document.getElementById("nj-paper").value,
+    finishing:       document.getElementById("nj-finishing").value,
+    service_type:    document.getElementById("nj-service").value.trim(),
+    is_student:      document.getElementById("nj-student").checked,
+    amount_quoted:   njQuotedAmount,
+    amount_collected: mode === "full"    ? amountInput : 0,
+    amount_partial:   mode === "partial" ? amountInput : 0,
+    payment_mode:     paymentMode,
+    override_reason:  mode === "override" ? overrideReason : "",
+    staff_id:        sessionStorage.getItem("staff_id") || "",
+  };
+
+  try {
+    const r    = await fetch(`${PC}/create-job`, {
+      method: "POST", headers: storeHeaders(), body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      closeNewJobModal();
+      await loadAll();
+      // Highlight and open the new job
+      setTimeout(() => selectJob(data.job_id), 300);
+    } else {
+      alert("Error: " + (data.error || "Unknown"));
+      btn.disabled = false;
+      btn.textContent = mode === "override" ? "Add to Queue (No Payment) ✓" : "Collect & Add to Queue ✓";
+    }
+  } catch (e) {
+    alert("Cannot reach store PC:\n" + e.message);
+    btn.disabled = false;
+    btn.textContent = mode === "override" ? "Add to Queue (No Payment) ✓" : "Collect & Add to Queue ✓";
+  }
+}
 </script>
 </body>
 </html>

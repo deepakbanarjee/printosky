@@ -26,9 +26,9 @@ echo  [2/3] Starting Print Server on port 3005...
 start "Printosky Print Server" cmd /k "cd /d C:\printosky_watcher && python print_server.py"
 timeout /t 2 /nobreak >nul
 
-:: 3. WhatsApp Bot (Node) — port 3001
-echo  [3/3] Starting WhatsApp Bot on port 3001...
-start "Printosky WhatsApp Bot" cmd /k "cd /d C:\printosky_watcher\whatsapp_capture && node index.js"
+:: 3. WhatsApp Bot (Meta Cloud API / Webhook Receiver) — runs in Watcher
+echo  [3/3] Meta WhatsApp Webhook active inside Watcher on port 3002
+:: Retired Node.js Bot: start "Printosky WhatsApp Bot" cmd /k "cd /d C:\printosky_watcher\whatsapp_capture && node index.js"
 
 echo.
 echo  All 3 services started. Check the CMD windows for status.

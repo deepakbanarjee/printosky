@@ -1,34 +1,77 @@
 """
 PRINTOSKY WHATSAPP NOTIFIER
 ============================
-Sends WhatsApp messages via the local whatsapp-web.js capture server.
-All messages go through port 3001 (send server in index.js).
+Sends WhatsApp messages via Meta WhatsApp Cloud API.
+Number: 9446903907 (registered as WABA number in Meta Business Manager)
+
+Meta Cloud API:
+  POST https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages
+  Authorization: Bearer {META_SYSTEM_USER_TOKEN}
 """
 
-import requests
+import os
+import json
 import logging
+import urllib.request
 
 logger = logging.getLogger("whatsapp_notify")
 
-SEND_URL     = "http://localhost:3001/send"
-STORE_PHONE  = "8943232033"   # Test number — swap to 9495706405 for production
+# ── Meta Cloud API config ──────────────────────────────────────────────────────
+META_PHONE_ID = os.environ.get("META_PHONE_NUMBER_ID", "")
+META_TOKEN    = os.environ.get("META_SYSTEM_USER_TOKEN", "")
+GRAPH_URL     = "https://graph.facebook.com/v21.0"
+STORE_PHONE   = os.environ.get("STORE_WHATSAPP_PHONE", "919495706405")  # Oxygen WABA number (with country code)
+
+
+def _send_meta(phone: str, message: str) -> bool:
+    """Send a text message via Meta WhatsApp Cloud API."""
+    if not phone or not META_PHONE_ID or not META_TOKEN:
+        if not META_PHONE_ID or not META_TOKEN:
+            logger.warning("Meta send skipped: META_PHONE_NUMBER_ID or META_SYSTEM_USER_TOKEN not set")
+        return False
+
+    # Normalise: strip + and @c.us, ensure 91 prefix for Indian numbers
+    digits = phone.replace("@c.us", "").replace("+", "").strip()
+    if len(digits) == 10:
+        digits = "91" + digits
+
+    url     = f"{GRAPH_URL}/{META_PHONE_ID}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "to":   digits,
+        "type": "text",
+        "text": {"preview_url": False, "body": message},
+    }
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={
+                "Content-Type":  "application/json",
+                "Authorization": f"Bearer {META_TOKEN}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            if r.status == 200:
+                logger.info(f"Meta sent to {digits}")
+                try:
+                    from db_cloud import log_message
+                    log_message(digits, "outbound", message[:500], message_type="text")
+                except Exception:
+                    pass
+                return True
+            body = r.read().decode()
+            logger.warning(f"Meta send failed: {r.status} {body[:200]}")
+            return False
+    except Exception as e:
+        logger.warning(f"Meta notify error: {e}")
+        return False
 
 
 def _send(phone: str, message: str) -> bool:
-    """Send a WhatsApp message via the local capture server."""
-    if not phone:
-        return False
-    digits = phone.replace("@c.us", "").replace("+", "").strip()
-    try:
-        r = requests.post(SEND_URL, json={"phone": digits, "message": message}, timeout=10)
-        if r.status_code == 200:
-            logger.info(f"WhatsApp sent to {digits}")
-            return True
-        logger.warning(f"WhatsApp send failed: {r.status_code} {r.text[:100]}")
-        return False
-    except Exception as e:
-        logger.warning(f"WhatsApp notify error: {e}")
-        return False
+    """Send a WhatsApp message (routes to Meta Cloud API)."""
+    return _send_meta(phone, message)
 
 
 def send_file_received(job_id: str, filename: str, sender: str):
@@ -43,6 +86,27 @@ def send_file_received(job_id: str, filename: str, sender: str):
         "— Printosky / Oxygen Globally 🖨️"
     )
     _send(sender, msg)
+
+
+def send_file_received_with_quote_start(job_id: str, filename: str, sender: str) -> bool:
+    """Single combined message: receipt + first quote question.
+
+    Sends ONE Meta API call instead of two, staying safely within
+    Vercel's 10-second function timeout on Hobby plan.
+    """
+    if not sender:
+        return False
+    msg = (
+        "✅ *File received!*\n\n"
+        f"📋 Job ID: `{job_id}`\n"
+        f"📄 File: {filename}\n\n"
+        "📄 *What paper size do you need?*\n\n"
+        "1️⃣  A4 (standard)\n"
+        "2️⃣  A3 (large)\n"
+        "3️⃣  Other (we'll quote manually)\n\n"
+        "_Reply with 1, 2, or 3_"
+    )
+    return _send(sender, msg)
 
 
 def send_payment_link(sender: str, job_id: str, amount: float,

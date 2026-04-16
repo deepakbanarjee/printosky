@@ -9,7 +9,7 @@ Usage:  python epson_snmp_discover.py
 import asyncio
 import sys
 
-EPSON_IP       = "192.168.55.201"
+EPSON_IP       = "192.168.55.202"
 SNMP_COMMUNITY = "public"
 SNMP_TIMEOUT   = 5
 

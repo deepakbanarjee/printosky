@@ -51,9 +51,20 @@ C:\Printosky\
 1. Open Command Prompt (Win + R → type `cmd` → Enter)
 2. Run:
 ```
-pip install watchdog gspread google-auth google-auth-oauthlib websockets requests pysnmp
+pip install watchdog gspread google-auth google-auth-oauthlib websockets requests pysnmp python-dotenv
 ```
 3. Wait for installation to finish.
+
+---
+
+## Step 3b — Create .env File (Razorpay credentials)
+
+1. Copy `.env.example` to `.env` in the same folder:
+```
+copy C:\Printosky\.env.example C:\Printosky\.env
+```
+2. Open `.env` in Notepad and fill in the real Razorpay credentials (get these from the Razorpay dashboard → Settings → API Keys).
+3. The `.env` file is gitignored and never committed — keep it on the store PC only.
 
 ---
 

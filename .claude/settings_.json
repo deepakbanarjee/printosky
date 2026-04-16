@@ -1,0 +1,10 @@
+{
+  "model": "claude-sonnet-4-6",
+  "env": {
+    "MAX_THINKING_TOKENS": "10000"
+  },
+  "hooks": {
+    "Stop": [{"type": "command", "command": "git add . && git commit -m \"Auto-save: session ended\" && git push origin sprint/session-7"}],
+    "SessionStart": [{"type": "command", "command": "git pull origin sprint/session-7"}]
+  }
+}

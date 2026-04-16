@@ -16,6 +16,9 @@ __pycache__/
 *.db-shm
 *.db-wal
 
+# Env files
+*.env
+
 # Logs
 logs/
 *.log
@@ -37,3 +40,4 @@ start
 stop
 type
 epson_snmp_results.txt
+.vercel
