@@ -1262,8 +1262,16 @@
 // ── Config ─────────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI";
-// Store PC URL — update this to your current Cloudflare tunnel URL for port 3005
-// STORE_PC_URL is configured per-browser during first-time PC setup (localStorage)
+// Store PC URL — configured per-browser during first-time PC setup (localStorage)
+// Auto-migrate stale LAN HTTP URLs (can't be called from HTTPS pages)
+(function migrateLanUrl() {
+  const saved = localStorage.getItem("storePcUrl");
+  if (window.location.protocol === "https:" && saved &&
+      saved.startsWith("http://") && !saved.includes("localhost")) {
+    localStorage.setItem("storePcUrl", "https://store.printosky.com");
+    location.reload();
+  }
+})();
 const STORE_PC_URL = localStorage.getItem("storePcUrl") || "";
 
 function storeHeaders() {
@@ -1287,8 +1295,7 @@ function setupPC() {
     const entered = prompt(
       "First-time setup (step 2/2)\nPrint server URL:\n" +
       "  Server PC (PC1): http://localhost:3005\n" +
-      "  LAN PC:          http://192.168.55.212:3005\n" +
-      "  Remote/Home:     https://store.printosky.com\n\n" +
+      "  All other PCs:   https://store.printosky.com\n\n" +
       "Enter URL (default: " + hint + "):"
     );
     const url = (entered || hint).trim().replace(/\/$/, "");
@@ -2377,7 +2384,7 @@ function renderJobPanel() {
   renderDtpPanel(j);
 
   // Load preview iframe
-  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
   const iframe = document.getElementById("jp-preview-iframe");
   const footer = document.getElementById("jp-preview-footer");
   if (iframe && j.job_id) {
@@ -2840,7 +2847,7 @@ function closePhotocopyModal() {
 // ── File Preview ────────────────────────────────────────────────────────────
 function openPreview() {
   if (!selectedJob) return;
-  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
   const jid  = selectedJob.job_id;
   const fname = selectedJob.filename || jid;
   const ext   = (fname.split(".").pop() || "").toLowerCase();
@@ -3175,7 +3182,7 @@ function njSkipFile() {
 async function njHandleFile(input) {
   const file = input.files[0];
   if (!file) return;
-  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
 
   document.getElementById("nj-file-uploading").style.display = "block";
   document.getElementById("nj-file-name").style.display = "none";
@@ -3214,7 +3221,7 @@ async function njHandleFile(input) {
 async function njFetchQuote() {
   clearTimeout(njQuoteTimer);
   njQuoteTimer = setTimeout(async () => {
-    const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+    const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
     const pages    = parseInt(document.getElementById("nj-pages").value) || 1;
     const copies   = parseInt(document.getElementById("nj-copies").value) || 1;
     const colour   = document.getElementById("nj-colour").value;
@@ -3257,7 +3264,7 @@ function njSelectPayOpt(mode) {
 }
 
 async function njSubmit() {
-  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
   const btn = document.getElementById("nj-submit-btn");
   btn.disabled = true;
   btn.textContent = "Saving…";
