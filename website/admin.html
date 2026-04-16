@@ -708,6 +708,36 @@
   /* status badge additions */
   .badge-queued { background: rgba(0,200,255,.12); color: var(--accent); border: 1px solid rgba(0,200,255,.3); }
   .badge-draft  { background: rgba(90,112,128,.12); color: var(--muted); border: 1px solid var(--border); }
+
+  /* ── Conversations Tab ─────────────────────────────────────────────────── */
+  .conv-tab-bar { display:flex; gap:4px; padding:10px 16px 0; border-bottom:1px solid var(--border); background:var(--bg); }
+  .conv-tab-btn { background:none; border:none; color:var(--muted); font-family:var(--mono); font-size:.75rem; padding:6px 14px; cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; letter-spacing:.05em; }
+  .conv-tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .conv-tab-btn:hover:not(.active) { color:var(--fg); }
+  #conv-panel { display:none; padding:12px 16px; }
+  .conv-toolbar { display:flex; gap:8px; margin-bottom:10px; }
+  .conv-search { flex:1; background:var(--bg2); border:1px solid var(--border); color:var(--fg); font-size:.78rem; padding:5px 10px; outline:none; border-radius:4px; }
+  .conv-search:focus { border-color:var(--accent); }
+  .conv-container { display:flex; gap:0; border:1px solid var(--border); border-radius:4px; height:calc(100vh - 240px); min-height:400px; overflow:hidden; }
+  .conv-inbox { width:280px; min-width:200px; border-right:1px solid var(--border); overflow-y:auto; background:var(--bg); }
+  .conv-inbox-item { padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; transition:background .1s; }
+  .conv-inbox-item:hover { background:var(--bg2); }
+  .conv-inbox-item.active { background:rgba(0,200,255,.08); border-left:2px solid var(--accent); }
+  .conv-phone { font-family:var(--mono); font-size:.78rem; color:var(--accent); font-weight:600; }
+  .conv-preview { font-size:.72rem; color:var(--muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
+  .conv-time { font-size:.65rem; color:var(--muted); float:right; margin-top:1px; }
+  .conv-right { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+  .conv-thread { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:6px; background:var(--bg2); }
+  .conv-reply-bar { display:flex; gap:8px; padding:8px 10px; border-top:1px solid var(--border); background:var(--bg); }
+  .conv-reply-input { flex:1; background:var(--bg2); border:1px solid var(--border); color:var(--fg); font-size:.8rem; padding:6px 10px; outline:none; border-radius:4px; resize:none; height:38px; font-family:inherit; }
+  .conv-reply-input:focus { border-color:var(--accent); }
+  .conv-send-btn { background:var(--accent); color:#000; border:none; padding:0 18px; font-size:.78rem; font-weight:700; border-radius:4px; cursor:pointer; letter-spacing:.05em; }
+  .conv-send-btn:disabled { opacity:.4; cursor:not-allowed; }
+  .conv-bubble { max-width:70%; padding:8px 12px; border-radius:8px; font-size:.8rem; line-height:1.45; word-break:break-word; }
+  .conv-bubble.inbound  { align-self:flex-start; background:var(--bg); border:1px solid var(--border); color:var(--fg); }
+  .conv-bubble.outbound { align-self:flex-end; background:rgba(0,200,100,.15); border:1px solid rgba(0,200,100,.3); color:var(--fg); }
+  .conv-meta { font-size:.62rem; color:var(--muted); margin-top:4px; }
+  .conv-empty { color:var(--muted); font-size:.78rem; padding:20px; text-align:center; }
 </style>
 </head>
 <body>
@@ -723,8 +753,10 @@
       <div class="pin-dot" id="pd1"></div>
       <div class="pin-dot" id="pd2"></div>
       <div class="pin-dot" id="pd3"></div>
+      <div class="pin-dot" id="pd4"></div>
+      <div class="pin-dot" id="pd5"></div>
     </div>
-    <input type="password" id="pin-input" placeholder="4-digit PIN" maxlength="4"
+    <input type="password" id="pin-input" placeholder="6-digit PIN" maxlength="6"
            inputmode="numeric" pattern="[0-9]*" autocomplete="off"
            oninput="onPinInput()" style="text-align:center;letter-spacing:.4em;font-size:1.4rem;">
     <button class="login-btn" onclick="tryPinLogin()">ENTER →</button>
@@ -755,7 +787,14 @@
     </div>
   </header>
 
+  <!-- Tab bar -->
+  <div class="conv-tab-bar">
+    <button class="conv-tab-btn active" id="tab-jobs" onclick="switchTab('jobs')">Jobs</button>
+    <button class="conv-tab-btn"        id="tab-conv" onclick="switchTab('conv')">Conversations</button>
+  </div>
+
   <main>
+  <div id="jobs-view">
     <!-- Stats row -->
     <div class="stats-grid" id="stats-grid">
       <div class="stat"><div class="stat-label">Today's Jobs</div><div class="stat-value accent" id="s-jobs">—</div></div>
@@ -883,6 +922,26 @@
     </div>
 
     <!-- ── Job Print Panel (expands below table on row click) ── -->
+  </div><!-- /#jobs-view -->
+
+  <!-- Conversations panel -->
+  <div id="conv-panel">
+    <div class="conv-toolbar">
+      <input class="conv-search" id="conv-search" placeholder="Search by phone…" oninput="filterInbox()">
+      <button class="refresh-btn" onclick="loadInbox()">↻ Refresh</button>
+    </div>
+    <div class="conv-container">
+      <div class="conv-inbox"  id="conv-inbox-list"><div class="conv-empty">Loading…</div></div>
+      <div class="conv-right">
+        <div class="conv-thread" id="conv-thread-view"><div class="conv-empty">Select a contact to view messages</div></div>
+        <div class="conv-reply-bar" id="conv-reply-bar" style="display:none">
+          <textarea class="conv-reply-input" id="conv-reply-input" placeholder="Type a message…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendConvReply();}"></textarea>
+          <button class="conv-send-btn" id="conv-send-btn" onclick="sendConvReply()">SEND</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   </main>
 </div>
 
@@ -1253,11 +1312,11 @@ function resetPCSetup() {
 // ── PIN input visual feedback ──────────────────────────────────────────────
 function onPinInput() {
   const len = document.getElementById("pin-input").value.length;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     document.getElementById("pd" + i).classList.toggle("filled", i < len);
   }
   document.getElementById("login-err").style.display = "none";
-  if (len === 4) tryPinLogin();
+  if (len === 6) tryPinLogin();
 }
 
 function toggleAdminOverride() {
@@ -1268,7 +1327,7 @@ function toggleAdminOverride() {
 // ── Staff PIN login ────────────────────────────────────────────────────────
 async function tryPinLogin() {
   const pin = document.getElementById("pin-input").value;
-  if (pin.length !== 4) return;
+  if (pin.length !== 6) return;
   const pcId = getPcId();
   try {
     const r = await fetch(`${STORE_PC_URL}/staff-login`, {
@@ -1294,9 +1353,10 @@ async function tryPinLogin() {
       } catch { /* JWT optional — falls back to anon key */ }
       showDashboard();
     } else {
+      document.getElementById("login-err").textContent = "Incorrect PIN";
       document.getElementById("login-err").style.display = "block";
       document.getElementById("pin-input").value = "";
-      onPinInput();
+      for (let i = 0; i < 6; i++) document.getElementById("pd" + i).classList.remove("filled");
     }
   } catch {
     // Store PC offline — fall back to admin override only
@@ -1818,6 +1878,11 @@ function panelHTML() {
       <div id="jp-colour-content"></div>
       <div id="jp-colour-actions" style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"></div>
     </div>
+    <!-- DTP / Work Session Timer -->
+    <div id="jp-dtp-section" style="display:none;padding:8px 16px 12px;border-top:1px solid var(--border)">
+      <div style="font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.06em;margin-bottom:6px">DTP / EDITING TIMER</div>
+      <div id="jp-dtp-content"></div>
+    </div>
     <!-- Timeline -->
     <div id="jp-timeline-section" style="padding:8px 16px 16px;border-top:1px solid var(--border)">
       <div style="font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.06em;margin-bottom:6px">TIMELINE</div>
@@ -2004,6 +2069,227 @@ async function confirmColour(withOverride) {
   } catch { /* silent */ }
 }
 
+// ── DTP / Work Session Timer ──────────────────────────────────────────────────
+
+let dtpTimerInterval = null;   // running clock interval
+let dtpOpenSession   = null;   // { id, started_at, paused_at }
+
+const DTP_SERVICE_TYPES = ["dtp", "editing", "graph", "mixed"];
+
+function renderDtpPanel(j) {
+  const section = document.getElementById("jp-dtp-section");
+  if (!section) return;
+  const svc = (j.service_type || "print").toLowerCase();
+  const isDtp = DTP_SERVICE_TYPES.some(t => svc.includes(t));
+  if (!isDtp) { section.style.display = "none"; stopDtpClock(); return; }
+  section.style.display = "";
+  loadDtpSessions(j.job_id);
+}
+
+async function loadDtpSessions(jobId) {
+  const el = document.getElementById("jp-dtp-content");
+  if (!el) return;
+  try {
+    const r = await fetch(`${STORE_PC_URL}/work-sessions?job_id=${encodeURIComponent(jobId)}`, {
+      headers: { "X-Store-Token": localStorage.getItem("storeToken") || "" }
+    });
+    const data = await r.json();
+    dtpOpenSession = data.open_session || null;
+    renderDtpContent(data.sessions || [], dtpOpenSession, jobId);
+  } catch {
+    if (el) el.innerHTML = '<span style="color:#e57373;font-size:.72rem">Could not load sessions</span>';
+  }
+}
+
+function renderDtpContent(sessions, open, jobId) {
+  const el = document.getElementById("jp-dtp-content");
+  if (!el) return;
+
+  // Summary of past closed sessions
+  const closed = sessions.filter(s => s.ended_at);
+  const totalBilledMin = closed.reduce((acc, s) => {
+    if (!s.total_sec) return acc;
+    const slot = 15;
+    return acc + Math.max(1, Math.ceil(s.total_sec / 60 / slot)) * slot;
+  }, 0);
+
+  let html = "";
+
+  if (closed.length) {
+    const hrs = (totalBilledMin / 60).toFixed(2);
+    html += `<div style="font-size:.72rem;margin-bottom:6px">
+      Past sessions: <b>${closed.length}</b> &nbsp;|&nbsp;
+      Total billed: <b>${totalBilledMin} min (${hrs} h)</b>
+    </div>`;
+    html += `<div style="font-size:.67rem;color:var(--muted);margin-bottom:8px">`;
+    closed.forEach((s, i) => {
+      const billedMin = s.total_sec ? Math.max(1, Math.ceil(s.total_sec / 60 / 15)) * 15 : "?";
+      html += `Session ${i + 1}: ${esc(s.staff_id)} — ${billedMin} min`;
+      if (s.notes) html += ` (${esc(s.notes)})`;
+      html += "<br>";
+    });
+    html += "</div>";
+  }
+
+  if (open) {
+    const isPaused = !!open.paused_at;
+    html += `<div style="font-size:.72rem;margin-bottom:6px">
+      <span style="color:${isPaused ? "var(--amber)" : "var(--green)"}">
+        ${isPaused ? "⏸ Paused" : "▶ Running"}
+      </span>
+      &nbsp; Session #${open.id} — staff: <b>${esc(String(open.staff_id || ""))}</b>
+      &nbsp; <span id="dtp-clock" style="font-family:monospace;font-weight:600">00:00:00</span>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${!isPaused ? `<button class="jp-btn" style="font-size:.7rem;padding:3px 10px;border-color:var(--amber);color:var(--amber)" onclick="dtpPause()">⏸ Pause</button>` : ""}
+      ${isPaused  ? `<button class="jp-btn save" style="font-size:.7rem;padding:3px 10px" onclick="dtpResume()">▶ Resume</button>` : ""}
+      <button class="jp-btn collect" style="font-size:.7rem;padding:3px 10px" onclick="openDtpEndModal()">✓ Done</button>
+    </div>`;
+    startDtpClock(open);
+  } else {
+    stopDtpClock();
+    html += `<button class="jp-btn save" style="font-size:.7rem;padding:3px 10px" onclick="dtpStart()">▶ Start Work</button>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function startDtpClock(session) {
+  stopDtpClock();
+  function tick() {
+    const el = document.getElementById("dtp-clock");
+    if (!el) { stopDtpClock(); return; }
+    const start   = new Date(session.started_at.replace(" ", "T"));
+    let elapsed   = Math.floor((Date.now() - start.getTime()) / 1000);
+    // Subtract all previously accumulated pause time (from past pause/resume cycles)
+    elapsed -= (session.paused_sec || 0);
+    // If currently paused, also subtract the ongoing pause interval
+    if (session.paused_at) {
+      const paused = new Date(session.paused_at.replace(" ", "T"));
+      elapsed -= Math.floor((Date.now() - paused.getTime()) / 1000);
+    }
+    elapsed = Math.max(0, elapsed);
+    const h = String(Math.floor(elapsed / 3600)).padStart(2, "0");
+    const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0");
+    const s = String(elapsed % 60).padStart(2, "0");
+    el.textContent = `${h}:${m}:${s}`;
+  }
+  tick();
+  dtpTimerInterval = setInterval(tick, 1000);
+}
+
+function stopDtpClock() {
+  if (dtpTimerInterval) { clearInterval(dtpTimerInterval); dtpTimerInterval = null; }
+}
+
+async function dtpStart() {
+  if (!selectedJob || !activeStaff) { showToast("Login first", "error"); return; }
+  try {
+    const r = await fetch(`${STORE_PC_URL}/session-start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify({ job_id: selectedJob.job_id, staff_id: activeStaff.staff_id }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showToast("Timer started", "ok");
+      await loadDtpSessions(selectedJob.job_id);
+    } else {
+      showToast(data.error || "Failed to start", "error");
+    }
+  } catch { showToast("Network error", "error"); }
+}
+
+async function dtpPause() {
+  if (!dtpOpenSession) return;
+  try {
+    const r = await fetch(`${STORE_PC_URL}/session-pause`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify({ session_id: dtpOpenSession.id, staff_id: activeStaff?.staff_id || "" }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showToast("Paused", "ok");
+      stopDtpClock();
+      dtpOpenSession.paused_at = new Date().toISOString().slice(0, 19).replace("T", " ");
+      await loadDtpSessions(selectedJob.job_id);
+    } else {
+      showToast(data.error || "Failed to pause", "error");
+    }
+  } catch { showToast("Network error", "error"); }
+}
+
+async function dtpResume() {
+  if (!dtpOpenSession) return;
+  try {
+    const r = await fetch(`${STORE_PC_URL}/session-resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify({ session_id: dtpOpenSession.id, staff_id: activeStaff?.staff_id || "" }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showToast("Resumed", "ok");
+      await loadDtpSessions(selectedJob.job_id);
+    } else {
+      showToast(data.error || "Failed to resume", "error");
+    }
+  } catch { showToast("Network error", "error"); }
+}
+
+// End session modal
+function openDtpEndModal() {
+  if (!dtpOpenSession) return;
+  const overlay = document.getElementById("modal-overlay");
+  const modal   = document.getElementById("modal-content");
+  if (!overlay || !modal) return;
+  overlay.style.display = "flex";
+  modal.innerHTML = `
+    <h3 style="margin:0 0 12px">End Work Session</h3>
+    <div class="pp-field">
+      <label>Pages completed (DTP)</label>
+      <input class="pp-inp" type="number" min="0" id="dtp-end-pages" value="0" style="width:100%">
+    </div>
+    <div class="pp-field">
+      <label>Graphs created</label>
+      <input class="pp-inp" type="number" min="0" id="dtp-end-graphs" value="0" style="width:100%">
+    </div>
+    <div class="pp-field">
+      <label>Notes (optional)</label>
+      <input class="pp-inp" type="text" id="dtp-end-notes" placeholder="e.g. Cover design done" style="width:100%">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="jp-btn collect" onclick="dtpEnd()">✓ End &amp; Calculate Bill</button>
+      <button class="jp-btn" onclick="document.getElementById('modal-overlay').style.display='none'">Cancel</button>
+    </div>
+  `;
+}
+
+async function dtpEnd() {
+  if (!dtpOpenSession || !selectedJob) return;
+  const dtp_pages   = parseInt(document.getElementById("dtp-end-pages")?.value || "0");
+  const graph_count = parseInt(document.getElementById("dtp-end-graphs")?.value || "0");
+  const notes       = document.getElementById("dtp-end-notes")?.value || "";
+  document.getElementById("modal-overlay").style.display = "none";
+  try {
+    const r = await fetch(`${STORE_PC_URL}/session-end`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Store-Token": localStorage.getItem("storeToken") || "" },
+      body: JSON.stringify({ session_id: dtpOpenSession.id, dtp_pages, graph_count, notes }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showToast(`Done — ${data.billing_minutes} min billed (${data.billing_hours}h)`, "ok");
+      dtpOpenSession = null;
+      stopDtpClock();
+      await loadDtpSessions(selectedJob.job_id);
+    } else {
+      showToast(data.error || "Failed to end session", "error");
+    }
+  } catch { showToast("Network error", "error"); }
+}
+
 function loadTimeline(jobId) {
   const el = document.getElementById("jp-timeline");
   if (!el) return;
@@ -2037,15 +2323,15 @@ function renderTimeline(events) {
   if (!el) return;
   if (!events.length) { el.innerHTML = '<span style="color:var(--muted);font-size:.72rem">No events yet</span>'; return; }
   el.innerHTML = events.map(e => {
-    const label = TL_ACTION_LABELS[e.action] || e.action;
+    const label = TL_ACTION_LABELS[e.action] || esc(e.action);
     const isSystem = !e.staff_id;
     const time = e.created_at ? e.created_at.slice(11, 16) : "";
     const date = e.created_at ? e.created_at.slice(0, 10) : "";
     const dur  = e.duration_sec != null ? fmtDuration(e.duration_sec) : "";
     const meta = [
-      e.staff_id ? "by " + e.staff_id : "",
-      e.to_status ? "→ " + e.to_status : "",
-      e.notes     ? e.notes : "",
+      e.staff_id  ? "by " + esc(e.staff_id)  : "",
+      e.to_status ? "→ "  + esc(e.to_status) : "",
+      e.notes     ? esc(e.notes)              : "",
     ].filter(Boolean).join(" · ");
     return `<div class="tl-row">
       <div class="tl-dot${isSystem ? " system" : ""}"></div>
@@ -2066,6 +2352,8 @@ function fmtDuration(sec) {
 
 function closeJobPanel() {
   selectedJob = null;
+  dtpOpenSession = null;
+  stopDtpClock();
   const panelRow = document.getElementById("job-panel-row");
   if (panelRow) panelRow.remove();
   document.querySelectorAll("tr.job-row").forEach(r => r.classList.remove("active-row"));
@@ -2082,6 +2370,7 @@ function renderJobPanel() {
   document.getElementById("jp-source").textContent = j.source || "";
   document.getElementById("jp-status").innerHTML   = badge(j.status);
   renderColourPanel(j);
+  renderDtpPanel(j);
 
   // Load preview iframe
   const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
@@ -2228,7 +2517,7 @@ async function fetchAndShowQuote() {
       if (fr.ok) {
         const fq = await fr.json();
         finCost = fq.finishing_cost || 0;
-        if (fq.breakdown) breakdown.push(...fq.breakdown.filter(b => !/sheet|per sheet/i.test(b)));
+        if (fq.breakdown) breakdown.push(...fq.breakdown.filter(b => !/sheet|per sheet/i.test(b) && !b.startsWith("---")));
       }
     }
     const total = totalPrint + finCost;
@@ -2620,6 +2909,160 @@ async function confirmPhotocopy() {
     alert("Cannot reach print server:\n" + e.message);
     btn.disabled = false; btn.textContent = "Add & Complete";
   }
+}
+
+// ── Conversations Tab ─────────────────────────────────────────────────────────
+
+let convRows    = [];   // all log rows loaded
+let convPhone   = null; // currently selected phone
+let convRefresh = null; // setInterval handle
+
+function switchTab(tab) {
+  document.getElementById("jobs-view").style.display  = tab === "jobs" ? "" : "none";
+  document.getElementById("conv-panel").style.display = tab === "conv" ? "block" : "none";
+  document.getElementById("tab-jobs").classList.toggle("active", tab === "jobs");
+  document.getElementById("tab-conv").classList.toggle("active", tab === "conv");
+
+  if (tab === "conv") {
+    loadInbox();
+    if (!convRefresh) convRefresh = setInterval(loadInbox, 30000);
+  } else {
+    if (convRefresh) { clearInterval(convRefresh); convRefresh = null; }
+  }
+}
+
+async function loadInbox() {
+  try {
+    const rows = await sbFetch("conversation_log",
+      "select=phone,body,created_at,direction,message_type,filename&order=created_at.desc&limit=500");
+    if (!rows) return;
+    convRows = rows;
+    renderInbox(rows);
+    if (convPhone) loadThread(convPhone);
+  } catch (e) {
+    document.getElementById("conv-inbox-list").innerHTML =
+      `<div class="conv-empty">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderInbox(rows) {
+  const seen = new Map();
+  for (const r of rows) {
+    if (!seen.has(r.phone)) seen.set(r.phone, r);
+  }
+  const phones = Array.from(seen.values());
+
+  const q        = (document.getElementById("conv-search")?.value || "").toLowerCase();
+  const filtered = q ? phones.filter(r => r.phone.includes(q)) : phones;
+
+  if (filtered.length === 0) {
+    document.getElementById("conv-inbox-list").innerHTML =
+      `<div class="conv-empty">No conversations yet</div>`;
+    return;
+  }
+
+  document.getElementById("conv-inbox-list").innerHTML = filtered.map(r => {
+    const active   = r.phone === convPhone ? " active" : "";
+    const preview  = r.filename
+      ? `[${escHtml(r.message_type || "file")}: ${escHtml(r.filename)}]`
+      : escHtml((r.body || "").slice(0, 60));
+    const ts       = (r.created_at || "").replace("T", " ").slice(11, 16);
+    const ph       = escHtml(r.phone);
+    return `<div class="conv-inbox-item${active}" onclick="loadThread('${ph}')">
+      <span class="conv-time">${ts}</span>
+      <div class="conv-phone">${ph}</div>
+      <div class="conv-preview">${preview}</div>
+    </div>`;
+  }).join("");
+}
+
+async function loadThread(phone) {
+  convPhone = phone;
+  document.querySelectorAll(".conv-inbox-item").forEach(el => {
+    el.classList.toggle("active",
+      el.querySelector(".conv-phone")?.textContent === phone);
+  });
+
+  const view = document.getElementById("conv-thread-view");
+  view.innerHTML = `<div class="conv-empty"><span class="spinner"></span></div>`;
+
+  try {
+    const rows = await sbFetch("conversation_log",
+      `phone=eq.${encodeURIComponent(phone)}&order=created_at.asc&limit=200`);
+    if (!rows) return;
+
+    if (rows.length === 0) {
+      view.innerHTML = `<div class="conv-empty">No messages</div>`;
+      return;
+    }
+
+    view.innerHTML = rows.map(r => {
+      const dir  = r.direction === "outbound" ? "outbound" : "inbound";
+      const body = r.filename
+        ? `[${escHtml(r.message_type || "file")}: ${escHtml(r.filename)}]`
+        : escHtml(r.body || "");
+      const ts   = (r.created_at || "").replace("T", " ").slice(0, 16);
+      return `<div class="conv-bubble ${dir}">
+        ${body}
+        <div class="conv-meta">${ts} · ${r.direction}</div>
+      </div>`;
+    }).join("");
+
+    view.scrollTop = view.scrollHeight;
+    document.getElementById("conv-reply-bar").style.display = "";
+  } catch (e) {
+    view.innerHTML = `<div class="conv-empty">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function sendConvReply() {
+  const input = document.getElementById("conv-reply-input");
+  const btn   = document.getElementById("conv-send-btn");
+  const msg   = (input.value || "").trim();
+  if (!msg || !convPhone) return;
+
+  const pw = sessionStorage.getItem("admin_pw_cache");
+  if (!pw) {
+    const entered = prompt("Enter admin password to send message:");
+    if (!entered) return;
+    sessionStorage.setItem("admin_pw_cache", entered);
+  }
+  const adminPw = sessionStorage.getItem("admin_pw_cache");
+
+  btn.disabled = true;
+  btn.textContent = "…";
+  try {
+    const res = await fetch("https://printosky.vercel.app/admin/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ admin_password: adminPw, phone: convPhone, message: msg })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (res.status === 403) sessionStorage.removeItem("admin_pw_cache");
+      alert("Error: " + (data.error || res.status));
+      return;
+    }
+    input.value = "";
+    await loadThread(convPhone);
+  } catch (e) {
+    alert("Send failed: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "SEND";
+  }
+}
+
+function filterInbox() {
+  renderInbox(convRows);
+}
+
+function escHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // Close modals on Escape key

@@ -64,7 +64,7 @@ def get_b2b_client(db_path: str, phone: str) -> dict:
     """Return B2B client dict if registered and active, else None."""
     clean = phone.replace("@c.us", "").replace("+", "").replace(" ", "")
     # Try with and without country code
-    variants = [clean, clean.lstrip("91") if clean.startswith("91") else "91" + clean]
+    variants = [clean, clean[2:] if clean.startswith("91") else "91" + clean]
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     for v in variants:
@@ -159,7 +159,7 @@ def list_b2b_clients(db_path: str) -> str:
 # ── Jobs for a client ─────────────────────────────────────────────────────────
 def get_b2b_jobs(db_path: str, phone: str, unpaid_only: bool = False) -> list:
     clean = phone.replace("+", "").replace(" ", "")
-    variants = [clean, clean.lstrip("91") if clean.startswith("91") else "91" + clean]
+    variants = [clean, clean[2:] if clean.startswith("91") else "91" + clean]
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     for v in variants:
@@ -404,7 +404,7 @@ def generate_invoice_pdf(db_path: str, phone: str, output_path: str = None) -> s
 # ── Mark jobs as invoiced ─────────────────────────────────────────────────────
 def mark_jobs_invoiced(db_path: str, phone: str, inv_number: str):
     clean = phone.replace("+", "").replace(" ", "")
-    variants = [clean, clean.lstrip("91") if clean.startswith("91") else "91" + clean]
+    variants = [clean, clean[2:] if clean.startswith("91") else "91" + clean]
     conn = sqlite3.connect(db_path)
     for v in variants:
         conn.execute("""

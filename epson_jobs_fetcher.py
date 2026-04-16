@@ -1,7 +1,7 @@
 """
 EPSON JOB LOG FETCHER
 ======================
-Fetches per-job print details from the Epson WF-C21000 (192.168.55.201).
+Fetches per-job print details from the Epson WF-C21000 (192.168.55.202).
 
 Two-tier approach:
   Tier 1 — Web log probe: attempts to pull a job history table from the
@@ -33,7 +33,7 @@ from datetime import datetime
 logger = logging.getLogger("epson_fetcher")
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-EPSON_IP            = "192.168.55.201"
+EPSON_IP            = "192.168.55.202"
 EPSON_ADMIN_USER    = "admin"   # EpsonNet Config default; check printer label
 EPSON_ADMIN_PASS    = "admin"   # common default — update if changed
 HTTP_TIMEOUT        = 10        # seconds
@@ -280,7 +280,7 @@ def _delta_attribution(conn):
             FROM jobs
             WHERE printed_at BETWEEN ? AND ?
               AND (LOWER(printer) LIKE '%epson%' OR LOWER(printer) LIKE '%wf%'
-                   OR LOWER(printer) LIKE '%192.168.55.201%')
+                   OR LOWER(printer) LIKE '%192.168.55.202%')
         """, (ts_before, ts_after)).fetchall()
 
         if jobs:

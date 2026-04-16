@@ -20,10 +20,16 @@ for _mod in ("dotenv", "requests"):
         sys.modules[_mod] = types.ModuleType(_mod)
 sys.modules["dotenv"].load_dotenv = lambda: None  # type: ignore
 
+# Give the requests stub a callable post() so create_payment_link tests can patch it
+if not hasattr(sys.modules["requests"], "post"):
+    sys.modules["requests"].post = None  # type: ignore
+
 # requests.auth needs HTTPBasicAuth
 _auth_mod = types.ModuleType("requests.auth")
 class _BasicAuth:
-    def __init__(self, u, p): pass
+    def __init__(self, u, p):
+        self.username = u
+        self.password = p
 _auth_mod.HTTPBasicAuth = _BasicAuth
 sys.modules["requests.auth"] = _auth_mod
 
@@ -169,3 +175,99 @@ class TestParsePaymentWebhook:
     def test_amount_fractional_paise(self):
         r = rz.parse_payment_webhook(self._payment_link_paid(amount_paise=12550))
         assert r["amount"] == 125.5
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _auth
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAuth:
+    def test_returns_http_basic_auth(self):
+        from requests.auth import HTTPBasicAuth
+        auth = rz._auth()
+        assert isinstance(auth, HTTPBasicAuth)
+
+    def test_uses_configured_credentials(self, monkeypatch):
+        monkeypatch.setattr(rz, "RAZORPAY_KEY_ID", "mykey")
+        monkeypatch.setattr(rz, "RAZORPAY_KEY_SECRET", "mysecret")
+        auth = rz._auth()
+        assert auth.username == "mykey"
+        assert auth.password == "mysecret"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# create_payment_link
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _mock_response(status_code, json_data):
+    resp = types.SimpleNamespace()
+    resp.status_code = status_code
+    resp.json = lambda: json_data
+    return resp
+
+
+class TestCreatePaymentLink:
+    def test_success_returns_url_and_link_id(self, monkeypatch):
+        api_resp = {"id": "plink_123", "short_url": "https://rzp.io/l/abc"}
+        monkeypatch.setattr(rz.requests, "post",
+                            lambda *a, **kw: _mock_response(200, api_resp))
+        result = rz.create_payment_link("OSP-20260101-0001", 50.0, "Print job")
+        assert result["url"] == "https://rzp.io/l/abc"
+        assert result["link_id"] == "plink_123"
+
+    def test_amount_converted_to_paise(self, monkeypatch):
+        captured = {}
+        api_resp = {"id": "pl1", "short_url": "https://rzp.io/l/x"}
+        def _post(url, json, auth, timeout):
+            captured["paise"] = json["amount"]
+            return _mock_response(200, api_resp)
+        monkeypatch.setattr(rz.requests, "post", _post)
+        rz.create_payment_link("OSP-1", 84.5, "desc")
+        assert captured["paise"] == 8450
+
+    def test_job_id_in_reference_and_notes(self, monkeypatch):
+        captured = {}
+        api_resp = {"id": "pl1", "short_url": "https://rzp.io/l/x"}
+        def _post(url, json, auth, timeout):
+            captured["payload"] = json
+            return _mock_response(200, api_resp)
+        monkeypatch.setattr(rz.requests, "post", _post)
+        rz.create_payment_link("OSP-20260101-0099", 30.0, "desc")
+        assert captured["payload"]["reference_id"] == "OSP-20260101-0099"
+        assert captured["payload"]["notes"]["job_id"] == "OSP-20260101-0099"
+
+    def test_phone_10_digit_gets_country_code(self, monkeypatch):
+        captured = {}
+        api_resp = {"id": "pl1", "short_url": "https://rzp.io/l/x"}
+        def _post(url, json, auth, timeout):
+            captured["payload"] = json
+            return _mock_response(200, api_resp)
+        monkeypatch.setattr(rz.requests, "post", _post)
+        rz.create_payment_link("OSP-1", 10.0, "d", customer_phone="9876543210")
+        assert captured["payload"]["customer"]["contact"] == "+919876543210"
+
+    def test_no_phone_no_customer_field(self, monkeypatch):
+        captured = {}
+        api_resp = {"id": "pl1", "short_url": "https://rzp.io/l/x"}
+        def _post(url, json, auth, timeout):
+            captured["payload"] = json
+            return _mock_response(200, api_resp)
+        monkeypatch.setattr(rz.requests, "post", _post)
+        rz.create_payment_link("OSP-1", 10.0, "d")
+        assert "customer" not in captured["payload"]
+        assert captured["payload"]["notify"]["sms"] is False
+
+    def test_api_error_returns_error_dict(self, monkeypatch):
+        error_resp = {"error": {"description": "Bad amount"}}
+        monkeypatch.setattr(rz.requests, "post",
+                            lambda *a, **kw: _mock_response(400, error_resp))
+        result = rz.create_payment_link("OSP-1", -1.0, "d")
+        assert "error" in result
+        assert result["error"] == "Bad amount"
+
+    def test_network_exception_returns_error_dict(self, monkeypatch):
+        def _raise(*a, **kw): raise OSError("no network")
+        monkeypatch.setattr(rz.requests, "post", _raise)
+        result = rz.create_payment_link("OSP-1", 50.0, "d")
+        assert "error" in result
+        assert "no network" in result["error"]

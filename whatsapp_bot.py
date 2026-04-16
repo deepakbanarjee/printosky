@@ -261,16 +261,18 @@ def save_customer_profile(phone: str, settings: dict, db_path: str):
     conn = sqlite3.connect(db_path)
     conn.execute("""
         INSERT INTO customer_profiles(phone, last_size, last_colour, last_layout,
-            last_copies, last_finishing, last_delivery, updated_at)
-        VALUES(?,?,?,?,?,?,?,datetime('now'))
+            last_copies, last_finishing, last_delivery, last_multiup_sided, updated_at)
+        VALUES(?,?,?,?,?,?,?,?,datetime('now'))
         ON CONFLICT(phone) DO UPDATE SET
             last_size=excluded.last_size, last_colour=excluded.last_colour,
             last_layout=excluded.last_layout, last_copies=excluded.last_copies,
             last_finishing=excluded.last_finishing, last_delivery=excluded.last_delivery,
+            last_multiup_sided=excluded.last_multiup_sided,
             updated_at=excluded.updated_at
     """, (
         phone, settings["size"], settings["colour"], settings["layout"],
-        settings["copies"], settings["finishing"], int(settings["delivery"])
+        settings["copies"], settings["finishing"], int(settings["delivery"]),
+        settings.get("sided", "single"),
     ))
     conn.commit()
     conn.close()
@@ -314,8 +316,7 @@ def _build_job_settings(session: dict, job: dict) -> dict:
 def _build_job_settings_from_saved(saved: dict, job: dict) -> dict:
     """Build a settings dict for one job using saved profile settings."""
     layout = saved["layout"]
-    # multiup sided is not stored in profile — default single
-    sided = "single"
+    sided  = saved.get("multiup_sided") or "single"
     return {
         "size":       saved["size"],
         "colour":     saved["colour"],
@@ -327,6 +328,69 @@ def _build_job_settings_from_saved(saved: dict, job: dict) -> dict:
         "filename":   job["filename"],
         "job_id":     job["job_id"],
     }
+
+
+def _update_job_quote_db(job_id: str, amount_quoted: float, copies: int,
+                         finishing: str, size: str, colour: str, layout: str,
+                         db_path: str) -> None:
+    """Persist quoted price and settings onto a jobs row (SQLite path)."""
+    conn = sqlite3.connect(db_path)
+    _ensure_job_columns(conn)
+    conn.execute(
+        "UPDATE jobs SET amount_quoted=?, copies=?, finishing=?, size=?, colour=?, layout=? WHERE job_id=?",
+        (amount_quoted, copies, finishing, size, colour, layout, job_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def _update_jobs_delivery_db(job_ids: list, delivery: int, db_path: str) -> None:
+    """Set delivery flag on a list of jobs (SQLite path)."""
+    conn = sqlite3.connect(db_path)
+    for jid in job_ids:
+        conn.execute("UPDATE jobs SET delivery=? WHERE job_id=?", (delivery, jid))
+    conn.commit()
+    conn.close()
+
+
+def _update_batch_payment_db(batch_id: str, total: float, link_id: str,
+                              link_sent_at: str, job_ids: list, db_path: str) -> None:
+    """Record Razorpay link on batch + all its jobs (SQLite path)."""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE job_batches SET total_amount=?, razorpay_link_id=?, link_sent_at=?, "
+        "status='awaiting_payment' WHERE batch_id=?",
+        (total, link_id, link_sent_at, batch_id)
+    )
+    for jid in job_ids:
+        conn.execute(
+            "UPDATE jobs SET razorpay_link_id=?, link_sent_at=? WHERE job_id=?",
+            (link_id, link_sent_at, jid)
+        )
+    conn.commit()
+    conn.close()
+
+
+def _get_pending_review_db(phone: str, db_path: str):
+    """Return a pending review row for the customer, or None (SQLite path)."""
+    conn = sqlite3.connect(db_path)
+    try:
+        from review_manager import setup_review_db
+        setup_review_db(conn)
+        return conn.execute(
+            "SELECT id FROM job_reviews WHERE phone=? AND rating IS NULL AND review_sent=1 LIMIT 1",
+            (phone,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def _get_job_filepath_db(job_id: str, db_path: str) -> str | None:
+    """Return the file path for a job (SQLite path)."""
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT filepath FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+    conn.close()
+    return row[0] if row else None
 
 
 def _persist_job_settings(settings: dict, db_path: str, job_settings_json_current: str) -> str:
@@ -357,16 +421,11 @@ def _persist_job_settings(settings: dict, db_path: str, job_settings_json_curren
         f"× {settings['copies']}"
     )
 
-    # Update jobs table
-    conn = sqlite3.connect(db_path)
-    _ensure_job_columns(conn)
-    conn.execute(
-        "UPDATE jobs SET amount_quoted=?, copies=?, finishing=?, size=?, colour=?, layout=? WHERE job_id=?",
-        (result["total"], settings["copies"], settings["finishing"],
-         settings["size"], settings["colour"], settings["layout"], settings["job_id"])
+    _update_job_quote_db(
+        settings["job_id"], result["total"], settings["copies"],
+        settings["finishing"], settings["size"], settings["colour"],
+        settings["layout"], db_path
     )
-    conn.commit()
-    conn.close()
 
     # Merge into job_settings_json
     existing = json.loads(job_settings_json_current or "{}")
@@ -461,12 +520,7 @@ def _send_batch_summary(phone: str, delivery: bool, db_path: str) -> list:
     total    = total_print + del_cost
 
     # Persist delivery on each job
-    conn = sqlite3.connect(db_path)
-    _ensure_job_columns(conn)
-    for job in jobs_list:
-        conn.execute("UPDATE jobs SET delivery=? WHERE job_id=?", (int(delivery), job["job_id"]))
-    conn.commit()
-    conn.close()
+    _update_jobs_delivery_db([j["job_id"] for j in jobs_list], int(delivery), db_path)
 
     # If any job needs staff quote — route to staff
     if any_staff_quote:
@@ -512,18 +566,10 @@ def _send_batch_summary(phone: str, delivery: bool, db_path: str) -> list:
     link_id  = pay.get("link_id")
     now_str  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        "UPDATE job_batches SET total_amount=?, razorpay_link_id=?, link_sent_at=?, status='awaiting_payment' WHERE batch_id=?",
-        (total, link_id, now_str, batch_id)
+    _update_batch_payment_db(
+        batch_id, total, link_id, now_str,
+        [j["job_id"] for j in jobs_list], db_path
     )
-    for job in jobs_list:
-        conn.execute(
-            "UPDATE jobs SET razorpay_link_id=?, link_sent_at=? WHERE job_id=?",
-            (link_id, now_str, job["job_id"])
-        )
-    conn.commit()
-    conn.close()
 
     return [msg_batch_summary(jobs_with_settings, delivery, total, pay_url)]
 
@@ -601,6 +647,41 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     text    = text.strip()
     session = get_session(db_path, phone)
 
+    # ── Staff hold: customer requests human agent ─────────────────────────────
+    if text.lower() in ("agent", "help", "staff"):
+        prev_step = (session or {}).get("step", "")
+        save_session(db_path, phone, step="staff_hold", prev_step=prev_step)
+        return [
+            "Our staff will contact you shortly. Please wait.",
+            ("STAFF_QUOTE", f"[HOLD] Customer {phone} requested a staff agent. "
+             f"Reply via WhatsApp Business Suite. To resume bot: POST /staff/resume "
+             f"{{\"phone\":\"{phone}\"}}", phone, 0)
+        ]
+
+    # ── Staff hold: ignore all messages until staff resumes ───────────────────
+    if session and session.get("step") == "staff_hold":
+        return []
+
+    # ── Review reply (1-5) — checked before session flow ─────────────────────
+    # If no active conversation and message is a digit 1-5, treat as review rating.
+    if not session and text in ("1", "2", "3", "4", "5"):
+        try:
+            from review_manager import record_rating
+            pending = _get_pending_review_db(phone, db_path)
+            if pending:
+                from whatsapp_notify import send_whatsapp_message as _swm
+                def _send(p, m):
+                    try:
+                        return _swm(p, m)
+                    except Exception:
+                        return False
+                result = record_rating(db_path, phone, int(text), _send)
+                if result.get("ok"):
+                    logger.info("Review recorded via bot: phone=%s rating=%s", phone, text)
+                    return []   # review_manager already sent the reply
+        except ImportError:
+            pass
+
     # ── New job (legacy direct path — batch flow uses start_batch_conversation) ─
     if job_id and not session:
         save_session(db_path, phone, job_id=job_id, step="size", page_count=page_count)
@@ -648,13 +729,13 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
             if saved and idx < len(jobs):
                 return [msg_batch_confirm(idx, len(jobs),
                                           jobs[idx]["filename"], jobs[idx]["page_count"], saved)]
-            return ["_Please reply with 1 or 2_ 👆"]
+            return ["_Please reply with 1 or 2_ 👆\n\nType *AGENT* to speak to our staff."]
 
     # ── Step 1: Size ──────────────────────────────────────────────────────────
     if step == "size":
         size = SIZE_MAP.get(text)
         if not size:
-            return ["_Please reply with 1, 2, or 3_ 👆"]
+            return ["_Please reply with 1, 2, or 3_ 👆\n\nType *AGENT* to speak to our staff."]
         if size == "other":
             clear_session(db_path, phone)
             return [msg_other_size(s_jobid)]
@@ -665,7 +746,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     elif step == "colour":
         colour = COLOUR_MAP.get(text)
         if not colour:
-            return ["_Please reply with 1, 2, or 3_ 👆"]
+            return ["_Please reply with 1, 2, or 3_ 👆\n\nType *AGENT* to speak to our staff."]
         save_session(db_path, phone, colour=colour, step="layout")
         return [msg_step3_layout()]
 
@@ -673,7 +754,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     elif step == "layout":
         layout = LAYOUT_MAP.get(text)
         if not layout:
-            return ["_Please reply with 1, 2, or 3_ 👆"]
+            return ["_Please reply with 1, 2, or 3_ 👆\n\nType *AGENT* to speak to our staff."]
         if layout == "multiup":
             save_session(db_path, phone, layout="multiup", step="multiup_per")
             return [msg_step3b_multiup()]
@@ -684,7 +765,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     elif step == "multiup_per":
         mup = MULTIUP_MAP.get(text)
         if not mup:
-            return ["_Please reply with 1, 2, 3, or 4_ 👆"]
+            return ["_Please reply with 1, 2, 3, or 4_ 👆\n\nType *AGENT* to speak to our staff."]
         save_session(db_path, phone, multiup_per=mup, step="multiup_sided")
         return [msg_step3c_multiup_sided()]
 
@@ -692,7 +773,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     elif step == "multiup_sided":
         sided = SIDED_MAP.get(text)
         if not sided:
-            return ["_Please reply with 1 or 2_ 👆"]
+            return ["_Please reply with 1 or 2_ 👆\n\nType *AGENT* to speak to our staff."]
         save_session(db_path, phone, multiup_sided=sided, step="copies")
         return [msg_step4_copies()]
 
@@ -703,7 +784,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
             if copies < 1 or copies > 999:
                 raise ValueError
         except ValueError:
-            return ["_Please reply with a valid number (e.g. 1, 2, 5)_ 👆"]
+            return ["_Please reply with a valid number (e.g. 1, 2, 5)_ 👆\n\nType *AGENT* to speak to our staff."]
         save_session(db_path, phone, copies=copies, step="finishing")
         return [msg_step5_finishing()]
 
@@ -711,7 +792,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     elif step == "finishing":
         finishing = FINISHING_MAP.get(text)
         if not finishing:
-            return ["_Please reply with a number from 1 to 9_ 👆"]
+            return ["_Please reply with a number from 1 to 9_ 👆\n\nType *AGENT* to speak to our staff."]
         save_session(db_path, phone, finishing=finishing)
 
         if batch_id:
@@ -734,7 +815,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     # ── Step 6: Delivery → Calculate/Summary ─────────────────────────────────
     elif step == "delivery":
         if text not in ("1", "2"):
-            return ["_Please reply with 1 or 2_ 👆"]
+            return ["_Please reply with 1 or 2_ 👆\n\nType *AGENT* to speak to our staff."]
         delivery = text == "2"
         save_session(db_path, phone, delivery=int(delivery), step="done")
 
@@ -766,12 +847,7 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
         if colour_mode == "mixed":
             try:
                 from pdf_scanner import scan_pdf, calculate_mixed_cost
-                job_filepath = None
-                conn_f = sqlite3.connect(db_path)
-                row_f  = conn_f.execute("SELECT filepath FROM jobs WHERE job_id=?", (s_jobid,)).fetchone()
-                conn_f.close()
-                if row_f:
-                    job_filepath = row_f[0]
+                job_filepath = _get_job_filepath_db(s_jobid, db_path)
 
                 if job_filepath:
                     scan = scan_pdf(job_filepath, timeout_seconds=30)
@@ -866,4 +942,39 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
 
         return [msg_payment_link(s_jobid, result["breakdown"], pay["url"])]
 
-    return []
+    # ── Fallthrough: unrecognised input for current step ─────────────────────
+    return [
+        "Sorry, I didn't understand that. Please reply with one of the options above.\n\n"
+        "Type *AGENT* to speak to our staff. 🙏"
+    ]
+
+
+# ── Cloud mode: swap SQLite DB functions to Supabase backend ──────────────────
+# Activated when SUPABASE_URL is set (Vercel deployment).
+# Store PC has no SUPABASE_URL → continues to use the SQLite path above.
+if os.environ.get("SUPABASE_URL"):
+    import db_cloud as _dbc
+
+    get_session           = _dbc.get_session           # noqa: F811
+    save_session          = _dbc.save_session           # noqa: F811
+    clear_session         = _dbc.clear_session          # noqa: F811
+    save_customer_profile = _dbc.save_customer_profile  # noqa: F811
+
+    def _update_job_quote_db(job_id, amount_quoted, copies,          # noqa: F811
+                              finishing, size, colour, layout, db_path):
+        _dbc.update_job_settings(job_id, amount_quoted, copies, finishing, size, colour, layout)
+
+    def _update_jobs_delivery_db(job_ids: list, delivery: int, db_path: str):  # noqa: F811
+        for jid in job_ids:
+            _dbc.update_job_delivery(jid, delivery)
+
+    def _update_batch_payment_db(batch_id, total, link_id,           # noqa: F811
+                                  link_sent_at, job_ids, db_path):
+        _dbc.update_batch_payment(batch_id, total, link_id, link_sent_at)
+        _dbc.update_jobs_payment_link(job_ids, link_id, link_sent_at)
+
+    def _get_pending_review_db(phone: str, db_path: str):            # noqa: F811
+        return _dbc.get_pending_review(phone)
+
+    def _get_job_filepath_db(job_id: str, db_path: str) -> str | None:  # noqa: F811
+        return _dbc.get_job_filepath(job_id)

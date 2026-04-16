@@ -79,7 +79,7 @@ Supporting modules (all imported/threaded, not standalone services):
 | `razorpay_integration.py` | Creates payment links; verifies webhook signatures |
 | `webhook_receiver.py` | HTTP handler (port 3002) for Razorpay payment confirmations |
 | `supabase_sync.py` | Background thread; upserts jobs + counters to Supabase every 5 min |
-| `printer_poller.py` | SNMP/HTTP polling for Konica (192.168.55.110) and Epson (192.168.55.201) |
+| `printer_poller.py` | SNMP/HTTP polling for Konica (192.168.55.110) and Epson (192.168.55.202) |
 | `konica_jobs_fetcher.py` | Pulls CSV job log from Konica web admin; deduplicates |
 | `session_timeout.py` | Flags idle WhatsApp bot sessions; sends staff alerts |
 | `b2b_manager.py` | B2B credit accounts, per-client discounts, monthly invoice PDF |

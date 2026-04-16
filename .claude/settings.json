@@ -1,8 +1,8 @@
 {
-  "model": "claude-sonnet-4-6",
   "env": {
     "MAX_THINKING_TOKENS": "10000"
   },
+  "model": "claude-sonnet-4-6",
   "hooks": {
     "SessionEnd": [
       {
@@ -11,8 +11,8 @@
           {
             "type": "command",
             "command": "git -C C:/printosky_watcher add . && git -C C:/printosky_watcher commit -m \"Auto-save: session ended\" && git -C C:/printosky_watcher push origin sprint/session-7 || true",
-            "async": true,
-            "timeout": 30
+            "timeout": 30,
+            "async": true
           }
         ]
       }
@@ -29,5 +29,8 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
   }
 }

@@ -4,7 +4,7 @@ PRINTOSKY PRINTER POLLER — Phase 3
 Polls Konica Bizhub Pro 1100 and Epson WF-C21000 for page counters.
 Stores readings in SQLite. Dashboard picks them up automatically.
 
-Konica: Uses /wcd/system_device.xml (HTTP) with SNMP fallback
+Konica: Uses /wcd/system_device.xml (HTTP, counters) + /wcd/system_consumable.xml (supplies) with SNMP fallback
 Epson:  Uses SNMP (standard RFC 3805 printer MIB)
 
 Runs automatically — imported and started by watcher.py.
@@ -36,7 +36,7 @@ import requests
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 KONICA_IP            = "192.168.55.110"
-EPSON_IP             = "192.168.55.201"
+EPSON_IP             = "192.168.55.202"
 POLL_INTERVAL        = 300          # seconds (5 minutes)
 SNMP_COMMUNITY       = "public"
 SNMP_TIMEOUT         = 3            # seconds
@@ -46,10 +46,11 @@ HTTP_TIMEOUT         = 5            # seconds
 KONICA_USER          = "Admin"      # default Konica admin username
 KONICA_PASS          = ""           # default is blank — set if changed
 
-# Konica XML endpoint (confirmed working)
-KONICA_XML_URL       = f"http://{KONICA_IP}/wcd/system_device.xml"
-KONICA_LOGIN_URL     = f"http://{KONICA_IP}/wcd/index.html"
-KONICA_COUNTER_URL   = f"http://{KONICA_IP}/wcd/counters.xml"  # alternate endpoint
+# Konica XML endpoints (confirmed working)
+KONICA_XML_URL        = f"http://{KONICA_IP}/wcd/system_device.xml"
+KONICA_LOGIN_URL      = f"http://{KONICA_IP}/wcd/index.html"
+KONICA_COUNTER_URL    = f"http://{KONICA_IP}/wcd/counters.xml"       # alternate counter endpoint
+KONICA_CONSUMABLE_URL = f"http://{KONICA_IP}/wcd/system_consumable.xml"  # toner + drum levels
 
 # SNMP OIDs
 OID_KONICA_TOTAL     = "1.3.6.1.4.1.18334.1.1.1.5.7.2.1.1.0"
@@ -57,6 +58,10 @@ OID_KONICA_PRINT_BW  = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.2"
 OID_KONICA_COPY_BW   = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.1"
 OID_KONICA_PRINT_COL = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.2"
 OID_KONICA_COPY_COL  = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.1"
+# Konica vendor supply OIDs — confirmed via SNMP walk 2026-04-14
+# Drum level not accessible via SNMP on this model (returns no data)
+OID_KONICA_TONER_PCT = "1.3.6.1.4.1.18334.1.1.1.5.7.2.3.1.1.1"   # toner remaining %
+OID_KONICA_TONER_STS = "1.3.6.1.4.1.18334.1.1.1.5.7.2.3.1.2.1"   # toner status code
 OID_EPSON_TOTAL      = "1.3.6.1.2.1.43.10.2.1.4.1.1"
 # Epson WF-C21000 vendor OIDs — confirmed via epson_snmp_discover.py 2026-03-15
 # 6.1.1.4.1.X = print pages by media type; .4.1.2 = A4 (all sizes sum = total)
@@ -198,6 +203,127 @@ def poll_konica_xml():
     return None
 
 
+def poll_konica_supplies_xml():
+    """
+    Fetch Konica toner/drum levels from system_consumable.xml.
+    Returns list of supply dicts (same format as poll_supplies()), or [] on failure.
+    This fixes the SNMP -2/-3 (unknown) readings for Konica supplies.
+    """
+    session = requests.Session()
+    try:
+        login_data = {
+            "func":          "PSL_LP_SLOGIN",
+            "S_LoginName":   KONICA_USER,
+            "S_Password":    KONICA_PASS,
+            "S_Permissions": "",
+        }
+        session.post(KONICA_LOGIN_URL, data=login_data, timeout=HTTP_TIMEOUT)
+    except Exception:
+        pass
+
+    try:
+        r = session.get(KONICA_CONSUMABLE_URL, timeout=HTTP_TIMEOUT)
+        if r.status_code != 200:
+            logger.debug(f"Konica consumable XML: HTTP {r.status_code}")
+            return []
+        # Konica prepends a UTF-8 BOM — decode with utf-8-sig to strip it
+        raw_xml = r.content.decode("utf-8-sig", errors="replace").strip()
+        if not raw_xml.startswith("<"):
+            logger.debug(f"Konica consumable XML: response is not XML after BOM strip")
+            return []
+
+        root = ET.fromstring(raw_xml)
+        labels = SUPPLY_LABELS.get("konica", {})
+        supplies = []
+
+        # Konica consumable XML uses repeated blocks — try common element names
+        supply_elems = (
+            list(root.iter("Consumable")) or
+            list(root.iter("Supply")) or
+            list(root.iter("TonerInfo")) or
+            list(root.iter("ConsumableItem"))
+        )
+
+        for elem in supply_elems:
+            desc = None
+            max_cap = None
+            current = None
+            level_pct = None   # direct percentage from LevelPer
+            for child in elem:
+                ctag = child.tag.lower().replace("_", "").replace("-", "")
+                ctext = (child.text or "").strip()
+                if ctag in ("description", "name", "type", "supplyname", "color", "colour"):
+                    if ctext and ctext not in ("Black", "Cyan", "Magenta", "Yellow"):
+                        desc = ctext   # prefer descriptive name over colour label
+                    elif ctext and desc is None:
+                        desc = ctext
+                elif ctag in ("maxcapacity", "fullcapacity", "capacity", "max"):
+                    try:
+                        max_cap = int(ctext)
+                    except ValueError:
+                        pass
+                elif ctag in ("levelper", "levelpercent", "remainpct", "percent", "pct"):
+                    # LevelPer is a direct 0-100 percentage — Konica confirmed
+                    try:
+                        level_pct = float(ctext)
+                    except ValueError:
+                        pass
+                elif ctag in ("currentlevel", "level", "remaining", "currentvalue"):
+                    try:
+                        current = int(ctext)
+                    except ValueError:
+                        pass
+
+            if level_pct is not None or current is not None or max_cap is not None:
+                supply_idx = len(supplies) + 1
+                label = desc or labels.get(supply_idx, f"Supply {supply_idx}")
+                pct = level_pct  # use direct pct if available
+                if pct is None and max_cap and max_cap > 0 and current is not None and current >= 0:
+                    pct = round(current / max_cap * 100, 1)
+                elif pct is None and current is not None and 0 <= current <= 100 and max_cap in (None, 100):
+                    pct = float(current)
+                supplies.append({
+                    "supply_index":  supply_idx,
+                    "description":   label,
+                    "max_capacity":  max_cap,
+                    "current_level": current,
+                    "pct":           pct,
+                })
+
+        if supplies:
+            logger.info(f"Konica consumable XML OK: {[(s['description'], s['pct']) for s in supplies]}")
+            return supplies
+
+        # Flat fallback: look for any element with toner/drum + a numeric value
+        for elem in root.iter():
+            tag = elem.tag.lower()
+            text = (elem.text or "").strip()
+            if ("toner" in tag or "drum" in tag) and text.lstrip("-").isdigit():
+                val = int(text)
+                if val >= 0:
+                    supply_idx = len(supplies) + 1
+                    supplies.append({
+                        "supply_index":  supply_idx,
+                        "description":   labels.get(supply_idx, tag.title()),
+                        "max_capacity":  None,
+                        "current_level": val,
+                        "pct":           float(val) if val <= 100 else None,
+                    })
+
+        if supplies:
+            logger.info(f"Konica consumable XML (flat fallback): {[(s['description'], s['pct']) for s in supplies]}")
+        else:
+            logger.debug("Konica consumable XML: no supply data (public access returns no levels — expected)")
+        return supplies
+
+    except ET.ParseError as e:
+        logger.debug(f"Konica consumable XML parse error: {e}")
+        return []
+    except Exception as e:
+        logger.debug(f"Konica consumable XML error: {e}")
+        return []
+
+
 # ── SNMP helper ───────────────────────────────────────────────────────────────
 
 def snmp_get(ip, oid):
@@ -277,6 +403,45 @@ def poll_konica_snmp():
     }
     logger.info(f"Konica SNMP OK: {result}")
     return result
+
+
+def poll_konica_supplies_vendor_snmp():
+    """
+    Poll Konica toner level via confirmed vendor SNMP OIDs.
+    OID_KONICA_TONER_PCT returns 0-100 (percent remaining).
+    Drum level is not accessible via SNMP on the Bizhub Pro 1100.
+
+    Returns list of supply dicts compatible with save_supplies().
+    """
+    toner_pct = snmp_get(KONICA_IP, OID_KONICA_TONER_PCT)
+    toner_sts = snmp_get(KONICA_IP, OID_KONICA_TONER_STS)
+
+    if toner_pct is None:
+        logger.warning("Konica vendor SNMP: toner OID returned no data")
+        return []
+
+    # Status codes observed: 4 = normal/OK; other values may indicate warnings
+    TONER_STATUS = {1: "OK", 2: "Low", 3: "Near-empty", 4: "OK", 5: "Empty"}
+    status_str = TONER_STATUS.get(toner_sts, f"status={toner_sts}")
+
+    supplies = [
+        {
+            "supply_index":  1,
+            "description":   "Toner Black",
+            "max_capacity":  100,
+            "current_level": toner_pct,
+            "pct":           float(toner_pct),
+        },
+        {
+            "supply_index":  2,
+            "description":   "Drum Black",
+            "max_capacity":  None,
+            "current_level": None,
+            "pct":           None,   # drum OID not accessible on this model
+        },
+    ]
+    logger.info(f"Konica vendor SNMP supplies: Toner={toner_pct}% ({status_str}), Drum=unknown")
+    return supplies
 
 
 # ── Epson: SNMP ───────────────────────────────────────────────────────────────
@@ -426,6 +591,138 @@ def save_supplies(conn, printer, supplies):
     logger.info(f"Saved {len(supplies)} supply readings for {printer}")
 
 
+# ── Konica: XML supply parsing ───────────────────────────────────────────────
+
+# Tag-name → (supply_index, description) mappings for known bizhub XML variants
+_KONICA_SUPPLY_TAGS = {
+    # Pro 1100 flat-tag format (confirmed via HTTP walk)
+    "tnrblkrmng": (1, "Toner Black"),
+    "drmblkrmng": (2, "Drum Black"),
+    # Alternate firmware tag style
+    "tonerblack": (1, "Toner Black"),
+    "drumblack":  (2, "Drum Black"),
+    "toner_black_remaining": (1, "Toner Black"),
+    "drum_black_remaining":  (2, "Drum Black"),
+}
+
+
+def parse_konica_xml_supplies(xml_text: str) -> list:
+    """
+    Parse toner/drum supply levels from Konica bizhub XML text.
+    Returns list of supply dicts compatible with save_supplies().
+    Returns [] on parse failure or if no supply fields found.
+
+    Handles:
+    - Flat tags: <TnrBlkRmng>72</TnrBlkRmng>
+    - Alternate tags: <TonerBlack>68</TonerBlack>
+    - Values with '%' sign: <TnrBlkRmng>33%</TnrBlkRmng>
+    """
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        logger.debug("parse_konica_xml_supplies: XML parse error")
+        return []
+
+    found = {}  # supply_index → dict
+    for elem in root.iter():
+        tag = (elem.tag or "").lower().replace("-", "_")
+        raw = (elem.text or "").strip().rstrip("%")
+        try:
+            pct = float(raw)
+        except (ValueError, TypeError):
+            continue
+        if not (0.0 <= pct <= 100.0):
+            continue
+        if tag in _KONICA_SUPPLY_TAGS:
+            idx, desc = _KONICA_SUPPLY_TAGS[tag]
+            if idx not in found:
+                found[idx] = {
+                    "supply_index":  idx,
+                    "description":   desc,
+                    "pct":           pct,
+                    "max_capacity":  100,
+                    "current_level": int(pct),
+                }
+
+    return list(found.values())
+
+
+def poll_konica_xml_supplies() -> list:
+    """
+    Fetch Konica supply levels from HTTP XML (same session as counter poll).
+    Returns list of supply dicts, or [] if unavailable.
+    Falls back to empty list — caller should use poll_supplies() SNMP as backup.
+    """
+    import requests as _req
+    session = _req.Session()
+    try:
+        login_data = {
+            "func": "PSL_LP_SLOGIN",
+            "S_LoginName": KONICA_USER,
+            "S_Password": KONICA_PASS,
+            "S_Permissions": "",
+        }
+        session.post(KONICA_LOGIN_URL, data=login_data, timeout=HTTP_TIMEOUT)
+    except Exception:
+        pass
+
+    urls_to_try = [KONICA_XML_URL, KONICA_COUNTER_URL]
+    for url in urls_to_try:
+        try:
+            r = session.get(url, timeout=HTTP_TIMEOUT)
+            if r.status_code != 200:
+                continue
+            supplies = parse_konica_xml_supplies(r.text)
+            if supplies:
+                logger.info("Konica XML supplies OK (%s): %s",
+                            url, [(s["description"], s["pct"]) for s in supplies])
+                return supplies
+        except Exception as e:
+            logger.debug("Konica XML supply fetch %s: %s", url, e)
+
+    logger.warning("Konica XML supplies: no data from any endpoint")
+    return []
+
+
+# ── Ink alert thresholds ──────────────────────────────────────────────────────
+
+INK_ALERT_PCT = 10   # alert when level drops to or below this %
+
+
+def _send_ink_alerts(printer: str, supplies: list, conn) -> None:
+    """
+    Send a WhatsApp staff alert when an ink/toner level crosses a threshold.
+    Fires once on the crossing poll (prev > threshold, current <= threshold).
+    0% gets its own EMPTY alert distinct from the LOW alert.
+    """
+    alerts = []
+    for s in supplies:
+        pct = s.get("pct")
+        if pct is None:
+            continue
+
+        # Two most-recent rows: [0] = just inserted, [1] = previous reading
+        rows = conn.execute("""
+            SELECT pct FROM printer_supplies
+            WHERE printer=? AND supply_index=?
+            ORDER BY polled_at DESC LIMIT 2
+        """, (printer, s["supply_index"])).fetchall()
+        prev_pct = rows[1][0] if len(rows) >= 2 else None
+
+        label = s["description"]
+        if pct == 0 and (prev_pct is None or prev_pct > 0):
+            alerts.append(f"🔴 {label}: EMPTY (0%) — replace immediately")
+        elif 0 < pct <= INK_ALERT_PCT and (prev_pct is None or prev_pct > INK_ALERT_PCT):
+            alerts.append(f"🟡 {label}: LOW ({pct}%) — order replacement soon")
+
+    if alerts:
+        from whatsapp_notify import send_staff_alert
+        printer_name = "Epson WF-C21000" if printer == "epson" else "Konica Bizhub"
+        msg = f"🖨️ *{printer_name} ink alert*\n\n" + "\n".join(alerts)
+        send_staff_alert(msg)
+        logger.warning(f"Ink alert sent for {printer}: {alerts}")
+
+
 # ── Main poll loop ────────────────────────────────────────────────────────────
 
 def poll_once(db_path):
@@ -439,12 +736,19 @@ def poll_once(db_path):
         logger.info("Konica XML gave no counters — trying SNMP fallback")
         konica_data = poll_konica_snmp()
     save_reading(conn, "konica", konica_data)
-    save_supplies(conn, "konica", poll_supplies(KONICA_IP, "konica"))
+    # Try XML first (requires admin auth — usually falls through), then vendor SNMP
+    konica_supplies = poll_konica_supplies_xml()
+    if not konica_supplies:
+        konica_supplies = poll_konica_supplies_vendor_snmp()
+    save_supplies(conn, "konica", konica_supplies)
+    _send_ink_alerts("konica", konica_supplies, conn)
 
     # Epson: SNMP only
     epson_data = poll_epson_snmp()
     save_reading(conn, "epson", epson_data)
-    save_supplies(conn, "epson", poll_supplies(EPSON_IP, "epson"))
+    epson_supplies = poll_supplies(EPSON_IP, "epson")
+    save_supplies(conn, "epson", epson_supplies)
+    _send_ink_alerts("epson", epson_supplies, conn)
 
     conn.close()
 
@@ -456,7 +760,7 @@ def start_poller(db_path, interval=POLL_INTERVAL):
     """
     def loop():
         logger.info(f"Printer poller started — polling every {interval}s")
-        logger.info(f"  Konica: http://{KONICA_IP}/wcd/system_device.xml")
+        logger.info(f"  Konica: http://{KONICA_IP}/wcd/system_device.xml + system_consumable.xml")
         logger.info(f"  Epson:  SNMP {EPSON_IP}")
         while True:
             try:

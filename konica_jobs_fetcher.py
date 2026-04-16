@@ -26,6 +26,7 @@ On first successful import, subsequent runs only import new job numbers (deduped
 
 import os
 import io
+import csv as csv_mod
 import time
 import logging
 import threading
@@ -45,8 +46,11 @@ KONICA_PASS         = ""           # blank by default; set if changed
 # Leave as None to enable auto-discovery from _CANDIDATE_URLS.
 KONICA_JOB_EXPORT_URL = None   # e.g. "http://192.168.55.110/wcd/joblist_export.csv"
 
-KONICA_LOGIN_URL    = f"http://{KONICA_IP}/wcd/index.html"
-HTTP_TIMEOUT        = 30       # seconds — job log can be large
+KONICA_LOGIN_URL  = f"http://{KONICA_IP}/wcd/index.html"
+HTTP_TIMEOUT      = 30       # seconds — job log can be large
+# NOTE: job_history.xml is a device settings page, not job records.
+# Job history CSV export is not available via the web UI on this model.
+# Use Job Centro 2.0 to export CSVs and drop them into data/imports/.
 FETCH_INTERVAL      = 1800     # seconds (30 minutes)
 
 # Cache file — persists discovered URL across restarts
@@ -136,6 +140,7 @@ def _try_download(session, url):
         return None
 
 
+
 def discover_export_url():
     """
     Try candidate URLs and return the first one that returns valid CSV data.
@@ -181,13 +186,23 @@ def fetch_and_import(db_path):
 
     if not csv_text:
         url, csv_text = discover_export_url()
-        if not csv_text:
-            return None
+
+    if not csv_text:
+        # job_history.xml is a settings page — it does not contain job records.
+        # Job history is only available as a CSV export via the browser UI.
+        # To fix: open http://192.168.55.110 → Job Log → Download CSV → F12 Network
+        # → copy the download URL → set KONICA_JOB_EXPORT_URL above.
+        logger.warning(
+            "Konica job history unavailable: no CSV export URL found.\n"
+            "  Fix: open http://192.168.55.110 in browser → Job Log page\n"
+            "       → click Download/Export → F12 Network tab → copy the URL\n"
+            "       → paste into KONICA_JOB_EXPORT_URL in konica_jobs_fetcher.py"
+        )
+        return None
 
     # Feed the in-memory CSV string to the importer (no temp file needed)
     try:
         csv_file = io.StringIO(csv_text)
-        import csv as csv_mod
         reader = csv_mod.DictReader(csv_file)
         rows = list(reader)
 

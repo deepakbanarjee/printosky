@@ -130,10 +130,10 @@ except ImportError as _bot_err:
 
 # Folder to watch — change this to match the actual path on the store PC
 if platform.system() == "Windows":
-    WATCH_FOLDER = r"C:\\Printosky\Jobs\Incoming"
-    ARCHIVE_FOLDER = r"C:\\Printosky\Jobs\Archive"
-    DB_PATH = r"C:\\Printosky\Data\jobs.db"
-    LOG_PATH = r"C:\\Printosky\Data\watcher.log"
+    WATCH_FOLDER = r"C:\Printosky\Jobs\Incoming"
+    ARCHIVE_FOLDER = r"C:\Printosky\Jobs\Archive"
+    DB_PATH = r"C:\Printosky\Data\jobs.db"
+    LOG_PATH = r"C:\Printosky\Data\watcher.log"
 else:
     # Development / Linux paths
     WATCH_FOLDER = str(Path.home() / "Printosky" / "Jobs" / "Incoming")
@@ -148,8 +148,8 @@ GSHEETS_WORKSHEET_NAME = "Job Log"
 
 # ── Phase 3: Printer IPs (confirmed 2026-03-12 via arp -a) ───────────────────
 KONICA_IP  = "192.168.55.110"   # Konica Bizhub Pro 1100 (MAC: 00-50-aa-2c-78-4c)
-EPSON_IP   = "192.168.55.201"   # Epson WF-C21000       (MAC: e0-bb-9e-d6-52-2e)
-# Access EWS at: http://192.168.55.110  and  http://192.168.55.201
+EPSON_IP   = "192.168.55.202"   # Epson WF-C21000       (MAC: e0-bb-9e-d6-52-2e)
+# Access EWS at: http://192.168.55.110  and  http://192.168.55.202
 # Phase 3 will poll these for page counts to cross-check jobs received vs printed
 
 # File types to track (ignore temp files, system files)
@@ -330,6 +330,8 @@ def setup_database():
         ("jobs", "is_sub_job INTEGER DEFAULT 0"),
         ("jobs", "sub_job_type TEXT"),
         ("jobs", "collation_warning INTEGER DEFAULT 0"),
+        # v10: multiup_sided stored in customer profile
+        ("customer_profiles", "last_multiup_sided TEXT"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE {tbl_col_def[0]} ADD COLUMN {tbl_col_def[1]}")
@@ -347,21 +349,33 @@ def setup_database():
 # JOB ID GENERATOR
 # ══════════════════════════════════════════════════════════════════════════════
 
+_job_id_lock     = __import__("threading").Lock()
+_job_id_counters = {}   # date-string → last issued sequence number (int)
+
+
 def generate_job_id():
     """
     Generates a job ID like: OSP-20260311-0042
     Date-based, sequential within each day.
+
+    Uses an in-memory counter (seeded from DB once per day) protected by a
+    lock, so concurrent watchdog threads always receive distinct IDs without
+    hitting the COUNT→INSERT gap of the old approach.
     """
     today = datetime.now().strftime("%Y%m%d")
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT COUNT(*) FROM jobs WHERE job_id LIKE ?",
-        (f"OSP-{today}-%",)
-    )
-    count = cursor.fetchone()[0] + 1
-    conn.close()
-    return f"OSP-{today}-{count:04d}"
+    with _job_id_lock:
+        if today not in _job_id_counters:
+            # Seed from DB on the first call of the day (or first call ever)
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM jobs WHERE job_id LIKE ?",
+                (f"OSP-{today}-%",)
+            )
+            _job_id_counters[today] = cursor.fetchone()[0]
+            conn.close()
+        _job_id_counters[today] += 1
+        return f"OSP-{today}-{_job_id_counters[today]:04d}"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FILE HASH (detect duplicates)
@@ -1094,7 +1108,8 @@ def _fire_batch_conversation(batch_id: str, phone: str, job_ids_str: str):
 
     # Load customer profile (saved settings)
     profile = conn.execute(
-        "SELECT last_size, last_colour, last_layout, last_copies, last_finishing, last_delivery "
+        "SELECT last_size, last_colour, last_layout, last_copies, last_finishing, "
+        "last_delivery, last_multiup_sided "
         "FROM customer_profiles WHERE phone=?", (phone,)
     ).fetchone()
     conn.commit(); conn.close()
@@ -1105,6 +1120,7 @@ def _fire_batch_conversation(batch_id: str, phone: str, job_ids_str: str):
             "size": profile[0], "colour": profile[1], "layout": profile[2],
             "copies": profile[3] or 1, "finishing": profile[4] or "none",
             "delivery": profile[5] or 0,
+            "multiup_sided": profile[6] or "single",
         }
 
     logging.info(f"Firing batch {batch_id}: {len(jobs)} job(s), phone={phone}, saved={bool(saved)}")
@@ -1114,6 +1130,11 @@ def _fire_batch_conversation(batch_id: str, phone: str, job_ids_str: str):
     for r in replies:
         if isinstance(r, str):
             _send(phone, r)
+            try:
+                from db_cloud import log_message as _log_msg
+                _log_msg(phone, "outbound", r, message_type="text")
+            except Exception:
+                pass
 
 
 def start_bot_relay_server(db_path):
@@ -1200,6 +1221,15 @@ def start_bot_relay_server(db_path):
                 # Return replies as JSON — Node's sendBotReply will send them via WhatsApp
                 # (do NOT also call _send here — that would cause duplicate messages)
                 reply_list = [r for r in (replies or []) if isinstance(r, str)]
+
+                # Log inbound + outbound to conversation_log
+                try:
+                    from db_cloud import log_message as _log
+                    _log(phone, "inbound", text, message_type="text")
+                    for r in reply_list:
+                        _log(phone, "outbound", r, message_type="text")
+                except Exception:
+                    pass
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
