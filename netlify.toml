@@ -3,7 +3,7 @@
   functions = "netlify/functions"
 
 [build.environment]
-  SECRETS_SCAN_OMIT_KEYS = "STORE_SHA256_HASH"
+  SECRETS_SCAN_OMIT_KEYS = "ADMIN_PBKDF2_HASH,ADMIN_PBKDF2_SALT,MIS_SHA256_HASH,STAFF_TOKEN_HASH,STORE_SHA256_HASH,SUPERADMIN_SHA256_HASH"
 
 [[redirects]]
   from   = "/admin"
