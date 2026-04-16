@@ -2919,7 +2919,7 @@ let convRefresh = null; // setInterval handle
 
 function switchTab(tab) {
   document.getElementById("jobs-view").style.display  = tab === "jobs" ? "" : "none";
-  document.getElementById("conv-panel").style.display = tab === "conv" ? "" : "none";
+  document.getElementById("conv-panel").style.display = tab === "conv" ? "block" : "none";
   document.getElementById("tab-jobs").classList.toggle("active", tab === "jobs");
   document.getElementById("tab-conv").classList.toggle("active", tab === "conv");
 
