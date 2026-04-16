@@ -136,7 +136,8 @@
       "Bash(for f:*)",
       "Bash(do echo:*)",
       "Read(//c/Users/user/AppData/Local/Temp/claude/C--py-printosky/81f62190-4c4d-4f09-b11a-84b8efb55ea9/**)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(npm --version)"
     ]
   },
   "model": "claude-sonnet-4-6",
