@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
+from unittest.mock import patch
 import session_timeout
 
 
@@ -138,3 +139,71 @@ class TestMarkTimedOut:
         row = conn.execute("SELECT step FROM bot_sessions WHERE phone='91222'").fetchone()
         conn.close()
         assert row[0] == "colour"  # unchanged
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _handle_timeout
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _silent_send(*a, **kw):
+    return False
+
+
+class TestHandleTimeout:
+    # _handle_timeout has try/except around every _send call, so tests work
+    # without mocking whatsapp_notify (which may be stubbed by other test files).
+
+    def test_marks_session_timed_out(self, db):
+        _insert_session(db, "91111", "size", minutes_ago=20)
+        session = {"phone": "91111", "job_id": "JOB-001", "step": "size",
+                   "filename": "test.pdf", "updated_at": "2026-01-01 10:00:00"}
+        session_timeout._handle_timeout(session, db)
+        conn = sqlite3.connect(db)
+        row = conn.execute("SELECT step FROM bot_sessions WHERE phone='91111'").fetchone()
+        conn.close()
+        assert row[0] == "timed_out"
+
+    def test_handles_unknown_step_label(self, db):
+        _insert_session(db, "91222", "unknown_step", minutes_ago=20)
+        session = {"phone": "91222", "job_id": "JOB-002", "step": "unknown_step",
+                   "filename": "doc.pdf", "updated_at": "2026-01-01 10:00:00"}
+        session_timeout._handle_timeout(session, db)
+        conn = sqlite3.connect(db)
+        row = conn.execute("SELECT step FROM bot_sessions WHERE phone='91222'").fetchone()
+        conn.close()
+        assert row[0] == "timed_out"
+
+    def test_handles_null_job_id_and_filename(self, db):
+        _insert_session(db, "91333", "colour", minutes_ago=20)
+        session = {"phone": "91333", "job_id": None, "step": "colour",
+                   "filename": None, "updated_at": "2026-01-01 10:00:00"}
+        session_timeout._handle_timeout(session, db)
+        conn = sqlite3.connect(db)
+        row = conn.execute("SELECT step FROM bot_sessions WHERE phone='91333'").fetchone()
+        conn.close()
+        assert row[0] == "timed_out"
+
+    def test_all_known_steps_resolve_without_error(self, db):
+        steps = ["size", "colour", "layout", "multiup_per",
+                 "multiup_sided", "copies", "finishing", "delivery"]
+        for i, step in enumerate(steps):
+            phone = f"9100000{i:03d}"
+            _insert_session(db, phone, step, minutes_ago=20)
+            session = {"phone": phone, "job_id": f"JOB-{i}", "step": step,
+                       "filename": "f.pdf", "updated_at": "2026-01-01 10:00:00"}
+            session_timeout._handle_timeout(session, db)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# start_timeout_monitor
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestStartTimeoutMonitor:
+    def test_returns_daemon_thread(self, db):
+        t = session_timeout.start_timeout_monitor(db, timeout_minutes=15, check_interval=9999)
+        assert t.is_alive()
+        assert t.daemon is True
+
+    def test_thread_named_correctly(self, db):
+        t = session_timeout.start_timeout_monitor(db, timeout_minutes=15, check_interval=9999)
+        assert t.name == "SessionTimeoutMonitor"
