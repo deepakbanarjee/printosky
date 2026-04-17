@@ -1,260 +1,251 @@
 """
-KONICA JOB LOG AUTO-FETCHER
-============================
-Periodically downloads the job history CSV from the Konica Bizhub web admin
-and feeds it to konica_csv_importer.py.
+KONICA JOB LOG FETCHER — CLRC SOAP API
+========================================
+Pulls job history directly from the Konica bizhub PRO 1100 via its built-in
+Tomcat/Axis2 SOAP service on port 30081 (no Job Centro GUI needed).
 
-HOW TO FIND THE CORRECT DOWNLOAD URL:
-  1. Open Chrome/Edge, go to http://192.168.55.110
-  2. Log in (username: Admin, password: blank or whatever is set)
-  3. Navigate to the job log / job history page
-  4. Press F12 → Network tab → clear log
-  5. Click the CSV download / export button
-  6. In the Network tab, find the request that downloads the CSV
-  7. Right-click → Copy → Copy URL
-  8. Paste that URL into KONICA_JOB_EXPORT_URL below
-
-Common Konica Bizhub URL patterns (try these if the above is unclear):
-  http://192.168.55.110/wcd/joblist_export.csv
-  http://192.168.55.110/wcd/job_history.csv
-  http://192.168.55.110/wcd/index.html?func=PSL_JL_EXPORT  (POST)
+Endpoint:  http://192.168.55.110:30081/clrc/services/CLRC
+Operation: GetHistoryList (startIndex / endIndex, most-recent-first)
+Auth:      None (printer auth mode is OFF)
 
 Runs as a background thread started by watcher.py (via start_fetcher()).
-Fetches every FETCH_INTERVAL seconds (default: 30 minutes).
-On first successful import, subsequent runs only import new job numbers (deduped by job_number UNIQUE constraint).
+Fetches every FETCH_INTERVAL seconds (default: 30 min).
+New jobs are inserted; duplicates silently ignored (UNIQUE on job_number).
 """
 
-import os
+import html
 import io
-import csv as csv_mod
-import time
 import logging
+import os
+import re
+import sqlite3
+import tempfile
 import threading
-import requests
-from datetime import datetime
+import time
+import xml.etree.ElementTree as ET
 
-import konica_csv_importer as importer
+import requests
 
 logger = logging.getLogger("konica_fetcher")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-KONICA_IP           = "192.168.55.110"
-KONICA_USER         = "Admin"
-KONICA_PASS         = ""           # blank by default; set if changed
+KONICA_IP      = "192.168.55.110"
+SOAP_PORT      = 30081
+SOAP_ENDPOINT  = f"http://{KONICA_IP}:{SOAP_PORT}/clrc/services/CLRC"
+FETCH_INTERVAL = 1800          # seconds (30 min)
+BATCH_SIZE     = 200           # jobs per SOAP call
+HTTP_TIMEOUT   = 30
 
-# Set this once you've found the correct URL via browser DevTools (see module docstring).
-# Leave as None to enable auto-discovery from _CANDIDATE_URLS.
-KONICA_JOB_EXPORT_URL = None   # e.g. "http://192.168.55.110/wcd/joblist_export.csv"
+# ── SOAP helper ───────────────────────────────────────────────────────────────
 
-KONICA_LOGIN_URL  = f"http://{KONICA_IP}/wcd/index.html"
-HTTP_TIMEOUT      = 30       # seconds — job log can be large
-# NOTE: job_history.xml is a device settings page, not job records.
-# Job history CSV export is not available via the web UI on this model.
-# Use Job Centro 2.0 to export CSVs and drop them into data/imports/.
-FETCH_INTERVAL      = 1800     # seconds (30 minutes)
-
-# Cache file — persists discovered URL across restarts
-_URL_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "konica_export_url.txt")
-
-def _load_cached_url():
-    try:
-        with open(_URL_CACHE_FILE) as f:
-            return f.read().strip() or None
-    except FileNotFoundError:
-        return None
-
-def _save_cached_url(url):
-    try:
-        with open(_URL_CACHE_FILE, "w") as f:
-            f.write(url)
-    except Exception:
-        pass
-
-# Load cached URL on module import (overridden by hardcoded value above if set)
-KONICA_JOB_EXPORT_URL = KONICA_JOB_EXPORT_URL or _load_cached_url()
-
-# Candidate URLs/POSTs to try automatically
-# Prefix "POST:<url>|<form_key>=<val>&..." for POST-based exports
-_CANDIDATE_URLS = [
-    f"http://{KONICA_IP}/wcd/joblist_export.csv",
-    f"http://{KONICA_IP}/wcd/job_log_export.csv",
-    f"http://{KONICA_IP}/wcd/AccountTrack/Export.csv",
-    f"http://{KONICA_IP}/wcd/jobhistory.csv",
-    f"POST:http://{KONICA_IP}/wcd/index.html|func=PSL_JL_EXPORT",
-    f"POST:http://{KONICA_IP}/wcd/index.html|func=PSL_JL_CSV",
-    f"POST:http://{KONICA_IP}/wcd/index.html|func=PSL_JH_EXPORT",
-    f"POST:http://{KONICA_IP}/wcd/index.html|func=PSL_JH_CSV",
-]
-
-# ── HTTP session helper ───────────────────────────────────────────────────────
-
-def _make_session():
-    """Create an authenticated requests session to the Konica web admin."""
-    session = requests.Session()
-    try:
-        login_data = {
-            "func":           "PSL_LP_SLOGIN",
-            "S_LoginName":    KONICA_USER,
-            "S_Password":     KONICA_PASS,
-            "S_Permissions":  "",
-        }
-        session.post(KONICA_LOGIN_URL, data=login_data, timeout=10)
-        logger.debug("Konica web login attempted")
-    except Exception as e:
-        logger.debug(f"Konica web login: {e}")
-    return session
+_ENVELOPE = """\
+<?xml version="1.0" encoding="utf-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:web="http://web.clrc.bskk.konicaminolta.jp">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <web:GetHistoryList>
+      <web:opeUserXML></web:opeUserXML>
+      <web:startIndex>{start}</web:startIndex>
+      <web:endIndex>{end}</web:endIndex>
+    </web:GetHistoryList>
+  </soapenv:Body>
+</soapenv:Envelope>"""
 
 
-def _try_download(session, url):
-    """
-    Try to GET (or POST) a URL and return the response text if it looks like a CSV.
-    Handles "POST:<url>|<form_data>" prefix for POST-based Konica exports.
-    Uses utf-8-sig decoding to strip the BOM that Bizhub sometimes prepends.
-    Returns None if the URL doesn't return CSV content.
-    """
-    try:
-        if url.startswith("POST:"):
-            _, rest = url.split("POST:", 1)
-            endpoint, form_str = rest.split("|", 1)
-            form_data = dict(kv.split("=", 1) for kv in form_str.split("&"))
-            r = session.post(endpoint, data=form_data, timeout=HTTP_TIMEOUT)
-        else:
-            r = session.get(url, timeout=HTTP_TIMEOUT)
-
-        if r.status_code != 200:
-            return None
-
-        # Decode with utf-8-sig to strip BOM; fall back to utf-16 if garbage
-        try:
-            content = r.content.decode("utf-8-sig", errors="replace").strip()
-        except Exception:
-            content = r.text.strip()
-
-        # Must look like a CSV — "Job Number" header or commas + digits
-        if ("Job Number" in content[:500]
-                or (content.count(",") > 10 and any(c.isdigit() for c in content[:50]))):
-            return content
-        return None
-    except Exception as e:
-        logger.debug(f"  {url}: {e}")
-        return None
-
-
-
-def discover_export_url():
-    """
-    Try candidate URLs and return the first one that returns valid CSV data.
-    Saves the discovered URL back to module-level config.
-    """
-    global KONICA_JOB_EXPORT_URL
-    logger.info("Discovering Konica job export URL…")
-    session = _make_session()
-    for url in _CANDIDATE_URLS:
-        logger.info(f"  Trying {url}")
-        csv_text = _try_download(session, url)
-        if csv_text:
-            logger.info(f"  Found export URL: {url}")
-            KONICA_JOB_EXPORT_URL = url
-            _save_cached_url(url)
-            return url, csv_text
-    logger.warning(
-        "Could not auto-discover Konica job export URL.\n"
-        "  → Open http://192.168.55.110 in browser, go to job log, click CSV export,\n"
-        "    inspect the download URL in DevTools (F12 → Network),\n"
-        "    then set KONICA_JOB_EXPORT_URL in konica_jobs_fetcher.py"
+def _soap_get_history(start: int, end: int) -> list[dict]:
+    """Call GetHistoryList and return a list of job dicts."""
+    body = _ENVELOPE.format(start=start, end=end)
+    r = requests.post(
+        SOAP_ENDPOINT,
+        data=body.encode("utf-8"),
+        headers={
+            "Content-Type": "text/xml; charset=utf-8",
+            "SOAPAction": "urn:GetHistoryList",
+        },
+        timeout=HTTP_TIMEOUT,
     )
-    return None, None
+    r.raise_for_status()
+
+    # The inner XML is HTML-entity-escaped inside <ns:return>
+    m = re.search(r"<ns:return>(.*?)</ns:return>", r.text, re.DOTALL)
+    if not m:
+        raise ValueError("No <ns:return> in SOAP response")
+
+    inner = html.unescape(m.group(1))
+    root = ET.fromstring(inner)
+
+    result_el = root.find("Result")
+    result_code = result_el.get("code", "") if result_el is not None else ""
+    if not result_code.startswith("2"):
+        raise ValueError(f"Printer returned error code: {result_code}")
+
+    jobs = []
+    for h in root.iter("History"):
+        jobs.append({
+            "job_number":    h.get("jobnumber", ""),
+            "job_type":      h.get("jobtype", ""),
+            "user":          h.get("user", ""),
+            "name":          h.get("name", ""),
+            "result":        h.get("result", ""),
+            "pages":         h.get("pages", "0"),
+            "print_pages":   h.get("printpages", "0"),
+            "mono_pages":    h.get("pagesmono", "0"),
+            "color_pages":   h.get("pagescolor", "0"),
+            "copies":        h.get("copies", "1"),
+            "print_time":    h.get("printtime", ""),
+            "media_size":    h.get("mediasize", ""),
+            "media_type":    h.get("mediatype", ""),
+            "register_time": h.get("jobregisttime", ""),
+            "rip_start":     h.get("ripstarttime", ""),
+            "rip_end":       h.get("ripendtime", ""),
+            "print_start":   h.get("printstarttime", ""),
+        })
+    return jobs
+
+
+def _get_job_count() -> int:
+    """Return total number of history jobs stored on the printer."""
+    body = """\
+<?xml version="1.0" encoding="utf-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:web="http://web.clrc.bskk.konicaminolta.jp">
+  <soapenv:Header/>
+  <soapenv:Body><web:GetJobHistoryNum/></soapenv:Body>
+</soapenv:Envelope>"""
+    r = requests.post(
+        SOAP_ENDPOINT,
+        data=body.encode("utf-8"),
+        headers={"Content-Type": "text/xml; charset=utf-8", "SOAPAction": "urn:GetJobHistoryNum"},
+        timeout=HTTP_TIMEOUT,
+    )
+    r.raise_for_status()
+    m = re.search(r"JobHistoryNum value=.(\d+)", html.unescape(r.text))
+    return int(m.group(1)) if m else 0
+
+
+# ── SQLite helpers ────────────────────────────────────────────────────────────
+
+def _init_table(conn: sqlite3.Connection):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS konica_jobs (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_number     INTEGER UNIQUE,
+            job_type       TEXT,
+            user_name      TEXT,
+            file_name      TEXT,
+            result         TEXT,
+            num_pages      INTEGER,
+            pages_printed  INTEGER,
+            mono_pages     INTEGER,
+            color_pages    INTEGER,
+            copies         INTEGER,
+            job_date       TEXT,
+            print_end_date TEXT,
+            paper_size     TEXT,
+            paper_type     TEXT,
+            attributed_to  TEXT,
+            imported_at    TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    conn.commit()
+
+
+def _insert_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> tuple[int, int]:
+    inserted = skipped = 0
+    for j in jobs:
+        try:
+            conn.execute("""
+                INSERT INTO konica_jobs
+                  (job_number, job_type, user_name, file_name, result,
+                   num_pages, pages_printed, mono_pages, color_pages, copies,
+                   job_date, print_end_date, paper_size, paper_type)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                j["job_number"], j["job_type"], j["user"], j["name"], j["result"],
+                int(j["pages"] or 0), int(j["print_pages"] or 0),
+                int(j["mono_pages"] or 0), int(j["color_pages"] or 0),
+                int(j["copies"] or 1),
+                j["register_time"], j["print_time"],
+                j["media_size"], j["media_type"],
+            ))
+            inserted += 1
+        except sqlite3.IntegrityError:
+            skipped += 1
+    conn.commit()
+    return inserted, skipped
 
 
 # ── Main fetch function ───────────────────────────────────────────────────────
 
-def fetch_and_import(db_path):
+def fetch_and_import(db_path: str) -> tuple[int, int, int] | None:
     """
-    Download the job log CSV from Konica and import new rows.
+    Fetch recent job history from the printer and import new rows.
     Returns (inserted, skipped, errors) or None on failure.
+
+    Strategy: fetch the most-recent BATCH_SIZE jobs (index 1..BATCH_SIZE).
+    Once all are duplicates (skipped == batch size), stop — no older new jobs.
     """
-    global KONICA_JOB_EXPORT_URL
-
-    session = _make_session()
-    csv_text = None
-
-    if KONICA_JOB_EXPORT_URL:
-        csv_text = _try_download(session, KONICA_JOB_EXPORT_URL)
-        if not csv_text:
-            logger.warning(f"Konica export URL returned no CSV: {KONICA_JOB_EXPORT_URL}")
-            KONICA_JOB_EXPORT_URL = None   # reset and re-discover next time
-
-    if not csv_text:
-        url, csv_text = discover_export_url()
-
-    if not csv_text:
-        # job_history.xml is a settings page — it does not contain job records.
-        # Job history is only available as a CSV export via the browser UI.
-        # To fix: open http://192.168.55.110 → Job Log → Download CSV → F12 Network
-        # → copy the download URL → set KONICA_JOB_EXPORT_URL above.
-        logger.warning(
-            "Konica job history unavailable: no CSV export URL found.\n"
-            "  Fix: open http://192.168.55.110 in browser → Job Log page\n"
-            "       → click Download/Export → F12 Network tab → copy the URL\n"
-            "       → paste into KONICA_JOB_EXPORT_URL in konica_jobs_fetcher.py"
-        )
-        return None
-
-    # Feed the in-memory CSV string to the importer (no temp file needed)
     try:
-        csv_file = io.StringIO(csv_text)
-        reader = csv_mod.DictReader(csv_file)
-        rows = list(reader)
+        conn = sqlite3.connect(db_path)
+        _init_table(conn)
 
-        # Use the importer's internal helpers
-        importer.init_konica_jobs_table(
-            __import__("sqlite3").connect(db_path)
+        total_inserted = total_skipped = total_errors = 0
+        start = 1
+
+        while True:
+            end = start + BATCH_SIZE - 1
+            logger.info(f"Konica SOAP fetch: jobs {start}–{end}")
+            try:
+                jobs = _soap_get_history(start, end)
+            except Exception as e:
+                logger.error(f"SOAP fetch error at {start}-{end}: {e}")
+                total_errors += 1
+                break
+
+            if not jobs:
+                break
+
+            ins, sk = _insert_jobs(conn, jobs)
+            total_inserted += ins
+            total_skipped  += sk
+
+            # Stop when entire batch was already in DB (caught up)
+            if sk == len(jobs) and ins == 0:
+                logger.info("Konica fetch: all duplicates — caught up.")
+                break
+
+            if len(jobs) < BATCH_SIZE:
+                break  # last page
+
+            start = end + 1
+
+        conn.close()
+        logger.info(
+            f"Konica SOAP import done: +{total_inserted} new, "
+            f"{total_skipped} duplicates, {total_errors} errors"
         )
-
-        # Write to a temp file so the importer can read it normally
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv",
-                                        delete=False, encoding="utf-8") as tf:
-            tmp_path = tf.name
-            tf.write(csv_text)
-
-        result = importer.import_csv(tmp_path, db_path)
-        os.unlink(tmp_path)
-
-        ins, sk, err = result
-        logger.info(f"Konica auto-fetch complete: +{ins} new jobs, {sk} duplicates, {err} errors")
-        return result
+        return total_inserted, total_skipped, total_errors
 
     except Exception as e:
-        logger.error(f"Konica auto-fetch import error: {e}")
+        logger.error(f"Konica fetch_and_import failed: {e}")
         return None
 
 
 # ── Background thread ─────────────────────────────────────────────────────────
 
-def start_fetcher(db_path, interval=FETCH_INTERVAL):
-    """
-    Start the Konica job log fetcher as a daemon background thread.
-    Called from watcher.py after first CSV has been imported.
-
-    The thread:
-      - Runs an immediate fetch on startup
-      - Then fetches every `interval` seconds
-      - Skips gracefully if Konica is unreachable
-      - New jobs are inserted; duplicates are silently ignored
-    """
+def start_fetcher(db_path: str, interval: int = FETCH_INTERVAL) -> threading.Thread:
     def loop():
-        logger.info(f"Konica job fetcher started — polling every {interval}s")
+        logger.info(f"Konica SOAP fetcher started — polling every {interval}s")
         while True:
             try:
                 fetch_and_import(db_path)
             except Exception as e:
-                logger.error(f"Konica fetcher error: {e}")
+                logger.error(f"Konica fetcher loop error: {e}")
             time.sleep(interval)
 
     t = threading.Thread(target=loop, daemon=True, name="KonicaJobFetcher")
     t.start()
-    logger.info("Konica job fetcher thread launched")
     return t
 
 
@@ -262,20 +253,21 @@ def start_fetcher(db_path, interval=FETCH_INTERVAL):
 
 if __name__ == "__main__":
     import sys
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s [%(name)s] %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 
-    db = os.path.join(os.path.expanduser("~"), "Printosky", "Data", "jobs.db")
+    db = r"C:\Printosky\Data\jobs.db"
     if len(sys.argv) > 1:
         db = sys.argv[1]
 
-    print(f"DB: {db}")
-    print(f"Konica IP: {KONICA_IP}")
-    print()
+    print(f"Printer:  {SOAP_ENDPOINT}")
+    print(f"DB:       {db}")
+
+    count = _get_job_count()
+    print(f"Total jobs on printer: {count}")
 
     result = fetch_and_import(db)
     if result:
         ins, sk, err = result
-        print(f"\nResult: +{ins} new jobs, {sk} duplicates, {err} errors")
+        print(f"\nResult: +{ins} new, {sk} duplicates, {err} errors")
     else:
-        print("\nFetch failed — check logs above and set KONICA_JOB_EXPORT_URL manually")
+        print("\nFetch failed — check logs above")
