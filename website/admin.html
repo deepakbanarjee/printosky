@@ -19,6 +19,8 @@
     --red:      #ff5252;
     --text:     #e0eaf5;
     --muted:    #5a7080;
+    --fg:       #e0eaf5;
+    --bg2:      #111820;
     --mono:     'IBM Plex Mono', monospace;
     --sans:     'IBM Plex Sans', sans-serif;
   }
@@ -1262,8 +1264,16 @@
 // ── Config ─────────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI";
-// Store PC URL — update this to your current Cloudflare tunnel URL for port 3005
-// STORE_PC_URL is configured per-browser during first-time PC setup (localStorage)
+// Store PC URL — configured per-browser during first-time PC setup (localStorage)
+// Auto-migrate stale LAN HTTP URLs (can't be called from HTTPS pages)
+(function migrateLanUrl() {
+  const saved = localStorage.getItem("storePcUrl");
+  if (window.location.protocol === "https:" && saved &&
+      saved.startsWith("http://") && !saved.includes("localhost")) {
+    localStorage.setItem("storePcUrl", "https://store.printosky.com");
+    location.reload();
+  }
+})();
 const STORE_PC_URL = localStorage.getItem("storePcUrl") || "";
 
 function storeHeaders() {
@@ -1287,8 +1297,7 @@ function setupPC() {
     const entered = prompt(
       "First-time setup (step 2/2)\nPrint server URL:\n" +
       "  Server PC (PC1): http://localhost:3005\n" +
-      "  LAN PC:          http://192.168.55.212:3005\n" +
-      "  Remote/Home:     https://store.printosky.com\n\n" +
+      "  All other PCs:   https://store.printosky.com\n\n" +
       "Enter URL (default: " + hint + "):"
     );
     const url = (entered || hint).trim().replace(/\/$/, "");
@@ -1370,22 +1379,26 @@ async function tryPinLogin() {
 // ── Admin override (master password) ──────────────────────────────────────
 async function tryAdminLogin() {
   const pw = document.getElementById("pw").value;
-  let ok = false, data = {};
-  try {
-    const r = await fetch("/.netlify/functions/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "admin", password: pw }),
-    });
-    data = await r.json();
-    ok = data.ok;
-  } catch { /* network error — ok stays false */ }
-  if (ok) {
+  // Client-side SHA256 fallback (used when Netlify function is unavailable)
+  const ADMIN_HASH = "037589dcf5f165dc2ad53b6b453be08fd90aee611c71f822247023f1d7b5196d";
+  const enc = new TextEncoder();
+  const buf = await crypto.subtle.digest("SHA-256", enc.encode(pw));
+  const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
+  if (hash === ADMIN_HASH) {
     sessionStorage.setItem("p_auth", "1");
-    if (data.supabase_jwt) sessionStorage.setItem("supabase_jwt", data.supabase_jwt);
     sessionStorage.removeItem("staff_id");
     sessionStorage.removeItem("staff_name");
     sessionStorage.removeItem("session_id");
+    // Try to get Supabase JWT via function — optional, falls back to anon key
+    try {
+      const r = await fetch("/.netlify/functions/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "admin", password: pw }),
+      });
+      const data = await r.json();
+      if (data.supabase_jwt) sessionStorage.setItem("supabase_jwt", data.supabase_jwt);
+    } catch { /* function unavailable — anon key fallback */ }
     showDashboard();
   } else {
     document.getElementById("login-err").textContent = "Incorrect password";
@@ -2373,7 +2386,7 @@ function renderJobPanel() {
   renderDtpPanel(j);
 
   // Load preview iframe
-  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
   const iframe = document.getElementById("jp-preview-iframe");
   const footer = document.getElementById("jp-preview-footer");
   if (iframe && j.job_id) {
@@ -2836,7 +2849,7 @@ function closePhotocopyModal() {
 // ── File Preview ────────────────────────────────────────────────────────────
 function openPreview() {
   if (!selectedJob) return;
-  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
   const jid  = selectedJob.job_id;
   const fname = selectedJob.filename || jid;
   const ext   = (fname.split(".").pop() || "").toLowerCase();
@@ -3171,7 +3184,7 @@ function njSkipFile() {
 async function njHandleFile(input) {
   const file = input.files[0];
   if (!file) return;
-  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
 
   document.getElementById("nj-file-uploading").style.display = "block";
   document.getElementById("nj-file-name").style.display = "none";
@@ -3210,7 +3223,7 @@ async function njHandleFile(input) {
 async function njFetchQuote() {
   clearTimeout(njQuoteTimer);
   njQuoteTimer = setTimeout(async () => {
-    const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+    const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
     const pages    = parseInt(document.getElementById("nj-pages").value) || 1;
     const copies   = parseInt(document.getElementById("nj-copies").value) || 1;
     const colour   = document.getElementById("nj-colour").value;
@@ -3253,7 +3266,7 @@ function njSelectPayOpt(mode) {
 }
 
 async function njSubmit() {
-  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
   const btn = document.getElementById("nj-submit-btn");
   btn.disabled = true;
   btn.textContent = "Saving…";

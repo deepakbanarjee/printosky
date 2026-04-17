@@ -128,7 +128,7 @@
       "Bash(pip show:*)",
       "Bash(netlify status:*)",
       "Bash(netlify env:list)",
-      "Bash(netlify env:set ADMIN_PBKDF2_HASH ad94950b6dbe616a9b0729dd2b58a298571ad9130d39696f2a5d973a26ba613a)",
+      "Bash(netlify env:set ADMIN_PBKDF2_HASH:*)",
       "Bash(ls C:printosky_watcher/*.py)",
       "Bash(ls:*)",
       "WebFetch(domain:store.printosky.com)",
@@ -136,7 +136,8 @@
       "Bash(for f:*)",
       "Bash(do echo:*)",
       "Read(//c/Users/user/AppData/Local/Temp/claude/C--py-printosky/81f62190-4c4d-4f09-b11a-84b8efb55ea9/**)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(npm --version)"
     ]
   },
   "model": "claude-sonnet-4-6",

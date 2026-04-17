@@ -263,10 +263,19 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def _send_cors_headers(h) -> None:
+    """Attach CORS headers. Endpoints are individually auth-gated so * is safe."""
+    h.send_header("Access-Control-Allow-Origin",  "*")
+    h.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+    h.send_header("Access-Control-Allow-Headers", "Content-Type, X-Hub-Signature-256, X-Razorpay-Signature")
+    h.send_header("Access-Control-Max-Age",       "86400")
+
+
 def _json_response(h, status: int, data: dict) -> None:
     body = json.dumps(data).encode()
     h.send_response(status)
     h.send_header("Content-Type", "application/json")
+    _send_cors_headers(h)
     h.end_headers()
     h.wfile.write(body)
 
@@ -442,6 +451,12 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Printosky webhook OK (cloud)")
+
+    def do_OPTIONS(self):
+        # CORS preflight — allow any origin, advertise supported methods/headers.
+        self.send_response(204)
+        _send_cors_headers(self)
+        self.end_headers()
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
