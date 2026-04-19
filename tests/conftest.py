@@ -29,7 +29,9 @@ _gap_results: list[str] = []
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     if "test_browser" not in report.nodeid:
         return
-    if report.when != "call":
+    if report.when == "call" or (report.when == "setup" and report.skipped):
+        pass
+    else:
         return
     test_id = report.nodeid.split("::")[-1]
     if report.skipped:
