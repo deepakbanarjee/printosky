@@ -147,7 +147,7 @@ def test_a17_detail_panel_items(logged_in_admin: AdminPage) -> None:
     if logged_in_admin.job_row_count() == 0:
         pytest.skip("No jobs")
     logged_in_admin.select_job(0)
-    assert logged_in_admin.page.locator("table:near([id*='panel'])").count() > 0
+    assert logged_in_admin.page.locator("#job-panel table").count() > 0
 
 
 # ── A18 ───────────────────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ def test_a18_detail_panel_timeline(logged_in_admin: AdminPage) -> None:
     if logged_in_admin.job_row_count() == 0:
         pytest.skip("No jobs")
     logged_in_admin.select_job(0)
-    assert logged_in_admin.page.locator("[id*='timeline'], .timeline").count() > 0
+    assert logged_in_admin.page.locator("#jp-timeline-section").is_visible()
 
 
 # ── A19 ───────────────────────────────────────────────────────────────────────
@@ -167,7 +167,7 @@ def test_a19_detail_panel_dtp(logged_in_admin: AdminPage) -> None:
     if logged_in_admin.job_row_count() == 0:
         pytest.skip("No jobs")
     logged_in_admin.select_job(0)
-    assert logged_in_admin.page.locator("[id*='dtp'], .dtp").count() > 0
+    assert logged_in_admin.page.locator("#jp-dtp-section").count() > 0
 
 
 # ── A20 ───────────────────────────────────────────────────────────────────────
