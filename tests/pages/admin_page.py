@@ -66,7 +66,7 @@ class AdminPage:
         self.page.wait_for_timeout(800)
 
     def detail_panel_visible(self) -> bool:
-        return self.page.locator("#job-panel, .job-panel, [id*='panel']").first().is_visible()
+        return self.page.locator("#job-panel").is_visible()
 
     # ── New Job Modal ─────────────────────────────────────────────────────
 
