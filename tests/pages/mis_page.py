@@ -34,12 +34,12 @@ class MISPage:
 
     def set_konica_tab(self, period: str) -> None:
         """period: 'today', 'week', 'month', 'year'"""
-        self.page.click(f"button:has-text('{period.capitalize()}')")
+        self.page.locator(f"[onclick*=\"setKJTab('{period}'\"]").click()
         self.page.wait_for_selector(f"#kj-{period}", state="visible")
 
     def set_staff_tab(self, period: str) -> None:
         """period: 'today', 'week', 'month'"""
-        self.page.click(f"button:has-text('{period.capitalize()}')")
+        self.page.locator(f"[onclick*=\"setSPTab('{period}'\"]").click()
         self.page.wait_for_selector(f"#sp-{period}", state="visible")
 
     def konica_total(self) -> str:
