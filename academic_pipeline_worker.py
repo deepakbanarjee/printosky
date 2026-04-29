@@ -89,6 +89,11 @@ def _process(order: dict) -> None:
             return
 
         # Upload DOCX to Supabase Storage.
+        import re as _re
+        if not _re.fullmatch(r"PROJ-\d{4}-\d{3}", project_id):
+            logger.error(f"{project_id}: invalid project_id format — aborting upload")
+            _revert_on_failure(project_id, phase)
+            return
         storage_filename = f"{project_id}-phase{phase}.docx"
         with open(output_path, "rb") as fh:
             content = fh.read()

@@ -441,7 +441,8 @@ def _acad_auth_staff(h) -> bool:
             .execute()
         )
         return bool(result.data)
-    except Exception:
+    except Exception as e:
+        logger.error(f"_acad_auth_staff Supabase error: {e}")
         return False
 
 
@@ -491,7 +492,10 @@ def _handle_acad_order_get(h, pid: str) -> None:
 
 
 def _handle_acad_orders_post(h, body: bytes) -> None:
-    """POST /academic/orders — create new order."""
+    """POST /academic/orders — create new order (staff only)."""
+    if not _acad_auth_staff(h):
+        _json_response(h, 401, {"error": "unauthorized"})
+        return
     try:
         payload = json.loads(body)
     except Exception:
@@ -685,12 +689,15 @@ def _handle_acad_deliver(h, body: bytes, pid: str) -> None:
 def _handle_acad_razorpay_webhook(h, body: bytes) -> None:
     """POST /academic/razorpay-webhook — Razorpay payment confirmation for academic orders."""
     secret = os.environ.get("RAZORPAY_ACADEMIC_WEBHOOK_SECRET", "")
-    if secret:
-        sig = h.headers.get("X-Razorpay-Signature", "")
-        expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, sig):
-            _json_response(h, 401, {"error": "invalid signature"})
-            return
+    if not secret:
+        logger.error("RAZORPAY_ACADEMIC_WEBHOOK_SECRET not configured — rejecting academic webhook")
+        _json_response(h, 500, {"error": "webhook not configured"})
+        return
+    sig = h.headers.get("X-Razorpay-Signature", "")
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        _json_response(h, 401, {"error": "invalid signature"})
+        return
     try:
         payload = json.loads(body)
     except Exception:
