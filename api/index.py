@@ -140,7 +140,7 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
     ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     if orig_filename and "." in orig_filename:
-        base_name = re.sub(r"[^\w.\- ]", "_", orig_filename).strip()
+        base_name = re.sub(r"[^\w.\- ]", "_", os.path.basename(orig_filename)).strip()
     else:
         base_name = f"{sender}_{ts}{ext or '.bin'}"
 
@@ -260,7 +260,27 @@ ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
 
 
 def _sha256(value: str) -> str:
+    """SHA-256 — used for admin password comparison only. Do NOT use for PIN hashing."""
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+# ── PBKDF2 PIN hashing ────────────────────────────────────────────────────────
+import secrets as _sec
+
+_PBKDF2_ITER = 260_000
+
+def _hash_pin(pin: str) -> tuple[str, str]:
+    """Return (hash_hex, salt_hex) using PBKDF2-HMAC-SHA256."""
+    salt = _sec.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt.encode(), _PBKDF2_ITER).hex()
+    return h, salt
+
+def _verify_pin(pin: str, stored_hash: str, stored_salt: str | None) -> bool:
+    """Constant-time PIN verify. Handles legacy SHA-256 (salt=None) and PBKDF2."""
+    if stored_salt is None:
+        return hmac.compare_digest(stored_hash, hashlib.sha256(pin.encode()).hexdigest())
+    expected = hashlib.pbkdf2_hmac("sha256", pin.encode(), stored_salt.encode(), _PBKDF2_ITER).hex()
+    return hmac.compare_digest(stored_hash, expected)
 
 
 def _send_cors_headers(h) -> None:
@@ -300,7 +320,7 @@ def _handle_staff_set_pin(h, body: bytes) -> None:
 
     from db_cloud import _client
     try:
-        result = _client().table("staff").select("pin_hash,active").eq("id", staff_id).execute()
+        result = _client().table("staff").select("pin_hash,pin_salt,active").eq("id", staff_id).execute()
         if not result.data:
             _json_response(h, 404, {"error": "Staff not found"})
             return
@@ -308,10 +328,11 @@ def _handle_staff_set_pin(h, body: bytes) -> None:
         if not row.get("active"):
             _json_response(h, 403, {"error": "Account inactive"})
             return
-        if not hmac.compare_digest(row["pin_hash"], _sha256(current)):
+        if not _verify_pin(current, row["pin_hash"], row.get("pin_salt")):
             _json_response(h, 403, {"error": "Current PIN incorrect"})
             return
-        _client().table("staff").update({"pin_hash": _sha256(new_pin)}).eq("id", staff_id).execute()
+        new_hash, new_salt = _hash_pin(new_pin)
+        _client().table("staff").update({"pin_hash": new_hash, "pin_salt": new_salt}).eq("id", staff_id).execute()
         _json_response(h, 200, {"ok": True, "message": "PIN updated"})
         logger.info(f"Staff {staff_id} changed own PIN")
     except Exception as e:
@@ -373,7 +394,8 @@ def _handle_admin_reset_pin(h, body: bytes) -> None:
 
     from db_cloud import _client
     try:
-        result = _client().table("staff").update({"pin_hash": _sha256(new_pin)}).eq("id", staff_id).execute()
+        new_hash, new_salt = _hash_pin(new_pin)
+        result = _client().table("staff").update({"pin_hash": new_hash, "pin_salt": new_salt}).eq("id", staff_id).execute()
         if not result.data:
             _json_response(h, 404, {"error": "Staff not found"})
             return
@@ -435,12 +457,14 @@ def _acad_auth_staff(h) -> bool:
         result = (
             _client()
             .table("staff")
-            .select("id")
-            .eq("pin_hash", _sha256(pin))
+            .select("id,pin_hash,pin_salt")
             .eq("active", True)
             .execute()
         )
-        return bool(result.data)
+        return any(
+            _verify_pin(pin, r["pin_hash"], r.get("pin_salt"))
+            for r in (result.data or [])
+        )
     except Exception as e:
         logger.error(f"_acad_auth_staff Supabase error: {e}")
         return False

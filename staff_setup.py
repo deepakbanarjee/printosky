@@ -29,8 +29,19 @@ DEFAULT_STAFF = [
 ]
 
 
+import secrets as _secrets
+
+_PBKDF2_ITERATIONS = 260_000
+
 def sha256(pin: str) -> str:
+    """Legacy — kept for reference only. Do not use for new hashes."""
     return hashlib.sha256(pin.encode()).hexdigest()
+
+def pbkdf2_hash(pin: str) -> tuple[str, str]:
+    """Return (hash_hex, salt_hex) using PBKDF2-HMAC-SHA256."""
+    salt = _secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt.encode(), _PBKDF2_ITERATIONS).hex()
+    return h, salt
 
 
 def get_conn():
@@ -38,11 +49,16 @@ def get_conn():
     conn.execute("""
         CREATE TABLE IF NOT EXISTS staff (
             id TEXT PRIMARY KEY, name TEXT NOT NULL,
-            pin_hash TEXT NOT NULL, active INTEGER DEFAULT 1,
+            pin_hash TEXT NOT NULL, pin_salt TEXT, active INTEGER DEFAULT 1,
             created_at TEXT DEFAULT (datetime('now'))
         )
     """)
     conn.commit()
+    try:
+        conn.execute("ALTER TABLE staff ADD COLUMN pin_salt TEXT")
+        conn.commit()
+    except Exception:
+        pass
     return conn
 
 
@@ -52,9 +68,10 @@ def cmd_seed():
     skipped = []
     for sid, name, pin in DEFAULT_STAFF:
         try:
+            new_hash, new_salt = pbkdf2_hash(pin)
             conn.execute(
-                "INSERT INTO staff (id, name, pin_hash) VALUES (?,?,?)",
-                (sid, name, sha256(pin))
+                "INSERT INTO staff (id, name, pin_hash, pin_salt) VALUES (?,?,?,?)",
+                (sid, name, new_hash, new_salt)
             )
             seeded.append((name, pin))
         except sqlite3.IntegrityError:
@@ -95,9 +112,10 @@ def cmd_add(name: str, pin: str):
     sid = name.lower().strip()
     conn = get_conn()
     try:
+        new_hash, new_salt = pbkdf2_hash(pin)
         conn.execute(
-            "INSERT INTO staff (id, name, pin_hash) VALUES (?,?,?)",
-            (sid, name.strip(), sha256(pin))
+            "INSERT INTO staff (id, name, pin_hash, pin_salt) VALUES (?,?,?,?)",
+            (sid, name.strip(), new_hash, new_salt)
         )
         conn.commit()
         print(f"Added: {name} (id={sid}, PIN={pin})")
@@ -111,7 +129,11 @@ def cmd_reset_pin(sid: str, new_pin: str):
         print("PIN must be exactly 4 digits.")
         sys.exit(1)
     conn = get_conn()
-    rows = conn.execute("UPDATE staff SET pin_hash=? WHERE id=?", (sha256(new_pin), sid)).rowcount
+    new_hash, new_salt = pbkdf2_hash(new_pin)
+    rows = conn.execute(
+        "UPDATE staff SET pin_hash=?, pin_salt=? WHERE id=?",
+        (new_hash, new_salt, sid)
+    ).rowcount
     conn.commit()
     conn.close()
     if rows:
