@@ -6,6 +6,9 @@
     { "src": "/staff/resume",     "dest": "/api/index.py" },
     { "src": "/admin/reset-pin",  "dest": "/api/index.py" },
     { "src": "/admin/send",       "dest": "/api/index.py" },
-    { "src": "/",                  "dest": "/api/index.py" }
+    { "src": "/academic/orders",              "dest": "/api/index.py" },
+    { "src": "/academic/orders/(.*)",         "dest": "/api/index.py" },
+    { "src": "/academic/razorpay-webhook",    "dest": "/api/index.py" },
+    { "src": "/",                             "dest": "/api/index.py" }
   ]
 }
