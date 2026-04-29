@@ -712,9 +712,9 @@ def _handle_acad_deliver(h, body: bytes, pid: str) -> None:
 
 def _handle_acad_razorpay_webhook(h, body: bytes) -> None:
     """POST /academic/razorpay-webhook — Razorpay payment confirmation for academic orders."""
-    secret = os.environ.get("RAZORPAY_ACADEMIC_WEBHOOK_SECRET", "")
+    secret = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
     if not secret:
-        logger.error("RAZORPAY_ACADEMIC_WEBHOOK_SECRET not configured — rejecting academic webhook")
+        logger.error("RAZORPAY_WEBHOOK_SECRET not configured — rejecting academic webhook")
         _json_response(h, 500, {"error": "webhook not configured"})
         return
     sig = h.headers.get("X-Razorpay-Signature", "")
