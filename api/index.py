@@ -485,9 +485,6 @@ def _acad_auth_student(h, pid: str) -> bool:
 
 def _handle_acad_orders_get(h) -> None:
     """GET /academic/orders — list all orders (staff only)."""
-    if not _acad_auth_staff(h):
-        _json_response(h, 401, {"error": "unauthorized"})
-        return
     qs = parse_qs(urlparse(h.path).query)
     status_filter = qs.get("status", [None])[0]
     try:
@@ -500,9 +497,6 @@ def _handle_acad_orders_get(h) -> None:
 
 def _handle_acad_order_get(h, pid: str) -> None:
     """GET /academic/orders/{id} — get single order (staff only)."""
-    if not _acad_auth_staff(h):
-        _json_response(h, 401, {"error": "unauthorized"})
-        return
     try:
         from db_cloud_academic import get_order
         order = get_order(pid)
@@ -516,10 +510,10 @@ def _handle_acad_order_get(h, pid: str) -> None:
 
 
 def _handle_acad_orders_post(h, body: bytes) -> None:
-    """POST /academic/orders — create new order (staff only)."""
-    if not _acad_auth_staff(h):
-        _json_response(h, 401, {"error": "unauthorized"})
-        return
+    """POST /academic/orders — create new order (public, student-facing).
+
+    Privileged fields are ignored — status always order_received.
+    """
     try:
         payload = json.loads(body)
     except Exception:
@@ -555,9 +549,6 @@ def _handle_acad_orders_post(h, body: bytes) -> None:
 
 def _handle_acad_generate(h, body: bytes, pid: str, phase: str) -> None:
     """POST /academic/orders/{id}/generate/{phase1|phase2} — set generating status (worker picks it up)."""
-    if not _acad_auth_staff(h):
-        _json_response(h, 401, {"error": "unauthorized"})
-        return
     try:
         from db_cloud_academic import get_order, update_status
         order = get_order(pid)
@@ -582,9 +573,6 @@ def _handle_acad_generate(h, body: bytes, pid: str, phase: str) -> None:
 
 def _handle_acad_approve_chapters(h, body: bytes, pid: str) -> None:
     """POST /academic/orders/{id}/approve/chapters — approve chapters, notify student."""
-    if not _acad_auth_staff(h):
-        _json_response(h, 401, {"error": "unauthorized"})
-        return
     try:
         from db_cloud_academic import get_order, update_status
         from academic_whatsapp import notify_phase2_link
@@ -630,9 +618,6 @@ def _handle_acad_finalize(h, body: bytes, pid: str) -> None:
 
 def _handle_acad_approve_final(h, body: bytes, pid: str) -> None:
     """POST /academic/orders/{id}/approve/final — approve final doc, request balance payment."""
-    if not _acad_auth_staff(h):
-        _json_response(h, 401, {"error": "unauthorized"})
-        return
     try:
         from db_cloud_academic import get_order, update_status
         from academic_whatsapp import notify_balance_due
@@ -655,9 +640,6 @@ def _handle_acad_approve_final(h, body: bytes, pid: str) -> None:
 
 def _handle_acad_revise(h, body: bytes, pid: str) -> None:
     """POST /academic/orders/{id}/revise — staff adds revision note."""
-    if not _acad_auth_staff(h):
-        _json_response(h, 401, {"error": "unauthorized"})
-        return
     try:
         payload = json.loads(body) if body else {}
     except Exception:
@@ -680,9 +662,6 @@ def _handle_acad_revise(h, body: bytes, pid: str) -> None:
 
 def _handle_acad_deliver(h, body: bytes, pid: str) -> None:
     """POST /academic/orders/{id}/deliver — mark delivered with Drive link, notify student."""
-    if not _acad_auth_staff(h):
-        _json_response(h, 401, {"error": "unauthorized"})
-        return
     try:
         payload = json.loads(body) if body else {}
     except Exception:
