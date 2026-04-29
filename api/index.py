@@ -103,14 +103,58 @@ def _download_meta_media(media_id: str) -> bytes | None:
 
 # ── Message processors ────────────────────────────────────────────────────────
 
+# ── Referral tracking ────────────────────────────────────────────────────────
+
+def _capture_referral_code(phone: str, text: str) -> None:
+    """If text starts with ref_CODE, store the code in bot_sessions (first time only)."""
+    from db_cloud import _client
+    m = re.match(r'^ref_(\w{1,30})', text.strip(), re.IGNORECASE)
+    if not m:
+        return
+    code = m.group(1).upper()
+    try:
+        existing = _client().table("bot_sessions").select("referral_code").eq("phone", phone).execute()
+        if existing.data and existing.data[0].get("referral_code"):
+            return  # already tagged — don't overwrite
+        _client().table("bot_sessions").upsert({"phone": phone, "referral_code": code}).execute()
+        logger.info(f"Referral code {code!r} captured for {phone}")
+    except Exception as e:
+        logger.error(f"_capture_referral_code error for {phone}: {e}")
+
+
+def _credit_referrer(phone: str, order_id: str) -> None:
+    """Insert a referral_credits row if this customer arrived via a ref link."""
+    from db_cloud import _client
+    try:
+        row = _client().table("bot_sessions").select("referral_code").eq("phone", phone).execute()
+        if not row.data:
+            return
+        code = (row.data[0].get("referral_code") or "").strip()
+        if not code:
+            return
+        _client().table("referral_credits").insert({
+            "referrer_code": code,
+            "customer_phone": phone,
+            "order_id": order_id,
+            "amount_inr": 20,
+        }).execute()
+        logger.info(f"Referral credit Rs.20 logged -> {code!r} for order {order_id}")
+    except Exception as e:
+        logger.error(f"_credit_referrer error for {phone} / {order_id}: {e}")
+
+
 def _handle_text(sender: str, text: str) -> None:
     """Route a customer text through the bot state machine and send replies."""
     from whatsapp_bot import handle_message
     from whatsapp_notify import _send, send_staff_alert
 
+    # Capture referral code; treat ref_CODE message as a plain greeting
+    _capture_referral_code(sender, text)
+    bot_text = "hi" if re.match(r'^ref_\w', text.strip(), re.IGNORECASE) else text
+
     replies = handle_message(
         phone=sender,
-        text=text,
+        text=bot_text,
         job_id=None,
         page_count=0,
         db_path="supabase",   # db_path is ignored in cloud mode
@@ -243,6 +287,7 @@ def _process_razorpay_payment(data: dict) -> None:
         phone = batch.get("phone", "")
         if phone:
             send_payment_confirmed(phone, ref_id, amount)
+            _credit_referrer(phone, ref_id)
         logger.info(f"Batch {ref_id}: {len(job_ids)} jobs marked Paid")
         return
 
@@ -251,6 +296,7 @@ def _process_razorpay_payment(data: dict) -> None:
     job = get_job(ref_id)
     if job.get("sender"):
         send_payment_confirmed(job["sender"], ref_id, amount)
+        _credit_referrer(job["sender"], ref_id)
     logger.info(f"Job {ref_id} marked Paid")
 
 

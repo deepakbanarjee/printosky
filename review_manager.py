@@ -26,8 +26,13 @@ REVIEW_DELAY_SEC = 30 * 60      # 30 minutes
 DISCOUNT_PCT     = 10            # percent off for 4-5 star reviews
 GOOGLE_MAPS_URL  = "https://g.page/r/Printosky"   # update with real short link
 
+REFERRAL_INVITE_DELAY_SEC = 5 * 60   # 5 minutes after a 4-5 star rating
+REFERRAL_BUSINESS_NUMBER  = "919495706405"
+REFERRAL_PAYOUT_INR       = 20
+
 # Scheduled review timers (job_id → Timer), kept to allow cancellation
 _pending_timers: dict[str, threading.Timer] = {}
+_pending_referral_timers: dict[str, threading.Timer] = {}
 
 
 # ── DB setup ──────────────────────────────────────────────────────────────────
@@ -220,6 +225,8 @@ def record_rating(
             f"See you again at Printosky! 🙏"
         )
         send_fn(phone, msg)
+        # Schedule referral invite a few minutes later — they're a happy customer
+        schedule_referral_invite(phone, send_fn)
     else:
         # Low rating — acknowledge, no discount
         msg = (
@@ -286,3 +293,91 @@ def redeem_discount(db_path: str, code: str) -> bool:
         return cur.rowcount == 1
     finally:
         conn.close()
+
+
+# ── Referral invitations (sent to 4-5 star customers) ────────────────────────
+
+def _generate_referral_code(phone: str) -> str:
+    """Build a memorable code: REF + last 4 of phone + 2 random uppercase letters."""
+    digits = "".join(c for c in phone if c.isdigit())
+    tail = digits[-4:].zfill(4) if digits else "0000"
+    suffix = "".join(random.choices(string.ascii_uppercase, k=2))
+    return f"REF{tail}{suffix}"
+
+
+def schedule_referral_invite(
+    phone: str,
+    send_fn,
+    delay_sec: int = REFERRAL_INVITE_DELAY_SEC,
+) -> None:
+    """
+    Schedule a referral-invite WhatsApp to a happy customer.
+    Idempotent per phone — won't queue twice for the same number.
+    """
+    if not phone:
+        return
+    if phone in _pending_referral_timers:
+        logger.info("Referral invite already scheduled for %s", phone)
+        return
+
+    def _fire():
+        _pending_referral_timers.pop(phone, None)
+        send_referral_invite(phone, send_fn)
+
+    t = threading.Timer(delay_sec, _fire)
+    t.daemon = True
+    t.start()
+    _pending_referral_timers[phone] = t
+    logger.info("Referral invite scheduled for %s in %ds", phone, delay_sec)
+
+
+def send_referral_invite(phone: str, send_fn) -> bool:
+    """
+    Generate (or look up) a unique referrer code for this customer,
+    create the Supabase `referrers` row, then send the invite WhatsApp.
+    Idempotent — re-sending uses the same code.
+    """
+    if not phone:
+        return False
+
+    code: Optional[str] = None
+    try:
+        from db_cloud import _client
+        sb = _client()
+        existing = sb.table("referrers").select("code").eq("label", phone).execute()
+        if existing.data:
+            code = existing.data[0]["code"]
+            logger.info("Referrer code %s already exists for %s — re-using", code, phone)
+        else:
+            for _ in range(10):
+                candidate = _generate_referral_code(phone)
+                hit = sb.table("referrers").select("code").eq("code", candidate).execute()
+                if not hit.data:
+                    sb.table("referrers").insert({
+                        "code": candidate,
+                        "label": phone,
+                        "platform": "whatsapp_invited",
+                    }).execute()
+                    code = candidate
+                    logger.info("Created referrer row %s for %s", code, phone)
+                    break
+            if not code:
+                logger.error("Could not generate unique referral code for %s after 10 attempts", phone)
+                return False
+    except Exception as e:
+        logger.error("send_referral_invite Supabase error for %s: %s", phone, e)
+        return False
+
+    share_link = f"https://wa.me/{REFERRAL_BUSINESS_NUMBER}?text=ref_{code}"
+    msg = (
+        f"One more thing — earn cash for sharing Printosky! 💸\n\n"
+        f"For every friend who places an order using your link, you earn "
+        f"*₹{REFERRAL_PAYOUT_INR} cash*.\n\n"
+        f"_(Cash payouts now — soon you'll be able to use earnings as Printosky store credit too!)_\n\n"
+        f"Your unique link:\n{share_link}\n\n"
+        f"Share with classmates, hostel mates, anyone who needs printing or projects.\n"
+        f"Reply *MY REFERRALS* anytime to track your earnings."
+    )
+    sent = send_fn(phone, msg)
+    logger.info("Referral invite sent to %s (code %s): %s", phone, code, "ok" if sent else "failed")
+    return bool(sent)
