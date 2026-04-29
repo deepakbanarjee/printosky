@@ -41,3 +41,26 @@ stop
 type
 epson_snmp_results.txt
 .vercel
+
+# Browser test artifacts
+tests/browser_gap_report.txt
+browser_test_run.log
+
+# Coverage artifacts
+.coverage
+coverage.json
+
+# Scratch / one-off analysis files
+scratch_*.py
+scratch_*.json
+
+# Crash dumps
+*.stackdump
+
+# Unversioned assets / data
+Capture.PNG
+SCHEMA_v13_staff_hold.sql
+WIKI/
+data/imports/done/
+docs/superpowers/
+oxygens-website/
