@@ -53,9 +53,9 @@ class TestConstantTimeComparison:
 
     def test_set_pin_uses_compare_digest_not_inequality(self):
         """
-        Inspect the source of _handle_staff_set_pin: it must not use
-        direct != comparison on hashes. After fix, hmac.compare_digest
-        must be used.
+        _handle_staff_set_pin must not use bare != for hash comparison.
+        Since PBKDF2 refactor, PIN verification is delegated to _verify_pin()
+        which uses hmac.compare_digest() internally.
         """
         import inspect
         src = inspect.getsource(api_mod._handle_staff_set_pin)
@@ -64,8 +64,14 @@ class TestConstantTimeComparison:
             "TIMING ATTACK: _handle_staff_set_pin uses != for hash comparison "
             "instead of hmac.compare_digest()"
         )
-        assert "compare_digest" in src, (
-            "_handle_staff_set_pin must use hmac.compare_digest() for PIN comparison"
+        # Either direct compare_digest OR delegated to _verify_pin (which uses compare_digest)
+        assert ("compare_digest" in src or "_verify_pin" in src), (
+            "_handle_staff_set_pin must use hmac.compare_digest() or _verify_pin() for PIN comparison"
+        )
+        # Confirm _verify_pin itself uses compare_digest
+        verify_src = inspect.getsource(api_mod._verify_pin)
+        assert "compare_digest" in verify_src, (
+            "_verify_pin must use hmac.compare_digest() for constant-time comparison"
         )
 
     def test_admin_reset_pin_uses_compare_digest_not_inequality(self):

@@ -153,7 +153,27 @@ def _get_supabase_jwt() -> str:
 
 
 def _sha256(text: str) -> str:
+    """Legacy SHA-256 hash — kept for admin password comparison only."""
     return hashlib.sha256(text.encode()).hexdigest()
+
+# ── PBKDF2 PIN hashing ────────────────────────────────────────────────────────
+_PBKDF2_ITERATIONS = 260_000
+
+def _hash_pin(pin: str) -> tuple[str, str]:
+    """Return (hash_hex, salt_hex) using PBKDF2-HMAC-SHA256."""
+    import secrets as _secrets
+    salt = _secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt.encode(), _PBKDF2_ITERATIONS).hex()
+    return h, salt
+
+def _verify_pin(pin: str, stored_hash: str, stored_salt: str | None) -> bool:
+    """Verify PIN against stored hash. Handles both legacy SHA-256 (salt=None) and PBKDF2."""
+    if stored_salt is None:
+        # Legacy path: plain SHA-256
+        return hmac.compare_digest(stored_hash, hashlib.sha256(pin.encode()).hexdigest())
+    # New path: PBKDF2
+    expected = hashlib.pbkdf2_hmac("sha256", pin.encode(), stored_salt.encode(), _PBKDF2_ITERATIONS).hex()
+    return hmac.compare_digest(stored_hash, expected)
 
 
 # Allowed directories for legacy /print filepath parameter
@@ -184,6 +204,12 @@ def init_staff_tables(db_path: str):
             created_at TEXT DEFAULT (datetime('now'))
         )
     """)
+    # v15: add pin_salt column if not present (idempotent)
+    try:
+        conn.execute("ALTER TABLE staff ADD COLUMN pin_salt TEXT")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
     conn.execute("""
         CREATE TABLE IF NOT EXISTS staff_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,16 +227,33 @@ def init_staff_tables(db_path: str):
 
 def staff_login(db_path: str, pin: str, pc_id: str):
     """Validate PIN, close prior session on this PC, open new session. Returns dict."""
-    pin_hash = _sha256(pin)
     conn = sqlite3.connect(db_path)
-    row = conn.execute(
-        "SELECT id, name FROM staff WHERE pin_hash=? AND active=1", (pin_hash,)
-    ).fetchone()
-    if not row:
+    conn.row_factory = sqlite3.Row
+    # Fetch all active staff — compare PIN client-side to support PBKDF2 migration
+    rows = conn.execute(
+        "SELECT id, name, pin_hash, pin_salt FROM staff WHERE active=1"
+    ).fetchall()
+    matched = None
+    for r in rows:
+        if _verify_pin(pin, r["pin_hash"], r["pin_salt"]):
+            matched = r
+            break
+    if not matched:
         conn.close()
         return {"ok": False, "error": "Invalid PIN"}
 
-    staff_id, name = row
+    # Upgrade legacy SHA-256 hash to PBKDF2 on first successful login
+    if matched["pin_salt"] is None:
+        new_hash, new_salt = _hash_pin(pin)
+        conn.execute(
+            "UPDATE staff SET pin_hash=?, pin_salt=? WHERE id=?",
+            (new_hash, new_salt, matched["id"])
+        )
+        conn.commit()
+        logging.info("PIN hash upgraded to PBKDF2 for staff %s", matched["id"])
+
+    row = matched
+    staff_id, name = row["id"], row["name"]
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Close any open session for this pc_id
@@ -325,6 +368,24 @@ PRINTER_IPS = {
     "epson":  "192.168.55.202",
 }
 
+# ── Rate limiter for /staff-login ──────────────────────────────────────────────────────
+import time as _time
+_rate_limit: dict[str, list[float]] = {}  # ip -> [timestamp, ...]
+_RATE_LIMIT_MAX    = 5     # max attempts per window
+_RATE_LIMIT_WINDOW = 60.0  # seconds
+
+def _check_rate_limit(ip: str) -> bool:
+    """Return True if allowed, False if rate-limited (5 attempts per 60s per IP)."""
+    now = _time.monotonic()
+    hits = [t for t in _rate_limit.get(ip, []) if now - t < _RATE_LIMIT_WINDOW]
+    _rate_limit[ip] = hits
+    if len(hits) >= _RATE_LIMIT_MAX:
+        return False
+    _rate_limit[ip].append(now)
+    return True
+
+_SERVER_START = _time.monotonic()  # for uptime in /health
+
 def get_system_health() -> dict:
     internet  = check_internet()
     konica_ok = check_printer_reachable(PRINTER_IPS["konica"])
@@ -352,6 +413,8 @@ def get_system_health() -> dict:
         "active_staff": list(_active_sessions.keys()),
         "staff_count":  len(_active_sessions),
         "time":         datetime.now().strftime("%H:%M:%S"),
+        "uptime_s":     int(_time.monotonic() - _SERVER_START),
+        "db_ok":        __import__("os").path.exists(DB_PATH),
     }
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -1746,6 +1809,11 @@ class PrintHandler(BaseHTTPRequestHandler):
             pc_id = body.get("pc_id", "")
             if not pin:
                 self._json(400, {"error": "pin required"})
+                return
+            client_ip = self.client_address[0]
+            if not _check_rate_limit(client_ip):
+                logging.warning("Rate limit hit on /staff-login from %s", client_ip)
+                self._json(429, {"error": "Too many login attempts. Wait 60 seconds."})
                 return
             result = staff_login(DB_PATH, pin, pc_id)
             if result.get("ok"):

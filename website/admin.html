@@ -717,6 +717,11 @@
   .conv-tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
   .conv-tab-btn:hover:not(.active) { color:var(--fg); }
   #conv-panel { display:none; padding:12px 16px; }
+  /* ── Academic Projects Tab ──────────────────────────────────────────────── */
+  #academic-tab { display:none; padding:12px 16px; }
+  .filter-pills { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .pill { padding:6px 14px; border-radius:20px; border:1px solid #3a3a3a; background:#1a1a1a; color:#aaa; cursor:pointer; font-size:.8rem; }
+  .pill.active { background:#ffc000; color:#000; border-color:#ffc000; }
   .conv-toolbar { display:flex; gap:8px; margin-bottom:10px; }
   .conv-search { flex:1; background:var(--bg2); border:1px solid var(--border); color:var(--fg); font-size:.78rem; padding:5px 10px; outline:none; border-radius:4px; }
   .conv-search:focus { border-color:var(--accent); }
@@ -793,6 +798,7 @@
   <div class="conv-tab-bar">
     <button class="conv-tab-btn active" id="tab-jobs" onclick="switchTab('jobs')">Jobs</button>
     <button class="conv-tab-btn"        id="tab-conv" onclick="switchTab('conv')">Conversations</button>
+    <button class="conv-tab-btn"        id="tab-academic" onclick="switchTab('academic')">Academic Projects</button>
   </div>
 
   <main>
@@ -944,7 +950,73 @@
     </div>
   </div>
 
+  <!-- Academic Projects Tab Panel -->
+  <div id="academic-tab">
+    <div class="filter-pills">
+      <button class="pill active" onclick="filterAcademic('all', this)">All</button>
+      <button class="pill" onclick="filterAcademic('qc', this)">Waiting for QC</button>
+      <button class="pill" onclick="filterAcademic('generating', this)">Generating</button>
+      <button class="pill" onclick="filterAcademic('delivered', this)">Delivered</button>
+    </div>
+
+    <div id="academic-list"></div>
+
+    <div id="academic-detail" style="display:none; margin-top:16px; background:#1a1a1a; border-radius:8px; padding:16px;">
+      <h3 id="acad-detail-title" style="margin:0 0 8px; color:var(--fg);"></h3>
+      <p id="acad-detail-info" style="color:#aaa; font-size:.85rem; margin:0 0 10px;"></p>
+      <div id="acad-status-badge" style="margin-bottom:14px;"></div>
+
+      <button id="btn-approve-chapters" onclick="academicApprove('chapters')" style="display:none; margin-right:8px; padding:8px 16px; background:#2ecc71; color:#000; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+        ✅ Approve Chapters
+      </button>
+      <button id="btn-approve-final" onclick="academicApprove('final')" style="display:none; margin-right:8px; padding:8px 16px; background:#2ecc71; color:#000; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+        ✅ Approve Final
+      </button>
+      <button id="btn-request-revision" onclick="toggleRevisionBox()" style="display:none; margin-right:8px; padding:8px 16px; background:#e67e22; color:#000; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+        ✏️ Request Revision
+      </button>
+      <button id="btn-deliver" onclick="academicDeliver()" style="display:none; padding:8px 16px; background:#3498db; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+        📤 Send to Student
+      </button>
+      <button id="btn-generate-phase1" onclick="academicGenerate('phase1')" style="display:none; margin-right:8px; padding:8px 16px; background:#f39c12; color:#000; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+        ⚙️ Generate Chapters
+      </button>
+      <button id="btn-generate-phase2" onclick="academicGenerate('phase2')" style="display:none; margin-right:8px; padding:8px 16px; background:#9b59b6; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+        ⚙️ Generate Final Doc
+      </button>
+
+      <div id="revision-box" style="display:none; margin-top:12px;">
+        <textarea id="revision-note" rows="3" placeholder="Describe what needs to be revised..." style="width:100%; background:#111; color:var(--fg); border:1px solid #3a3a3a; border-radius:6px; padding:8px; resize:vertical;"></textarea>
+        <button onclick="submitRevision()" style="margin-top:6px; padding:6px 14px; background:#ffc000; color:#000; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Send Revision Request</button>
+      </div>
+
+      <button onclick="showNewAcademicModal()" style="margin-top:16px; display:block; padding:8px 16px; background:#2a2a2a; color:#aaa; border:1px solid #3a3a3a; border-radius:6px; cursor:pointer;">
+        ➕ New Walk-in Order
+      </button>
+    </div>
+  </div>
+
   </main>
+</div>
+
+<!-- ── Academic Walk-in Order Modal ── -->
+<div id="academic-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000;">
+  <div style="background:#1a1a1a; border-radius:12px; padding:32px; max-width:480px; margin:80px auto;">
+    <h3 style="margin:0 0 16px; color:var(--fg);">New Academic Order</h3>
+    <input id="m-name" placeholder="Student Name" style="width:100%; margin-bottom:8px; background:#111; color:var(--fg); border:1px solid #3a3a3a; border-radius:6px; padding:8px; box-sizing:border-box;">
+    <input id="m-phone" placeholder="WhatsApp (91XXXXXXXXXX)" style="width:100%; margin-bottom:8px; background:#111; color:var(--fg); border:1px solid #3a3a3a; border-radius:6px; padding:8px; box-sizing:border-box;">
+    <select id="m-course" style="width:100%; margin-bottom:8px; background:#111; color:var(--fg); border:1px solid #3a3a3a; border-radius:6px; padding:8px; box-sizing:border-box;">
+      <option>B.Com</option><option>BBA</option><option>MBA</option>
+      <option>MCA</option><option>BCA</option><option>BSc</option><option>MSc</option>
+    </select>
+    <input id="m-topic" placeholder="Research Topic" style="width:100%; margin-bottom:8px; background:#111; color:var(--fg); border:1px solid #3a3a3a; border-radius:6px; padding:8px; box-sizing:border-box;">
+    <select id="m-payment" style="width:100%; margin-bottom:16px; background:#111; color:var(--fg); border:1px solid #3a3a3a; border-radius:6px; padding:8px; box-sizing:border-box;">
+      <option value="cash">Cash</option>
+      <option value="upi">UPI</option>
+    </select>
+    <button onclick="submitNewAcademicOrder()" style="padding:8px 20px; background:#ffc000; color:#000; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Create Order</button>
+    <button onclick="document.getElementById('academic-modal').style.display='none'" style="margin-left:8px; padding:8px 16px; background:#2a2a2a; color:#aaa; border:1px solid #3a3a3a; border-radius:6px; cursor:pointer;">Cancel</button>
+  </div>
 </div>
 
 <!-- ── New Job Modal (walk-in wizard) ── -->
@@ -1264,16 +1336,8 @@
 // ── Config ─────────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI";
-// Store PC URL — configured per-browser during first-time PC setup (localStorage)
-// Auto-migrate stale LAN HTTP URLs (can't be called from HTTPS pages)
-(function migrateLanUrl() {
-  const saved = localStorage.getItem("storePcUrl");
-  if (window.location.protocol === "https:" && saved &&
-      saved.startsWith("http://") && !saved.includes("localhost")) {
-    localStorage.setItem("storePcUrl", "https://store.printosky.com");
-    location.reload();
-  }
-})();
+// Store PC URL — update this to your current Cloudflare tunnel URL for port 3005
+// STORE_PC_URL is configured per-browser during first-time PC setup (localStorage)
 const STORE_PC_URL = localStorage.getItem("storePcUrl") || "";
 
 function storeHeaders() {
@@ -1297,7 +1361,8 @@ function setupPC() {
     const entered = prompt(
       "First-time setup (step 2/2)\nPrint server URL:\n" +
       "  Server PC (PC1): http://localhost:3005\n" +
-      "  All other PCs:   https://store.printosky.com\n\n" +
+      "  LAN PC:          http://192.168.55.212:3005\n" +
+      "  Remote/Home:     https://store.printosky.com\n\n" +
       "Enter URL (default: " + hint + "):"
     );
     const url = (entered || hint).trim().replace(/\/$/, "");
@@ -1350,6 +1415,7 @@ async function tryPinLogin() {
       sessionStorage.setItem("staff_id", data.staff_id);
       sessionStorage.setItem("staff_name", data.name);
       sessionStorage.setItem("session_id", data.session_id);
+      sessionStorage.setItem("staff_pin", pin);
       // Fetch Supabase JWT so sbFetch works with RLS-protected tables
       try {
         const jr = await fetch("/.netlify/functions/auth", {
@@ -1379,26 +1445,22 @@ async function tryPinLogin() {
 // ── Admin override (master password) ──────────────────────────────────────
 async function tryAdminLogin() {
   const pw = document.getElementById("pw").value;
-  // Client-side SHA256 fallback (used when Netlify function is unavailable)
-  const ADMIN_HASH = "037589dcf5f165dc2ad53b6b453be08fd90aee611c71f822247023f1d7b5196d";
-  const enc = new TextEncoder();
-  const buf = await crypto.subtle.digest("SHA-256", enc.encode(pw));
-  const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
-  if (hash === ADMIN_HASH) {
+  let ok = false, data = {};
+  try {
+    const r = await fetch("/.netlify/functions/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "admin", password: pw }),
+    });
+    data = await r.json();
+    ok = data.ok;
+  } catch { /* network error — ok stays false */ }
+  if (ok) {
     sessionStorage.setItem("p_auth", "1");
+    if (data.supabase_jwt) sessionStorage.setItem("supabase_jwt", data.supabase_jwt);
     sessionStorage.removeItem("staff_id");
     sessionStorage.removeItem("staff_name");
     sessionStorage.removeItem("session_id");
-    // Try to get Supabase JWT via function — optional, falls back to anon key
-    try {
-      const r = await fetch("/.netlify/functions/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "admin", password: pw }),
-      });
-      const data = await r.json();
-      if (data.supabase_jwt) sessionStorage.setItem("supabase_jwt", data.supabase_jwt);
-    } catch { /* function unavailable — anon key fallback */ }
     showDashboard();
   } else {
     document.getElementById("login-err").textContent = "Incorrect password";
@@ -2386,7 +2448,7 @@ function renderJobPanel() {
   renderDtpPanel(j);
 
   // Load preview iframe
-  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
   const iframe = document.getElementById("jp-preview-iframe");
   const footer = document.getElementById("jp-preview-footer");
   if (iframe && j.job_id) {
@@ -2849,7 +2911,7 @@ function closePhotocopyModal() {
 // ── File Preview ────────────────────────────────────────────────────────────
 function openPreview() {
   if (!selectedJob) return;
-  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
   const jid  = selectedJob.job_id;
   const fname = selectedJob.filename || jid;
   const ext   = (fname.split(".").pop() || "").toLowerCase();
@@ -2931,16 +2993,22 @@ let convPhone   = null; // currently selected phone
 let convRefresh = null; // setInterval handle
 
 function switchTab(tab) {
-  document.getElementById("jobs-view").style.display  = tab === "jobs" ? "" : "none";
-  document.getElementById("conv-panel").style.display = tab === "conv" ? "block" : "none";
-  document.getElementById("tab-jobs").classList.toggle("active", tab === "jobs");
-  document.getElementById("tab-conv").classList.toggle("active", tab === "conv");
+  document.getElementById("jobs-view").style.display    = tab === "jobs"     ? "" : "none";
+  document.getElementById("conv-panel").style.display   = tab === "conv"     ? "block" : "none";
+  document.getElementById("academic-tab").style.display = tab === "academic" ? "block" : "none";
+  document.getElementById("tab-jobs").classList.toggle("active",     tab === "jobs");
+  document.getElementById("tab-conv").classList.toggle("active",     tab === "conv");
+  document.getElementById("tab-academic").classList.toggle("active", tab === "academic");
 
   if (tab === "conv") {
     loadInbox();
     if (!convRefresh) convRefresh = setInterval(loadInbox, 30000);
   } else {
     if (convRefresh) { clearInterval(convRefresh); convRefresh = null; }
+  }
+
+  if (tab === "academic") {
+    loadAcademicOrders();
   }
 }
 
@@ -3184,7 +3252,7 @@ function njSkipFile() {
 async function njHandleFile(input) {
   const file = input.files[0];
   if (!file) return;
-  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
 
   document.getElementById("nj-file-uploading").style.display = "block";
   document.getElementById("nj-file-name").style.display = "none";
@@ -3223,7 +3291,7 @@ async function njHandleFile(input) {
 async function njFetchQuote() {
   clearTimeout(njQuoteTimer);
   njQuoteTimer = setTimeout(async () => {
-    const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
+    const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
     const pages    = parseInt(document.getElementById("nj-pages").value) || 1;
     const copies   = parseInt(document.getElementById("nj-copies").value) || 1;
     const colour   = document.getElementById("nj-colour").value;
@@ -3266,7 +3334,7 @@ function njSelectPayOpt(mode) {
 }
 
 async function njSubmit() {
-  const PC = (STORE_PC_URL || "http://localhost:3005").replace(/\/$/, "");
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
   const btn = document.getElementById("nj-submit-btn");
   btn.disabled = true;
   btn.textContent = "Saving…";
@@ -3327,6 +3395,171 @@ async function njSubmit() {
     btn.disabled = false;
     btn.textContent = mode === "override" ? "Add to Queue (No Payment) ✓" : "Collect & Add to Queue ✓";
   }
+}
+
+// ── Academic Projects Tab ──────────────────────────────────────────────────────
+
+const ACAD_API = 'https://printosky.vercel.app';
+const _QC_S    = ['chapters_qc', 'final_qc'];
+const _GEN_S   = ['chapters_generating', 'final_generating'];
+
+let _acadOrders   = [];
+let _acadFilter   = 'all';
+let _acadSelected = null;
+
+const _ACAD_COLORS = {
+  order_received:      '#888',
+  advance_paid:        '#3498db',
+  chapters_generating: '#f39c12',
+  chapters_qc:         '#e74c3c',
+  chapters_approved:   '#2ecc71',
+  details_collected:   '#9b59b6',
+  final_generating:    '#f39c12',
+  final_qc:            '#e74c3c',
+  balance_due:         '#e67e22',
+  balance_paid:        '#27ae60',
+  delivered:           '#2ecc71',
+};
+
+async function loadAcademicOrders() {
+  try {
+    const r = await fetch(`${ACAD_API}/academic/orders`, { headers: { 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' } });
+    const data = await r.json();
+    _acadOrders = data.orders || [];
+    renderAcademicList();
+  } catch(e) {
+    document.getElementById('academic-list').innerHTML = '<p style="color:#e74c3c;">Could not connect to Academic API (port 3006)</p>';
+  }
+}
+
+function filterAcademic(f, btn) {
+  _acadFilter = f;
+  document.querySelectorAll('#academic-tab .pill').forEach(p => p.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderAcademicList();
+}
+
+function renderAcademicList() {
+  let orders = _acadOrders;
+  if (_acadFilter === 'qc')        orders = orders.filter(o => _QC_S.includes(o.status));
+  else if (_acadFilter === 'generating') orders = orders.filter(o => _GEN_S.includes(o.status));
+  else if (_acadFilter === 'delivered') orders = orders.filter(o => o.status === 'delivered');
+
+  if (!orders.length) {
+    document.getElementById('academic-list').innerHTML = '<p style="color:#888;">No orders found.</p>';
+    return;
+  }
+
+  document.getElementById('academic-list').innerHTML = orders.map(o => `
+    <div onclick="openAcademicDetail('${o.project_id}')"
+         style="border-left:4px solid ${_ACAD_COLORS[o.status]||'#888'}; background:#1a1a1a;
+                padding:12px 16px; margin-bottom:8px; border-radius:6px; cursor:pointer;">
+      <strong>${o.project_id}</strong> — ${o.customer_name}
+      <span style="float:right; color:#aaa; font-size:13px;">${o.course} · ${o.status}</span>
+      <div style="color:#888; font-size:13px;">${o.topic}</div>
+    </div>
+  `).join('');
+}
+
+function openAcademicDetail(pid) {
+  const o = _acadOrders.find(x => x.project_id === pid);
+  if (!o) return;
+  _acadSelected = o;
+
+  document.getElementById('acad-detail-title').textContent = `${o.project_id} — ${o.customer_name}`;
+  document.getElementById('acad-detail-info').textContent  = `${o.course} | ${o.topic} | ${o.whatsapp_phone}`;
+  document.getElementById('acad-status-badge').innerHTML   =
+    `<span style="background:${_ACAD_COLORS[o.status]||'#888'}; color:#000; padding:4px 10px; border-radius:12px; font-size:13px;">${o.status}</span>
+     <span style="margin-left:8px; color:#aaa; font-size:13px;">Advance: ${o.advance_paid?'✅':'❌'} | Balance: ${o.balance_paid?'✅':'❌'}</span>`;
+
+  document.getElementById('btn-approve-chapters').style.display  = o.status === 'chapters_qc' ? '' : 'none';
+  document.getElementById('btn-approve-final').style.display     = o.status === 'final_qc'    ? '' : 'none';
+  document.getElementById('btn-request-revision').style.display  = _QC_S.includes(o.status)   ? '' : 'none';
+  document.getElementById('btn-deliver').style.display           = o.status === 'balance_paid' ? '' : 'none';
+  document.getElementById('btn-generate-phase1').style.display   = ['order_received', 'advance_paid'].includes(o.status) ? '' : 'none';
+  document.getElementById('btn-generate-phase2').style.display   = o.status === 'details_collected' ? '' : 'none';
+  document.getElementById('revision-box').style.display          = 'none';
+  document.getElementById('academic-detail').style.display       = '';
+}
+
+function toggleRevisionBox() {
+  const box = document.getElementById('revision-box');
+  box.style.display = box.style.display === 'none' ? '' : 'none';
+}
+
+async function academicApprove(type) {
+  if (!_acadSelected) return;
+  const pid = _acadSelected.project_id;
+  const url = type === 'chapters'
+    ? `${ACAD_API}/academic/orders/${pid}/approve/chapters`
+    : `${ACAD_API}/academic/orders/${pid}/approve/final`;
+  await fetch(url, { method: 'POST', headers: { 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' } });
+  await loadAcademicOrders();
+  openAcademicDetail(pid);
+}
+
+async function submitRevision() {
+  if (!_acadSelected) return;
+  const note = document.getElementById('revision-note').value.trim();
+  if (!note) return alert('Please enter revision notes.');
+  await fetch(`${ACAD_API}/academic/orders/${_acadSelected.project_id}/revise`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' },
+    body: JSON.stringify({ note }),
+  });
+  document.getElementById('revision-box').style.display = 'none';
+  alert('Revision request sent.');
+  await loadAcademicOrders();
+  if (_acadSelected) openAcademicDetail(_acadSelected.project_id);
+}
+
+async function academicDeliver() {
+  if (!_acadSelected) return;
+  const url = prompt('Enter Google Drive URL for the final document:');
+  if (!url) return;
+  await fetch(`${ACAD_API}/academic/orders/${_acadSelected.project_id}/deliver`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' },
+    body: JSON.stringify({ drive_url: url }),
+  });
+  await loadAcademicOrders();
+  openAcademicDetail(_acadSelected.project_id);
+}
+
+function showNewAcademicModal() {
+  document.getElementById('academic-modal').style.display = '';
+}
+
+async function academicGenerate(phase) {
+  if (!_acadSelected) return;
+  const pid = _acadSelected.project_id;
+  const url = `${ACAD_API}/academic/orders/${pid}/generate/${phase}`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' },
+  });
+  const data = await r.json();
+  alert(`Generation started: ${data.status || data.error || 'ok'}`);
+  await loadAcademicOrders();
+  openAcademicDetail(pid);
+}
+
+async function submitNewAcademicOrder() {
+  const name   = document.getElementById('m-name').value.trim();
+  const phone  = document.getElementById('m-phone').value.trim();
+  const course = document.getElementById('m-course').value;
+  const topic  = document.getElementById('m-topic').value.trim();
+  const payment_mode = document.getElementById('m-payment').value;
+  if (!name || !phone || !topic) return alert('Please fill all required fields.');
+  const r = await fetch(`${ACAD_API}/academic/orders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' },
+    body: JSON.stringify({ customer_name: name, whatsapp_phone: phone, course, topic, advance_paid: 1, payment_mode }),
+  });
+  const data = await r.json();
+  document.getElementById('academic-modal').style.display = 'none';
+  alert(`Order created: ${data.project_id}`);
+  loadAcademicOrders();
 }
 </script>
 </body>

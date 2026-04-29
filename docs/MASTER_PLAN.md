@@ -953,3 +953,19 @@ CREATE TABLE IF NOT EXISTS discount_codes (
 
 *Plan saved: C:\py\printosky\docs\MASTER_PLAN.md*
 *Last updated: 2026-03-29 — v3 (all permutations locked, ready for implementation)*
+
+
+---
+
+## Strategic Plans (added 2026-04-29)
+
+This document covers operational phases (Phase 1: colour intelligence, Phase 2: cover generation).
+The following linked documents cover business expansion and growth:
+
+| Document | Contents |
+|----------|----------|
+| [EXPANSION_PLAN.md](EXPANSION_PLAN.md) | Phase A→B→C — single owner → franchise SaaS → marketplace; agent architecture; geography; phase triggers |
+| [GROWTH_PLAN.md](GROWTH_PLAN.md) | Customer acquisition — GMB, WhatsApp click-to-chat, Instagram, college groups, referral program, SEO landing pages, B2B academic partnerships |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Full technical architecture — ports, Vercel routes, env vars, data flow, deploy pipeline |
+| [SECURITY.md](SECURITY.md) | Security posture — fixes with commit refs, open items with severity |
+
