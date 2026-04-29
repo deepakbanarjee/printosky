@@ -45,7 +45,7 @@ HTTP_TIMEOUT       = 15        # seconds
 FETCH_INTERVAL     = 300       # seconds (5 minutes — matches SNMP poll)
 _WEBLOG_FAIL_LIMIT = 3         # give up Tier 1 after this many consecutive failures
 
-LOGIN_URL   = f"{EPSON_BASE}/PRESENTATION/ADVANCED/COMMON/TOP"
+LOGIN_URL   = f"{EPSON_BASE}/PRESENTATION/ADVANCED/PASSWORD/SET"
 HISTORY_URL = f"{EPSON_BASE}/PRESENTATION/ADVANCED/INFO_JOBHISTORY/TOP"
 EXPORT_URL  = f"{EPSON_BASE}/PRESENTATION/ADVANCED/INFO_JOBHISTORY/OUTPUT.CSV"
 
@@ -98,15 +98,24 @@ def _make_session() -> requests.Session:
 
 
 def _login(session: requests.Session) -> bool:
-    """POST credentials to the admin top page to acquire a session cookie."""
+    """POST credentials to ADVANCED/PASSWORD/SET to acquire a session cookie."""
     try:
         r = session.post(
             LOGIN_URL,
-            data={"INPUTT_ID": EPSON_USER, "INPUTT_PASS": EPSON_PASS},
+            data={
+                "SEL_SESSIONTYPE": "ADMIN",
+                "INPUTT_USERNAME":  EPSON_USER,
+                "INPUTT_PASSWORD":  EPSON_PASS,
+                "access":           "https",
+            },
             timeout=HTTP_TIMEOUT,
             allow_redirects=True,
         )
-        return r.status_code == 200
+        # Successful login sets EPSON_COOKIE_SESSION; check for it
+        ok = r.status_code == 200 and "EPSON_COOKIE_SESSION" in session.cookies
+        if not ok:
+            logger.debug(f"Epson login failed — no session cookie. len={len(r.text)}")
+        return ok
     except Exception as e:
         logger.debug(f"Epson login error: {e}")
         return False
@@ -430,9 +439,6 @@ if __name__ == "__main__":
                         format="%(asctime)s [%(name)s] %(message)s")
 
     db = r"C:\Printosky\Data\jobs.db"
-    if len(sys.argv) > 1:
-        db = sys.argv[1]
-
     print(f"DB: {db}")
     print(f"Epson IP: {EPSON_IP}\n")
 
