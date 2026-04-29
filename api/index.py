@@ -512,7 +512,9 @@ def _handle_acad_order_get(h, pid: str) -> None:
 def _handle_acad_orders_post(h, body: bytes) -> None:
     """POST /academic/orders — create new order (public, student-facing).
 
-    Privileged fields are ignored — status always order_received.
+    Privileged fields (advance_paid, status, payment_mode) are ALWAYS
+    server-set and ignored from the request body — students cannot
+    self-elevate their order status.
     """
     try:
         payload = json.loads(body)
@@ -527,19 +529,18 @@ def _handle_acad_orders_post(h, body: bytes) -> None:
         from db_cloud_academic import next_project_id, create_order
         pid = next_project_id()
         order: dict = {
-            "project_id":    pid,
-            "customer_name": payload["customer_name"],
-            "whatsapp_phone": payload["whatsapp_phone"],
-            "course":        payload["course"],
-            "topic":         payload["topic"],
-            "study_area":    payload.get("study_area", ""),
-            "sample_size":   int(payload.get("sample_size", 100)),
-            "tables_json":   json.dumps(payload.get("tables", [])),
-            "advance_paid":  bool(payload.get("advance_paid")),
-            "status":        "advance_paid" if payload.get("advance_paid") else "order_received",
+            "project_id":     pid,
+            "customer_name":  str(payload["customer_name"])[:200],
+            "whatsapp_phone": str(payload["whatsapp_phone"])[:20],
+            "course":         str(payload["course"])[:100],
+            "topic":          str(payload["topic"])[:500],
+            "study_area":     str(payload.get("study_area", ""))[:200],
+            "sample_size":    max(1, min(int(payload.get("sample_size", 100)), 10000)),
+            "tables_json":    json.dumps(payload.get("tables", [])),
+            # Privileged — always server-controlled, never from request body
+            "advance_paid":   False,
+            "status":         "order_received",
         }
-        if payload.get("payment_mode"):
-            order["payment_mode"] = payload["payment_mode"]
         create_order(order)
         _json_response(h, 201, {"project_id": pid})
     except Exception as e:
