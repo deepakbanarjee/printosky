@@ -106,8 +106,8 @@ def cmd_list():
 
 
 def cmd_add(name: str, pin: str):
-    if not pin.isdigit() or len(pin) != 4:
-        print("PIN must be exactly 4 digits.")
+    if not pin.isdigit() or len(pin) != 6:
+        print("PIN must be exactly 6 digits.")
         sys.exit(1)
     sid = name.lower().strip()
     conn = get_conn()
@@ -125,8 +125,8 @@ def cmd_add(name: str, pin: str):
 
 
 def cmd_reset_pin(sid: str, new_pin: str):
-    if not new_pin.isdigit() or len(new_pin) != 4:
-        print("PIN must be exactly 4 digits.")
+    if not new_pin.isdigit() or len(new_pin) != 6:
+        print("PIN must be exactly 6 digits.")
         sys.exit(1)
     conn = get_conn()
     new_hash, new_salt = pbkdf2_hash(new_pin)

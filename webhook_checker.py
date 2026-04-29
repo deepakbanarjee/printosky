@@ -189,9 +189,29 @@ def run_check(db_path: str):
 
         if status == "paid":
             force_mark_paid(item, db_path)
-        elif status in ("expired", "cancelled", "created", None):
+        elif status in ("expired", "cancelled"):
+            # Mark in DB so it stops appearing as stale on every poll
+            try:
+                conn = sqlite3.connect(db_path)
+                if item.get("is_batch"):
+                    conn.execute(
+                        "UPDATE job_batches SET status='cancelled' WHERE batch_id=?",
+                        (item["job_id"],)
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE jobs SET status='Cancelled' WHERE job_id=?",
+                        (item["job_id"],)
+                    )
+                conn.commit()
+                conn.close()
+                logger.info(f"  Marked {item['job_id']} as cancelled (Razorpay: {status})")
+            except Exception as e:
+                logger.error(f"  Failed to mark {item['job_id']} cancelled: {e}")
             _alert_staff_stale(item)
-        # 'created' means link is still active but unpaid — alert staff to follow up
+        elif status == "created":
+            # Link still active but unpaid — alert staff to follow up
+            _alert_staff_stale(item)
 
 
 # ── Background thread ─────────────────────────────────────────────────────────

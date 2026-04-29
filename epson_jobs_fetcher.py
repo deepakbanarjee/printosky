@@ -4,9 +4,9 @@ EPSON JOB LOG FETCHER
 Fetches per-job print details from the Epson WF-C21000 (192.168.55.202).
 
 Two-tier approach:
-  Tier 1 — Web log probe: attempts to pull a job history table from the
-            EpsonNet Config web admin (HTTP Basic auth). If found, rows are
-            parsed and stored with source='weblog'.
+  Tier 1 — Web log CSV: logs in via form POST, extracts SETUPTOKEN from
+            INFO_JOBHISTORY/TOP, then POSTs to OUTPUT.CSV. Rows stored
+            with source='weblog'. Auth: Oxygen / Oxygen@1234 (set 2026-04-29).
 
   Tier 2 — SNMP delta attribution: compares consecutive SNMP page-counter
             readings in printer_counters and attributes the page delta to
@@ -21,37 +21,37 @@ Runs as a background daemon thread started by watcher.py.
 Poll interval: 300 seconds (5 min) to match the SNMP poller cycle.
 """
 
-import os
+import csv
+import io
 import re
 import time
 import sqlite3
 import logging
 import threading
 import requests
+import urllib3
 from datetime import datetime
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger("epson_fetcher")
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-EPSON_IP            = "192.168.55.202"
-EPSON_ADMIN_USER    = "admin"   # EpsonNet Config default; check printer label
-EPSON_ADMIN_PASS    = "admin"   # common default — update if changed
-HTTP_TIMEOUT        = 10        # seconds
-FETCH_INTERVAL      = 300       # seconds (5 minutes — matches SNMP poll)
-_WEBLOG_FAIL_LIMIT  = 3         # give up Tier 1 after this many consecutive failures
+EPSON_IP           = "192.168.55.202"
+EPSON_BASE         = f"https://{EPSON_IP}"
+EPSON_USER         = "Oxygen"
+EPSON_PASS         = "Oxygen@1234"
+HTTP_TIMEOUT       = 15        # seconds
+FETCH_INTERVAL     = 300       # seconds (5 minutes — matches SNMP poll)
+_WEBLOG_FAIL_LIMIT = 3         # give up Tier 1 after this many consecutive failures
 
-# EpsonNet Config web admin — known job log URL candidates
-_JOBLOG_CANDIDATES = [
-    f"http://{EPSON_IP}/PRESENTATION/ADVANCED/JOBLOG/TOP.HTML",
-    f"http://{EPSON_IP}/PRESENTATION/ADVANCED/JOBLOG/",
-    f"http://{EPSON_IP}/job_history",
-    f"http://{EPSON_IP}/joblog.htm",
-    f"http://{EPSON_IP}/job_log",
-]
+LOGIN_URL   = f"{EPSON_BASE}/PRESENTATION/ADVANCED/PASSWORD/SET"
+HISTORY_URL = f"{EPSON_BASE}/PRESENTATION/ADVANCED/INFO_JOBHISTORY/TOP"
+EXPORT_URL  = f"{EPSON_BASE}/PRESENTATION/ADVANCED/INFO_JOBHISTORY/OUTPUT.CSV"
 
 # Session-level state
-_weblog_fail_count  = 0
-_weblog_available   = True   # set to False after _WEBLOG_FAIL_LIMIT failures
+_weblog_fail_count = 0
+_weblog_available  = True   # set to False after _WEBLOG_FAIL_LIMIT failures
 
 
 # ── DB init ────────────────────────────────────────────────────────────────────
@@ -89,100 +89,127 @@ def init_epson_jobs_table(conn):
     logger.info("epson_jobs table ready")
 
 
-# ── Tier 1: Web log probe ──────────────────────────────────────────────────────
+# ── Tier 1: Web log CSV (form login + SETUPTOKEN) ─────────────────────────────
 
-def _make_session():
-    """HTTP session with Basic auth for EpsonNet Config web admin."""
+def _make_session() -> requests.Session:
     session = requests.Session()
-    session.auth = (EPSON_ADMIN_USER, EPSON_ADMIN_PASS)
+    session.verify = False
     return session
 
 
-def _probe_job_log(session):
+def _login(session: requests.Session) -> bool:
+    """POST credentials to ADVANCED/PASSWORD/SET to acquire a session cookie."""
+    try:
+        r = session.post(
+            LOGIN_URL,
+            data={
+                "SEL_SESSIONTYPE": "ADMIN",
+                "INPUTT_USERNAME":  EPSON_USER,
+                "INPUTT_PASSWORD":  EPSON_PASS,
+                "access":           "https",
+            },
+            timeout=HTTP_TIMEOUT,
+            allow_redirects=True,
+        )
+        # Successful login sets EPSON_COOKIE_SESSION; check for it
+        ok = r.status_code == 200 and "EPSON_COOKIE_SESSION" in session.cookies
+        if not ok:
+            logger.debug(f"Epson login failed — no session cookie. len={len(r.text)}")
+        return ok
+    except Exception as e:
+        logger.debug(f"Epson login error: {e}")
+        return False
+
+
+def _get_setup_token(session: requests.Session) -> str | None:
+    """GET job history page and extract the per-session SETUPTOKEN."""
+    try:
+        r = session.get(HISTORY_URL, timeout=HTTP_TIMEOUT)
+        r.raise_for_status()
+        m = re.search(r'name="INPUTT_SETUPTOKEN"\s+value="([^"]+)"', r.text)
+        return m.group(1) if m else None
+    except Exception as e:
+        logger.debug(f"Epson token fetch error: {e}")
+        return None
+
+
+def _download_csv(session: requests.Session, token: str) -> str | None:
+    """POST to the CSV export endpoint with the session token."""
+    try:
+        r = session.post(
+            EXPORT_URL,
+            data={"INPUTT_SETUPTOKEN": token, "INPUTD_HISTORYTYPE": "ALL"},
+            timeout=HTTP_TIMEOUT,
+        )
+        r.raise_for_status()
+        return r.text
+    except Exception as e:
+        logger.debug(f"Epson CSV download error: {e}")
+        return None
+
+
+def _probe_job_log(session: requests.Session):
     """
-    Try candidate URLs and return (url, response_text, fmt) where fmt is
-    'html' or 'csv', or (None, None, None) if nothing found.
+    Login, get token, download CSV.
+    Returns (EXPORT_URL, csv_text, 'csv') or (None, None, None) on failure.
     """
-    for url in _JOBLOG_CANDIDATES:
-        try:
-            r = session.get(url, timeout=HTTP_TIMEOUT)
-            if r.status_code != 200:
-                continue
-            ct = r.headers.get("Content-Type", "")
-            text = r.content.decode("utf-8", errors="replace")
-
-            if "text/csv" in ct or url.endswith(".csv"):
-                if text.count(",") > 5:
-                    logger.info(f"Epson web log found (CSV): {url}")
-                    return url, text, "csv"
-
-            # HTML table heuristic: page with a <table> and job-related headers
-            if "<table" in text.lower():
-                keywords = ("job", "print", "date", "page", "file", "result")
-                hits = sum(1 for kw in keywords if kw in text.lower())
-                if hits >= 3:
-                    logger.info(f"Epson web log found (HTML): {url}")
-                    return url, text, "html"
-
-            logger.debug(f"Epson {url}: {r.status_code} — no job log content")
-        except Exception as e:
-            logger.debug(f"Epson {url}: {e}")
-
+    if not _login(session):
+        logger.debug("Epson Tier 1: login failed")
+        return None, None, None
+    token = _get_setup_token(session)
+    if not token:
+        logger.debug("Epson Tier 1: SETUPTOKEN not found")
+        return None, None, None
+    csv_text = _download_csv(session, token)
+    if csv_text:
+        logger.info("Epson web log CSV downloaded successfully")
+        return EXPORT_URL, csv_text, "csv"
     return None, None, None
 
 
-def _parse_joblog_html(html):
+def _parse_joblog_csv(csv_text: str) -> list[dict]:
     """
-    Parse an HTML table from the Epson web log into a list of dicts.
-    Maps column headers to epson_jobs fields by keyword matching.
-    Returns list of dicts (may be empty).
+    Parse the Epson job history CSV.
+    CSV columns: Receipt No., Date/Time, Completed, Type, Result, Pages,
+                 From, To, Total Receipt Fax Data, File Name,
+                 Reference Receipt No., Receipt Number for Sending, Storage
+    Returns Print-type jobs only.
     """
+    lines = csv_text.splitlines()
+    header_idx = next(
+        (i for i, line in enumerate(lines) if "Receipt No." in line),
+        None,
+    )
+    if header_idx is None:
+        logger.warning("Epson CSV: header row not found")
+        return []
+
+    reader = csv.DictReader(io.StringIO("\n".join(lines[header_idx:])))
     rows = []
-    try:
-        # Extract all <tr> rows
-        tr_blocks = re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.IGNORECASE | re.DOTALL)
-        if not tr_blocks:
-            return rows
-
-        # First row = headers
-        headers_raw = re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", tr_blocks[0], re.IGNORECASE | re.DOTALL)
-        headers = [re.sub(r"<[^>]+>", "", h).strip().lower() for h in headers_raw]
-
-        def _col(row_cells, *keywords):
-            for i, h in enumerate(headers):
-                if any(kw in h for kw in keywords):
-                    if i < len(row_cells):
-                        return row_cells[i].strip()
-            return None
-
-        for tr in tr_blocks[1:]:
-            cells_raw = re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", tr, re.IGNORECASE | re.DOTALL)
-            cells = [re.sub(r"<[^>]+>", "", c).strip() for c in cells_raw]
-            if not cells or all(c == "" for c in cells):
-                continue
-
-            row = {
-                "source":      "weblog",
-                "job_number":  _col(cells, "job", "number", "#"),
-                "job_type":    _col(cells, "type", "kind"),
-                "user_name":   _col(cells, "user", "host", "sender"),
-                "file_name":   _col(cells, "file", "name", "document"),
-                "result":      _col(cells, "result", "status", "error"),
-                "pages_printed": _col(cells, "page", "count", "printed"),
-                "job_date":    _col(cells, "date", "time", "start"),
-                "print_end_date": _col(cells, "end", "finish", "complete"),
-                "paper_size":  _col(cells, "paper", "media", "size"),
-                "imported_at": datetime.now().isoformat(sep=" ", timespec="seconds"),
-            }
-            # Normalise pages to int
-            try:
-                row["pages_printed"] = int(row["pages_printed"]) if row["pages_printed"] else None
-            except (ValueError, TypeError):
-                row["pages_printed"] = None
-
-            rows.append(row)
-    except Exception as e:
-        logger.warning(f"Epson HTML parse error: {e}")
+    now = datetime.now().isoformat(sep=" ", timespec="seconds")
+    for row in reader:
+        row = {k.strip().strip('"'): v.strip().strip('"') for k, v in row.items() if k}
+        if not row.get("Receipt No."):
+            continue
+        if row.get("Type", "").strip() != "Print":
+            continue
+        # Map to epson_jobs schema
+        pages_str = row.get("Pages", "")  # format "2/2"
+        try:
+            pages_printed = int(pages_str.split("/")[0])
+        except (ValueError, IndexError):
+            pages_printed = None
+        rows.append({
+            "source":        "weblog",
+            "job_number":    row.get("Receipt No."),
+            "job_type":      row.get("Type"),
+            "file_name":     row.get("File Name"),
+            "result":        row.get("Result"),
+            "pages_printed": pages_printed,
+            "job_date":      row.get("Date/Time"),
+            "print_end_date": row.get("Completed"),
+            "imported_at":   now,
+        })
     return rows
 
 
@@ -351,15 +378,12 @@ def fetch_and_import(db_path):
             session = _make_session()
             url, text, fmt = _probe_job_log(session)
             if text:
-                if fmt == "html":
-                    rows = _parse_joblog_html(text)
+                if fmt == "csv":
+                    rows = _parse_joblog_csv(text)
                     if rows:
                         _import_weblog_rows(conn, rows)
                     else:
-                        logger.info("Epson web log: HTML found but no parseable rows")
-                elif fmt == "csv":
-                    # CSV parsing not yet implemented — treat as unstructured text
-                    logger.info(f"Epson web log: CSV found at {url} — manual parsing needed")
+                        logger.info("Epson web log: CSV downloaded but no Print jobs found")
                 _weblog_fail_count = 0
             else:
                 _weblog_fail_count += 1
@@ -415,9 +439,6 @@ if __name__ == "__main__":
                         format="%(asctime)s [%(name)s] %(message)s")
 
     db = r"C:\Printosky\Data\jobs.db"
-    if len(sys.argv) > 1:
-        db = sys.argv[1]
-
     print(f"DB: {db}")
     print(f"Epson IP: {EPSON_IP}\n")
 

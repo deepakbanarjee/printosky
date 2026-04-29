@@ -53,7 +53,7 @@ Last updated: 2026-04-09 (Session 9)
 | # | Task | Details |
 |---|------|---------|
 | S9-1 | ~~**Konica supply levels**~~ ✅ | `parse_konica_xml_supplies()` + `poll_konica_xml_supplies()` in printer_poller.py. Parses TnrBlkRmng/DrmBlkRmng tags (and alternates); poll_once() tries XML first, falls back to SNMP. 14 tests in test_konica_supplies.py. |
-| S9-2 | **Konica job export URL** | Auto-discovery failed. Manual: open `192.168.55.110` → job log → CSV export → inspect URL in DevTools → set `KONICA_JOB_EXPORT_URL` in konica_jobs_fetcher.py |
+| S9-2 | ~~**Konica job export URL**~~ ✅ | Jobs loading correctly — confirmed 2026-04-20 |
 | S9-3 | ~~**Epson ink alerts**~~ ✅ | `_send_ink_alerts()` in printer_poller.py:434. Fires on threshold crossing (EMPTY at 0%, LOW at ≤10%). Called in poll_once() for both printers. |
 | S9-4 | **A3 printing** | Test A3 job end-to-end (bot → quote → print) |
 | S9-5 | **Receipt printer** | `RECEIPT_PRINTER = None` in print_server.py. Hardware pending. |
