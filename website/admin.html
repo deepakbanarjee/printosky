@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -3424,7 +3424,7 @@ function convRenderBubble(m) {
     content = '<em class="conv-media-unavail">Media unavailable</em>';
   } else if (mt.startsWith('image')) {
     content = `<img class="conv-img" src="${convEscAttr(url)}"
-                    onclick="convOpenLightbox('${convEscAttr(url)}')"
+                    data-lightbox-url="${convEscAttr(url)}"
                     alt="image" loading="lazy">`;
     if (m.body) content += `<p style="margin:6px 0 0">${convEsc(m.body)}</p>`;
   } else if (mt.startsWith('audio')) {
@@ -3594,6 +3594,12 @@ if (typeof Notification !== 'undefined' && Notification.permission === 'default'
   Notification.requestPermission();
 }
 
+
+// Image lightbox — event delegation so onclick in innerHTML is not needed
+document.addEventListener('click', function(e) {
+  const url = e.target.dataset && e.target.dataset.lightboxUrl;
+  if (url) convOpenLightbox(url);
+});
 function switchTab(tab) {
   document.getElementById("jobs-view").style.display     = tab === "jobs"      ? "" : "none";
   document.getElementById("conv-panel").style.display    = tab === "conv"      ? "block" : "none";
