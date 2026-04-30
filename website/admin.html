@@ -1260,6 +1260,13 @@
         <option value="Online">Online</option>
       </select>
     </div>
+    <div class="modal-field" id="pm-credit-section" style="display:none">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="pm-apply-credit" onchange="onCreditToggle()">
+        <span>Apply <span id="pm-credit-amount" style="color:var(--green);font-weight:600">Rs.0</span> store credit (<span id="pm-credit-code" style="font-family:var(--mono)">—</span>)</span>
+      </label>
+      <div id="pm-credit-after" style="font-size:.7rem;color:var(--muted);margin-top:4px"></div>
+    </div>
     <div class="modal-btns">
       <button class="modal-ok" id="pm-confirm-btn" onclick="confirmPayment()">Mark Complete</button>
       <button class="modal-cancel" onclick="closePaymentModal()">Cancel</button>
@@ -2844,8 +2851,53 @@ function openPaymentModal() {
     `${payJobId}  ·  ${trim(selectedJob.filename || "—", 35)}  ·  Quoted: Rs.${quoted ? Math.ceil(quoted) : "—"}`;
   document.getElementById("pm-confirm-btn").disabled = false;
   document.getElementById("pm-confirm-btn").textContent = "Mark Complete";
+
+  // Reset + load store-credit panel
+  document.getElementById("pm-credit-section").style.display = "none";
+  document.getElementById("pm-apply-credit").checked = false;
+  document.getElementById("pm-credit-after").textContent = "";
+  loadCreditBalance(_cleanPhone(selectedJob.sender || ""));
+
   document.getElementById("payment-modal").classList.add("open");
   setTimeout(() => document.getElementById("pm-amount").focus(), 100);
+}
+
+function _cleanPhone(s) {
+  return (s || "").replace("@c.us", "").replace("@lid", "").trim();
+}
+
+async function loadCreditBalance(phone) {
+  if (!phone) return;
+  try {
+    const r = await fetch(`${ACAD_API}/referrals/balance?phone=${encodeURIComponent(phone)}`, {
+      headers: { 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' }
+    });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d && d.balance > 0) {
+      const cb = document.getElementById('pm-apply-credit');
+      cb.dataset.balance = String(d.balance);
+      cb.dataset.code    = d.code || "";
+      cb.dataset.phone   = phone;
+      document.getElementById('pm-credit-amount').textContent = `Rs.${d.balance}`;
+      document.getElementById('pm-credit-code').textContent   = d.code || "—";
+      document.getElementById('pm-credit-section').style.display = "";
+    }
+  } catch (e) { /* silent — credit panel just stays hidden */ }
+}
+
+function onCreditToggle() {
+  const cb     = document.getElementById('pm-apply-credit');
+  const quoted = parseFloat(document.getElementById("pm-amount").value) || 0;
+  const credit = parseInt(cb.dataset.balance || "0", 10);
+  const after  = document.getElementById('pm-credit-after');
+  if (cb.checked) {
+    const apply  = Math.min(credit, quoted);
+    const remain = Math.max(0, quoted - apply);
+    after.textContent = `Customer pays Rs.${remain} (Rs.${apply} from store credit)`;
+  } else {
+    after.textContent = "";
+  }
 }
 
 function closePaymentModal() {
@@ -2855,25 +2907,52 @@ function closePaymentModal() {
 
 async function confirmPayment() {
   if (!STORE_PC_URL || !payJobId) return;
-  const amount = parseFloat(document.getElementById("pm-amount").value) || 0;
+  const quoted = parseFloat(document.getElementById("pm-amount").value) || 0;
   const mode   = document.getElementById("pm-mode").value;
   const btn    = document.getElementById("pm-confirm-btn");
+
+  // Store-credit redemption: deduct from cash collected if checkbox is on
+  const cb        = document.getElementById('pm-apply-credit');
+  const useCredit = cb && cb.checked;
+  const creditAvail = useCredit ? parseInt(cb.dataset.balance || "0", 10) : 0;
+  const creditApply = useCredit ? Math.min(creditAvail, quoted) : 0;
+  const cashAmount  = Math.max(0, quoted - creditApply);
+
   btn.disabled = true; btn.textContent = "Saving…";
   try {
     const r    = await fetch(`${STORE_PC_URL}/complete-job`, {
       method: "POST", headers: storeHeaders(),
-      body: JSON.stringify({ job_id: payJobId, amount_collected: amount,
+      body: JSON.stringify({ job_id: payJobId, amount_collected: cashAmount,
                              payment_mode: mode,
                              staff_id: sessionStorage.getItem("staff_id") }),
     });
     const data = await r.json();
     if (data.ok) {
+      // Redeem store credit AFTER job is marked complete (don't redeem on a failed close)
+      if (creditApply > 0 && cb.dataset.phone) {
+        try {
+          await fetch(`${ACAD_API}/referrals/redeem`, {
+            method: "POST",
+            headers: { 'Content-Type': 'application/json',
+                       'X-Staff-Pin':  sessionStorage.getItem('staff_pin') || '' },
+            body: JSON.stringify({
+              phone:      cb.dataset.phone,
+              order_id:   payJobId,
+              amount_inr: creditApply,
+              staff_id:   sessionStorage.getItem("staff_id") || ""
+            })
+          });
+        } catch (e) {
+          console.warn("Credit redemption call failed:", e);
+          alert(`Job marked complete, but Rs.${creditApply} credit redemption failed. Apply manually.`);
+        }
+      }
       closePaymentModal();
       const j = allJobs.find(x => x.job_id === payJobId);
-      if (j) { j.status = "Completed"; j.amount_collected = amount; j.payment_mode = mode; }
+      if (j) { j.status = "Completed"; j.amount_collected = cashAmount; j.payment_mode = mode; }
       if (selectedJob && selectedJob.job_id === payJobId) {
         selectedJob.status           = "Completed";
-        selectedJob.amount_collected = amount;
+        selectedJob.amount_collected = cashAmount;
         selectedJob.payment_mode     = mode;
         document.getElementById("jp-status").innerHTML           = badge("Completed");
         document.getElementById("jp-btn-notify").style.display  = "none";

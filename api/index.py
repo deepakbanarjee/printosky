@@ -574,6 +574,136 @@ def _acad_auth_student(h, pid: str) -> bool:
         return False
 
 
+# ── Referral store-credit redemption (staff endpoints) ──────────────────────
+
+def _handle_referrals_balance(h) -> None:
+    """GET /referrals/balance?phone=91XXXXXXXXXX — staff auth.
+    Returns the customer's referral code and unredeemed store-credit balance.
+    """
+    if not _acad_auth_staff(h):
+        _json_response(h, 401, {"error": "staff PIN required"})
+        return
+    qs = parse_qs(urlparse(h.path).query)
+    phone = (qs.get("phone", [""])[0] or "").strip()
+    if not phone:
+        _json_response(h, 400, {"error": "phone parameter required"})
+        return
+    try:
+        from db_cloud import _client
+        sb = _client()
+        ref = sb.table("referrers").select("code").eq("label", phone).execute()
+        if not ref.data:
+            _json_response(h, 200, {"phone": phone, "code": None, "balance": 0, "credits": []})
+            return
+        code = ref.data[0]["code"]
+        rows = (sb.table("referral_credits")
+                  .select("id,amount_inr,customer_phone,order_id,created_at")
+                  .eq("referrer_code", code)
+                  .is_("redeemed_at", "null")
+                  .order("created_at")
+                  .execute())
+        credits = rows.data or []
+        balance = sum(int(c.get("amount_inr") or 0) for c in credits)
+        _json_response(h, 200, {
+            "phone": phone, "code": code, "balance": balance, "credits": credits
+        })
+    except Exception as e:
+        logger.error(f"_handle_referrals_balance error: {e}")
+        _json_response(h, 500, {"error": "server error"})
+
+
+def _handle_referrals_redeem(h, body: bytes) -> None:
+    """POST /referrals/redeem — staff auth.
+    Body: { phone, order_id, amount_inr, staff_id }
+    Marks oldest unredeemed credits up to amount_inr as redeemed.
+    Returns: { ok, redeemed, applied_credit_ids }
+    """
+    if not _acad_auth_staff(h):
+        _json_response(h, 401, {"error": "staff PIN required"})
+        return
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+    phone    = (data.get("phone")    or "").strip()
+    order_id = (data.get("order_id") or "").strip()
+    staff_id = (data.get("staff_id") or "").strip() or "unknown"
+    try:
+        amount = int(data.get("amount_inr") or 0)
+    except Exception:
+        amount = 0
+    if not phone or not order_id or amount <= 0:
+        _json_response(h, 400, {"error": "phone, order_id, amount_inr (>0) required"})
+        return
+    try:
+        from db_cloud import _client
+        sb = _client()
+        ref = sb.table("referrers").select("code").eq("label", phone).execute()
+        if not ref.data:
+            _json_response(h, 404, {"error": "no referrer for this phone"})
+            return
+        code = ref.data[0]["code"]
+        rows = (sb.table("referral_credits")
+                  .select("id,amount_inr")
+                  .eq("referrer_code", code)
+                  .is_("redeemed_at", "null")
+                  .order("created_at")
+                  .execute())
+        available = rows.data or []
+        total_available = sum(int(c.get("amount_inr") or 0) for c in available)
+        if total_available < amount:
+            _json_response(h, 400, {
+                "error": "insufficient balance",
+                "balance": total_available, "requested": amount
+            })
+            return
+        applied: list[int] = []
+        remaining = amount
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        for row in available:
+            if remaining <= 0:
+                break
+            credit_amt = int(row.get("amount_inr") or 0)
+            if credit_amt <= remaining:
+                # Mark this credit fully redeemed
+                sb.table("referral_credits").update({
+                    "redeemed_at": now_iso,
+                    "redeemed_order_id": order_id,
+                    "redeemed_by": staff_id,
+                }).eq("id", row["id"]).execute()
+                applied.append(row["id"])
+                remaining -= credit_amt
+            else:
+                # Partial redemption: split the row.
+                # 1) Update the original row to redeemed amount.
+                sb.table("referral_credits").update({
+                    "amount_inr": remaining,
+                    "redeemed_at": now_iso,
+                    "redeemed_order_id": order_id,
+                    "redeemed_by": staff_id,
+                }).eq("id", row["id"]).execute()
+                # 2) Insert a new unredeemed row with the leftover.
+                sb.table("referral_credits").insert({
+                    "referrer_code":  code,
+                    "customer_phone": "split",
+                    "order_id":       row.get("order_id") or order_id,
+                    "amount_inr":     credit_amt - remaining,
+                }).execute()
+                applied.append(row["id"])
+                remaining = 0
+        logger.info(f"Redeemed Rs.{amount} from {code} for order {order_id} (staff {staff_id})")
+        _json_response(h, 200, {
+            "ok": True,
+            "redeemed": amount,
+            "applied_credit_ids": applied,
+            "remaining_balance": total_available - amount,
+        })
+    except Exception as e:
+        logger.error(f"_handle_referrals_redeem error: {e}")
+        _json_response(h, 500, {"error": "server error"})
+
+
 def _handle_acad_orders_get(h) -> None:
     """GET /academic/orders — list all orders (staff only)."""
     qs = parse_qs(urlparse(h.path).query)
@@ -858,6 +988,11 @@ class handler(BaseHTTPRequestHandler):
                 _handle_acad_orders_get(self)
             return
 
+        # ── Referral store-credit balance lookup (staff) ─────────────────────
+        if self.path.startswith("/referrals/balance"):
+            _handle_referrals_balance(self)
+            return
+
         # Health check
         self.send_response(200)
         self.end_headers()
@@ -963,6 +1098,11 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/admin/send":
             _handle_admin_send(self, body)
+            return
+
+        # ── Referral store-credit redemption (staff) ─────────────────────────
+        if self.path == "/referrals/redeem":
+            _handle_referrals_redeem(self, body)
             return
 
         self.send_response(404)
