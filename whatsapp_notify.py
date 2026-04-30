@@ -13,6 +13,7 @@ import os
 import json
 import logging
 import urllib.request
+import requests as _requests
 
 logger = logging.getLogger("whatsapp_notify")
 
@@ -165,3 +166,77 @@ def send_timeout_alert(job_id: str, step: str) -> bool:
         f"Type: `quote {job_id} AMOUNT`"
     )
     return _send(STORE_PHONE, msg)
+
+
+# ── File sending via Meta media upload API ────────────────────────────────────
+
+def _mime_to_wa_type(mime_type: str) -> str:
+    """Map MIME type to WhatsApp Cloud API message type string."""
+    if mime_type.startswith("image/"):
+        return "image"
+    if mime_type.startswith("audio/"):
+        return "audio"
+    if mime_type.startswith("video/"):
+        return "video"
+    return "document"
+
+
+def _meta_upload_media(data: bytes, mime_type: str, filename: str) -> dict:
+    """Upload raw bytes to Meta and return the response dict (contains 'id').
+
+    Uses multipart/form-data — the only format Meta accepts for media upload.
+    Raises requests.HTTPError on a non-2xx response.
+    """
+    url = f"{GRAPH_URL}/{META_PHONE_ID}/media"
+    resp = _requests.post(
+        url,
+        headers={"Authorization": f"Bearer {META_TOKEN}"},
+        files={"file": (filename, data, mime_type)},
+        data={"messaging_product": "whatsapp"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _send_meta_media(phone: str, media_id: str, msg_type: str,
+                     caption: str, filename: str) -> bool:
+    """Send a WhatsApp message that references a pre-uploaded media_id."""
+    url = f"{GRAPH_URL}/{META_PHONE_ID}/messages"
+    media_obj: dict = {"id": media_id}
+    if caption:
+        media_obj["caption"] = caption
+    if msg_type == "document" and filename:
+        media_obj["filename"] = filename
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": msg_type,
+        msg_type: media_obj,
+    }
+    resp = _requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {META_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=15,
+    )
+    return resp.ok
+
+
+def send_file(phone: str, data: bytes, mime_type: str,
+              filename: str, caption: str = "") -> bool:
+    """Upload a file to Meta then send it as a WhatsApp message.
+
+    Returns True on success, False on any error (never raises).
+    """
+    try:
+        upload_resp = _meta_upload_media(data, mime_type, filename)
+        media_id = upload_resp["id"]
+        msg_type = _mime_to_wa_type(mime_type)
+        return _send_meta_media(phone, media_id, msg_type, caption, filename)
+    except Exception as exc:
+        logger.error("send_file failed for %s: %s", phone, exc)
+        return False
