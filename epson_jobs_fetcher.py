@@ -191,7 +191,7 @@ def _parse_joblog_csv(csv_text: str) -> list[dict]:
         row = {k.strip().strip('"'): v.strip().strip('"') for k, v in row.items() if k}
         if not row.get("Receipt No."):
             continue
-        if row.get("Type", "").strip() != "Print":
+        if row.get("Type", "").strip() not in ("Print", "Other Devices"):
             continue
         # Map to epson_jobs schema
         pages_str = row.get("Pages", "")  # format "2/2"
