@@ -770,9 +770,184 @@
   .conv-bubble.outbound { align-self:flex-end; background:rgba(0,200,100,.15); border:1px solid rgba(0,200,100,.3); color:var(--fg); }
   .conv-meta { font-size:.62rem; color:var(--muted); margin-top:4px; }
   .conv-empty { color:var(--muted); font-size:.78rem; padding:20px; text-align:center; }
+/* ── Conversations tab (rebuilt) ──────────────────────────────────────────── */
+.conv-layout {
+    display: flex;
+    height: calc(100vh - 160px);
+    overflow: hidden;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+}
+.conv-sidebar {
+    width: 280px;
+    border-right: 1px solid #e0e0e0;
+    overflow-y: auto;
+    flex-shrink: 0;
+    background: #fff;
+}
+.conv-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #ece5dd;
+}
+.conv-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e0e0e0;
+    font-weight: 600;
+    background: #f8f9fa;
+    font-size: 15px;
+}
+.conv-message-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.conv-reply-bar {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 10px 12px;
+    border-top: 1px solid #ddd;
+    background: #f8f9fa;
+}
+.conv-contact {
+    padding: 12px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background 0.15s;
+}
+.conv-contact:hover, .conv-contact.active { background: #e8f4fd; }
+.conv-contact-name { font-weight: 600; font-size: 14px; color: #111; }
+.conv-contact-preview {
+    font-size: 12px;
+    color: #666;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+}
+.conv-contact-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 4px;
+    font-size: 11px;
+    color: #999;
+}
+.conv-unread-badge {
+    background: #25d366;
+    color: #fff;
+    border-radius: 10px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 18px;
+    text-align: center;
+}
+.conv-bubble { max-width: 72%; display: flex; flex-direction: column; }
+.conv-bubble-in  { align-self: flex-start; }
+.conv-bubble-out { align-self: flex-end; }
+.conv-bubble-content {
+    background: #fff;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    word-break: break-word;
+}
+.conv-bubble-out .conv-bubble-content { background: #dcf8c6; }
+.conv-bubble-ts {
+    font-size: 11px;
+    color: #999;
+    margin-top: 3px;
+    align-self: flex-end;
+}
+.conv-bubble-in .conv-bubble-ts { align-self: flex-start; }
+.conv-img {
+    max-width: 240px;
+    max-height: 300px;
+    border-radius: 6px;
+    cursor: zoom-in;
+    display: block;
+}
+.conv-dl-btn {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 5px 14px;
+    background: #1976d2;
+    color: #fff;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 13px;
+}
+.conv-dl-btn:hover { background: #1565c0; }
+.conv-media-unavail { color: #aaa; font-style: italic; font-size: 13px; }
+#conv-textarea {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    resize: none;
+    font-size: 14px;
+    max-height: 100px;
+    overflow-y: auto;
+    outline: none;
+    font-family: inherit;
+    line-height: 1.4;
+}
+.conv-attach-btn {
+    background: none;
+    border: none;
+    font-size: 22px;
+    cursor: pointer;
+    padding: 4px 6px;
+    color: #555;
+    line-height: 1;
+}
+.conv-send-btn {
+    background: #25d366;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.conv-send-btn:hover { background: #1ebe5d; }
+#conv-upload-status { font-size: 12px; color: #888; padding: 0 4px; min-width: 60px; }
+#conv-lightbox {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.88);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-out;
+}
+#conv-lightbox img {
+    max-width: 92vw;
+    max-height: 92vh;
+    border-radius: 4px;
+    box-shadow: 0 4px 32px rgba(0,0,0,0.4);
+}
 </style>
 </head>
 <body>
+<!-- Lightbox for full-size image preview -->
+<div id="conv-lightbox" onclick="closeLightbox()">
+    <img id="conv-lightbox-img" src="" alt="Full size image">
+</div>
 
 <!-- ══ LOGIN ══════════════════════════════════════════════════════════════ -->
 <div id="login-screen">
@@ -960,17 +1135,32 @@
 
   <!-- Conversations panel -->
   <div id="conv-panel">
-    <div class="conv-toolbar">
-      <input class="conv-search" id="conv-search" placeholder="Search by phone…" oninput="filterInbox()">
-      <button class="refresh-btn" onclick="loadInbox()">↻ Refresh</button>
-    </div>
-    <div class="conv-container">
-      <div class="conv-inbox"  id="conv-inbox-list"><div class="conv-empty">Loading…</div></div>
-      <div class="conv-right">
-        <div class="conv-thread" id="conv-thread-view"><div class="conv-empty">Select a contact to view messages</div></div>
-        <div class="conv-reply-bar" id="conv-reply-bar" style="display:none">
-          <textarea class="conv-reply-input" id="conv-reply-input" placeholder="Type a message…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendConvReply();}"></textarea>
-          <button class="conv-send-btn" id="conv-send-btn" onclick="sendConvReply()">SEND</button>
+    <div class="conv-layout">
+      <!-- Sidebar: contact list -->
+      <div class="conv-sidebar">
+        <div class="conv-header">Conversations</div>
+        <div id="conv-contact-list">
+          <div style="padding:20px;color:#999;font-size:13px;">Loading...</div>
+        </div>
+      </div>
+      <!-- Main: message thread -->
+      <div class="conv-main">
+        <div class="conv-header" id="conv-active-header">
+          <span id="conv-active-name" style="color:#666;">Select a conversation</span>
+        </div>
+        <div id="conv-message-area" class="conv-message-area" style="text-align:center;color:#999;padding:40px;">
+        </div>
+        <div class="conv-reply-bar">
+          <button class="conv-attach-btn" title="Attach file"
+                  onclick="document.getElementById('conv-file-input').click()">&#128206;</button>
+          <input type="file" id="conv-file-input" style="display:none"
+                 onchange="handleFileAttach(this)">
+          <textarea id="conv-textarea" rows="1"
+                    placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
+                    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendConvMessage();}"
+                    oninput="this.style.height='';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
+          <span id="conv-upload-status"></span>
+          <button class="conv-send-btn" onclick="sendConvMessage()" title="Send">&#10148;</button>
         </div>
       </div>
     </div>
@@ -3133,11 +3323,276 @@ async function confirmPhotocopy() {
   }
 }
 
-// ── Conversations Tab ─────────────────────────────────────────────────────────
+// ── Conversations Tab (rebuilt) ─────────────────────────────────────────────
 
-let convRows    = [];   // all log rows loaded
-let convPhone   = null; // currently selected phone
-let convRefresh = null; // setInterval handle
+let _convActivePhone = null;
+let _convPollInbox   = null;
+let _convPollThread  = null;
+let _convNotified    = new Set();
+
+function _convPw() { return sessionStorage.getItem('admin_pw_cache') || ''; }
+
+async function convFetchInbox() {
+  try {
+    const r = await fetch(
+      `${ACAD_API}/admin/conversations?admin_password=${encodeURIComponent(_convPw())}`
+    );
+    if (!r.ok) return;
+    const contacts = await r.json();
+    convRenderInbox(contacts);
+    convUpdateTabTitle(contacts);
+    convFireNotifications(contacts);
+  } catch (e) {
+    console.error('[conv] inbox fetch failed', e);
+  }
+}
+
+function convRenderInbox(contacts) {
+  const list = document.getElementById('conv-contact-list');
+  if (!list) return;
+  if (!contacts.length) {
+    list.innerHTML = '<div style="padding:20px;color:#999;font-size:13px;">No conversations yet.</div>';
+    return;
+  }
+  list.innerHTML = contacts.map(c => `
+    <div class="conv-contact${c.phone === _convActivePhone ? ' active' : ''}"
+         onclick="convOpenContact(${JSON.stringify(c.phone)}, ${JSON.stringify(c.name)})">
+      <div class="conv-contact-name">${convEsc(c.name)}</div>
+      <div class="conv-contact-preview">${convEsc(c.last_message)}</div>
+      <div class="conv-contact-meta">
+        <span>${convFmtTs(c.ts)}</span>
+        ${c.unread_count > 0 ? `<span class="conv-unread-badge">${c.unread_count}</span>` : ''}
+      </div>
+    </div>`
+  ).join('');
+}
+
+function convUpdateTabTitle(contacts) {
+  const total = contacts.reduce((s, c) => s + (c.unread_count || 0), 0);
+  document.title = total > 0 ? `(${total}) Printosky Admin` : 'Printosky Admin';
+}
+
+function convFireNotifications(contacts) {
+  for (const c of contacts) {
+    if (!c.unread_count) continue;
+    const key = `${c.phone}_${c.ts}`;
+    if (_convNotified.has(key)) continue;
+    _convNotified.add(key);
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && c.phone !== _convActivePhone) {
+      new Notification(`New message from ${c.name}`, {
+        body: c.last_message,
+        icon: '/favicon.ico',
+        tag:  c.phone,
+      });
+    }
+  }
+}
+
+async function convFetchThread(phone) {
+  if (!phone) return;
+  try {
+    const r = await fetch(
+      `${ACAD_API}/admin/thread?phone=${encodeURIComponent(phone)}&limit=100` +
+      `&admin_password=${encodeURIComponent(_convPw())}`
+    );
+    if (!r.ok) return;
+    const messages = await r.json();
+    convRenderThread(messages);
+  } catch (e) {
+    console.error('[conv] thread fetch failed', e);
+  }
+}
+
+function convRenderThread(messages) {
+  const area = document.getElementById('conv-message-area');
+  if (!area) return;
+  const wasAtBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 80;
+  area.innerHTML = messages.map(convRenderBubble).join('');
+  if (wasAtBottom || messages.length <= 10) area.scrollTop = area.scrollHeight;
+}
+
+function convRenderBubble(m) {
+  const dir  = m.direction === 'outbound' ? 'out' : 'in';
+  const ts   = convFmtTs(m.created_at);
+  const mt   = (m.message_type || 'text').toLowerCase();
+  const url  = m.media_url || '';
+  let content = '';
+
+  if (mt === 'text' || mt === '') {
+    content = convEsc(m.body || '');
+  } else if (!url) {
+    content = '<em class="conv-media-unavail">Media unavailable</em>';
+  } else if (mt.startsWith('image')) {
+    content = `<img class="conv-img" src="${convEscAttr(url)}"
+                    onclick="convOpenLightbox('${convEscAttr(url)}')"
+                    alt="image" loading="lazy">`;
+    if (m.body) content += `<p style="margin:6px 0 0">${convEsc(m.body)}</p>`;
+  } else if (mt.startsWith('audio')) {
+    content = `<div style="font-size:13px;margin-bottom:4px">Voice note</div>
+               <audio controls src="${convEscAttr(url)}" style="max-width:240px;display:block"></audio>`;
+  } else if (mt.startsWith('video')) {
+    content = `<div style="font-size:13px;margin-bottom:4px">Video</div>
+               <a href="${convEscAttr(url)}" target="_blank" class="conv-dl-btn">Download</a>`;
+  } else if (mt.includes('pdf')) {
+    content = `<div style="font-size:13px;margin-bottom:4px">PDF: ${convEsc(m.filename || 'document.pdf')}</div>
+               <a href="${convEscAttr(url)}" target="_blank" class="conv-dl-btn">Download PDF</a>`;
+  } else {
+    content = `<div style="font-size:13px;margin-bottom:4px">File: ${convEsc(m.filename || 'file')}</div>
+               <a href="${convEscAttr(url)}" target="_blank" class="conv-dl-btn">Download</a>`;
+  }
+
+  return `<div class="conv-bubble conv-bubble-${dir}">
+    <div class="conv-bubble-content">${content}</div>
+    <div class="conv-bubble-ts">${ts}</div>
+  </div>`;
+}
+
+async function convOpenContact(phone, name) {
+  _convActivePhone = phone;
+  const nameEl = document.getElementById('conv-active-name');
+  if (nameEl) nameEl.textContent = name || phone;
+
+  clearInterval(_convPollThread);
+  const area = document.getElementById('conv-message-area');
+  if (area) area.innerHTML = '<div style="padding:20px;text-align:center;color:#999">Loading...</div>';
+  await convFetchThread(phone);
+  _convPollThread = setInterval(() => convFetchThread(phone), 30000);
+
+  try {
+    await fetch(`${ACAD_API}/admin/contacts/seen`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ admin_password: _convPw(), phone }),
+    });
+  } catch (e) { /* non-fatal */ }
+
+  await convFetchInbox();
+}
+
+function convStartPolling() {
+  if (_convPollInbox) return;
+  convFetchInbox();
+  _convPollInbox = setInterval(convFetchInbox, 30000);
+}
+
+function convStopPolling() {
+  clearInterval(_convPollInbox);
+  clearInterval(_convPollThread);
+  _convPollInbox  = null;
+  _convPollThread = null;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    convFetchInbox();
+    if (_convActivePhone) convFetchThread(_convActivePhone);
+    convStartPolling();
+  } else {
+    convStopPolling();
+  }
+});
+
+async function sendConvMessage() {
+  if (!_convActivePhone) return;
+  const ta  = document.getElementById('conv-textarea');
+  const msg = (ta.value || '').trim();
+  if (!msg) return;
+  ta.value = '';
+  ta.style.height = '';
+  try {
+    await fetch(`${ACAD_API}/admin/send`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        admin_password: _convPw(),
+        phone:   _convActivePhone,
+        message: msg,
+      }),
+    });
+  } catch (e) { console.error('[conv] send failed', e); }
+  await convFetchThread(_convActivePhone);
+}
+
+async function handleFileAttach(input) {
+  const file = input.files && input.files[0];
+  if (!file || !_convActivePhone) { input.value = ''; return; }
+  input.value = '';
+  const status  = document.getElementById('conv-upload-status');
+  const setSt   = msg => { if (status) status.textContent = msg; };
+  setSt('Uploading...');
+  try {
+    const tokenResp = await fetch(`${ACAD_API}/admin/upload-token`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        admin_password: _convPw(),
+        filename:  file.name,
+        mime_type: file.type || 'application/octet-stream',
+      }),
+    });
+    if (!tokenResp.ok) throw new Error(`token ${tokenResp.status}`);
+    const { upload_url, storage_path } = await tokenResp.json();
+    setSt('Sending...');
+    const uploadResp = await fetch(upload_url, {
+      method:  'PUT',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body:    file,
+    });
+    if (!uploadResp.ok) throw new Error(`upload ${uploadResp.status}`);
+    const sendResp = await fetch(`${ACAD_API}/admin/send-file`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        admin_password: _convPw(),
+        phone:        _convActivePhone,
+        storage_path: storage_path,
+        mime_type:    file.type || 'application/octet-stream',
+        filename:     file.name,
+        caption:      '',
+      }),
+    });
+    if (!sendResp.ok) throw new Error(`send-file ${sendResp.status}`);
+    setSt('');
+    await convFetchThread(_convActivePhone);
+  } catch (e) {
+    setSt('Error: ' + e.message);
+    console.error('[conv] file attach failed', e);
+  }
+}
+
+function convOpenLightbox(url) {
+  const lb  = document.getElementById('conv-lightbox');
+  const img = document.getElementById('conv-lightbox-img');
+  if (!lb || !img) return;
+  img.src = url;
+  lb.style.display = 'flex';
+}
+
+function closeLightbox() {
+  const lb = document.getElementById('conv-lightbox');
+  if (lb) lb.style.display = 'none';
+}
+
+function convEsc(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function convEscAttr(s) { return convEsc(s); }
+
+function convFmtTs(iso) {
+  if (!iso) return '';
+  const d   = new Date(iso);
+  const now = new Date();
+  if (isNaN(d.getTime())) return '';
+  return d.toDateString() === now.toDateString()
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+}
+
+if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+  Notification.requestPermission();
+}
 
 function switchTab(tab) {
   document.getElementById("jobs-view").style.display     = tab === "jobs"      ? "" : "none";
@@ -3149,11 +3604,11 @@ function switchTab(tab) {
   document.getElementById("tab-academic").classList.toggle("active",  tab === "academic");
   document.getElementById("tab-referrals").classList.toggle("active", tab === "referrals");
 
+  // Conversations polling — start when tab is active, stop otherwise
   if (tab === "conv") {
-    loadInbox();
-    if (!convRefresh) convRefresh = setInterval(loadInbox, 30000);
+    convStartPolling();
   } else {
-    if (convRefresh) { clearInterval(convRefresh); convRefresh = null; }
+    convStopPolling();
   }
 
   if (tab === "academic")  { loadAcademicOrders(); }
@@ -3356,131 +3811,7 @@ function closeReferrerDetail() {
   document.getElementById("referrer-detail").style.display = "none";
 }
 
-async function loadInbox() {
-  try {
-    const rows = await sbFetch("conversation_log",
-      "select=phone,body,created_at,direction,message_type,filename&order=created_at.desc&limit=500");
-    if (!rows) return;
-    convRows = rows;
-    renderInbox(rows);
-    if (convPhone) loadThread(convPhone);
-  } catch (e) {
-    document.getElementById("conv-inbox-list").innerHTML =
-      `<div class="conv-empty">Error: ${escHtml(e.message)}</div>`;
-  }
-}
 
-function renderInbox(rows) {
-  const seen = new Map();
-  for (const r of rows) {
-    if (!seen.has(r.phone)) seen.set(r.phone, r);
-  }
-  const phones = Array.from(seen.values());
-
-  const q        = (document.getElementById("conv-search")?.value || "").toLowerCase();
-  const filtered = q ? phones.filter(r => r.phone.includes(q)) : phones;
-
-  if (filtered.length === 0) {
-    document.getElementById("conv-inbox-list").innerHTML =
-      `<div class="conv-empty">No conversations yet</div>`;
-    return;
-  }
-
-  document.getElementById("conv-inbox-list").innerHTML = filtered.map(r => {
-    const active   = r.phone === convPhone ? " active" : "";
-    const preview  = r.filename
-      ? `[${escHtml(r.message_type || "file")}: ${escHtml(r.filename)}]`
-      : escHtml((r.body || "").slice(0, 60));
-    const ts       = (r.created_at || "").replace("T", " ").slice(11, 16);
-    const ph       = escHtml(r.phone);
-    return `<div class="conv-inbox-item${active}" onclick="loadThread('${ph}')">
-      <span class="conv-time">${ts}</span>
-      <div class="conv-phone">${ph}</div>
-      <div class="conv-preview">${preview}</div>
-    </div>`;
-  }).join("");
-}
-
-async function loadThread(phone) {
-  convPhone = phone;
-  document.querySelectorAll(".conv-inbox-item").forEach(el => {
-    el.classList.toggle("active",
-      el.querySelector(".conv-phone")?.textContent === phone);
-  });
-
-  const view = document.getElementById("conv-thread-view");
-  view.innerHTML = `<div class="conv-empty"><span class="spinner"></span></div>`;
-
-  try {
-    const rows = await sbFetch("conversation_log",
-      `phone=eq.${encodeURIComponent(phone)}&order=created_at.asc&limit=200`);
-    if (!rows) return;
-
-    if (rows.length === 0) {
-      view.innerHTML = `<div class="conv-empty">No messages</div>`;
-      return;
-    }
-
-    view.innerHTML = rows.map(r => {
-      const dir  = r.direction === "outbound" ? "outbound" : "inbound";
-      const body = r.filename
-        ? `[${escHtml(r.message_type || "file")}: ${escHtml(r.filename)}]`
-        : escHtml(r.body || "");
-      const ts   = (r.created_at || "").replace("T", " ").slice(0, 16);
-      return `<div class="conv-bubble ${dir}">
-        ${body}
-        <div class="conv-meta">${ts} · ${r.direction}</div>
-      </div>`;
-    }).join("");
-
-    view.scrollTop = view.scrollHeight;
-    document.getElementById("conv-reply-bar").style.display = "";
-  } catch (e) {
-    view.innerHTML = `<div class="conv-empty">Error: ${escHtml(e.message)}</div>`;
-  }
-}
-
-async function sendConvReply() {
-  const input = document.getElementById("conv-reply-input");
-  const btn   = document.getElementById("conv-send-btn");
-  const msg   = (input.value || "").trim();
-  if (!msg || !convPhone) return;
-
-  const pw = sessionStorage.getItem("admin_pw_cache");
-  if (!pw) {
-    const entered = prompt("Enter admin password to send message:");
-    if (!entered) return;
-    sessionStorage.setItem("admin_pw_cache", entered);
-  }
-  const adminPw = sessionStorage.getItem("admin_pw_cache");
-
-  btn.disabled = true;
-  btn.textContent = "…";
-  try {
-    const res = await fetch("https://printosky.vercel.app/admin/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ admin_password: adminPw, phone: convPhone, message: msg })
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      if (res.status === 403) sessionStorage.removeItem("admin_pw_cache");
-      alert("Error: " + (data.error || res.status));
-      return;
-    }
-    input.value = "";
-    await loadThread(convPhone);
-  } catch (e) {
-    alert("Send failed: " + e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "SEND";
-  }
-}
-
-function filterInbox() {
-  renderInbox(convRows);
-}
 
 function escHtml(s) {
   return String(s || "")
