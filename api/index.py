@@ -822,6 +822,41 @@ def _handle_referrals_leaderboard(h) -> None:
         _json_response(h, 500, {"error": "server error"})
 
 
+def _handle_referrals_credits(h) -> None:
+    """GET /referrals/credits?code=REFXXXX — staff auth.
+    Returns the referrer's row plus every credit (redeemed and unredeemed),
+    newest first. Used by the drill-in panel.
+    """
+    if not _acad_auth_staff(h):
+        _json_response(h, 401, {"error": "staff PIN required"})
+        return
+    qs = parse_qs(urlparse(h.path).query)
+    code = (qs.get("code", [""])[0] or "").strip().upper()
+    if not code:
+        _json_response(h, 400, {"error": "code parameter required"})
+        return
+    try:
+        from db_cloud import _client
+        sb = _client()
+        ref = sb.table("referrers").select("code,label,platform,created_at").eq("code", code).execute()
+        if not ref.data:
+            _json_response(h, 404, {"error": "referrer not found"})
+            return
+        credits = (sb.table("referral_credits")
+                     .select("id,customer_phone,order_id,amount_inr,created_at,"
+                             "redeemed_at,redeemed_order_id,redeemed_by")
+                     .eq("referrer_code", code)
+                     .order("created_at", desc=True)
+                     .execute())
+        _json_response(h, 200, {
+            "referrer": ref.data[0],
+            "credits":  credits.data or [],
+        })
+    except Exception as e:
+        logger.error(f"_handle_referrals_credits error: {e}")
+        _json_response(h, 500, {"error": "server error"})
+
+
 def _handle_acad_orders_get(h) -> None:
     """GET /academic/orders — list all orders (staff only)."""
     qs = parse_qs(urlparse(h.path).query)
@@ -1114,6 +1149,11 @@ class handler(BaseHTTPRequestHandler):
         # ── Referral leaderboard (staff) ─────────────────────────────────────
         if self.path.startswith("/referrals/leaderboard"):
             _handle_referrals_leaderboard(self)
+            return
+
+        # ── Referral drill-in credits (staff) ────────────────────────────────
+        if self.path.startswith("/referrals/credits"):
+            _handle_referrals_credits(self)
             return
 
         # Health check

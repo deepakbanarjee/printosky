@@ -729,6 +729,21 @@
   #referrals-tab .ref-stat .l { font-size:.65rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
   #referrals-tab .ref-bal { color:var(--green); font-weight:600; }
   #referrals-tab .ref-redeemed { color:var(--muted); }
+  #referrals-tab tbody tr { cursor:pointer; }
+  #referrals-tab th.sortable { cursor:pointer; user-select:none; }
+  #referrals-tab th.sortable:hover { color:var(--accent); }
+  #referrals-tab th.sortable .arr { font-size:.6rem; opacity:.4; margin-left:4px; }
+  #referrals-tab th.sortable.sort-asc  .arr,
+  #referrals-tab th.sortable.sort-desc .arr { opacity:1; color:var(--accent); }
+  #referrals-tab .ctrl-btn { padding:6px 14px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; cursor:pointer; font-size:.7rem; margin-left:6px; }
+  #referrals-tab .ctrl-btn.active { background:var(--accent); color:#001a2e; border-color:var(--accent); }
+  #referrer-detail { margin-top:18px; padding:16px; background:var(--card); border:1px solid var(--border); border-radius:8px; display:none; }
+  #referrer-detail h3 { color:var(--accent); font-family:var(--mono); font-size:.95rem; margin:0 0 8px; }
+  #referrer-detail .meta { color:var(--muted); font-size:.7rem; margin-bottom:12px; }
+  #referrer-detail .close { float:right; background:none; border:none; color:var(--muted); cursor:pointer; font-size:1.2rem; }
+  #referrer-detail table { font-size:.72rem; }
+  #referrer-detail .badge-ok { color:var(--green); }
+  #referrer-detail .badge-pending { color:var(--amber); }
   .filter-pills { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
   .pill { padding:6px 14px; border-radius:20px; border:1px solid #3a3a3a; background:#1a1a1a; color:#aaa; cursor:pointer; font-size:.8rem; }
   .pill.active { background:#ffc000; color:#000; border-color:#ffc000; }
@@ -1016,25 +1031,37 @@
         <span class="ref-stat"><span class="v" id="ref-stat-balance">Rs.0</span><span class="l">Outstanding credit</span></span>
         <span class="ref-stat"><span class="v" id="ref-stat-redeemed">Rs.0</span><span class="l">Redeemed</span></span>
       </div>
-      <button onclick="loadReferralsLeaderboard()" style="padding:6px 14px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:.7rem">↻ Refresh</button>
+      <div>
+        <button id="ref-hide-test" class="ctrl-btn active" onclick="toggleHideTest()">Hide test data</button>
+        <button class="ctrl-btn" onclick="exportLeaderboardCsv()">↓ CSV</button>
+        <button class="ctrl-btn" onclick="loadReferralsLeaderboard()">↻ Refresh</button>
+      </div>
     </div>
     <table>
       <thead>
         <tr>
-          <th>Code</th>
-          <th>Phone</th>
-          <th>Source</th>
-          <th style="text-align:right">Orders</th>
-          <th style="text-align:right">Earned</th>
-          <th style="text-align:right">Redeemed</th>
-          <th style="text-align:right">Balance</th>
-          <th>Joined</th>
+          <th class="sortable" onclick="sortLeaderboardBy('code')">Code <span class="arr">▼</span></th>
+          <th class="sortable" onclick="sortLeaderboardBy('label')">Phone <span class="arr">▼</span></th>
+          <th class="sortable" onclick="sortLeaderboardBy('platform')">Source <span class="arr">▼</span></th>
+          <th class="sortable" style="text-align:right" onclick="sortLeaderboardBy('orders')">Orders <span class="arr">▼</span></th>
+          <th class="sortable" style="text-align:right" onclick="sortLeaderboardBy('earned_inr')">Earned <span class="arr">▼</span></th>
+          <th class="sortable" style="text-align:right" onclick="sortLeaderboardBy('redeemed_inr')">Redeemed <span class="arr">▼</span></th>
+          <th class="sortable" style="text-align:right" onclick="sortLeaderboardBy('balance_inr')">Balance <span class="arr">▼</span></th>
+          <th class="sortable" onclick="sortLeaderboardBy('created_at')">Joined <span class="arr">▼</span></th>
         </tr>
       </thead>
       <tbody id="ref-tbody">
         <tr><td colspan="8" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>
       </tbody>
     </table>
+
+    <!-- Drill-in detail panel -->
+    <div id="referrer-detail">
+      <button class="close" onclick="closeReferrerDetail()" title="Close">×</button>
+      <h3 id="rd-title">—</h3>
+      <div class="meta" id="rd-meta">—</div>
+      <div id="rd-body">Loading…</div>
+    </div>
   </div>
 
   </main>
@@ -3134,6 +3161,11 @@ function switchTab(tab) {
 }
 
 // ── Referrals leaderboard ───────────────────────────────────────────────────
+let _refRowsRaw = [];           // unfiltered rows from server
+let _refSortKey = "balance_inr"; // current sort column
+let _refSortDir = "desc";        // "asc" | "desc"
+let _refHideTest = true;         // default ON
+
 async function loadReferralsLeaderboard() {
   const tbody = document.getElementById("ref-tbody");
   tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>';
@@ -3146,16 +3178,65 @@ async function loadReferralsLeaderboard() {
       return;
     }
     const d = await r.json();
-    renderLeaderboard(d.referrers || []);
+    _refRowsRaw = d.referrers || [];
+    applyLeaderboardFilters();
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="8" style="padding:24px;color:var(--red);text-align:center">Network error: ${escHtml(e.message)}</td></tr>`;
   }
 }
 
+function toggleHideTest() {
+  _refHideTest = !_refHideTest;
+  document.getElementById("ref-hide-test").classList.toggle("active", _refHideTest);
+  applyLeaderboardFilters();
+}
+
+function sortLeaderboardBy(key) {
+  if (_refSortKey === key) {
+    _refSortDir = _refSortDir === "desc" ? "asc" : "desc";
+  } else {
+    _refSortKey = key;
+    _refSortDir = "desc";
+  }
+  applyLeaderboardFilters();
+}
+
+function applyLeaderboardFilters() {
+  const rows = _refHideTest
+    ? _refRowsRaw.filter(r => (r.platform || "") !== "test")
+    : _refRowsRaw.slice();
+  rows.sort((a, b) => {
+    const va = a[_refSortKey], vb = b[_refSortKey];
+    let cmp;
+    if (typeof va === "number" && typeof vb === "number") cmp = va - vb;
+    else cmp = String(va == null ? "" : va).localeCompare(String(vb == null ? "" : vb));
+    return _refSortDir === "asc" ? cmp : -cmp;
+  });
+  // Update sort indicators in <thead>
+  document.querySelectorAll("#referrals-tab th.sortable").forEach(th => {
+    th.classList.remove("sort-asc", "sort-desc");
+    const arr = th.querySelector(".arr");
+    if (arr) arr.textContent = "▼";
+  });
+  const thMap = {
+    code:"Code", label:"Phone", platform:"Source", orders:"Orders",
+    earned_inr:"Earned", redeemed_inr:"Redeemed", balance_inr:"Balance",
+    created_at:"Joined",
+  };
+  document.querySelectorAll("#referrals-tab th.sortable").forEach(th => {
+    if (th.textContent.trim().startsWith(thMap[_refSortKey])) {
+      th.classList.add(_refSortDir === "asc" ? "sort-asc" : "sort-desc");
+      const arr = th.querySelector(".arr");
+      if (arr) arr.textContent = _refSortDir === "asc" ? "▲" : "▼";
+    }
+  });
+  renderLeaderboard(rows);
+}
+
 function renderLeaderboard(rows) {
   const tbody = document.getElementById("ref-tbody");
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;color:var(--muted);text-align:center">No referrers yet — share <code>wa.me/919495706405</code> with happy customers.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;color:var(--muted);text-align:center">No referrers — share <code>wa.me/919495706405</code> with happy customers.</td></tr>';
     document.getElementById("ref-stat-count").textContent    = "0";
     document.getElementById("ref-stat-orders").textContent   = "0";
     document.getElementById("ref-stat-balance").textContent  = "Rs.0";
@@ -3170,7 +3251,8 @@ function renderLeaderboard(rows) {
     totBalance  += r.balance_inr   || 0;
     const joined = r.created_at ? new Date(r.created_at).toLocaleDateString() : "—";
     const phone  = (r.label || "").replace(/^91/, "+91 ");
-    return `<tr>
+    const safeCode = encodeURIComponent(r.code);
+    return `<tr onclick="openReferrerDetail('${escHtml(r.code).replace(/'/g, "&#39;")}')" title="Click for details">
       <td style="font-family:var(--mono);color:var(--accent)">${escHtml(r.code)}</td>
       <td>${escHtml(phone)}</td>
       <td style="color:var(--muted)">${escHtml(r.platform || "—")}</td>
@@ -3186,6 +3268,92 @@ function renderLeaderboard(rows) {
   document.getElementById("ref-stat-orders").textContent   = String(totOrders);
   document.getElementById("ref-stat-balance").textContent  = `Rs.${totBalance}`;
   document.getElementById("ref-stat-redeemed").textContent = `Rs.${totRedeemed}`;
+}
+
+function exportLeaderboardCsv() {
+  const rows = _refHideTest
+    ? _refRowsRaw.filter(r => (r.platform || "") !== "test")
+    : _refRowsRaw.slice();
+  if (!rows.length) { alert("No rows to export."); return; }
+  const headers = ["code","phone","source","orders","earned_inr","redeemed_inr","balance_inr","joined"];
+  const esc = v => {
+    const s = v == null ? "" : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [headers.join(",")];
+  rows.forEach(r => {
+    lines.push([
+      r.code, r.label, r.platform || "",
+      r.orders, r.earned_inr, r.redeemed_inr, r.balance_inr,
+      r.created_at ? new Date(r.created_at).toISOString().slice(0,10) : ""
+    ].map(esc).join(","));
+  });
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const ts = new Date().toISOString().slice(0,10);
+  a.href = url; a.download = `printosky-referrals-${ts}.csv`;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 200);
+}
+
+async function openReferrerDetail(code) {
+  const panel = document.getElementById("referrer-detail");
+  const body  = document.getElementById("rd-body");
+  document.getElementById("rd-title").textContent = code;
+  document.getElementById("rd-meta").textContent  = "Loading…";
+  body.innerHTML = '<div style="color:var(--muted)">Loading…</div>';
+  panel.style.display = "block";
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  try {
+    const r = await fetch(`${ACAD_API}/referrals/credits?code=${encodeURIComponent(code)}`, {
+      headers: { 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' }
+    });
+    if (!r.ok) { body.innerHTML = `<div style="color:var(--red)">Failed (HTTP ${r.status})</div>`; return; }
+    const d = await r.json();
+    const ref = d.referrer || {};
+    const credits = d.credits || [];
+    const phone = (ref.label || "").replace(/^91/, "+91 ");
+    document.getElementById("rd-meta").textContent =
+      `${phone}  ·  ${ref.platform || "—"}  ·  joined ${ref.created_at ? new Date(ref.created_at).toLocaleDateString() : "—"}  ·  ${credits.length} credit${credits.length === 1 ? "" : "s"}`;
+    if (!credits.length) {
+      body.innerHTML = '<div style="color:var(--muted)">No credits earned yet.</div>';
+      return;
+    }
+    const rowsHtml = credits.map(c => {
+      const created  = c.created_at ? new Date(c.created_at).toLocaleString() : "—";
+      const status   = c.redeemed_at
+        ? `<span class="badge-ok">redeemed</span> on ${new Date(c.redeemed_at).toLocaleDateString()}` +
+          (c.redeemed_order_id ? `<br><span style="color:var(--muted);font-size:.65rem">→ ${escHtml(c.redeemed_order_id)}</span>` : "")
+        : '<span class="badge-pending">unredeemed</span>';
+      return `<tr>
+        <td style="font-family:var(--mono);color:var(--accent)">${escHtml(c.order_id || "—")}</td>
+        <td>${escHtml((c.customer_phone || "").replace(/^91/, "+91 "))}</td>
+        <td style="text-align:right">Rs.${c.amount_inr}</td>
+        <td>${escHtml(created)}</td>
+        <td>${status}</td>
+      </tr>`;
+    }).join("");
+    body.innerHTML = `
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--muted);text-transform:uppercase;font-size:.6rem;letter-spacing:.04em">Order</th>
+            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--muted);text-transform:uppercase;font-size:.6rem;letter-spacing:.04em">Referred customer</th>
+            <th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--muted);text-transform:uppercase;font-size:.6rem;letter-spacing:.04em">Earned</th>
+            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--muted);text-transform:uppercase;font-size:.6rem;letter-spacing:.04em">When</th>
+            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--muted);text-transform:uppercase;font-size:.6rem;letter-spacing:.04em">Status</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>`;
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--red)">Network error: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function closeReferrerDetail() {
+  document.getElementById("referrer-detail").style.display = "none";
 }
 
 async function loadInbox() {
