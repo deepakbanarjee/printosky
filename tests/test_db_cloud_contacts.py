@@ -76,7 +76,7 @@ def test_upsert_contact_without_name(mock_client):
 
 
 def test_mark_contact_seen_upserts(mock_client):
-    """mark_contact_seen must upsert last_seen_at for the phone."""
+    """mark_contact_seen must upsert an ISO timestamp for last_seen_at."""
     from db_cloud import mark_contact_seen
     table = mock_client.table.return_value
     table.upsert.return_value.execute.return_value = MagicMock()
@@ -86,3 +86,6 @@ def test_mark_contact_seen_upserts(mock_client):
     upserted = table.upsert.call_args[0][0]
     assert upserted["phone"] == "919495706405"
     assert "last_seen_at" in upserted
+    # Must be an ISO timestamp string, not the literal "now()"
+    assert upserted["last_seen_at"] != "now()"
+    assert "T" in upserted["last_seen_at"]  # ISO format contains T separator

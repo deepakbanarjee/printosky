@@ -291,8 +291,7 @@ def upsert_contact(phone: str, name: str | None = None) -> None:
             data, on_conflict="phone"
         ).execute()
     except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning("upsert_contact failed: %s", exc)
+        logger.warning("upsert_contact failed: %s", exc)
 
 
 def mark_contact_seen(phone: str) -> None:
@@ -301,10 +300,10 @@ def mark_contact_seen(phone: str) -> None:
     Uses upsert so a contact row is created if it doesn't exist yet.
     """
     try:
+        from datetime import datetime, timezone
         _client().table("whatsapp_contacts").upsert(
-            {"phone": phone, "last_seen_at": "now()"},
+            {"phone": phone, "last_seen_at": datetime.now(timezone.utc).isoformat()},
             on_conflict="phone",
         ).execute()
     except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning("mark_contact_seen failed: %s", exc)
+        logger.warning("mark_contact_seen failed: %s", exc)
