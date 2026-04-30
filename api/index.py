@@ -143,6 +143,44 @@ def _credit_referrer(phone: str, order_id: str) -> None:
         logger.error(f"_credit_referrer error for {phone} / {order_id}: {e}")
 
 
+def _send_credits_balance(phone: str) -> None:
+    """Reply to a 'MY CREDITS' message with the customer's referral store-credit balance."""
+    from db_cloud import _client
+    from whatsapp_notify import _send
+    try:
+        ref = _client().table("referrers").select("code").eq("label", phone).execute()
+        if not ref.data:
+            _send(phone,
+                  "You don't have a Printosky referral code yet.\n\n"
+                  "Tip: rate your next order 4 or 5 stars - we'll send you a personal "
+                  "share link so you can start earning store credit.")
+            return
+        code = ref.data[0]["code"]
+        # Sum all credits - redemption tracking (redeemed_at column) is a follow-up.
+        credits = _client().table("referral_credits").select("amount_inr").eq("referrer_code", code).execute()
+        balance = sum(int(row.get("amount_inr") or 0) for row in (credits.data or []))
+        share_link = f"https://wa.me/919495706405?text=ref_{code}"
+        if balance == 0:
+            _send(phone,
+                  f"Your share code: *{code}*\n\n"
+                  f"Rs.0 store credit so far - you'll earn Rs.20 each time a friend orders using your link:\n"
+                  f"{share_link}")
+        else:
+            _send(phone,
+                  f"*Printosky Store Credit*\n\n"
+                  f"Balance: *Rs.{balance}*\n"
+                  f"Code: {code}\n\n"
+                  f"Mention this on your next order - staff will apply it at checkout.\n\n"
+                  f"Keep sharing: {share_link}")
+        logger.info(f"Credits balance Rs.{balance} sent to {phone} (code {code})")
+    except Exception as e:
+        logger.error(f"_send_credits_balance error for {phone}: {e}")
+        try:
+            _send(phone, "Sorry, couldn't fetch your balance right now. Please try again later.")
+        except Exception:
+            pass
+
+
 def _handle_text(sender: str, text: str) -> None:
     """Route a customer text through the bot state machine and send replies."""
     from whatsapp_bot import handle_message
@@ -150,6 +188,13 @@ def _handle_text(sender: str, text: str) -> None:
 
     # Capture referral code; treat ref_CODE message as a plain greeting
     _capture_referral_code(sender, text)
+
+    # Intercept MY CREDITS query - return balance, don't pass to bot
+    norm = re.sub(r"\s+", " ", text.strip()).upper()
+    if norm in ("MY CREDITS", "MYCREDITS", "MY CREDIT", "BALANCE", "CREDITS"):
+        _send_credits_balance(sender)
+        return
+
     bot_text = "hi" if re.match(r'^ref_\w', text.strip(), re.IGNORECASE) else text
 
     replies = handle_message(

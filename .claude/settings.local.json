@@ -155,7 +155,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd /d C:\\PY\\printosky && git add . && git commit -m \"Auto-save: session ended\" && git push origin sprint/session-7",
+            "command": "cd /d C:\\PY\\printosky && git add . && git commit -m \"Auto-save: session ended\" && git push origin main",
             "async": true
           }
         ]
@@ -167,7 +167,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd /d C:\\PY\\printosky && git pull origin sprint/session-7"
+            "command": "cd /d C:\\PY\\printosky && git pull origin main"
           }
         ]
       }
