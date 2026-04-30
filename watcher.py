@@ -1012,7 +1012,7 @@ def handle_command(cmd: str):
                             print(f"   âœ… Jobs marked as invoiced\n")
 
                         else:
-                            print(f"   âš ï¸ WhatsApp send failed ({_resp.status_code}) â€” PDF saved at {pdf_path}\n")
+                            print(f"   WhatsApp send failed - PDF saved at {pdf_path}\n")
 
                     except Exception as e:
                         print(f"   âš ï¸ WhatsApp send error: {e}")
