@@ -718,7 +718,17 @@
   .conv-tab-btn:hover:not(.active) { color:var(--fg); }
   #conv-panel { display:none; padding:12px 16px; }
   /* ── Academic Projects Tab ──────────────────────────────────────────────── */
-  #academic-tab { display:none; padding:12px 16px; }
+  #academic-tab  { display:none; padding:12px 16px; }
+  #referrals-tab { display:none; padding:12px 16px; }
+  #referrals-tab table { width:100%; border-collapse:collapse; font-family:var(--mono); font-size:.78rem; }
+  #referrals-tab th { text-align:left; padding:10px 8px; border-bottom:1px solid var(--border); color:var(--muted); font-weight:500; text-transform:uppercase; letter-spacing:.04em; font-size:.62rem; }
+  #referrals-tab td { padding:10px 8px; border-bottom:1px solid #14202a; }
+  #referrals-tab tr:hover { background:#0f1820; }
+  #referrals-tab .ref-stat { display:inline-block; padding:8px 14px; background:var(--card); border:1px solid var(--border); border-radius:6px; margin-right:10px; }
+  #referrals-tab .ref-stat .v { font-size:1.2rem; color:var(--accent); font-weight:600; display:block; }
+  #referrals-tab .ref-stat .l { font-size:.65rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  #referrals-tab .ref-bal { color:var(--green); font-weight:600; }
+  #referrals-tab .ref-redeemed { color:var(--muted); }
   .filter-pills { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
   .pill { padding:6px 14px; border-radius:20px; border:1px solid #3a3a3a; background:#1a1a1a; color:#aaa; cursor:pointer; font-size:.8rem; }
   .pill.active { background:#ffc000; color:#000; border-color:#ffc000; }
@@ -798,7 +808,8 @@
   <div class="conv-tab-bar">
     <button class="conv-tab-btn active" id="tab-jobs" onclick="switchTab('jobs')">Jobs</button>
     <button class="conv-tab-btn"        id="tab-conv" onclick="switchTab('conv')">Conversations</button>
-    <button class="conv-tab-btn"        id="tab-academic" onclick="switchTab('academic')">Academic Projects</button>
+    <button class="conv-tab-btn"        id="tab-academic"  onclick="switchTab('academic')">Academic Projects</button>
+    <button class="conv-tab-btn"        id="tab-referrals" onclick="switchTab('referrals')">Referrals</button>
   </div>
 
   <main>
@@ -994,6 +1005,36 @@
         ➕ New Walk-in Order
       </button>
     </div>
+  </div>
+
+  <!-- Referrals Tab Panel -->
+  <div id="referrals-tab">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div id="ref-stats">
+        <span class="ref-stat"><span class="v" id="ref-stat-count">0</span><span class="l">Referrers</span></span>
+        <span class="ref-stat"><span class="v" id="ref-stat-orders">0</span><span class="l">Referred orders</span></span>
+        <span class="ref-stat"><span class="v" id="ref-stat-balance">Rs.0</span><span class="l">Outstanding credit</span></span>
+        <span class="ref-stat"><span class="v" id="ref-stat-redeemed">Rs.0</span><span class="l">Redeemed</span></span>
+      </div>
+      <button onclick="loadReferralsLeaderboard()" style="padding:6px 14px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:.7rem">↻ Refresh</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Phone</th>
+          <th>Source</th>
+          <th style="text-align:right">Orders</th>
+          <th style="text-align:right">Earned</th>
+          <th style="text-align:right">Redeemed</th>
+          <th style="text-align:right">Balance</th>
+          <th>Joined</th>
+        </tr>
+      </thead>
+      <tbody id="ref-tbody">
+        <tr><td colspan="8" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>
+      </tbody>
+    </table>
   </div>
 
   </main>
@@ -3072,12 +3113,14 @@ let convPhone   = null; // currently selected phone
 let convRefresh = null; // setInterval handle
 
 function switchTab(tab) {
-  document.getElementById("jobs-view").style.display    = tab === "jobs"     ? "" : "none";
-  document.getElementById("conv-panel").style.display   = tab === "conv"     ? "block" : "none";
-  document.getElementById("academic-tab").style.display = tab === "academic" ? "block" : "none";
-  document.getElementById("tab-jobs").classList.toggle("active",     tab === "jobs");
-  document.getElementById("tab-conv").classList.toggle("active",     tab === "conv");
-  document.getElementById("tab-academic").classList.toggle("active", tab === "academic");
+  document.getElementById("jobs-view").style.display     = tab === "jobs"      ? "" : "none";
+  document.getElementById("conv-panel").style.display    = tab === "conv"      ? "block" : "none";
+  document.getElementById("academic-tab").style.display  = tab === "academic"  ? "block" : "none";
+  document.getElementById("referrals-tab").style.display = tab === "referrals" ? "block" : "none";
+  document.getElementById("tab-jobs").classList.toggle("active",      tab === "jobs");
+  document.getElementById("tab-conv").classList.toggle("active",      tab === "conv");
+  document.getElementById("tab-academic").classList.toggle("active",  tab === "academic");
+  document.getElementById("tab-referrals").classList.toggle("active", tab === "referrals");
 
   if (tab === "conv") {
     loadInbox();
@@ -3086,9 +3129,63 @@ function switchTab(tab) {
     if (convRefresh) { clearInterval(convRefresh); convRefresh = null; }
   }
 
-  if (tab === "academic") {
-    loadAcademicOrders();
+  if (tab === "academic")  { loadAcademicOrders(); }
+  if (tab === "referrals") { loadReferralsLeaderboard(); }
+}
+
+// ── Referrals leaderboard ───────────────────────────────────────────────────
+async function loadReferralsLeaderboard() {
+  const tbody = document.getElementById("ref-tbody");
+  tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>';
+  try {
+    const r = await fetch(`${ACAD_API}/referrals/leaderboard`, {
+      headers: { 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' }
+    });
+    if (!r.ok) {
+      tbody.innerHTML = `<tr><td colspan="8" style="padding:24px;color:var(--red);text-align:center">${r.status === 401 ? "Staff PIN required" : "Failed to load (HTTP " + r.status + ")"}</td></tr>`;
+      return;
+    }
+    const d = await r.json();
+    renderLeaderboard(d.referrers || []);
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="8" style="padding:24px;color:var(--red);text-align:center">Network error: ${escHtml(e.message)}</td></tr>`;
   }
+}
+
+function renderLeaderboard(rows) {
+  const tbody = document.getElementById("ref-tbody");
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;color:var(--muted);text-align:center">No referrers yet — share <code>wa.me/919495706405</code> with happy customers.</td></tr>';
+    document.getElementById("ref-stat-count").textContent    = "0";
+    document.getElementById("ref-stat-orders").textContent   = "0";
+    document.getElementById("ref-stat-balance").textContent  = "Rs.0";
+    document.getElementById("ref-stat-redeemed").textContent = "Rs.0";
+    return;
+  }
+  let totOrders = 0, totEarned = 0, totRedeemed = 0, totBalance = 0;
+  const html = rows.map(r => {
+    totOrders   += r.orders        || 0;
+    totEarned   += r.earned_inr    || 0;
+    totRedeemed += r.redeemed_inr  || 0;
+    totBalance  += r.balance_inr   || 0;
+    const joined = r.created_at ? new Date(r.created_at).toLocaleDateString() : "—";
+    const phone  = (r.label || "").replace(/^91/, "+91 ");
+    return `<tr>
+      <td style="font-family:var(--mono);color:var(--accent)">${escHtml(r.code)}</td>
+      <td>${escHtml(phone)}</td>
+      <td style="color:var(--muted)">${escHtml(r.platform || "—")}</td>
+      <td style="text-align:right">${r.orders}</td>
+      <td style="text-align:right">Rs.${r.earned_inr}</td>
+      <td style="text-align:right" class="ref-redeemed">Rs.${r.redeemed_inr}</td>
+      <td style="text-align:right" class="ref-bal">Rs.${r.balance_inr}</td>
+      <td style="color:var(--muted);font-size:.7rem">${escHtml(joined)}</td>
+    </tr>`;
+  }).join("");
+  tbody.innerHTML = html;
+  document.getElementById("ref-stat-count").textContent    = String(rows.length);
+  document.getElementById("ref-stat-orders").textContent   = String(totOrders);
+  document.getElementById("ref-stat-balance").textContent  = `Rs.${totBalance}`;
+  document.getElementById("ref-stat-redeemed").textContent = `Rs.${totRedeemed}`;
 }
 
 async function loadInbox() {

@@ -773,6 +773,55 @@ def _handle_referrals_redeem(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "server error"})
 
 
+def _handle_referrals_leaderboard(h) -> None:
+    """GET /referrals/leaderboard — staff auth.
+    Returns all referrers with aggregated stats:
+      [{code, label, platform, orders, earned_inr, redeemed_inr, balance_inr, created_at}]
+    Sorted by balance_inr DESC.
+    """
+    if not _acad_auth_staff(h):
+        _json_response(h, 401, {"error": "staff PIN required"})
+        return
+    try:
+        from db_cloud import _client
+        sb = _client()
+        refs    = sb.table("referrers").select("code,label,platform,created_at").execute()
+        credits = sb.table("referral_credits").select("referrer_code,amount_inr,redeemed_at").execute()
+
+        # Aggregate in Python — small enough for now (P3 will need a Postgres view)
+        agg: dict[str, dict] = {}
+        for c in (credits.data or []):
+            code = c.get("referrer_code")
+            if not code:
+                continue
+            row = agg.setdefault(code, {"orders": 0, "earned": 0, "redeemed": 0})
+            amt = int(c.get("amount_inr") or 0)
+            row["orders"]  += 1
+            row["earned"]  += amt
+            if c.get("redeemed_at"):
+                row["redeemed"] += amt
+
+        out = []
+        for r in (refs.data or []):
+            code = r["code"]
+            a = agg.get(code, {"orders": 0, "earned": 0, "redeemed": 0})
+            out.append({
+                "code":         code,
+                "label":        r.get("label"),
+                "platform":     r.get("platform"),
+                "created_at":   r.get("created_at"),
+                "orders":       a["orders"],
+                "earned_inr":   a["earned"],
+                "redeemed_inr": a["redeemed"],
+                "balance_inr":  a["earned"] - a["redeemed"],
+            })
+        out.sort(key=lambda x: (x["balance_inr"], x["earned_inr"]), reverse=True)
+        _json_response(h, 200, {"referrers": out})
+    except Exception as e:
+        logger.error(f"_handle_referrals_leaderboard error: {e}")
+        _json_response(h, 500, {"error": "server error"})
+
+
 def _handle_acad_orders_get(h) -> None:
     """GET /academic/orders — list all orders (staff only)."""
     qs = parse_qs(urlparse(h.path).query)
@@ -1060,6 +1109,11 @@ class handler(BaseHTTPRequestHandler):
         # ── Referral store-credit balance lookup (staff) ─────────────────────
         if self.path.startswith("/referrals/balance"):
             _handle_referrals_balance(self)
+            return
+
+        # ── Referral leaderboard (staff) ─────────────────────────────────────
+        if self.path.startswith("/referrals/leaderboard"):
+            _handle_referrals_leaderboard(self)
             return
 
         # Health check
