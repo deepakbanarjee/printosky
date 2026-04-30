@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pymupdf
+python-multipart
+Pillow
+langdetect
+fonttools
+numpy
+supabase

@@ -1,0 +1,55 @@
+# Netlify site config for pdf.printosky.com
+#
+# This file is read from the frontend/ subdirectory when this directory is
+# configured as the Netlify site's base directory.
+#
+# Build uses the Vite toolchain (package.json -> scripts.build).
+# API calls are proxied to the Vercel Python backend via /* redirects below,
+# so the frontend can call relative URLs (/upload, /split, ...) and avoid CORS.
+
+[build]
+  base    = "frontend"
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+  # "/" → config.ts emits API_BASE="" so fetch('/upload') stays same-origin.
+  # Netlify then redirects same-origin API paths to Vercel (see [[redirects]]).
+  VITE_API_BASE = "/"
+
+# Proxy backend API paths to the Vercel Python deployment.
+# Replace PDF_EDITOR_VERCEL_HOST with the actual vercel URL after first deploy.
+# Force 200 rewrite (not 302) so the browser keeps the same origin and the
+# response body is returned transparently.
+
+[[redirects]]
+  from   = "/upload"
+  to     = "https://PDF_EDITOR_VERCEL_HOST/upload"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from   = "/split"
+  to     = "https://PDF_EDITOR_VERCEL_HOST/split"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from   = "/save"
+  to     = "https://PDF_EDITOR_VERCEL_HOST/save"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from   = "/pdf/*"
+  to     = "https://PDF_EDITOR_VERCEL_HOST/pdf/:splat"
+  status = 200
+  force  = true
+
+# SPA fallback — all unmatched routes return index.html so client-side
+# navigation works for deep links.
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

@@ -1,0 +1,26 @@
+# pdf-editor local ignores (complements parent C:\PY\printosky\.gitignore)
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# Python envs
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local env overrides (parent already ignores *.env, but be explicit)
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+backend/.env
+backend/.env.local
