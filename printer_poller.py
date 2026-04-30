@@ -17,12 +17,11 @@ KONICA SNMP OIDs (bizhub, enterprise 18334):
   Print Colour: 1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.2  (returns None — Pro 1100 is B&W only)
   Copy Colour:  1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.1  (returns None — Pro 1100 is B&W only)
 
-EPSON SNMP OIDs (confirmed via epson_snmp_discover.py 2026-03-15):
-  Total pages:  1.3.6.1.2.1.43.10.2.1.4.1.1   (standard prtMarkerLifeCount)
-  A4 prints:    1.3.6.1.4.1.1248.1.2.2.6.1.1.4.1.2  (~B&W, sum of .4.1.* = total)
-  Colour pages: derived as total − A4_print (~12,623 of 910,112 are non-A4 / colour)
+EPSON counters (confirmed 2026-04-30):
+  Method:       Web scrape of INFO_MENTINFO/TOP (Usage Status page) — real colour/BW
+  Fallback:     SNMP 1.3.6.1.2.1.43.10.2.1.4.1.1 (total only — colour not in SNMP)
+  Real totals:  total=915,078  bw=843,605  colour=71,473  (SNMP derived was wrong: 12,924)
   Supplies:     1.3.6.1.2.1.43.11.1.1.8.1.{idx} (max) / .9.1.{idx} (level)
-                5 ink supplies found, levels: 82%, 0%, 6%, 17%, 1%
 """
 
 import time
@@ -32,7 +31,10 @@ import threading
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
+import re
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 KONICA_IP            = "192.168.55.110"
@@ -40,7 +42,13 @@ EPSON_IP             = "192.168.55.202"
 POLL_INTERVAL        = 300          # seconds (5 minutes)
 SNMP_COMMUNITY       = "public"
 SNMP_TIMEOUT         = 3            # seconds
-HTTP_TIMEOUT         = 5            # seconds
+HTTP_TIMEOUT         = 10           # seconds
+
+EPSON_BASE      = f"https://{EPSON_IP}"
+EPSON_USER      = "Oxygen"
+EPSON_PASS      = "Oxygen@1234"
+EPSON_LOGIN_URL = f"{EPSON_BASE}/PRESENTATION/ADVANCED/PASSWORD/SET"
+EPSON_USAGE_URL = f"{EPSON_BASE}/PRESENTATION/ADVANCED/INFO_MENTINFO/TOP"
 
 # Konica web admin credentials (leave blank if no password set)
 KONICA_USER          = "Admin"      # default Konica admin username
@@ -723,6 +731,64 @@ def _send_ink_alerts(printer: str, supplies: list, conn) -> None:
         logger.warning(f"Ink alert sent for {printer}: {alerts}")
 
 
+# ── Epson: web scrape for real colour/BW counters ────────────────────────────
+
+def poll_epson_web():
+    """
+    Scrape Epson WF-C21000 Usage Status page (INFO_MENTINFO/TOP) for accurate
+    colour/BW totals. SNMP cannot provide real colour counts on this model.
+    Returns counter dict or None on failure.
+    """
+    try:
+        session = requests.Session()
+        session.verify = False
+        r = session.post(EPSON_LOGIN_URL, data={
+            "SEL_SESSIONTYPE": "ADMIN",
+            "INPUTT_USERNAME": EPSON_USER,
+            "INPUTT_PASSWORD": EPSON_PASS,
+            "access": "https",
+        }, timeout=HTTP_TIMEOUT, allow_redirects=True)
+        if "EPSON_COOKIE_SESSION" not in session.cookies:
+            logger.debug("Epson web poll: login failed (no session cookie)")
+            return None
+
+        r = session.get(EPSON_USAGE_URL, timeout=HTTP_TIMEOUT)
+        if r.status_code != 200:
+            logger.debug(f"Epson web poll: INFO_MENTINFO/TOP → {r.status_code}")
+            return None
+
+        text = re.sub(r'<[^>]+>', ' ', r.text)
+        text = re.sub(r'&amp;', '&', text)
+        text = re.sub(r'&nbsp;', ' ', text)
+        text = re.sub(r'\s+', ' ', text)
+
+        def extract(pattern):
+            m = re.search(pattern, text, re.IGNORECASE)
+            return int(m.group(1).replace(',', '')) if m else None
+
+        total  = extract(r'Total Number of Pages\s*:\s*([\d,]+)')
+        bw     = extract(r'Total Number of B&W Pages\s*:\s*([\d,]+)')
+        colour = extract(r'Total Number of Color Pages\s*:\s*([\d,]+)')
+
+        if total is None:
+            logger.debug("Epson web poll: could not parse total pages from usage page")
+            return None
+
+        logger.info(f"Epson web OK: total={total} bw={bw} colour={colour}")
+        return {
+            "method":       "web",
+            "total_pages":  total,
+            "print_bw":     bw,
+            "print_colour": colour,
+            "copy_bw":      None,
+            "copy_colour":  None,
+            "raw":          f"Web: total={total} bw={bw} colour={colour}",
+        }
+    except Exception as e:
+        logger.debug(f"Epson web poll error: {e}")
+        return None
+
+
 # ── Main poll loop ────────────────────────────────────────────────────────────
 
 def poll_once(db_path):
@@ -743,8 +809,11 @@ def poll_once(db_path):
     save_supplies(conn, "konica", konica_supplies)
     _send_ink_alerts("konica", konica_supplies, conn)
 
-    # Epson: SNMP only
-    epson_data = poll_epson_snmp()
+    # Epson: web scrape for real colour/BW, SNMP fallback for total only
+    epson_data = poll_epson_web()
+    if not epson_data or epson_data.get("total_pages") is None:
+        logger.info("Epson web scrape failed — falling back to SNMP")
+        epson_data = poll_epson_snmp()
     save_reading(conn, "epson", epson_data)
     epson_supplies = poll_supplies(EPSON_IP, "epson")
     save_supplies(conn, "epson", epson_supplies)
