@@ -1,4 +1,4 @@
-"""
+﻿"""
 PRINTOSKY HOT FOLDER WATCHER
 =============================
 Runs silently on the store desktop (Windows 11).
@@ -27,11 +27,11 @@ import platform
 from datetime import datetime
 from pathlib import Path
 
-# ── watchdog ──────────────────────────────────────────────────────────────────
+# â”€â”€ watchdog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-# ── Google Sheets (optional — works without it if no credentials) ─────────────
+# â”€â”€ Google Sheets (optional â€” works without it if no credentials) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 try:
     import gspread
     from google.oauth2.service_account import Credentials
@@ -39,35 +39,35 @@ try:
 except ImportError:
     GSHEETS_AVAILABLE = False
 
-# ── Phase 3: Printer Poller (optional — works without it) ────────────────────
+# â”€â”€ Phase 3: Printer Poller (optional â€” works without it) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 try:
     from printer_poller import start_poller as _start_printer_poller
     PRINTER_POLLER_AVAILABLE = True
 except ImportError:
     PRINTER_POLLER_AVAILABLE = False
 
-# ── Supabase Sync (optional — enables admin page on printosky.com) ────────────
+# â”€â”€ Supabase Sync (optional â€” enables admin page on printosky.com) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 try:
     from supabase_sync import start_sync as _start_supabase_sync
     SUPABASE_SYNC_AVAILABLE = True
 except ImportError:
     SUPABASE_SYNC_AVAILABLE = False
 
-# ── Konica Job Log Auto-Fetcher (optional) ────────────────────────────────────
+# â”€â”€ Konica Job Log Auto-Fetcher (optional) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 try:
     from konica_jobs_fetcher import start_fetcher as _start_konica_fetcher
     KONICA_FETCHER_AVAILABLE = True
 except ImportError:
     KONICA_FETCHER_AVAILABLE = False
 
-# ── Epson Job Log Auto-Fetcher (optional) ─────────────────────────────────────
+# â”€â”€ Epson Job Log Auto-Fetcher (optional) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 try:
     from epson_jobs_fetcher import start_fetcher as _start_epson_fetcher
     EPSON_FETCHER_AVAILABLE = True
 except ImportError:
     EPSON_FETCHER_AVAILABLE = False
 
-# ── Job Tracker — status machine + event log ──────────────────────────────────
+# â”€â”€ Job Tracker â€” status machine + event log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 try:
     from job_tracker import log_event as _log_event, setup_job_events_db as _setup_jevents
     JOB_TRACKER_AVAILABLE = True
@@ -76,7 +76,7 @@ except ImportError:
     def _log_event(*a, **kw): pass
     def _setup_jevents(*a): pass
 
-# ── Colour Detector — PyMuPDF colour page detection ───────────────────────────
+# â”€â”€ Colour Detector â€” PyMuPDF colour page detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 try:
     from colour_detector import build_colour_map as _build_colour_map, save_colour_map as _save_colour_map
     COLOUR_DETECTOR_AVAILABLE = True
@@ -85,7 +85,7 @@ except ImportError:
     def _build_colour_map(*a, **kw): return {}
     def _save_colour_map(*a, **kw): pass
 
-# ── WhatsApp Notifications (optional — sends job tokens + ready alerts) ───────
+# â”€â”€ WhatsApp Notifications (optional â€” sends job tokens + ready alerts) â”€â”€â”€â”€â”€â”€â”€
 try:
     from whatsapp_notify import send_job_token, send_ready_alert, send_file_received
     WHATSAPP_NOTIFY_AVAILABLE = True
@@ -95,7 +95,7 @@ except ImportError:
     def send_ready_alert(*a, **kw): pass
     def send_file_received(*a, **kw): pass
 
-# ── WhatsApp Bot + Rate Card + Razorpay (optional) ───────────────────────────
+# â”€â”€ WhatsApp Bot + Rate Card + Razorpay (optional) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 try:
     from whatsapp_bot import handle_message as _bot_handle, setup_bot_db
     from webhook_receiver import start_webhook_server
@@ -124,11 +124,11 @@ except ImportError as _bot_err:
     def mark_jobs_invoiced(*a): pass
     def handle_b2b_message(*a): return []
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CONFIG — edit these for your store
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# CONFIG â€” edit these for your store
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-# Folder to watch — change this to match the actual path on the store PC
+# Folder to watch â€” change this to match the actual path on the store PC
 if platform.system() == "Windows":
     WATCH_FOLDER = r"C:\Printosky\Jobs\Incoming"
     ARCHIVE_FOLDER = r"C:\Printosky\Jobs\Archive"
@@ -141,12 +141,12 @@ else:
     DB_PATH = str(Path.home() / "Printosky" / "Data" / "jobs.db")
     LOG_PATH = str(Path.home() / "Printosky" / "Data" / "watcher.log")
 
-# Google Sheets config — fill in after setup (see INSTALL.md)
+# Google Sheets config â€” fill in after setup (see INSTALL.md)
 GSHEETS_CREDENTIALS_FILE = "credentials.json"   # service account JSON
 GSHEETS_SPREADSHEET_NAME = "Printosky Job Tracker"
 GSHEETS_WORKSHEET_NAME = "Job Log"
 
-# ── Phase 3: Printer IPs (confirmed 2026-03-12 via arp -a) ───────────────────
+# â”€â”€ Phase 3: Printer IPs (confirmed 2026-03-12 via arp -a) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 KONICA_IP  = "192.168.55.110"   # Konica Bizhub Pro 1100 (MAC: 00-50-aa-2c-78-4c)
 EPSON_IP   = "192.168.55.202"   # Epson WF-C21000       (MAC: e0-bb-9e-d6-52-2e)
 # Access EWS at: http://192.168.55.110  and  http://192.168.55.202
@@ -167,9 +167,9 @@ IGNORE_PATTERNS = {
     ".ds_store",    # Mac metadata
 }
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # SETUP
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def setup_folders():
     """Create required folders if they don't exist."""
@@ -193,7 +193,7 @@ def setup_database():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Jobs table — one row per file received
+    # Jobs table â€” one row per file received
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS jobs (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -265,7 +265,7 @@ def setup_database():
         except Exception:
             pass  # column already exists
 
-    # Batch table — groups multiple files from same customer into one payment
+    # Batch table â€” groups multiple files from same customer into one payment
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS job_batches (
             batch_id        TEXT PRIMARY KEY,
@@ -280,7 +280,7 @@ def setup_database():
         )
     """)
 
-    # Customer profiles — saved print settings per phone
+    # Customer profiles â€” saved print settings per phone
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS customer_profiles (
             phone           TEXT PRIMARY KEY,
@@ -294,7 +294,7 @@ def setup_database():
         )
     """)
 
-    # Staff table — one row per staff member
+    # Staff table â€” one row per staff member
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS staff (
             id         TEXT PRIMARY KEY,
@@ -305,7 +305,7 @@ def setup_database():
         )
     """)
 
-    # Staff sessions — login/logout tracking
+    # Staff sessions â€” login/logout tracking
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS staff_sessions (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -345,12 +345,12 @@ def setup_database():
     conn.close()
     logging.info("Database ready: %s", DB_PATH)
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # JOB ID GENERATOR
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 _job_id_lock     = __import__("threading").Lock()
-_job_id_counters = {}   # date-string → last issued sequence number (int)
+_job_id_counters = {}   # date-string â†’ last issued sequence number (int)
 
 
 def generate_job_id():
@@ -360,7 +360,7 @@ def generate_job_id():
 
     Uses an in-memory counter (seeded from DB once per day) protected by a
     lock, so concurrent watchdog threads always receive distinct IDs without
-    hitting the COUNT→INSERT gap of the old approach.
+    hitting the COUNTâ†’INSERT gap of the old approach.
     """
     today = datetime.now().strftime("%Y%m%d")
     with _job_id_lock:
@@ -377,12 +377,12 @@ def generate_job_id():
         _job_id_counters[today] += 1
         return f"OSP-{today}-{_job_id_counters[today]:04d}"
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # FILE HASH (detect duplicates)
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def file_hash(filepath):
-    """MD5 hash of file — detects if same file is dropped twice."""
+    """MD5 hash of file â€” detects if same file is dropped twice."""
     try:
         h = hashlib.md5()
         with open(filepath, "rb") as f:
@@ -392,9 +392,9 @@ def file_hash(filepath):
     except Exception:
         return None
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # GOOGLE SHEETS SYNC
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 _sheets_client = None
 
@@ -464,7 +464,7 @@ def ensure_sheets_headers():
                 "Job ID", "Received At", "Filename", "Type", "Size (KB)",
                 "Source", "Sender", "Status",
                 "Customer Name", "Service", "Pages",
-                "Quoted (₹)", "Collected (₹)", "Payment Mode", "Notes"
+                "Quoted (â‚¹)", "Collected (â‚¹)", "Payment Mode", "Notes"
             ]
             sheet.insert_row(headers, 1)
             # Format header row
@@ -475,9 +475,9 @@ def ensure_sheets_headers():
     except Exception as e:
         logging.warning("Could not set headers: %s", e)
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # CORE: LOG A NEW FILE
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
     """
@@ -564,7 +564,7 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
     logging.info("NEW JOB [%s] %s | %.1f KB | Source: %s | Sender: %s",
                  job_id, filepath.name, size_kb, source, sender or "walk-in")
 
-    # Auto colour detection for PDFs (background thread — non-blocking)
+    # Auto colour detection for PDFs (background thread â€” non-blocking)
     if filepath.suffix.lower() == ".pdf" and COLOUR_DETECTOR_AVAILABLE:
         import threading as _cd_thread
         def _run_colour_detect(jid=job_id, fp=str(filepath)):
@@ -588,7 +588,7 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
             import time, sqlite3 as _sq3, logging as _log
             time.sleep(2)
             try:
-                # ── Page count ────────────────────────────────────────────
+                # â”€â”€ Page count â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 pc = 0
                 ext_lower = fp.suffix.lower()
                 if ext_lower == ".pdf":
@@ -598,7 +598,7 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
                             pc = len(_pdf.pages)
                         _log.info(f"PDF page count ({jid}): {pc} pages via pikepdf")
                     except Exception as _e:
-                        _log.warning(f"pikepdf failed ({jid}): {_e} — trying fallback")
+                        _log.warning(f"pikepdf failed ({jid}): {_e} â€” trying fallback")
                         try:
                             from rate_card import get_pdf_page_count
                             pc = get_pdf_page_count(str(fp))
@@ -643,7 +643,7 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
                     _cx.execute("UPDATE jobs SET page_count=? WHERE job_id=?", (pc, jid))
                     _cx.commit(); _cx.close()
 
-                # ── B2B — bypass batch, handle immediately ─────────────────
+                # â”€â”€ B2B â€” bypass batch, handle immediately â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 from b2b_manager import is_b2b, get_b2b_client
                 from b2b_bot import handle_b2b_message
                 from whatsapp_notify import _send
@@ -655,7 +655,7 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
                             _send(s, r)
                     return
 
-                # ── Add job to batch (create or update) ────────────────────
+                # â”€â”€ Add job to batch (create or update) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 now_str = time.strftime("%Y-%m-%d %H:%M:%S")
                 _bx = _sq3.connect(DB_PATH)
                 batch_row = _bx.execute(
@@ -668,7 +668,7 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
                     batch_id = batch_row[0]
                     existing_ids = batch_row[1] or ""
                     new_ids = (existing_ids + "," + jid).strip(",")
-                    # Reset to collecting (new file arrived — extend the window)
+                    # Reset to collecting (new file arrived â€” extend the window)
                     _bx.execute(
                         "UPDATE job_batches SET status='collecting', last_file_at=?, job_ids=? WHERE batch_id=?",
                         (now_str, new_ids, batch_id)
@@ -707,9 +707,9 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
         print(f"  From   : {sender}")
     print(f"{'='*55}\n")
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # FOLDER WATCHER
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class JobFolderHandler(FileSystemEventHandler):
     """Watchdog event handler for the hot folder."""
@@ -755,9 +755,9 @@ class JobFolderHandler(FileSystemEventHandler):
             pass
         log_new_file(event.dest_path, source="Hot Folder", sender=sender)
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # DAILY REPORT (printed to console at end of day)
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def print_daily_report():
     """Print today's job summary."""
@@ -781,12 +781,12 @@ def print_daily_report():
     if row:
         total, completed, pending, revenue = row
         print(f"\n{'='*55}")
-        print(f"  PRINTOSKY DAILY REPORT — {today}")
+        print(f"  PRINTOSKY DAILY REPORT â€” {today}")
         print(f"{'='*55}")
         print(f"  Total jobs received : {total}")
         print(f"  Completed           : {completed}")
-        print(f"  PENDING (not done)  : {pending}  ← action needed")
-        print(f"  Revenue logged      : ₹{revenue:.2f}")
+        print(f"  PENDING (not done)  : {pending}  â† action needed")
+        print(f"  Revenue logged      : â‚¹{revenue:.2f}")
         print(f"{'='*55}\n")
 
 def print_pending_jobs():
@@ -803,7 +803,7 @@ def print_pending_jobs():
     conn.close()
 
     if not rows:
-        print("\n✅ No pending jobs.\n")
+        print("\nâœ… No pending jobs.\n")
         return
 
     print(f"\n{'='*55}")
@@ -826,9 +826,9 @@ def print_pending_jobs():
             print(f"           From: {sender}")
     print(f"{'='*55}\n")
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # STAFF COMMANDS (type in terminal while watcher is running)
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def handle_command(cmd: str):
     """Handle simple terminal commands from staff."""
@@ -860,9 +860,9 @@ def handle_command(cmd: str):
             """, (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), job_id))
         conn.commit()
         conn.close()
-        print(f"\n✅ Job {job_id} marked as COMPLETED")
+        print(f"\nâœ… Job {job_id} marked as COMPLETED")
         if amount:
-            print(f"   Payment: ₹{amount:.2f} via {mode}\n")
+            print(f"   Payment: â‚¹{amount:.2f} via {mode}\n")
         # Send ready alert to customer via WhatsApp
         send_ready_alert(job_id, DB_PATH)
 
@@ -881,7 +881,7 @@ def handle_command(cmd: str):
             conn.execute("UPDATE jobs SET status='Paid' WHERE job_id=?", (job_id,))
         conn.commit()
         conn.close()
-        print(f"\n\U0001f49a Job {job_id} — PAYMENT CONFIRMED, proceed to print")
+        print(f"\n\U0001f49a Job {job_id} â€” PAYMENT CONFIRMED, proceed to print")
         if amount:
             print(f"   Payment: \u20b9{amount:.2f} via {mode}")
         print(f"   When done printing, type: done {job_id}\n")
@@ -890,7 +890,7 @@ def handle_command(cmd: str):
             send_payment_confirmed(job_id, row[0], amount or 0, mode)
 
     elif parts[0] == "quote" and len(parts) >= 3:
-        # quote OSP-xxx 350  — staff sets binding quote, generates payment link
+        # quote OSP-xxx 350  â€” staff sets binding quote, generates payment link
         job_id = parts[1].upper()
         total  = float(parts[2])
         conn   = sqlite3.connect(DB_PATH)
@@ -899,22 +899,22 @@ def handle_command(cmd: str):
         ).fetchone()
         conn.close()
         if not row:
-            print(f"\n❌ Job {job_id} not found\n")
+            print(f"\nâŒ Job {job_id} not found\n")
         else:
             sender, filename = row
-            print(f"\n📋 Generating payment link for {job_id} — ₹{total:.2f}")
+            print(f"\nðŸ“‹ Generating payment link for {job_id} â€” â‚¹{total:.2f}")
             try:
                 from razorpay_integration import create_payment_link
                 from whatsapp_notify import _send
                 pay = create_payment_link(
                     job_id=job_id, amount=total,
-                    description=f"Print job {job_id} — Printosky",
+                    description=f"Print job {job_id} â€” Printosky",
                     customer_phone=sender,
                 )
                 if "error" in pay:
-                    print(f"   ❌ Razorpay error: {pay['error']}\n")
+                    print(f"   âŒ Razorpay error: {pay['error']}\n")
                 else:
-                    print(f"   ✅ Payment link: {pay['url']}")
+                    print(f"   âœ… Payment link: {pay['url']}")
                     if sender:
                         from rate_card import FINISHING_RATES
                         conn2 = sqlite3.connect(DB_PATH)
@@ -924,18 +924,18 @@ def handle_command(cmd: str):
                         conn2.close()
                         fin_label = FINISHING_RATES.get(fin[0] if fin else "none", {}).get("label", "Binding")
                         msg = (
-                            f"💳 *Payment link for {job_id}*\n\n"
-                            f"Total: ₹{total:.2f} (includes {fin_label})\n\n"
-                            f"👉 {pay['url']}\n\n"
-                            f"_Printing starts once payment is confirmed!_ 🖨️"
+                            f"ðŸ’³ *Payment link for {job_id}*\n\n"
+                            f"Total: â‚¹{total:.2f} (includes {fin_label})\n\n"
+                            f"ðŸ‘‰ {pay['url']}\n\n"
+                            f"_Printing starts once payment is confirmed!_ ðŸ–¨ï¸"
                         )
                         from whatsapp_notify import _send
                         _send(sender, msg)
-                        print(f"   💬 Payment link sent to customer\n")
+                        print(f"   ðŸ’¬ Payment link sent to customer\n")
             except Exception as e:
-                print(f"   ❌ Error: {e}\n")
+                print(f"   âŒ Error: {e}\n")
 
-    # ── B2B: register client ─────────────────────────────────────────────────
+    # â”€â”€ B2B: register client â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     elif parts[0] == "b2b" and len(parts) >= 2:
         sub = parts[1] if len(parts) > 1 else ""
 
@@ -952,7 +952,7 @@ def handle_command(cmd: str):
                 msg = register_b2b_client(DB_PATH, phone_b2b, company, contact, disc)
                 print(f"\n{msg}\n")
             except Exception as e:
-                print(f"\n❌ Error: {e}")
+                print(f"\nâŒ Error: {e}")
                 print('Usage: b2b add <phone> "Company Name" "Contact" <discount%>\n')
 
         elif sub == "list":
@@ -974,86 +974,86 @@ def handle_command(cmd: str):
         else:
             print("""
   B2B Commands:
-  b2b add <phone> "Company" "Contact" <disc%>  → register client
-  b2b list                                      → all B2B clients
-  b2b jobs <phone>                              → jobs for client
-  b2b credit <phone> <amount>                   → set credit limit
-  b2b paid <phone> <amount> <NEFT|IMPS|CASH>   → record payment
+  b2b add <phone> "Company" "Contact" <disc%>  â†’ register client
+  b2b list                                      â†’ all B2B clients
+  b2b jobs <phone>                              â†’ jobs for client
+  b2b credit <phone> <amount>                   â†’ set credit limit
+  b2b paid <phone> <amount> <NEFT|IMPS|CASH>   â†’ record payment
 """)
 
-    # ── Invoice: generate + send PDF via WhatsApp ─────────────────────────────
+    # â”€â”€ Invoice: generate + send PDF via WhatsApp â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     elif parts[0] == "invoice" and len(parts) >= 2:
         phone_inv = parts[1]
         preview   = len(parts) >= 3 and parts[2] == "preview"
         client_inv = get_b2b_client(DB_PATH, phone_inv)
         if not client_inv:
-            print(f"\n❌ No B2B client found for {phone_inv}\n")
+            print(f"\nâŒ No B2B client found for {phone_inv}\n")
         else:
-            print(f"\n📄 Generating invoice for {client_inv['company_name']}...")
+            print(f"\nðŸ“„ Generating invoice for {client_inv['company_name']}...")
 
             try:
                 pdf_path, grand_total, job_count, inv_num = generate_invoice_pdf(DB_PATH, phone_inv)
-                print(f"   ✅ Invoice: {pdf_path}")
-                print(f"   Jobs: {job_count}  |  Total: ₹{grand_total:.2f}  |  Ref: {inv_num}")
+                print(f"   âœ… Invoice: {pdf_path}")
+                print(f"   Jobs: {job_count}  |  Total: â‚¹{grand_total:.2f}  |  Ref: {inv_num}")
                 if not preview:
                     # Send via WhatsApp
                     try:
-                        import requests as _req
+                        from whatsapp_notify import send_file as _wa_send_file
                         with open(pdf_path, "rb") as pf:
-                            _resp = _req.post(
-                                "http://localhost:3004/send-document",
-                                files={"file": (f"{inv_num}.pdf", pf, "application/pdf")},
-                                data={"phone": phone_inv, "caption": f"📄 Invoice {inv_num} — \u20b9{grand_total:.2f}\nThank you for your business! 🙏"},
-                                timeout=15,
+                            _ok = _wa_send_file(
+                                phone_inv,
+                                pf.read(),
+                                "application/pdf",
+                                f"{inv_num}.pdf",
+                                caption=f"📄 Invoice {inv_num} — ₹{grand_total:.2f}\nThank you for your business! 🙏",
                             )
-                        if _resp.status_code == 200:
-                            print(f"   💬 Invoice sent to {client_inv['company_name']} via WhatsApp")
+                        if _ok:
                             mark_jobs_invoiced(DB_PATH, phone_inv, inv_num)
-                            print(f"   ✅ Jobs marked as invoiced\n")
+                            print(f"   âœ… Jobs marked as invoiced\n")
 
                         else:
-                            print(f"   ⚠️ WhatsApp send failed ({_resp.status_code}) — PDF saved at {pdf_path}\n")
+                            print(f"   âš ï¸ WhatsApp send failed ({_resp.status_code}) â€” PDF saved at {pdf_path}\n")
 
                     except Exception as e:
-                        print(f"   ⚠️ WhatsApp send error: {e}")
+                        print(f"   âš ï¸ WhatsApp send error: {e}")
                         print(f"   PDF saved at: {pdf_path}\n")
 
                 else:
-                    print(f"   (Preview only — not sent)\n")
+                    print(f"   (Preview only â€” not sent)\n")
 
             except ValueError as e:
-                print(f"\n❌ {e}\n")
+                print(f"\nâŒ {e}\n")
             except Exception as e:
-                print(f"\n❌ Invoice generation error: {e}\n")
+                print(f"\nâŒ Invoice generation error: {e}\n")
 
     elif parts[0] == "help":
         print("""
-PRINTOSKY WATCHER — Commands
-─────────────────────────────
-pending          → Show all pending (unfinished) jobs
-report           → Today's summary
-b2b add/list/jobs/credit/paid → Manage B2B clients
-invoice <phone>             → Generate + send monthly invoice PDF
-quote JOB# AMOUNT           → Send Razorpay link (binding/timeout)
+PRINTOSKY WATCHER â€” Commands
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+pending          â†’ Show all pending (unfinished) jobs
+report           â†’ Today's summary
+b2b add/list/jobs/credit/paid â†’ Manage B2B clients
+invoice <phone>             â†’ Generate + send monthly invoice PDF
+quote JOB# AMOUNT           â†’ Send Razorpay link (binding/timeout)
                               e.g: quote OSP-20260313-0001 350
-paid JOB# AMT MODE          → Manual cash/UPI payment
+paid JOB# AMT MODE          â†’ Manual cash/UPI payment
                               e.g: paid OSP-20260313-0001 150 UPI
-done JOB#                   → Mark job complete
+done JOB#                   â†’ Mark job complete
                               e.g: done OSP-20260313-0001
-help             → Show this help
+help             â†’ Show this help
         """)
     else:
         print("Unknown command. Type 'help' for options.")
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # BOT RELAY SERVER (port 3003)
 # Receives customer text replies from Node/WhatsApp and routes through bot
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def _ask_more_files(batch_id: str, phone: str, job_ids_str: str):
     """
     Called 30s after last file. Asks customer if they have more files.
-    Sets status to 'awaiting_more' — timer will fire full conversation after 30s more.
+    Sets status to 'awaiting_more' â€” timer will fire full conversation after 30s more.
     """
     import sqlite3 as _sq3
     from whatsapp_notify import _send
@@ -1088,7 +1088,7 @@ def _fire_batch_conversation(batch_id: str, phone: str, job_ids_str: str):
 
     job_ids = [j for j in job_ids_str.split(",") if j.strip()]
     if not job_ids:
-        logging.warning(f"Batch {batch_id} has no job_ids — skipping")
+        logging.warning(f"Batch {batch_id} has no job_ids â€” skipping")
         return
 
     # Mark batch as questioning so timer won't fire again
@@ -1138,7 +1138,7 @@ def _fire_batch_conversation(batch_id: str, phone: str, job_ids_str: str):
 
 
 def start_bot_relay_server(db_path):
-    """HTTP server on port 3003 — Node posts customer text replies here."""
+    """HTTP server on port 3003 â€” Node posts customer text replies here."""
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
     import json as _json
@@ -1177,7 +1177,7 @@ def start_bot_relay_server(db_path):
                 if _awaiting:
                     _txt_lower = text.lower().strip()
                     if any(w in _txt_lower for w in ["yes","yeah","yep","ha","yea","more","send"]):
-                        # Customer wants to send more — reset to collecting, give 30s more
+                        # Customer wants to send more â€” reset to collecting, give 30s more
                         _rc2 = _rq3.connect(db_path)
                         _rc2.execute(
                             "UPDATE job_batches SET status='collecting', last_file_at=datetime('now') WHERE batch_id=?",
@@ -1191,7 +1191,7 @@ def start_bot_relay_server(db_path):
                         self.wfile.write(_json.dumps({"replies": []}).encode())
                         return
                     elif any(w in _txt_lower for w in ["no","nope","done","proceed","ok","that","finish"]):
-                        # Customer is done — fire immediately
+                        # Customer is done â€” fire immediately
                         import threading as _rth
                         _rth.Thread(
                             target=_fire_batch_conversation,
@@ -1204,7 +1204,7 @@ def start_bot_relay_server(db_path):
                         self.wfile.write(_json.dumps({"replies": []}).encode())
                         return
 
-                # Route through bot — look up session for job_id + page_count
+                # Route through bot â€” look up session for job_id + page_count
                 from whatsapp_bot import handle_message, get_session
                 from b2b_manager import is_b2b, get_b2b_client
                 from b2b_bot import handle_b2b_message
@@ -1218,8 +1218,8 @@ def start_bot_relay_server(db_path):
                     page_count_s = session.get("page_count") or 0
                     replies = handle_message(phone, text, job_id_s, page_count_s, db_path)
 
-                # Return replies as JSON — Node's sendBotReply will send them via WhatsApp
-                # (do NOT also call _send here — that would cause duplicate messages)
+                # Return replies as JSON â€” Node's sendBotReply will send them via WhatsApp
+                # (do NOT also call _send here â€” that would cause duplicate messages)
                 reply_list = [r for r in (replies or []) if isinstance(r, str)]
 
                 # Log inbound + outbound to conversation_log
@@ -1245,16 +1245,16 @@ def start_bot_relay_server(db_path):
 
     def _run():
         server = HTTPServer(("127.0.0.1", 3003), BotRelayHandler)
-        logging.info("Bot relay server started — listening on :3003/bot")
+        logging.info("Bot relay server started â€” listening on :3003/bot")
         server.serve_forever()
 
     t = threading.Thread(target=_run, daemon=True, name="BotRelay")
     t.start()
     return t
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # MAIN
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def main():
     setup_folders()
@@ -1274,7 +1274,7 @@ def main():
     start_webhook_server(DB_PATH)
     start_bot_relay_server(DB_PATH)
 
-    # Start batch timer — 30s ask "more files?", 30s more then fire conversation
+    # Start batch timer â€” 30s ask "more files?", 30s more then fire conversation
     import threading as _bt, sqlite3 as _bsq, time as _btime
     def _batch_timer_loop():
         STAGE1_WAIT = 30   # seconds after last file before asking "more files?"
@@ -1314,7 +1314,7 @@ def main():
             except Exception as _loop_e:
                 logging.warning(f"Batch timer loop error: {_loop_e}")
     _bt.Thread(target=_batch_timer_loop, daemon=True, name="BatchTimer").start()
-    logging.info("Batch timer started — 30s ask + 30s wait before firing")
+    logging.info("Batch timer started â€” 30s ask + 30s wait before firing")
 
     # Start print server (port 3005)
     try:
@@ -1367,7 +1367,7 @@ def main():
     else:
         logging.info("Printer poller not loaded (printer_poller.py missing)")
 
-    # Supabase sync — admin page on printosky.com
+    # Supabase sync â€” admin page on printosky.com
     if SUPABASE_SYNC_AVAILABLE:
         _start_supabase_sync(DB_PATH)
     else:
@@ -1376,14 +1376,14 @@ def main():
     # Konica job log auto-fetcher (polls Konica web admin every 30 min)
     if KONICA_FETCHER_AVAILABLE:
         _start_konica_fetcher(DB_PATH)
-        logging.info("Konica job fetcher started — will auto-import job log every 30 min")
+        logging.info("Konica job fetcher started â€” will auto-import job log every 30 min")
     else:
         logging.info("Konica job fetcher not loaded (konica_jobs_fetcher.py missing)")
 
     # Epson job log fetcher (delta attribution + web log probe every 5 min)
     if EPSON_FETCHER_AVAILABLE:
         _start_epson_fetcher(DB_PATH)
-        logging.info("Epson job fetcher started — delta attribution every 5 min")
+        logging.info("Epson job fetcher started â€” delta attribution every 5 min")
     else:
         logging.info("Epson job fetcher not loaded (epson_jobs_fetcher.py missing)")
 
