@@ -253,7 +253,8 @@ def upload_file(filename: str, content: bytes, mime_type: str) -> str:
 
 def log_message(phone: str, direction: str, body: str,
                 message_type: str = "text", filename: str | None = None,
-                job_id: str | None = None) -> None:
+                job_id: str | None = None,
+                media_url: str | None = None) -> None:
     """Insert a row into conversation_log. Silent on error — never raises."""
     try:
         _client().table("conversation_log").insert({
@@ -263,6 +264,47 @@ def log_message(phone: str, direction: str, body: str,
             "body":         (body or "")[:2000],
             "filename":     filename,
             "job_id":       job_id,
+            "media_url":    media_url,
         }).execute()
     except Exception as e:
         logger.warning(f"log_message error ({direction} {phone}): {e}")
+
+
+# ── WhatsApp contacts ─────────────────────────────────────────────────────────
+
+def get_media_url(path: str) -> str:
+    """Return the public URL for a file stored in Supabase Storage.
+
+    The incoming-files bucket is public, so this constructs a stable URL.
+    If the bucket ever goes private, change this to create_signed_url().
+    """
+    return _client().storage.from_(INCOMING_BUCKET).get_public_url(path)
+
+
+def upsert_contact(phone: str, name: str | None = None) -> None:
+    """Insert or update a WhatsApp contact. Name only written when provided."""
+    data: dict = {"phone": phone}
+    if name:
+        data["name"] = name
+    try:
+        _client().table("whatsapp_contacts").upsert(
+            data, on_conflict="phone"
+        ).execute()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("upsert_contact failed: %s", exc)
+
+
+def mark_contact_seen(phone: str) -> None:
+    """Set last_seen_at = now() for a contact (called when staff opens the thread).
+
+    Uses upsert so a contact row is created if it doesn't exist yet.
+    """
+    try:
+        _client().table("whatsapp_contacts").upsert(
+            {"phone": phone, "last_seen_at": "now()"},
+            on_conflict="phone",
+        ).execute()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("mark_contact_seen failed: %s", exc)
