@@ -254,7 +254,7 @@ def _handle_text(sender: str, text: str) -> None:
 
 
 def _handle_media(sender: str, msg_type: str, media_id: str,
-                  mime_type: str, orig_filename: str) -> None:
+                  mime_type: str, orig_filename: str) -> str | None:
     """Download a WhatsApp attachment, upload to Supabase Storage, create job row."""
     from db_cloud import upload_file, insert_job_from_webhook, clear_session, save_session
     from whatsapp_notify import send_file_received_with_quote_start
@@ -298,16 +298,21 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
     content = _download_meta_media(media_id)
     if content is None:
         logger.error(f"Failed to download {media_id} from {sender}")
-        return
+        return None
+    content  = _compress_lossless(content, mime_type or "")
     file_url = upload_file(dest_name, content, mime_type or "application/octet-stream")
-    insert_job_from_webhook(job_id, sender, base_name, file_url)   # update with real URL
+    insert_job_from_webhook(job_id, sender, base_name, file_url)
     logger.info(f"Uploaded {dest_name} ({len(content)} bytes) → {file_url}")
+    return dest_name  # storage path — callers store this in media_url column
 
 
 def _process_meta_webhook(data: dict) -> None:
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
-            value = change.get("value", {})
+            value    = change.get("value", {})
+            contacts = value.get("contacts", [])
+            pushname = (contacts[0].get("profile", {}).get("name")
+                        if contacts else None)
             for msg in value.get("messages", []):
                 sender   = msg.get("from", "")
                 msg_type = msg.get("type", "")
@@ -318,8 +323,9 @@ def _process_meta_webhook(data: dict) -> None:
                     if text:
                         _handle_text(sender, text)
                         try:
-                            from db_cloud import log_message
+                            from db_cloud import log_message, upsert_contact
                             log_message(sender, "inbound", text, message_type="text")
+                            upsert_contact(sender, name=pushname)
                         except Exception:
                             pass
 
@@ -329,12 +335,14 @@ def _process_meta_webhook(data: dict) -> None:
                     mime     = blk.get("mime_type", "")
                     fname    = blk.get("filename", "")
                     if media_id:
-                        _handle_media(sender, msg_type, media_id, mime, fname)
+                        storage_path = _handle_media(sender, msg_type, media_id, mime, fname)
                         try:
-                            from db_cloud import log_message
+                            from db_cloud import log_message, upsert_contact
                             log_message(sender, "inbound",
                                         fname or f"[{msg_type}]",
-                                        message_type=msg_type, filename=fname)
+                                        message_type=msg_type, filename=fname,
+                                        media_url=storage_path)
+                            upsert_contact(sender, name=pushname)
                         except Exception:
                             pass
 
@@ -387,6 +395,40 @@ ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
 def _sha256(value: str) -> str:
     """SHA-256 — used for admin password comparison only. Do NOT use for PIN hashing."""
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _compress_lossless(data: bytes, mime: str) -> bytes:
+    """Lossless PNG-only optimisation. All other types pass through unchanged.
+
+    Never re-encodes JPEG (already lossy). If the compressed PNG is larger than
+    the original, the original bytes are returned unchanged.
+    """
+    if mime != "image/png":
+        return data
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(data))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        compressed = buf.getvalue()
+        return compressed if len(compressed) < len(data) else data
+    except Exception:
+        return data  # on any error, use original unchanged
+
+
+def _auth_admin_pw(pw: str) -> bool:
+    """Return True if pw matches the ADMIN_PASSWORD_HASH env var via HMAC."""
+    return bool(ADMIN_PASSWORD_HASH) and hmac.compare_digest(
+        _sha256(pw), ADMIN_PASSWORD_HASH
+    )
+
+
+def _fmt_phone(phone: str) -> str:
+    """Format a phone number for display. 919495706405 → +91 94957 06405."""
+    if len(phone) == 12 and phone.startswith("91"):
+        return f"+91 {phone[2:7]} {phone[7:]}"
+    return ("+" + phone) if not phone.startswith("+") else phone
 
 
 # ── PBKDF2 PIN hashing ────────────────────────────────────────────────────────
