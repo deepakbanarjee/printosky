@@ -2041,7 +2041,7 @@ async function loadPrinterJobs() {
 
   const [konicaRows, epsonRows] = await Promise.all([
     sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}`).catch(() => []),
-    sbFetch("epson_jobs",  `order=job_date.desc&limit=200${dateParam}`).catch(() => []),
+    sbFetch("epson_jobs",  `source=eq.weblog&order=job_date.desc&limit=200${dateParam}`).catch(() => []),
   ]);
 
   // Konica table
