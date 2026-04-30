@@ -370,13 +370,12 @@ def send_referral_invite(phone: str, send_fn) -> bool:
 
     share_link = f"https://wa.me/{REFERRAL_BUSINESS_NUMBER}?text=ref_{code}"
     msg = (
-        f"One more thing — earn cash for sharing Printosky! 💸\n\n"
+        f"One more thing — earn Printosky store credit for sharing! 🎟️\n\n"
         f"For every friend who places an order using your link, you earn "
-        f"*₹{REFERRAL_PAYOUT_INR} cash*.\n\n"
-        f"_(Cash payouts now — soon you'll be able to use earnings as Printosky store credit too!)_\n\n"
+        f"*₹{REFERRAL_PAYOUT_INR} store credit* — apply it on your next order.\n\n"
         f"Your unique link:\n{share_link}\n\n"
         f"Share with classmates, hostel mates, anyone who needs printing or projects.\n"
-        f"Reply *MY REFERRALS* anytime to track your earnings."
+        f"Reply *MY CREDITS* anytime to check your balance."
     )
     sent = send_fn(phone, msg)
     logger.info("Referral invite sent to %s (code %s): %s", phone, code, "ok" if sent else "failed")
