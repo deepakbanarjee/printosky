@@ -331,12 +331,26 @@ def schedule_referral_invite(
     logger.info("Referral invite scheduled for %s in %ds", phone, delay_sec)
 
 
+def _normalize_phone(p: str) -> str:
+    """Match api/index.py's normalization: digits-only, 91-prefixed for 10-digit Indian."""
+    if not p:
+        return ""
+    s = str(p).replace("@c.us", "").replace("@lid", "").replace("@s.whatsapp.net", "").strip()
+    digits = "".join(c for c in s if c.isdigit())
+    if len(digits) == 10:
+        digits = "91" + digits
+    return digits
+
+
 def send_referral_invite(phone: str, send_fn) -> bool:
     """
     Generate (or look up) a unique referrer code for this customer,
     create the Supabase `referrers` row, then send the invite WhatsApp.
     Idempotent — re-sending uses the same code.
+    Stores label in canonical 91XXXXXXXXXX form so Vercel-side lookups match.
     """
+    raw_phone = phone
+    phone = _normalize_phone(phone)
     if not phone:
         return False
 
@@ -377,6 +391,8 @@ def send_referral_invite(phone: str, send_fn) -> bool:
         f"Share with classmates, hostel mates, anyone who needs printing or projects.\n"
         f"Reply *MY CREDITS* anytime to check your balance."
     )
-    sent = send_fn(phone, msg)
+    # Send to the original phone format (whatever WhatsApp/store layer expects);
+    # Supabase rows are keyed by the normalized form.
+    sent = send_fn(raw_phone, msg)
     logger.info("Referral invite sent to %s (code %s): %s", phone, code, "ok" if sent else "failed")
     return bool(sent)

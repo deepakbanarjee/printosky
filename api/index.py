@@ -105,6 +105,21 @@ def _download_meta_media(media_id: str) -> bytes | None:
 
 # ── Referral tracking ────────────────────────────────────────────────────────
 
+def _normalize_phone(p: str) -> str:
+    """Canonicalize a WhatsApp phone to digits-only Indian format (91XXXXXXXXXX).
+
+    Strips '@c.us', '@lid', '@s.whatsapp.net' suffixes, removes non-digits,
+    auto-prepends '91' for bare 10-digit Indian numbers. Returns '' if empty.
+    """
+    if not p:
+        return ""
+    s = str(p).replace("@c.us", "").replace("@lid", "").replace("@s.whatsapp.net", "").strip()
+    digits = "".join(c for c in s if c.isdigit())
+    if len(digits) == 10:  # bare Indian mobile
+        digits = "91" + digits
+    return digits
+
+
 def _capture_referral_code(phone: str, text: str) -> None:
     """If text starts with ref_CODE, store the code in bot_sessions (first time only)."""
     from db_cloud import _client
@@ -112,6 +127,9 @@ def _capture_referral_code(phone: str, text: str) -> None:
     if not m:
         return
     code = m.group(1).upper()
+    phone = _normalize_phone(phone)
+    if not phone:
+        return
     try:
         existing = _client().table("bot_sessions").select("referral_code").eq("phone", phone).execute()
         if existing.data and existing.data[0].get("referral_code"):
@@ -125,12 +143,20 @@ def _capture_referral_code(phone: str, text: str) -> None:
 def _credit_referrer(phone: str, order_id: str) -> None:
     """Insert a referral_credits row if this customer arrived via a ref link."""
     from db_cloud import _client
+    phone = _normalize_phone(phone)
+    if not phone or not order_id:
+        return
     try:
         row = _client().table("bot_sessions").select("referral_code").eq("phone", phone).execute()
         if not row.data:
             return
         code = (row.data[0].get("referral_code") or "").strip()
         if not code:
+            return
+        # Idempotency: skip if a credit already exists for this (code, order_id)
+        dup = _client().table("referral_credits").select("id").eq("referrer_code", code).eq("order_id", order_id).execute()
+        if dup.data:
+            logger.info(f"Referral credit already exists for {code} / {order_id} — skipping")
             return
         _client().table("referral_credits").insert({
             "referrer_code": code,
@@ -147,26 +173,34 @@ def _send_credits_balance(phone: str) -> None:
     """Reply to a 'MY CREDITS' message with the customer's referral store-credit balance."""
     from db_cloud import _client
     from whatsapp_notify import _send
+    raw_phone = phone
+    phone = _normalize_phone(phone)
+    if not phone:
+        return
     try:
         ref = _client().table("referrers").select("code").eq("label", phone).execute()
         if not ref.data:
-            _send(phone,
+            _send(raw_phone,
                   "You don't have a Printosky referral code yet.\n\n"
                   "Tip: rate your next order 4 or 5 stars - we'll send you a personal "
                   "share link so you can start earning store credit.")
             return
         code = ref.data[0]["code"]
-        # Sum all credits - redemption tracking (redeemed_at column) is a follow-up.
-        credits = _client().table("referral_credits").select("amount_inr").eq("referrer_code", code).execute()
+        # Sum unredeemed credits only.
+        credits = (_client().table("referral_credits")
+                            .select("amount_inr")
+                            .eq("referrer_code", code)
+                            .is_("redeemed_at", "null")
+                            .execute())
         balance = sum(int(row.get("amount_inr") or 0) for row in (credits.data or []))
         share_link = f"https://wa.me/919495706405?text=ref_{code}"
         if balance == 0:
-            _send(phone,
+            _send(raw_phone,
                   f"Your share code: *{code}*\n\n"
                   f"Rs.0 store credit so far - you'll earn Rs.20 each time a friend orders using your link:\n"
                   f"{share_link}")
         else:
-            _send(phone,
+            _send(raw_phone,
                   f"*Printosky Store Credit*\n\n"
                   f"Balance: *Rs.{balance}*\n"
                   f"Code: {code}\n\n"
@@ -176,7 +210,7 @@ def _send_credits_balance(phone: str) -> None:
     except Exception as e:
         logger.error(f"_send_credits_balance error for {phone}: {e}")
         try:
-            _send(phone, "Sorry, couldn't fetch your balance right now. Please try again later.")
+            _send(raw_phone, "Sorry, couldn't fetch your balance right now. Please try again later.")
         except Exception:
             pass
 
@@ -584,7 +618,7 @@ def _handle_referrals_balance(h) -> None:
         _json_response(h, 401, {"error": "staff PIN required"})
         return
     qs = parse_qs(urlparse(h.path).query)
-    phone = (qs.get("phone", [""])[0] or "").strip()
+    phone = _normalize_phone(qs.get("phone", [""])[0] or "")
     if not phone:
         _json_response(h, 400, {"error": "phone parameter required"})
         return
@@ -616,7 +650,12 @@ def _handle_referrals_redeem(h, body: bytes) -> None:
     """POST /referrals/redeem — staff auth.
     Body: { phone, order_id, amount_inr, staff_id }
     Marks oldest unredeemed credits up to amount_inr as redeemed.
-    Returns: { ok, redeemed, applied_credit_ids }
+
+    Idempotent: if a redemption against (referrer_code, order_id) already exists,
+    returns success without further changes.
+
+    Race-safe: each row update filters on redeemed_at IS NULL — if another worker
+    grabbed the same row first, the update returns 0 rows; we skip and try the next.
     """
     if not _acad_auth_staff(h):
         _json_response(h, 401, {"error": "staff PIN required"})
@@ -626,7 +665,7 @@ def _handle_referrals_redeem(h, body: bytes) -> None:
     except Exception:
         _json_response(h, 400, {"error": "invalid JSON"})
         return
-    phone    = (data.get("phone")    or "").strip()
+    phone    = _normalize_phone(data.get("phone") or "")
     order_id = (data.get("order_id") or "").strip()
     staff_id = (data.get("staff_id") or "").strip() or "unknown"
     try:
@@ -644,6 +683,22 @@ def _handle_referrals_redeem(h, body: bytes) -> None:
             _json_response(h, 404, {"error": "no referrer for this phone"})
             return
         code = ref.data[0]["code"]
+
+        # Idempotency: same (code, redeemed_order_id) already booked? Return success.
+        prior = (sb.table("referral_credits")
+                   .select("id,amount_inr")
+                   .eq("referrer_code", code)
+                   .eq("redeemed_order_id", order_id)
+                   .execute())
+        if prior.data:
+            already = sum(int(c.get("amount_inr") or 0) for c in prior.data)
+            logger.info(f"Idempotent redeem: order {order_id} already had Rs.{already} from {code}")
+            return _json_response(h, 200, {
+                "ok": True, "redeemed": already,
+                "applied_credit_ids": [c["id"] for c in prior.data],
+                "idempotent": True,
+            })
+
         rows = (sb.table("referral_credits")
                   .select("id,amount_inr")
                   .eq("referrer_code", code)
@@ -658,46 +713,60 @@ def _handle_referrals_redeem(h, body: bytes) -> None:
                 "balance": total_available, "requested": amount
             })
             return
+
         applied: list[int] = []
         remaining = amount
+        actually_redeemed = 0
         now_iso = datetime.utcnow().isoformat() + "Z"
         for row in available:
             if remaining <= 0:
                 break
             credit_amt = int(row.get("amount_inr") or 0)
             if credit_amt <= remaining:
-                # Mark this credit fully redeemed
-                sb.table("referral_credits").update({
+                # Atomic: only update if still unredeemed (race guard)
+                upd = (sb.table("referral_credits").update({
                     "redeemed_at": now_iso,
                     "redeemed_order_id": order_id,
                     "redeemed_by": staff_id,
-                }).eq("id", row["id"]).execute()
-                applied.append(row["id"])
-                remaining -= credit_amt
+                }).eq("id", row["id"]).is_("redeemed_at", "null").execute())
+                if upd.data:
+                    applied.append(row["id"])
+                    remaining -= credit_amt
+                    actually_redeemed += credit_amt
+                # else: another worker won the race; loop continues
             else:
-                # Partial redemption: split the row.
-                # 1) Update the original row to redeemed amount.
-                sb.table("referral_credits").update({
+                # Partial: shrink original row to `remaining` and mark redeemed,
+                # insert leftover as new unredeemed row. Race-guard the shrink.
+                upd = (sb.table("referral_credits").update({
                     "amount_inr": remaining,
                     "redeemed_at": now_iso,
                     "redeemed_order_id": order_id,
                     "redeemed_by": staff_id,
-                }).eq("id", row["id"]).execute()
-                # 2) Insert a new unredeemed row with the leftover.
-                sb.table("referral_credits").insert({
-                    "referrer_code":  code,
-                    "customer_phone": "split",
-                    "order_id":       row.get("order_id") or order_id,
-                    "amount_inr":     credit_amt - remaining,
-                }).execute()
-                applied.append(row["id"])
-                remaining = 0
-        logger.info(f"Redeemed Rs.{amount} from {code} for order {order_id} (staff {staff_id})")
+                }).eq("id", row["id"]).is_("redeemed_at", "null").execute())
+                if upd.data:
+                    sb.table("referral_credits").insert({
+                        "referrer_code":  code,
+                        "customer_phone": "split",
+                        "order_id":       row.get("order_id") or order_id,
+                        "amount_inr":     credit_amt - remaining,
+                    }).execute()
+                    applied.append(row["id"])
+                    actually_redeemed += remaining
+                    remaining = 0
+        if actually_redeemed < amount:
+            # Race lost on too many rows. Report what we got.
+            logger.warning(f"Redeem partial: requested Rs.{amount}, got Rs.{actually_redeemed} from {code}")
+            return _json_response(h, 409, {
+                "error": "race lost — try again",
+                "redeemed": actually_redeemed, "requested": amount,
+                "applied_credit_ids": applied,
+            })
+        logger.info(f"Redeemed Rs.{actually_redeemed} from {code} for order {order_id} (staff {staff_id})")
         _json_response(h, 200, {
             "ok": True,
-            "redeemed": amount,
+            "redeemed": actually_redeemed,
             "applied_credit_ids": applied,
-            "remaining_balance": total_available - amount,
+            "remaining_balance": total_available - actually_redeemed,
         })
     except Exception as e:
         logger.error(f"_handle_referrals_redeem error: {e}")
