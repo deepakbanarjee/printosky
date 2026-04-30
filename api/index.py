@@ -453,7 +453,7 @@ def _verify_pin(pin: str, stored_hash: str, stored_salt: str | None) -> bool:
 def _send_cors_headers(h) -> None:
     """Attach CORS headers. Endpoints are individually auth-gated so * is safe."""
     h.send_header("Access-Control-Allow-Origin",  "*")
-    h.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+    h.send_header("Access-Control-Allow-Methods", "POST, GET, PATCH, OPTIONS")
     h.send_header("Access-Control-Allow-Headers", "Content-Type, X-Hub-Signature-256, X-Razorpay-Signature, X-Staff-Pin, X-Student-Phone")
     h.send_header("Access-Control-Max-Age",       "86400")
 
@@ -1150,6 +1150,225 @@ def _handle_acad_razorpay_webhook(h, body: bytes) -> None:
     _json_response(h, 200, {"ok": True})
 
 
+def _handle_admin_conversations(h) -> None:
+    """GET /admin/conversations — inbox: one row per contact, last msg + unread count."""
+    from urllib.parse import parse_qs, urlparse
+    params   = parse_qs(urlparse(h.path).query)
+    admin_pw = params.get("admin_password", [""])[0]
+    if not _auth_admin_pw(admin_pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+
+    try:
+        from db_cloud import _client as _dbc
+        client = _dbc()
+
+        # Fetch recent rows across all contacts (newest first, cap 500)
+        log_rows = (
+            client.table("conversation_log")
+            .select("phone,direction,message_type,body,filename,created_at")
+            .order("created_at", desc=True)
+            .limit(500)
+            .execute()
+            .data
+        )
+
+        # Fetch contacts for names + last_seen_at
+        contacts_data = (
+            client.table("whatsapp_contacts")
+            .select("phone,name,last_seen_at")
+            .execute()
+            .data
+        )
+        contacts_map = {c["phone"]: c for c in contacts_data}
+
+        # One entry per phone — first occurrence in log_rows is the newest message
+        seen_phones: set = set()
+        inbox = []
+        for row in log_rows:
+            ph = row["phone"]
+            if ph in seen_phones:
+                continue
+            seen_phones.add(ph)
+
+            contact   = contacts_map.get(ph, {})
+            name      = contact.get("name") or _fmt_phone(ph)
+            last_seen = contact.get("last_seen_at")
+
+            # Count unread inbound messages newer than last_seen_at
+            unread = sum(
+                1 for r in log_rows
+                if r["phone"] == ph
+                and r["direction"] == "inbound"
+                and (not last_seen or r["created_at"] > last_seen)
+            )
+
+            mt = row.get("message_type") or "text"
+            if mt.startswith("image"):
+                preview = "Image"
+            elif mt.startswith("audio"):
+                preview = "Voice note"
+            elif mt.startswith("video"):
+                preview = "Video"
+            elif "pdf" in mt or mt.startswith("application"):
+                preview = f"File: {row.get('filename') or 'file'}"
+            else:
+                preview = (row.get("body") or "")[:60]
+
+            inbox.append({
+                "phone":             ph,
+                "name":              name,
+                "last_message":      preview,
+                "last_message_type": mt,
+                "unread_count":      unread,
+                "ts":                row["created_at"],
+            })
+
+        _json_response(h, 200, sorted(inbox, key=lambda x: x["ts"], reverse=True))
+    except Exception as exc:
+        logger.error("GET /admin/conversations error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_thread(h) -> None:
+    """GET /admin/thread?phone=X — thread messages for one contact."""
+    from urllib.parse import parse_qs, urlparse
+    params   = parse_qs(urlparse(h.path).query)
+    admin_pw = params.get("admin_password", [""])[0]
+    if not _auth_admin_pw(admin_pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+
+    phone = params.get("phone", [""])[0]
+    if not phone:
+        _json_response(h, 400, {"error": "phone required"})
+        return
+    limit = min(int(params.get("limit", ["100"])[0]), 200)
+
+    try:
+        from db_cloud import _client as _dbc, get_media_url
+        rows = (
+            _dbc().table("conversation_log")
+            .select("id,direction,message_type,body,filename,media_url,created_at")
+            .eq("phone", phone)
+            .order("created_at", desc=False)
+            .limit(limit)
+            .execute()
+            .data
+        )
+        # Resolve storage paths to public URLs
+        for row in rows:
+            mp = row.get("media_url")
+            if mp and not mp.startswith("http"):
+                row["media_url"] = get_media_url(mp)
+        _json_response(h, 200, rows)
+    except Exception as exc:
+        logger.error("GET /admin/thread error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_contacts_seen(h, body: bytes) -> None:
+    """PATCH /admin/contacts/seen — mark contact thread as read."""
+    try:
+        payload = json.loads(body)
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+    if not _auth_admin_pw(payload.get("admin_password", "")):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    phone = payload.get("phone", "")
+    if not phone:
+        _json_response(h, 400, {"error": "phone required"})
+        return
+    try:
+        from db_cloud import mark_contact_seen
+        mark_contact_seen(phone)
+        _json_response(h, 200, {"ok": True})
+    except Exception as exc:
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_upload_token(h, body: bytes) -> None:
+    """POST /admin/upload-token — issue a Supabase signed upload URL (5 min).
+
+    Browser uploads the file directly to Supabase (bypasses Vercel 4.5MB limit).
+    Returns {upload_url, storage_path}.
+    """
+    try:
+        payload = json.loads(body)
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+    if not _auth_admin_pw(payload.get("admin_password", "")):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    filename = payload.get("filename", "")
+    if not filename:
+        _json_response(h, 400, {"error": "filename required"})
+        return
+
+    import re as _re, time as _time
+    safe_name    = _re.sub(r"[^a-zA-Z0-9._\-]", "_", filename)
+    storage_path = f"outbound/{int(_time.time())}_{safe_name}"
+
+    try:
+        from db_cloud import _client as _dbc, INCOMING_BUCKET
+        resp = _dbc().storage.from_(INCOMING_BUCKET).create_signed_upload_url(storage_path)
+        _json_response(h, 200, {
+            "upload_url":   resp["signedURL"],
+            "storage_path": storage_path,
+        })
+    except Exception as exc:
+        logger.error("upload-token error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_send_file(h, body: bytes) -> None:
+    """POST /admin/send-file — server downloads from storage, sends via Meta, logs."""
+    try:
+        payload = json.loads(body)
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+    if not _auth_admin_pw(payload.get("admin_password", "")):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+
+    phone        = payload.get("phone", "")
+    storage_path = payload.get("storage_path", "")
+    caption      = payload.get("caption", "")
+    mime_type    = payload.get("mime_type", "application/octet-stream")
+    filename     = payload.get("filename", "file")
+
+    if not phone or not storage_path:
+        _json_response(h, 400, {"error": "phone and storage_path required"})
+        return
+
+    try:
+        from db_cloud import _client as _dbc, INCOMING_BUCKET, log_message
+        from whatsapp_notify import send_file
+
+        # Download from Supabase Storage (server-to-server, no size limit)
+        file_bytes = _dbc().storage.from_(INCOMING_BUCKET).download(storage_path)
+
+        # Upload to Meta and send WhatsApp message
+        ok = send_file(phone, file_bytes, mime_type, filename, caption)
+        if not ok:
+            _json_response(h, 502, {"error": "WhatsApp send failed"})
+            return
+
+        # Log outbound message with storage path as media_url
+        log_message(phone, "outbound", caption or filename,
+                    message_type=mime_type, filename=filename,
+                    media_url=storage_path)
+
+        _json_response(h, 200, {"ok": True})
+    except Exception as exc:
+        logger.error("send-file error for %s: %s", phone, exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 # ── Vercel request handler ────────────────────────────────────────────────────
 
 class handler(BaseHTTPRequestHandler):
@@ -1196,6 +1415,14 @@ class handler(BaseHTTPRequestHandler):
         # ── Referral drill-in credits (staff) ────────────────────────────────
         if self.path.startswith("/referrals/credits"):
             _handle_referrals_credits(self)
+            return
+
+        # ── Admin inbox (conversations) ───────────────────────────────────────
+        if self.path.startswith("/admin/conversations"):
+            _handle_admin_conversations(self)
+            return
+        if self.path.startswith("/admin/thread"):
+            _handle_admin_thread(self)
             return
 
         # Health check
@@ -1305,6 +1532,13 @@ class handler(BaseHTTPRequestHandler):
             _handle_admin_send(self, body)
             return
 
+        if self.path == "/admin/upload-token":
+            _handle_admin_upload_token(self, body)
+            return
+        if self.path == "/admin/send-file":
+            _handle_admin_send_file(self, body)
+            return
+
         # ── Referral store-credit redemption (staff) ─────────────────────────
         if self.path == "/referrals/redeem":
             _handle_referrals_redeem(self, body)
@@ -1312,3 +1546,11 @@ class handler(BaseHTTPRequestHandler):
 
         self.send_response(404)
         self.end_headers()
+
+    def do_PATCH(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body   = self.rfile.read(length)
+        if self.path == "/admin/contacts/seen":
+            _handle_admin_contacts_seen(self, body)
+            return
+        _json_response(self, 404, {"error": "Not found"})
