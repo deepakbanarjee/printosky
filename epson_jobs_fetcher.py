@@ -167,6 +167,13 @@ def _probe_job_log(session: requests.Session):
     return None, None, None
 
 
+def _epson_date(s: str | None) -> str | None:
+    """Convert Epson date '2026.05.01 17:30' → ISO '2026-05-01 17:30'."""
+    if not s:
+        return None
+    return s.replace(".", "-", 2)  # replace first two dots only (YYYY.MM.DD)
+
+
 def _parse_joblog_csv(csv_text: str) -> list[dict]:
     """
     Parse the Epson job history CSV.
@@ -206,8 +213,8 @@ def _parse_joblog_csv(csv_text: str) -> list[dict]:
             "file_name":     row.get("File Name"),
             "result":        row.get("Result"),
             "pages_printed": pages_printed,
-            "job_date":      row.get("Date/Time"),
-            "print_end_date": row.get("Completed"),
+            "job_date":      _epson_date(row.get("Date/Time")),
+            "print_end_date": _epson_date(row.get("Completed")),
             "imported_at":   now,
         })
     return rows
