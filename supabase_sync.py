@@ -201,7 +201,7 @@ def collect_konica_jobs(db_path):
 
 
 def collect_epson_jobs(db_path):
-    """Pull epson job log rows (last 2000)."""
+    """Pull epson weblog job rows (source=weblog only — unique by job_number)."""
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -213,6 +213,7 @@ def collect_epson_jobs(db_path):
                    snmp_total_before, snmp_total_after, delta_pages,
                    attributed_job_id, imported_at
             FROM epson_jobs
+            WHERE source = 'weblog'
             ORDER BY job_date DESC LIMIT 2000
         """)
         rows = []
@@ -305,7 +306,7 @@ def sync_once(db_path):
     ok_supplies   = upsert("printer_supplies", supplies)                                                 if supplies    else True
     ok_changes    = upsert("supply_changes",   sup_changes, on_conflict="store_id,id")                  if sup_changes else True
     ok_konica     = upsert("konica_jobs",      konica_jobs, on_conflict="store_id,job_number")          if konica_jobs else True
-    ok_epson      = upsert("epson_jobs",       epson_jobs,  on_conflict="store_id,id")                  if epson_jobs  else True
+    ok_epson      = upsert("epson_jobs",       epson_jobs,  on_conflict="store_id,job_number")          if epson_jobs  else True
     ok_sessions   = upsert("staff_sessions",   staff_sess,  on_conflict="id")                           if staff_sess  else True
 
     if ok_jobs and ok_printers and ok_summary and ok_supplies and ok_changes and ok_konica and ok_epson and ok_sessions:
