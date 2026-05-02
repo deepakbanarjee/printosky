@@ -450,6 +450,32 @@ def _verify_pin(pin: str, stored_hash: str, stored_salt: str | None) -> bool:
     return hmac.compare_digest(stored_hash, expected)
 
 
+def _handle_health(h) -> None:
+    """Lightweight health check for external uptime monitoring.
+
+    Returns 200 with {"ok": true, "checks": {...}} when every required env
+    var is present. Returns 503 with the same shape (ok=false) otherwise.
+    Does NOT make any external network calls — this is a liveness probe.
+    Safe to expose publicly: only emits booleans, never secret values.
+    """
+    required = {
+        "meta_token":   bool(os.environ.get("META_SYSTEM_USER_TOKEN")),
+        "meta_phone":   bool(os.environ.get("META_PHONE_NUMBER_ID")),
+        "supabase_url": bool(os.environ.get("SUPABASE_URL")),
+        "supabase_key": bool(os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_KEY")),
+        "razorpay_key": bool(os.environ.get("RAZORPAY_KEY_ID")),
+        "razorpay_sec": bool(os.environ.get("RAZORPAY_WEBHOOK_SECRET")),
+    }
+    all_ok = all(required.values())
+    payload = {
+        "ok": all_ok,
+        "service": "printosky-api",
+        "checks": required,
+        "ts": datetime.utcnow().isoformat() + "Z",
+    }
+    _json_response(h, 200 if all_ok else 503, payload)
+
+
 def _send_cors_headers(h) -> None:
     """Attach CORS headers. Endpoints are individually auth-gated so * is safe."""
     h.send_header("Access-Control-Allow-Origin",  "*")
@@ -1423,6 +1449,10 @@ class handler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/admin/thread"):
             _handle_admin_thread(self)
+            return
+
+        if self.path.startswith("/api/health"):
+            _handle_health(self)
             return
 
         # Health check
