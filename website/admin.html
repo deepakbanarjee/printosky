@@ -3337,6 +3337,12 @@ async function convFetchInbox() {
     const r = await fetch(
       `${ACAD_API}/admin/conversations?admin_password=${encodeURIComponent(_convPw())}`
     );
+    if (r.status === 403) {
+      sessionStorage.removeItem('admin_pw_cache');
+      const pw = prompt('Admin password incorrect. Re-enter:');
+      if (pw) { sessionStorage.setItem('admin_pw_cache', pw); convFetchInbox(); }
+      return;
+    }
     if (!r.ok) return;
     const contacts = await r.json();
     convRenderInbox(contacts);
@@ -3612,6 +3618,10 @@ function switchTab(tab) {
 
   // Conversations polling — start when tab is active, stop otherwise
   if (tab === "conv") {
+    if (!_convPw()) {
+      const pw = prompt('Admin password:');
+      if (pw) sessionStorage.setItem('admin_pw_cache', pw);
+    }
     convStartPolling();
   } else {
     convStopPolling();
