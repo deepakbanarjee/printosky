@@ -306,6 +306,27 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
     return dest_name  # storage path — callers store this in media_url column
 
 
+def _store_media_only(sender: str, media_id: str, mime_type: str,
+                      orig_filename: str) -> str | None:
+    """Download a WhatsApp attachment and upload to Supabase — no job, no reply."""
+    from db_cloud import upload_file
+    ext = FILE_MIME_TYPES.get(mime_type, "")
+    ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if orig_filename and "." in orig_filename:
+        base_name = re.sub(r"[^\w.\- ]", "_", os.path.basename(orig_filename)).strip()
+    else:
+        base_name = f"{sender}_{ts}{ext or '.bin'}"
+    dest_name = f"{sender}_{ts}_{base_name}"
+    content = _download_meta_media(media_id)
+    if content is None:
+        logger.error(f"Failed to download chat media {media_id} from {sender}")
+        return None
+    content = _compress_lossless(content, mime_type or "")
+    upload_file(dest_name, content, mime_type or "application/octet-stream")
+    logger.info(f"Stored chat media {dest_name} ({len(content)} bytes)")
+    return dest_name
+
+
 def _process_meta_webhook(data: dict) -> None:
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
@@ -329,13 +350,29 @@ def _process_meta_webhook(data: dict) -> None:
                         except Exception:
                             pass
 
-                elif msg_type in ("document", "image", "video", "audio"):
+                elif msg_type in ("document", "image"):
                     blk      = msg.get(msg_type, {})
                     media_id = blk.get("id", "")
                     mime     = blk.get("mime_type", "")
                     fname    = blk.get("filename", "")
                     if media_id:
                         storage_path = _handle_media(sender, msg_type, media_id, mime, fname)
+                        try:
+                            from db_cloud import log_message, upsert_contact
+                            log_message(sender, "inbound",
+                                        fname or f"[{msg_type}]",
+                                        message_type=msg_type, filename=fname,
+                                        media_url=storage_path)
+                            upsert_contact(sender, name=pushname)
+                        except Exception:
+                            pass
+                elif msg_type in ("audio", "video"):
+                    blk      = msg.get(msg_type, {})
+                    media_id = blk.get("id", "")
+                    mime     = blk.get("mime_type", "")
+                    fname    = blk.get("filename", "")
+                    if media_id:
+                        storage_path = _store_media_only(sender, media_id, mime, fname)
                         try:
                             from db_cloud import log_message, upsert_contact
                             log_message(sender, "inbound",
