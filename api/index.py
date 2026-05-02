@@ -450,6 +450,45 @@ def _verify_pin(pin: str, stored_hash: str, stored_salt: str | None) -> bool:
     return hmac.compare_digest(stored_hash, expected)
 
 
+def _handle_internal_notify_owner(h, body: bytes) -> None:
+    """Internal endpoint for trusted local scripts to send a WhatsApp alert.
+
+    Auth: shared secret in JSON body (`secret` field) compared against
+    UPTIME_NOTIFY_SECRET env var. Constant-time comparison to avoid
+    timing leaks.
+
+    Body: {"secret": "<hex>", "message": "<text>"}
+    Returns 200 {"sent": true} on success, 401 on bad secret, 400 on
+    malformed body, 500 if WhatsApp send fails.
+    """
+    expected = os.environ.get("UPTIME_NOTIFY_SECRET", "")
+    if not expected:
+        _json_response(h, 503, {"error": "alerting disabled (UPTIME_NOTIFY_SECRET unset)"})
+        return
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+    provided = str(data.get("secret", ""))
+    if not hmac.compare_digest(provided, expected):
+        _json_response(h, 401, {"error": "bad secret"})
+        return
+    message = str(data.get("message", "")).strip()
+    if not message or len(message) > 4000:
+        _json_response(h, 400, {"error": "message must be 1-4000 chars"})
+        return
+    owner_phone = os.environ.get("OWNER_PHONE", "919495706405")
+    try:
+        from whatsapp_notify import _send_meta
+        ok = _send_meta(owner_phone, message)
+    except Exception as e:
+        logger.exception("notify-owner: send failed")
+        _json_response(h, 500, {"sent": False, "error": str(e)[:200]})
+        return
+    _json_response(h, 200 if ok else 500, {"sent": bool(ok)})
+
+
 def _handle_health(h) -> None:
     """Lightweight health check for external uptime monitoring.
 
@@ -1546,6 +1585,10 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # ── Staff PIN self-service ───────────────────────────────────────────
+        if self.path == "/api/internal/notify-owner":
+            _handle_internal_notify_owner(self, body)
+            return
+
         if self.path == "/staff/set-pin":
             _handle_staff_set_pin(self, body)
             return
