@@ -1033,6 +1033,7 @@ def _handle_acad_orders_post(h, body: bytes) -> None:
     # Best-effort: create the Rs. 500 advance payment link.
     # If this fails the order still exists — staff can re-send via WhatsApp.
     advance_url = None
+    debug_reason = None    # TEMP: surface failure reason in response for live debugging
     try:
         from razorpay_integration import create_academic_payment_link
         link = create_academic_payment_link(
@@ -1050,15 +1051,20 @@ def _handle_acad_orders_post(h, body: bytes) -> None:
             except Exception as e:
                 logger.warning(f"Could not persist razorpay_advance_link for {pid}: {e}")
         else:
+            debug_reason = f"link_returned_no_url: {link!r}"[:300]
             logger.error(f"Razorpay link create failed for {pid}: {link.get('error')}")
     except Exception as e:
+        debug_reason = f"exception: {type(e).__name__}: {e}"[:300]
         logger.error(f"Razorpay link create exception for {pid}: {e}")
 
-    _json_response(h, 201, {
+    resp = {
         "project_id":   pid,
         "payment_url":  advance_url,   # may be null if link creation failed
         "amount_inr":   500,
-    })
+    }
+    if debug_reason and not advance_url:
+        resp["_debug"] = debug_reason   # TEMP — remove after diagnosing
+    _json_response(h, 201, resp)
 
 
 def _handle_acad_generate(h, body: bytes, pid: str, phase: str) -> None:
