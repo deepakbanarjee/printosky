@@ -31,10 +31,17 @@ import threading
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
+import os
 import re
 import requests
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 KONICA_IP            = "192.168.55.110"
@@ -45,8 +52,8 @@ SNMP_TIMEOUT         = 3            # seconds
 HTTP_TIMEOUT         = 10           # seconds
 
 EPSON_BASE      = f"https://{EPSON_IP}"
-EPSON_USER      = "Oxygen"
-EPSON_PASS      = "Oxygen@1234"
+EPSON_USER      = os.environ.get("EPSON_USER", "Oxygen")
+EPSON_PASS      = os.environ.get("EPSON_PASS", "Oxygen@1234")
 EPSON_LOGIN_URL = f"{EPSON_BASE}/PRESENTATION/ADVANCED/PASSWORD/SET"
 EPSON_USAGE_URL = f"{EPSON_BASE}/PRESENTATION/ADVANCED/INFO_MENTINFO/TOP"
 

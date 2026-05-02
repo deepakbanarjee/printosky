@@ -5,9 +5,10 @@ import requests, re, urllib3
 urllib3.disable_warnings()
 
 IP    = "192.168.55.202"
+import os
 BASE  = f"https://{IP}"
-USER  = "Oxygen"
-PASS  = "Oxygen@1234"
+USER  = os.environ.get("EPSON_USER", "Oxygen")
+PASS  = os.environ.get("EPSON_PASS") or exit("Set EPSON_PASS in .env or environment before running")
 TIMEOUT = 10
 
 LOGIN_URL   = f"{BASE}/PRESENTATION/ADVANCED/PASSWORD/SET"

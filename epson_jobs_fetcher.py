@@ -6,7 +6,7 @@ Fetches per-job print details from the Epson WF-C21000 (192.168.55.202).
 Two-tier approach:
   Tier 1 — Web log CSV: logs in via form POST, extracts SETUPTOKEN from
             INFO_JOBHISTORY/TOP, then POSTs to OUTPUT.CSV. Rows stored
-            with source='weblog'. Auth: Oxygen / Oxygen@1234 (set 2026-04-29).
+            with source='weblog'. Auth: EPSON_USER/EPSON_PASS env vars (set 2026-04-29).
 
   Tier 2 — SNMP delta attribution: compares consecutive SNMP page-counter
             readings in printer_counters and attributes the page delta to
@@ -23,6 +23,7 @@ Poll interval: 300 seconds (5 min) to match the SNMP poller cycle.
 
 import csv
 import io
+import os
 import re
 import time
 import sqlite3
@@ -32,6 +33,12 @@ import requests
 import urllib3
 from datetime import datetime
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger("epson_fetcher")
@@ -39,8 +46,8 @@ logger = logging.getLogger("epson_fetcher")
 # ── Config ─────────────────────────────────────────────────────────────────────
 EPSON_IP           = "192.168.55.202"
 EPSON_BASE         = f"https://{EPSON_IP}"
-EPSON_USER         = "Oxygen"
-EPSON_PASS         = "Oxygen@1234"
+EPSON_USER         = os.environ.get("EPSON_USER", "Oxygen")
+EPSON_PASS         = os.environ.get("EPSON_PASS", "Oxygen@1234")
 HTTP_TIMEOUT       = 15        # seconds
 FETCH_INTERVAL     = 300       # seconds (5 minutes — matches SNMP poll)
 _WEBLOG_FAIL_LIMIT = 3         # give up Tier 1 after this many consecutive failures
