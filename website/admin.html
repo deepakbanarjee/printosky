@@ -3362,7 +3362,8 @@ function convRenderInbox(contacts) {
   }
   list.innerHTML = contacts.map(c => `
     <div class="conv-contact${c.phone === _convActivePhone ? ' active' : ''}"
-         onclick="convOpenContact(${JSON.stringify(c.phone)}, ${JSON.stringify(c.name)})">
+         data-phone="${convEscAttr(c.phone)}" data-name="${convEscAttr(c.name || '')}"
+         onclick="convOpenContact(this.dataset.phone, this.dataset.name)">
       <div class="conv-contact-name">${convEsc(c.name)}</div>
       <div class="conv-contact-preview">${convEsc(c.last_message)}</div>
       <div class="conv-contact-meta">
