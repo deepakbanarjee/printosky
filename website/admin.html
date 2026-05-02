@@ -3332,14 +3332,39 @@ let _convNotified    = new Set();
 
 function _convPw() { return sessionStorage.getItem('admin_pw_cache') || ''; }
 
+/* ── Admin password modal (replaces browser prompt) ──────────────────────── */
+let _adminPwResolve = null;
+function _adminPwPrompt(isError = false) {
+  return new Promise(resolve => {
+    _adminPwResolve = resolve;
+    document.getElementById('admin-pw-modal-title').textContent =
+      isError ? 'Incorrect — try again' : 'Admin Password';
+    document.getElementById('admin-pw-error').textContent =
+      isError ? 'Wrong password.' : '';
+    document.getElementById('admin-pw-input').value = '';
+    const modal = document.getElementById('admin-pw-modal');
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('admin-pw-input').focus(), 50);
+  });
+}
+function adminPwCancel() {
+  document.getElementById('admin-pw-modal').style.display = 'none';
+  if (_adminPwResolve) { _adminPwResolve(null); _adminPwResolve = null; }
+}
+function adminPwSubmit() {
+  const pw = document.getElementById('admin-pw-input').value;
+  document.getElementById('admin-pw-modal').style.display = 'none';
+  if (_adminPwResolve) { _adminPwResolve(pw || null); _adminPwResolve = null; }
+}
+
 async function convFetchInbox() {
   try {
-    const r = await fetch(
-      `${ACAD_API}/admin/conversations?admin_password=${encodeURIComponent(_convPw())}`
-    );
+    const r = await fetch(`${ACAD_API}/admin/conversations`, {
+      headers: { 'X-Admin-Password': _convPw() }
+    });
     if (r.status === 403) {
       sessionStorage.removeItem('admin_pw_cache');
-      const pw = prompt('Admin password incorrect. Re-enter:');
+      const pw = await _adminPwPrompt(true);
       if (pw) { sessionStorage.setItem('admin_pw_cache', pw); convFetchInbox(); }
       return;
     }
@@ -3399,8 +3424,8 @@ async function convFetchThread(phone) {
   if (!phone) return;
   try {
     const r = await fetch(
-      `${ACAD_API}/admin/thread?phone=${encodeURIComponent(phone)}&limit=100` +
-      `&admin_password=${encodeURIComponent(_convPw())}`
+      `${ACAD_API}/admin/thread?phone=${encodeURIComponent(phone)}&limit=100`,
+      { headers: { 'X-Admin-Password': _convPw() } }
     );
     if (!r.ok) return;
     const messages = await r.json();
@@ -3607,7 +3632,7 @@ document.addEventListener('click', function(e) {
   const url = e.target.dataset && e.target.dataset.lightboxUrl;
   if (url) convOpenLightbox(url);
 });
-function switchTab(tab) {
+async function switchTab(tab) {
   document.getElementById("jobs-view").style.display     = tab === "jobs"      ? "" : "none";
   document.getElementById("conv-panel").style.display    = tab === "conv"      ? "block" : "none";
   document.getElementById("academic-tab").style.display  = tab === "academic"  ? "block" : "none";
@@ -3620,8 +3645,9 @@ function switchTab(tab) {
   // Conversations polling — start when tab is active, stop otherwise
   if (tab === "conv") {
     if (!_convPw()) {
-      const pw = prompt('Admin password:');
+      const pw = await _adminPwPrompt(false);
       if (pw) sessionStorage.setItem('admin_pw_cache', pw);
+      else return;
     }
     convStartPolling();
   } else {
@@ -4254,5 +4280,20 @@ async function submitNewAcademicOrder() {
   loadAcademicOrders();
 }
 </script>
+
+<!-- ── Admin password modal ───────────────────────────────────────────────── -->
+<div id="admin-pw-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:8px;padding:28px 32px;min-width:300px;box-shadow:0 4px 24px rgba(0,0,0,.2)">
+    <div style="font-weight:600;font-size:16px;margin-bottom:14px" id="admin-pw-modal-title">Admin Password</div>
+    <input type="password" id="admin-pw-input" placeholder="Password"
+           style="width:100%;border:1px solid #ccc;border-radius:4px;padding:8px 10px;font-size:14px;box-sizing:border-box;outline:none"
+           onkeydown="if(event.key==='Enter')adminPwSubmit()">
+    <div style="color:#c00;font-size:12px;margin-top:6px;min-height:16px" id="admin-pw-error"></div>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button onclick="adminPwCancel()" style="padding:7px 18px;border:1px solid #ccc;background:#f5f5f5;border-radius:4px;cursor:pointer;font-size:14px">Cancel</button>
+      <button onclick="adminPwSubmit()" style="padding:7px 18px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px">OK</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

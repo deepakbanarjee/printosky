@@ -552,19 +552,29 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
 
     file_dir  = os.path.dirname(os.path.abspath(filepath))
     file_name = os.path.basename(filepath)
+
+    # SumatraPDF uses the filename as the document name in the Windows print
+    # spooler, which the Epson records verbatim in its job-history CSV.
+    # Copy to a temp file named <job_id>.<ext> so the Epson log shows the
+    # Printosky job ID — enabling direct matching without time-window deltas.
+    import tempfile, shutil as _shutil
+    ext = os.path.splitext(file_name)[1] or ".pdf"
+    named_tmp = os.path.join(tempfile.gettempdir(), f"{job_id}{ext}")
+    _shutil.copy2(filepath, named_tmp)
+
     cmd = [
         sumatra,
         "-print-to", printer_name,
         "-print-settings", settings,
         "-exit-when-done",
         "-silent",
-        file_name,
+        named_tmp,
     ]
 
     logging.info("Print command: %s", " ".join(cmd))
 
     try:
-        result = subprocess.run(cmd, timeout=60, capture_output=True, text=True, cwd=file_dir)
+        result = subprocess.run(cmd, timeout=60, capture_output=True, text=True)
         if result.returncode == 0:
             update_job_status(job_id, "Printed", printer_name, staff_id)
             return True, f"Sent to {printer_name} ({copies} cop{'y' if copies==1 else 'ies'})"
@@ -574,6 +584,11 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
             return False, f"Print failed: {err}"
     except subprocess.TimeoutExpired:
         return False, "Print command timed out after 60s"
+    finally:
+        try:
+            os.remove(named_tmp)
+        except OSError:
+            pass
     except Exception as e:
         return False, str(e)
 
