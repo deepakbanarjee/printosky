@@ -826,13 +826,24 @@
         });
 
         if (res.status === 201) {
-          const data   = await res.json().catch(function() { return {}; });
-          const projId = data.project_id || data.id || 'PROJ-????';
+          const data       = await res.json().catch(function() { return {}; });
+          const projId     = data.project_id || data.id || 'PROJ-????';
+          const paymentUrl = data.payment_url || '';
           try { localStorage.removeItem(DRAFT_KEY); } catch (_) {}
+
+          if (paymentUrl) {
+            // Backend created a Razorpay payment link — send the student straight there.
+            btn.textContent = 'Redirecting to payment…';
+            window.location.href = paymentUrl;
+            return;
+          }
+
+          // Fallback: payment link couldn't be generated server-side.
+          // Show success + project ID; staff will follow up over WhatsApp with a manual link.
           document.getElementById('form-card').style.display = 'none';
           document.getElementById('success-div').style.display = 'block';
-          document.getElementById(‘success-msg’).textContent =
-            ‘Your Project ID: ‘ + projId;
+          document.getElementById('success-msg').textContent =
+            'Your Project ID: ' + projId;
         } else {
           const errData = await res.json().catch(function() { return {}; });
           const msg = errData.detail || errData.error || errData.message || ('Server error: ' + res.status);

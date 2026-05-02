@@ -1007,12 +1007,14 @@ def _handle_acad_orders_post(h, body: bytes) -> None:
             _json_response(h, 400, {"error": f"missing {f}"})
             return
     try:
-        from db_cloud_academic import next_project_id, create_order
+        from db_cloud_academic import next_project_id, create_order, update_fields
         pid = next_project_id()
+        customer_name  = str(payload["customer_name"])[:200]
+        whatsapp_phone = str(payload["whatsapp_phone"])[:20]
         order: dict = {
             "project_id":     pid,
-            "customer_name":  str(payload["customer_name"])[:200],
-            "whatsapp_phone": str(payload["whatsapp_phone"])[:20],
+            "customer_name":  customer_name,
+            "whatsapp_phone": whatsapp_phone,
             "course":         str(payload["course"])[:100],
             "topic":          str(payload["topic"])[:500],
             "study_area":     str(payload.get("study_area", ""))[:200],
@@ -1023,10 +1025,40 @@ def _handle_acad_orders_post(h, body: bytes) -> None:
             "status":         "order_received",
         }
         create_order(order)
-        _json_response(h, 201, {"project_id": pid})
     except Exception as e:
         logger.error(f"acad order create error: {e}")
         _json_response(h, 500, {"error": "server error"})
+        return
+
+    # Best-effort: create the Rs. 500 advance payment link.
+    # If this fails the order still exists — staff can re-send via WhatsApp.
+    advance_url = None
+    try:
+        from razorpay_integration import create_academic_payment_link
+        link = create_academic_payment_link(
+            project_id     = pid,
+            payment_type   = "advance",
+            amount         = 500.0,
+            description    = f"Printosky academic project advance — {pid}",
+            customer_phone = whatsapp_phone,
+            customer_name  = customer_name,
+        )
+        if "url" in link and link["url"]:
+            advance_url = link["url"]
+            try:
+                update_fields(pid, razorpay_advance_link=link["url"])
+            except Exception as e:
+                logger.warning(f"Could not persist razorpay_advance_link for {pid}: {e}")
+        else:
+            logger.error(f"Razorpay link create failed for {pid}: {link.get('error')}")
+    except Exception as e:
+        logger.error(f"Razorpay link create exception for {pid}: {e}")
+
+    _json_response(h, 201, {
+        "project_id":   pid,
+        "payment_url":  advance_url,   # may be null if link creation failed
+        "amount_inr":   500,
+    })
 
 
 def _handle_acad_generate(h, body: bytes, pid: str, phase: str) -> None:
