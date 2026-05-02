@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Submit Your Project — Printosky</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0f0f0f;
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      padding: 24px 16px 48px;
+    }
+
+    #app {
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .header h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: #ffc000;
+      margin-bottom: 8px;
+    }
+
+    .header p {
+      color: #888;
+      font-size: 15px;
+    }
+
+    /* Step indicator */
+    .steps-indicator {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 32px;
+    }
+
+    .step-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100px;
+    }
+
+    .step-circle {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 15px;
+      transition: background 0.3s, color 0.3s, border-color 0.3s;
+      background: #2a2a2a;
+      color: #666;
+      border: 2px solid #3a3a3a;
+      flex-shrink: 0;
+    }
+
+    .step-circle.active {
+      background: #ffc000;
+      color: #000;
+      border-color: #ffc000;
+    }
+
+    .step-circle.done {
+      background: #2a2a2a;
+      color: #ffc000;
+      border-color: #ffc000;
+    }
+
+    .step-label {
+      font-size: 12px;
+      color: #666;
+      margin-top: 6px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .step-connector {
+      flex: 1;
+      height: 2px;
+      background: #3a3a3a;
+      margin-bottom: 18px;
+      max-width: 60px;
+      transition: background 0.3s;
+    }
+
+    .step-connector.done {
+      background: #ffc000;
+    }
+
+    /* Card */
+    .card {
+      background: #1a1a1a;
+      border-radius: 12px;
+      padding: 32px;
+    }
+
+    .step { display: block; }
+    .step.hidden { display: none; }
+
+    /* Form elements */
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #aaa;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select,
+    textarea {
+      width: 100%;
+      background: #2a2a2a;
+      border: 1px solid #3a3a3a;
+      color: #e0e0e0;
+      border-radius: 8px;
+      padding: 11px 14px;
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="text"]:focus,
+    input[type="number"]:focus,
+    select:focus,
+    textarea:focus {
+      border-color: #ffc000;
+    }
+
+    select option { background: #2a2a2a; }
+    textarea { resize: vertical; }
+
+    .step-error {
+      background: #2a1a1a;
+      border: 1px solid #ff4d4d;
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #ff4d4d;
+      font-size: 14px;
+      margin-bottom: 20px;
+      display: none;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover:not(:disabled) { opacity: 0.88; }
+    .btn:active:not(:disabled) { opacity: 0.75; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-primary {
+      background: #ffc000;
+      color: #000;
+    }
+
+    .btn-secondary {
+      background: #2a2a2a;
+      color: #e0e0e0;
+      border: 1px solid #3a3a3a;
+    }
+
+    .btn-danger {
+      background: transparent;
+      color: #ff4d4d;
+      border: 1px solid #ff4d4d;
+      padding: 6px 12px;
+      font-size: 13px;
+      border-radius: 6px;
+    }
+
+    .btn-add {
+      background: #2a2a2a;
+      color: #ffc000;
+      border: 1px dashed #ffc000;
+      width: 100%;
+      justify-content: center;
+      padding: 12px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+    }
+
+    .nav-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 28px;
+      gap: 12px;
+    }
+
+    /* Step 2 — Table builder */
+    .tables-container {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+
+    .table-row {
+      background: #222;
+      border: 1px solid #333;
+      border-radius: 10px;
+      padding: 16px;
+    }
+
+    .table-row-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .table-row-header span {
+      font-size: 13px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .table-row-fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .table-row-fields .form-group { margin-bottom: 0; }
+    .table-options { grid-column: 1 / -1; }
+
+    .table-count-badge {
+      display: inline-block;
+      background: #2a2a2a;
+      color: #ffc000;
+      border: 1px solid #ffc000;
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    /* Step 3 — Summary */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .summary-item {
+      background: #222;
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+
+    .summary-item .s-label {
+      font-size: 12px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 4px;
+    }
+
+    .summary-item .s-value {
+      font-size: 15px;
+      color: #e0e0e0;
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    .pricing-card {
+      background: #222;
+      border: 1px solid #ffc000;
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+    }
+
+    .pricing-card h3 {
+      font-size: 15px;
+      color: #ffc000;
+      margin-bottom: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .pricing-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      font-size: 15px;
+      border-bottom: 1px solid #333;
+    }
+
+    .pricing-row:last-child { border-bottom: none; }
+
+    .pricing-row.total {
+      font-weight: 700;
+      font-size: 17px;
+      color: #ffc000;
+      padding-top: 12px;
+    }
+
+    .pricing-note {
+      font-size: 12px;
+      color: #666;
+      margin-left: 8px;
+      font-weight: 400;
+    }
+
+    /* Success */
+    #success-div {
+      display: none;
+      background: #1a1a1a;
+      border-radius: 12px;
+      padding: 48px 32px;
+      text-align: center;
+    }
+
+    .success-icon {
+      width: 64px;
+      height: 64px;
+      background: #ffc000;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      font-size: 28px;
+      color: #000;
+      font-weight: 700;
+    }
+
+    #success-div h2 {
+      font-size: 22px;
+      color: #ffc000;
+      margin-bottom: 12px;
+    }
+
+    #success-div p {
+      color: #aaa;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    #success-msg {
+      color: #e0e0e0;
+      font-weight: 600;
+      margin-top: 8px;
+      font-size: 16px;
+    }
+
+    @media (max-width: 480px) {
+      .card { padding: 20px 16px; }
+      .summary-grid { grid-template-columns: 1fr; }
+      .table-row-fields { grid-template-columns: 1fr; }
+      .header h1 { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="header">
+      <h1>Academic Project Report</h1>
+      <p>Submit your project details and we'll generate your report</p>
+    </div>
+
+    <div class="steps-indicator">
+      <div class="step-item">
+        <div class="step-circle active" id="circle-1">1</div>
+        <div class="step-label">Order Details</div>
+      </div>
+      <div class="step-connector" id="conn-1"></div>
+      <div class="step-item">
+        <div class="step-circle" id="circle-2">2</div>
+        <div class="step-label">Table Builder</div>
+      </div>
+      <div class="step-connector" id="conn-2"></div>
+      <div class="step-item">
+        <div class="step-circle" id="circle-3">3</div>
+        <div class="step-label">Summary &amp; Pay</div>
+      </div>
+    </div>
+
+    <div class="card" id="form-card">
+
+      <!-- Step 1 — Order Details -->
+      <div id="step1" class="step">
+        <div class="step-error" id="err1"></div>
+
+        <div class="form-group">
+          <label for="customer_name">Your Name *</label>
+          <input type="text" id="customer_name" placeholder="Full name" autocomplete="name">
+        </div>
+
+        <div class="form-group">
+          <label for="whatsapp_phone">WhatsApp Number *</label>
+          <input type="tel" id="whatsapp_phone" placeholder="10-digit mobile number" maxlength="13" inputmode="numeric">
+          <small style="color:#777;display:block;margin-top:4px;">Enter your 10-digit mobile number (we'll WhatsApp you on this number)</small>
+        </div>
+
+        <div class="form-group">
+          <label for="course">Course *</label>
+          <select id="course">
+            <option value="">— Select your course —</option>
+            <option value="B.Com">B.Com</option>
+            <option value="BBA">BBA</option>
+            <option value="MBA">MBA</option>
+            <option value="MCA">MCA</option>
+            <option value="BCA">BCA</option>
+            <option value="BSc">BSc</option>
+            <option value="MSc">MSc</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="topic">Research Topic *</label>
+          <input type="text" id="topic" placeholder="e.g. A Study on Customer Satisfaction">
+        </div>
+
+        <div class="form-group">
+          <label for="study_area">Study Area / Location</label>
+          <input type="text" id="study_area" placeholder="e.g. Thrissur district">
+        </div>
+
+        <div class="form-group">
+          <label for="sample_size">Sample Size</label>
+          <input type="number" id="sample_size" value="100" min="1" max="10000">
+        </div>
+
+        <div class="nav-row">
+          <span></span>
+          <button class="btn btn-primary" onclick="goToStep2()">Next &#8594;</button>
+        </div>
+      </div>
+
+      <!-- Step 2 — Table Builder -->
+      <div id="step2" class="step hidden">
+        <div class="step-error" id="err2"></div>
+
+        <div id="table-count-display" class="table-count-badge">0 tables added</div>
+
+        <div class="tables-container" id="tables-container"></div>
+
+        <button class="btn btn-add" onclick="addTable(null)">+ Add Table</button>
+
+        <div class="nav-row">
+          <button class="btn btn-secondary" onclick="goToStep(1)">&#8592; Back</button>
+          <button class="btn btn-primary" onclick="goToStep3()">Next &#8594;</button>
+        </div>
+      </div>
+
+      <!-- Step 3 — Summary & Payment -->
+      <div id="step3" class="step hidden">
+        <div class="step-error" id="err3"></div>
+
+        <h2 style="font-size:18px;margin-bottom:20px;color:#e0e0e0;">Order Summary</h2>
+
+        <div class="summary-grid">
+          <div class="summary-item">
+            <div class="s-label">Name</div>
+            <div class="s-value" id="sum-name">—</div>
+          </div>
+          <div class="summary-item">
+            <div class="s-label">Course</div>
+            <div class="s-value" id="sum-course">—</div>
+          </div>
+          <div class="summary-item" style="grid-column:1/-1">
+            <div class="s-label">Research Topic</div>
+            <div class="s-value" id="sum-topic">—</div>
+          </div>
+          <div class="summary-item">
+            <div class="s-label">Tables</div>
+            <div class="s-value" id="sum-tables">—</div>
+          </div>
+          <div class="summary-item">
+            <div class="s-label">Sample Size</div>
+            <div class="s-value" id="sum-sample">—</div>
+          </div>
+        </div>
+
+        <div class="pricing-card">
+          <h3>Payment Breakdown</h3>
+          <div class="pricing-row">
+            <span>Advance Payment</span>
+            <span>&#8377;500 <span class="pricing-note">to start work</span></span>
+          </div>
+          <div class="pricing-row">
+            <span>Balance Payment</span>
+            <span>&#8377;500 <span class="pricing-note">on final approval</span></span>
+          </div>
+          <div class="pricing-row total">
+            <span>Total</span>
+            <span>&#8377;1,000</span>
+          </div>
+        </div>
+
+        <div class="nav-row">
+          <button class="btn btn-secondary" onclick="goToStep(2)">&#8592; Back</button>
+          <button class="btn btn-primary" id="place-order-btn" onclick="placeOrder()">
+            Submit Order Details
+          </button>
+        </div>
+      </div>
+
+    </div><!-- /.card -->
+
+    <!-- Success screen -->
+    <div id="success-div">
+      <div class="success-icon">&#10003;</div>
+      <h2>Order Received!</h2>
+      <p>Your project details have been submitted successfully.</p>
+      <p id="success-msg"></p>
+      <p style="margin-top:12px;color:#555;font-weight:500;">📱 We'll WhatsApp you shortly with a payment link for the ₹500 advance to begin work.</p>
+    </div>
+  </div><!-- /#app -->
+
+  <script>
+    'use strict';
+
+    const API = window.location.hostname === 'localhost'
+      ? 'http://127.0.0.1:3006'
+      : 'https://printosky.vercel.app';
+
+    const DRAFT_KEY = 'printosky_academic_draft';
+
+    let currentStep = 1;
+    let tables = [];       // { _id, title, chart_type, options }
+    let _nextId = 0;
+
+    // ── Draft persistence ─────────────────────────────────────────────────
+
+    function saveDraft() {
+      try {
+        const state = {
+          customer_name: val('customer_name'),
+          whatsapp_phone: val('whatsapp_phone'),
+          course: val('course'),
+          topic: val('topic'),
+          study_area: val('study_area'),
+          sample_size: val('sample_size'),
+          tables: tables,
+          currentStep: currentStep,
+        };
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(state));
+      } catch (_) { /* storage unavailable — ignore */ }
+    }
+
+    function restoreDraft() {
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (!raw) return;
+        const d = JSON.parse(raw);
+        setVal('customer_name', d.customer_name);
+        setVal('whatsapp_phone', d.whatsapp_phone);
+        setVal('course', d.course);
+        setVal('topic', d.topic);
+        setVal('study_area', d.study_area);
+        setVal('sample_size', d.sample_size);
+        if (Array.isArray(d.tables)) {
+          d.tables.forEach(function(t) { addTable(t); });
+        }
+        if (d.currentStep && d.currentStep > 1) {
+          goToStep(d.currentStep, true);
+        }
+      } catch (_) { /* corrupt draft — ignore */ }
+    }
+
+    function attachDraftListeners() {
+      ['customer_name', 'whatsapp_phone', 'course', 'topic', 'study_area', 'sample_size']
+        .forEach(function(id) {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.addEventListener('input', saveDraft);
+          el.addEventListener('change', saveDraft);
+        });
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+
+    function val(id) {
+      const el = document.getElementById(id);
+      return el ? el.value : '';
+    }
+
+    function setVal(id, v) {
+      const el = document.getElementById(id);
+      if (el && v !== undefined && v !== null) el.value = v;
+    }
+
+    function showError(step, msg) {
+      const el = document.getElementById('err' + step);
+      if (!el) return;
+      el.textContent = msg || '';
+      el.style.display = msg ? 'block' : 'none';
+    }
+
+    function escHtml(s) {
+      return String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // ── Step navigation ───────────────────────────────────────────────────
+
+    function goToStep(n, silent) {
+      document.getElementById('step' + currentStep).classList.add('hidden');
+      currentStep = n;
+      document.getElementById('step' + currentStep).classList.remove('hidden');
+      updateIndicator();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (!silent) saveDraft();
+    }
+
+    function updateIndicator() {
+      for (var i = 1; i <= 3; i++) {
+        const c = document.getElementById('circle-' + i);
+        c.classList.remove('active', 'done');
+        if (i < currentStep) c.classList.add('done');
+        else if (i === currentStep) c.classList.add('active');
+      }
+      for (var j = 1; j <= 2; j++) {
+        document.getElementById('conn-' + j).classList.toggle('done', j < currentStep);
+      }
+    }
+
+    // ── Step 1 → Step 2 ───────────────────────────────────────────────────
+
+    function normalizePhone(raw) {
+      // Strip everything except digits
+      const digits = (raw || '').replace(/\D/g, '');
+      // 10 digits → prepend 91
+      if (/^\d{10}$/.test(digits)) return '91' + digits;
+      // 12 digits starting with 91 → use as-is
+      if (/^91\d{10}$/.test(digits)) return digits;
+      // 13 digits starting with 091 → strip leading 0
+      if (/^091\d{10}$/.test(digits)) return digits.slice(1);
+      return null;
+    }
+
+    function goToStep2() {
+      const name  = val('customer_name').trim();
+      const phoneRaw = val('whatsapp_phone').trim();
+      const course = val('course');
+      const topic = val('topic').trim();
+
+      if (!name)  { showError(1, 'Please enter your name.'); return; }
+      if (!phoneRaw) { showError(1, 'Please enter your WhatsApp number.'); return; }
+      const phone = normalizePhone(phoneRaw);
+      if (!phone) {
+        showError(1, 'Please enter a valid 10-digit Indian mobile number.');
+        return;
+      }
+      // Persist the normalized form so submission uses 91XXXXXXXXXX
+      setVal('whatsapp_phone', phone);
+      if (!course) { showError(1, 'Please select your course.'); return; }
+      if (!topic)  { showError(1, 'Please enter your research topic.'); return; }
+
+      showError(1, '');
+      goToStep(2);
+    }
+
+    // ── Table builder ─────────────────────────────────────────────────────
+
+    function minTables() {
+      const c = val('course');
+      return (c === 'B.Com' || c === 'BBA') ? 5 : 3;
+    }
+
+    function addTable(data) {
+      const id = ++_nextId;
+      const t = {
+        _id: id,
+        title:      (data && data.title)      || '',
+        chart_type: (data && data.chart_type) || 'bar',
+        options:    (data && data.options)    || '',
+      };
+      tables.push(t);
+      renderRow(t);
+      updateBadge();
+      saveDraft();
+    }
+
+    function renderRow(t) {
+      const container = document.getElementById('tables-container');
+      const idx = tables.findIndex(function(x) { return x._id === t._id; });
+      const div = document.createElement('div');
+      div.className = 'table-row';
+      div.id = 'trow-' + t._id;
+      div.innerHTML =
+        '<div class="table-row-header">' +
+          '<span>Table #' + (idx + 1) + '</span>' +
+          '<button class="btn btn-danger" onclick="removeTable(' + t._id + ')">&#10005; Remove</button>' +
+        '</div>' +
+        '<div class="table-row-fields">' +
+          '<div class="form-group">' +
+            '<label>Table Title</label>' +
+            '<input type="text" placeholder="e.g. Gender of Respondents"' +
+              ' value="' + escHtml(t.title) + '"' +
+              ' oninput="updateField(' + t._id + ',\'title\',this.value)">' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>Chart Type</label>' +
+            '<select onchange="updateField(' + t._id + ',\'chart_type\',this.value)">' +
+              '<option value="bar"'        + (t.chart_type === 'bar'        ? ' selected' : '') + '>Bar Chart</option>' +
+              '<option value="pie"'        + (t.chart_type === 'pie'        ? ' selected' : '') + '>Pie Chart</option>' +
+              '<option value="line"'       + (t.chart_type === 'line'       ? ' selected' : '') + '>Line Chart</option>' +
+              '<option value="table_only"' + (t.chart_type === 'table_only' ? ' selected' : '') + '>Table Only</option>' +
+            '</select>' +
+          '</div>' +
+          '<div class="form-group table-options">' +
+            '<label>Options (one per line)</label>' +
+            '<textarea rows="3" placeholder="Yes&#10;No&#10;Maybe"' +
+              ' oninput="updateField(' + t._id + ',\'options\',this.value)">' +
+              escHtml(t.options) +
+            '</textarea>' +
+          '</div>' +
+        '</div>';
+      container.appendChild(div);
+    }
+
+    function rerenderAll() {
+      document.getElementById('tables-container').innerHTML = '';
+      tables.forEach(function(t) { renderRow(t); });
+    }
+
+    function removeTable(id) {
+      tables = tables.filter(function(t) { return t._id !== id; });
+      rerenderAll();
+      updateBadge();
+      saveDraft();
+    }
+
+    function updateField(id, field, value) {
+      const t = tables.find(function(x) { return x._id === id; });
+      if (t) { t[field] = value; saveDraft(); }
+    }
+
+    function updateBadge() {
+      const n = tables.length;
+      document.getElementById('table-count-display').textContent =
+        n + (n === 1 ? ' table added' : ' tables added');
+    }
+
+    // ── Step 2 → Step 3 ───────────────────────────────────────────────────
+
+    function goToStep3() {
+      const min    = minTables();
+      const course = val('course');
+
+      if (tables.length < min) {
+        showError(2, course + ' requires at least ' + min + ' tables. You have ' + tables.length + '.');
+        return;
+      }
+
+      showError(2, '');
+
+      // Populate summary
+      document.getElementById('sum-name').textContent   = val('customer_name').trim();
+      document.getElementById('sum-course').textContent = course;
+      document.getElementById('sum-topic').textContent  = val('topic').trim();
+      document.getElementById('sum-tables').textContent = tables.length + ' tables';
+      document.getElementById('sum-sample').textContent = val('sample_size') || '100';
+
+      goToStep(3);
+    }
+
+    // ── Place order ───────────────────────────────────────────────────────
+
+    async function placeOrder() {
+      const btn = document.getElementById('place-order-btn');
+      btn.disabled = true;
+      btn.textContent = 'Submitting…';
+      showError(3, '');
+
+      const payload = {
+        customer_name:  val('customer_name').trim(),
+        whatsapp_phone: val('whatsapp_phone').trim(),
+        course:         val('course'),
+        topic:          val('topic').trim(),
+        study_area:     val('study_area').trim(),
+        sample_size:    parseInt(val('sample_size'), 10) || 100,
+        tables: tables.map(function(t) {
+          return { title: t.title, chart_type: t.chart_type, options: t.options };
+        }),
+      };
+
+      try {
+        const res = await fetch(API + '/academic/orders', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(payload),
+        });
+
+        if (res.status === 201) {
+          const data   = await res.json().catch(function() { return {}; });
+          const projId = data.project_id || data.id || 'PROJ-????';
+          try { localStorage.removeItem(DRAFT_KEY); } catch (_) {}
+          document.getElementById('form-card').style.display = 'none';
+          document.getElementById('success-div').style.display = 'block';
+          document.getElementById(‘success-msg’).textContent =
+            ‘Your Project ID: ‘ + projId;
+        } else {
+          const errData = await res.json().catch(function() { return {}; });
+          const msg = errData.detail || errData.error || errData.message || ('Server error: ' + res.status);
+          showError(3, msg);
+          btn.disabled = false;
+          btn.innerHTML = 'Submit Order Details';
+        }
+      } catch (err) {
+        showError(3, 'Network error — please check your connection and try again.');
+        btn.disabled = false;
+        btn.innerHTML = 'Submit Order Details';
+      }
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────
+
+    document.addEventListener('DOMContentLoaded', function() {
+      attachDraftListeners();
+      restoreDraft();
+    });
+  </script>
+</body>
+</html>
