@@ -1348,11 +1348,12 @@ def _handle_admin_thread(h) -> None:
             _dbc().table("conversation_log")
             .select("id,direction,message_type,body,filename,media_url,created_at")
             .eq("phone", phone)
-            .order("created_at", desc=False)
+            .order("created_at", desc=True)
             .limit(limit)
             .execute()
             .data
         )
+        rows.reverse()  # return oldest→newest for display
         # Resolve storage paths to public URLs
         for row in rows:
             mp = row.get("media_url")
