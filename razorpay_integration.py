@@ -149,14 +149,22 @@ def create_academic_payment_link(
             cust["name"] = str(customer_name)[:200]
         payload["customer"] = cust
 
+    def _post(p: dict):
+        return requests.post(f"{BASE_URL}/payment_links", json=p, auth=_auth(), timeout=10)
+
     try:
-        r = requests.post(
-            f"{BASE_URL}/payment_links",
-            json=payload,
-            auth=_auth(),
-            timeout=10,
-        )
+        r = _post(payload)
         data = r.json()
+        # If Razorpay rejects the customer block (bad phone, recurring digits, etc.),
+        # retry without it — the link still works, just no auto-SMS reminder.
+        if r.status_code != 200 and "customer" in payload:
+            err_desc = (data.get("error", {}) or {}).get("description", "").lower()
+            if "contact" in err_desc or "customer" in err_desc or "phone" in err_desc:
+                logger.warning(f"Razorpay rejected customer block for {project_id} ({err_desc}) — retrying without it")
+                payload.pop("customer", None)
+                payload["notify"]["sms"] = False
+                r = _post(payload)
+                data = r.json()
         if r.status_code == 200:
             logger.info(f"Academic payment link created for {project_id} ({payment_type}): {data.get('short_url')}")
             return {
@@ -165,7 +173,7 @@ def create_academic_payment_link(
                 "short_url": data.get("short_url"),
             }
         logger.error(f"Razorpay academic link error for {project_id}: {data}")
-        return {"error": data.get("error", {}).get("description", "Unknown error")}
+        return {"error": (data.get("error") or {}).get("description", "Unknown error")}
     except Exception as e:
         logger.error(f"Razorpay academic link request failed for {project_id}: {e}")
         return {"error": str(e)}
