@@ -37,7 +37,7 @@ CLOUD (all logic, all state)
 | Sprint | Work | Outcome |
 |--------|------|---------|
 | A1 (Week 1-2) | PM2, UptimeRobot, Vercel env vars, Supabase pin_salt migration | Shop never goes dark unnoticed |
-| A2 (Week 3-6) | Finish Meta Cloud API cutover; move webhook_receiver to Vercel; Supabase as primary write | No store PC web requests |
+| A2 (Week 3-6) | Finish Meta Cloud API cutover ✅ done; move webhook_receiver to Vercel ✅ done 2026-05-01 (handler `_process_razorpay_payment` lives in `api/index.py`; `pay.printosky.com` tunnel deprecated — see `vault/infrastructure.md`); Supabase as primary write | No store PC web requests |
 | A3 (Week 7-9) | Build agent.py; retire watcher.py + print_server.py + webhook_receiver.py | 6,000 lines → 150 lines on store PC |
 | A4 (Week 10-12) | shop_id on all tables; per-shop config table; manual provisioning script | Second shop live in 30 min |
 

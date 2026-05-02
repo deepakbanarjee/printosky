@@ -22,11 +22,12 @@ _Last updated: 2026-04-29 — session 10_
 
 ### 🔴 Must resolve before public launch
 
-**SEC-OPEN-1: RAZORPAY_ACADEMIC_WEBHOOK_SECRET**
-- Print webhook → `webhook_receiver.py` store PC port 3002 (uses `RAZORPAY_WEBHOOK_SECRET`)
-- Academic webhook → Vercel `/academic/razorpay-webhook` (uses `RAZORPAY_ACADEMIC_WEBHOOK_SECRET`)
-- These are two different Razorpay webhook endpoints = need two separate secrets in Razorpay dashboard
-- Action: add academic webhook URL in Razorpay dashboard with a new secret → add `RAZORPAY_ACADEMIC_WEBHOOK_SECRET` to Vercel env vars
+**~~SEC-OPEN-1: RAZORPAY_ACADEMIC_WEBHOOK_SECRET~~** — RESOLVED 2026-05-01
+- Both webhooks now run on Vercel (`api/index.py`) and share the same `RAZORPAY_WEBHOOK_SECRET` env var. No separate `RAZORPAY_ACADEMIC_WEBHOOK_SECRET` needed.
+- Print webhook handler (`_process_razorpay_payment`) at `POST /webhook/razorpay` — verifies HMAC with `RAZORPAY_WEBHOOK_SECRET`
+- Academic webhook handler (`_handle_acad_razorpay_webhook`) at `POST /academic/razorpay-webhook` — verifies HMAC with the same `RAZORPAY_WEBHOOK_SECRET`
+- Both are registered in Razorpay dashboard. Smoke-tested via bad-signature curl: academic returns 401, print returns 400 — both reject correctly.
+- **Pending follow-up:** the WhatsApp print-job webhook in Razorpay dashboard still points at `https://pay.printosky.com/webhook/razorpay` (Cloudflare tunnel that's currently down — 502). Repoint to `https://printosky.vercel.app/webhook/razorpay` (same handler, same secret) — see `vault/infrastructure.md` Cloudflare cleanup section.
 
 **SEC-OPEN-2: ADMIN_PASSWORD_HASH in Vercel**
 - `api/index.py` reads this for `/admin/reset-pin` and `/admin/send`
