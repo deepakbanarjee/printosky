@@ -111,6 +111,8 @@ _All from [SECURITY.md](SECURITY.md) — restating priorities here for cross-ref
 - ✅ Redemption endpoints + admin checkbox UI
 - ✅ Phone normalization, redeem idempotency, race-safe atomic update
 - ✅ Branch hygiene: collapsed to `main`-only
+- ✅ Leaderboard tab + drill-in panel + CSV + sortable + hide-test toggle
+- ✅ **End-to-end smoke test passed (2026-05-02)** — see [REFERRAL_KIT.md](REFERRAL_KIT.md)
 
 ---
 
