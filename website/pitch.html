@@ -40,6 +40,8 @@
       height: 100%;
       box-sizing: border-box;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
     /* ── Typography ── */
@@ -102,17 +104,18 @@
       gap: 36px;
       align-items: start;
       margin-top: 20px;
-      height: calc(100% - 90px);
+      flex: 1;
+      min-height: 0;
     }
     .cols-2   { grid-template-columns: 1fr 1fr; }
     .cols-3-2 { grid-template-columns: 3fr 2fr; }
 
     /* ── Big stat block ── */
-    .stats-row { display: flex; gap: 40px; margin-top: 36px; }
+    .stats-row { display: flex; gap: 40px; margin-top: 20px; }
     .stat { flex: 1; }
     .stat .n {
       font-family: 'Syne', sans-serif;
-      font-size: 3em;
+      font-size: 2.5em;
       font-weight: 800;
       letter-spacing: -0.05em;
       line-height: 1;
@@ -176,7 +179,7 @@
     .cards-2 { grid-template-columns: repeat(2, 1fr); }
     .card {
       border-radius: 9px;
-      padding: 18px;
+      padding: 14px 16px;
       background: rgba(255,255,255,0.07);
     }
     .s-light .card, .s-white .card {
@@ -184,7 +187,7 @@
       border: 1px solid rgba(0,0,0,0.07);
       box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     }
-    .card .ico   { font-size: 1.4em; margin-bottom: 8px; }
+    .card .ico   { font-size: 1.2em; margin-bottom: 4px; }
     .card .ct    { font-family: 'Syne', sans-serif; font-size: 0.8em; font-weight: 700; margin-bottom: 5px; }
     .card .cd    { font-size: 0.72em; line-height: 1.6; color: rgba(255,255,255,0.5); }
     .s-light .card .cd, .s-white .card .cd { color: #6B7280; }
@@ -398,7 +401,7 @@
       <section class="s-light">
         <div class="chip">The Problem</div>
         <h2 class="h-md">Printing shouldn't require a treasure hunt.</h2>
-        <div class="cols cols-3-2" style="height:calc(100% - 95px);">
+        <div class="cols cols-3-2">
           <ul class="pains">
             <li class="pain">
               <span class="pain-i">🗺️</span>
@@ -459,7 +462,7 @@
       <section class="s-white">
         <div class="chip">Customer Journey</div>
         <h2 class="h-md">How it works — in 4 steps.</h2>
-        <div class="cols cols-2" style="height:calc(100% - 90px);">
+        <div class="cols cols-2">
           <ul class="steps">
             <li class="step">
               <div class="step-n">1</div>
@@ -522,32 +525,32 @@
           <div class="card">
             <div class="ico">📱</div>
             <div class="ct">WhatsApp dispatch</div>
-            <div class="cd">Jobs arrive as WhatsApp messages with the file, specs, and pickup code. Tap ACCEPT to claim.</div>
+            <div class="cd">Jobs arrive via WhatsApp with file &amp; specs. Tap ACCEPT to claim.</div>
           </div>
           <div class="card">
             <div class="ico">⚡</div>
             <div class="ct">Automatic routing</div>
-            <div class="cd">Our engine sends jobs to the best available store. No bidding. No chasing customers.</div>
+            <div class="cd">Routes to the best available store. No bidding, no chasing.</div>
           </div>
           <div class="card">
             <div class="ico">💳</div>
             <div class="ct">Instant Razorpay payouts</div>
-            <div class="cd">Payment splits automatically on completion. Your share lands in your account — zero manual settlement.</div>
+            <div class="cd">Razorpay splits your share on completion. Zero manual settlement.</div>
           </div>
           <div class="card">
             <div class="ico">🔒</div>
             <div class="ct">Pickup code verification</div>
-            <div class="cd">Customers show a unique P-XXXX code at the counter. No name lookup, no receipt confusion.</div>
+            <div class="cd">Customer shows P-XXXX code at the counter. No name lookup needed.</div>
           </div>
           <div class="card">
             <div class="ico">📊</div>
             <div class="ct">Live order tracking</div>
-            <div class="cd">Customers track status at printosky.com/track — no calls asking "is it done yet?"</div>
+            <div class="cd">Status at printosky.com/track — fewer "is it done yet?" calls.</div>
           </div>
           <div class="card">
             <div class="ico">🛠️</div>
             <div class="ct">Keep your setup</div>
-            <div class="cd">Your printers, your folder system, your workflow — we wrap around what you have. Nothing changes.</div>
+            <div class="cd">Keep your printers and workflow. We wrap around what you have.</div>
           </div>
         </div>
       </section>
@@ -595,7 +598,7 @@
       <section class="s-white">
         <div class="chip">Payments</div>
         <h2 class="h-md">Razorpay Route splits every payment instantly.</h2>
-        <div class="cols cols-2" style="height:calc(100% - 90px);">
+        <div class="cols cols-2">
           <div>
             <p class="lead" style="color:#6B7280;margin-top:4px;">
               When a customer pays, <strong style="color:#0D1117;">Razorpay Route</strong> automatically splits the payment between Printosky's platform fee and the partner store's share — no manual reconciliation, ever.
@@ -649,7 +652,7 @@
       <section class="s-light">
         <div class="chip">Customer Experience</div>
         <h2 class="h-md">Frictionless pickup. Zero confusion.</h2>
-        <div class="cols cols-2" style="height:calc(100% - 90px);">
+        <div class="cols cols-2">
           <div>
             <p class="lead" style="color:#6B7280;margin-top:4px;">
               Every paid job gets a <strong style="color:#0D1117;">cryptographically random 4-character code</strong>. Customer shows it at the counter — no name lookup, no receipt, no phone call.

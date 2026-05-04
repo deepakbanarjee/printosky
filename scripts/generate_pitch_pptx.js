@@ -42,8 +42,8 @@ const C = {
   panelBdr:'2A3A4A',
 };
 
-const SYNE   = 'Syne';
-const DMSANS = 'DM Sans';
+const SYNE   = 'Trebuchet MS';
+const DMSANS = 'Calibri';
 
 // ── Helper: small label chip ─────────────────────────────────────
 function addChip(slide, text, x, y) {
