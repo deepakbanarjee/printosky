@@ -106,6 +106,7 @@
       margin-top: 20px;
       flex: 1;
       min-height: 0;
+      overflow: hidden;
     }
     .cols-2   { grid-template-columns: 1fr 1fr; }
     .cols-3-2 { grid-template-columns: 3fr 2fr; }
@@ -188,7 +189,7 @@
       box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     }
     .card .ico   { font-size: 1.2em; margin-bottom: 4px; }
-    .card .ct    { font-family: 'Syne', sans-serif; font-size: 0.8em; font-weight: 700; margin-bottom: 5px; }
+    .card .ct    { font-family: 'Syne', sans-serif; font-size: 0.8em; font-weight: 700; margin-bottom: 0; }
     .card .cd    { font-size: 0.72em; line-height: 1.6; color: rgba(255,255,255,0.5); }
     .s-light .card .cd, .s-white .card .cd { color: #6B7280; }
 
@@ -437,9 +438,6 @@
           <h2 class="h-lg" style="color:#fff;max-width:620px;">
             One WhatsApp number.<br>Every print shop in Thrissur.
           </h2>
-          <p class="lead" style="max-width:500px;">
-            Printosky is a <strong style="color:#fff;">unified print marketplace</strong> — customers message once, we route the job to the best available store, they pay online, and pick up with a secure code.
-          </p>
           <div class="stats-row">
             <div class="stat">
               <div class="n">1</div>
@@ -518,39 +516,30 @@
       <section class="s-light">
         <div class="chip">For Partner Stores</div>
         <h2 class="h-md">Join Printosky. Get jobs. No software needed.</h2>
-        <p class="lead" style="color:#6B7280;margin-bottom:0;max-width:620px;">
-          Partner stores receive jobs via <strong style="color:#0D1117;">WhatsApp</strong> — no API, no software install, no IT overhead. Tap ACCEPT, print, mark ready.
-        </p>
         <div class="cards cards-3" style="margin-top:16px;">
           <div class="card">
             <div class="ico">📱</div>
             <div class="ct">WhatsApp dispatch</div>
-            <div class="cd">Jobs arrive via WhatsApp with file &amp; specs. Tap ACCEPT to claim.</div>
           </div>
           <div class="card">
             <div class="ico">⚡</div>
             <div class="ct">Automatic routing</div>
-            <div class="cd">Routes to the best available store. No bidding, no chasing.</div>
           </div>
           <div class="card">
             <div class="ico">💳</div>
             <div class="ct">Instant Razorpay payouts</div>
-            <div class="cd">Razorpay splits your share on completion. Zero manual settlement.</div>
           </div>
           <div class="card">
             <div class="ico">🔒</div>
             <div class="ct">Pickup code verification</div>
-            <div class="cd">Customer shows P-XXXX code at the counter. No name lookup needed.</div>
           </div>
           <div class="card">
             <div class="ico">📊</div>
             <div class="ct">Live order tracking</div>
-            <div class="cd">Status at printosky.com/track — fewer "is it done yet?" calls.</div>
           </div>
           <div class="card">
             <div class="ico">🛠️</div>
             <div class="ct">Keep your setup</div>
-            <div class="cd">Keep your printers and workflow. We wrap around what you have.</div>
           </div>
         </div>
       </section>
@@ -825,6 +814,7 @@
     transition: 'slide',
     transitionSpeed: 'fast',
     backgroundTransition: 'fade',
+    display: 'flex',
   });
   deck.initialize();
 
