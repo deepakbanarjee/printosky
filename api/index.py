@@ -158,13 +158,16 @@ def _credit_referrer(phone: str, order_id: str) -> None:
         if dup.data:
             logger.info(f"Referral credit already exists for {code} / {order_id} — skipping")
             return
+        # Look up campaign-specific credit amount; default 20 for regular referrers
+        ref_row = _client().table("referrers").select("credit_amount").eq("code", code).execute()
+        credit_amount = int((ref_row.data[0].get("credit_amount") or 20) if ref_row.data else 20)
         _client().table("referral_credits").insert({
             "referrer_code": code,
             "customer_phone": phone,
             "order_id": order_id,
-            "amount_inr": 20,
+            "amount_inr": credit_amount,
         }).execute()
-        logger.info(f"Referral credit Rs.20 logged -> {code!r} for order {order_id}")
+        logger.info(f"Referral credit Rs.{credit_amount} logged -> {code!r} for order {order_id}")
     except Exception as e:
         logger.error(f"_credit_referrer error for {phone} / {order_id}: {e}")
 
@@ -1013,6 +1016,73 @@ def _handle_acad_orders_get(h) -> None:
         _json_response(h, 500, {"error": "server error"})
 
 
+def _handle_track(h, code: str) -> None:
+    """GET /api/track/<code> — public read-only order tracker.
+
+    Returns minimum-PII status + (only after status='Ready') the pickup
+    location. Pickup codes are 30^4=810k random tokens so brute-forcing is
+    impractical; non-existent codes return 404 (no information leaked about
+    code-validity vs. code-existence).
+    """
+    try:
+        from pickup_code import is_valid_pickup_code
+        if not is_valid_pickup_code(code):
+            _json_response(h, 400, {"error": "invalid pickup code format"})
+            return
+
+        from db_cloud import _client
+        client = _client()
+        job_rows = (
+            client.table("jobs")
+            .select("status,customer_name,assigned_store_id,store_id,"
+                    "received_at,pickup_ready_at,delivered_at,pickup_code")
+            .eq("pickup_code", code)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(job_rows, "data", None) or []
+        if not rows:
+            _json_response(h, 404, {"error": "not found"})
+            return
+
+        job = rows[0]
+        status = (job.get("status") or "").strip() or "Pending"
+        is_ready_or_later = status in {"Ready", "Delivered", "Completed", "Printed"}
+
+        partner_id = job.get("assigned_store_id") or job.get("store_id") or "OSP"
+        pickup_label = None
+        pickup_address = None
+        if is_ready_or_later:
+            partner_rows = (
+                client.table("partners")
+                .select("display_pickup_label,pickup_address,name")
+                .eq("store_id", partner_id)
+                .limit(1)
+                .execute()
+            )
+            prows = getattr(partner_rows, "data", None) or []
+            if prows:
+                pickup_label = prows[0].get("display_pickup_label")
+                pickup_address = prows[0].get("pickup_address") or prows[0].get("name")
+
+        full_name = (job.get("customer_name") or "").strip()
+        first_name = full_name.split()[0] if full_name else None
+
+        _json_response(h, 200, {
+            "pickup_code":     code,
+            "status":          status,
+            "first_name":      first_name,
+            "received_at":     job.get("received_at"),
+            "pickup_ready_at": job.get("pickup_ready_at"),
+            "delivered_at":    job.get("delivered_at"),
+            "pickup_label":    pickup_label,
+            "pickup_address":  pickup_address,
+        })
+    except Exception as e:
+        logger.error(f"track lookup error for {code!r}: {e}")
+        _json_response(h, 500, {"error": "server error"})
+
+
 def _handle_acad_order_get(h, pid: str) -> None:
     """GET /academic/orders/{id} — get single order (staff only)."""
     try:
@@ -1530,6 +1600,15 @@ class handler(BaseHTTPRequestHandler):
                 self.send_response(403)
                 self.end_headers()
                 logger.warning("Meta webhook verify failed — token mismatch")
+            return
+
+        # ── Public order tracker (no auth) ───────────────────────────────────
+        if self.path.startswith("/api/track/"):
+            m = re.match(r"^/api/track/([^/?]+)$", self.path.split("?")[0])
+            if m:
+                _handle_track(self, m.group(1))
+            else:
+                _json_response(self, 400, {"error": "missing pickup code"})
             return
 
         # ── Academic project orders ──────────────────────────────────────────
