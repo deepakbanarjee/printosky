@@ -3,45 +3,883 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- Permanent move to /academic.html. Search engines update via canonical + 0-second meta refresh. -->
-  <title>Academic Project Builder — Printosky</title>
-  <meta name="description" content="Order your academic project report at Printosky, Thrissur. Custom research, formatting, printing, and binding.">
-  <link rel="canonical" href="https://printosky.com/academic.html">
-  <meta name="robots" content="noindex,follow">
-  <meta http-equiv="refresh" content="0; url=/academic.html">
-  <script>
-    // JS fallback so the redirect happens even when meta-refresh is blocked
-    // (some privacy extensions strip it). Preserves any query string.
-    (function () {
-      var qs = window.location.search || '';
-      window.location.replace('/academic.html' + qs);
-    })();
-  </script>
+  <title>Project Report Builder — Printosky</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #f5f5f5; color: #222; margin: 0;
-      display: flex; align-items: center; justify-content: center; min-height: 100vh;
-    }
-    .box {
-      background: #fff; padding: 32px 40px; border-radius: 8px;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.08); max-width: 480px; text-align: center;
-    }
-    h1 { font-size: 1.25rem; margin: 0 0 12px; color: #0f2557; }
-    p  { margin: 0 0 16px; line-height: 1.5; }
-    a  { color: #e8500a; font-weight: 600; text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    /* ── Page-level overrides ── */
+    .pb-page { max-width: 860px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    .pb-hero { text-align: center; padding: 3rem 0 2rem; }
+    .pb-hero h1 { font-family: 'Syne', sans-serif; font-size: clamp(1.8rem, 5vw, 2.6rem); font-weight: 800; color: var(--ink); line-height: 1.2; margin-bottom: .75rem; }
+    .pb-hero p { color: #555; font-size: 1.05rem; max-width: 600px; margin: 0 auto; }
+    .pb-badge { display: inline-block; background: var(--green); color: #fff; font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; border-radius: 4px; padding: 2px 8px; margin-left: 6px; vertical-align: middle; }
+
+    /* ── Step indicator ── */
+    .pb-steps { display: flex; align-items: center; justify-content: center; gap: 0; margin-bottom: 2.5rem; }
+    .pb-step-dot { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #ddd; background: #fff; display: flex; align-items: center; justify-content: center; font-size: .75rem; font-weight: 700; color: #aaa; transition: all .2s; }
+    .pb-step-dot.active { border-color: var(--blue); background: var(--blue); color: #fff; }
+    .pb-step-dot.done { border-color: var(--green); background: var(--green); color: #fff; }
+    .pb-step-line { flex: 1; max-width: 60px; height: 2px; background: #ddd; }
+    .pb-step-line.done { background: var(--green); }
+
+    /* ── Cards ── */
+    .pb-card { background: #fff; border: 1.5px solid #e8e2d8; border-radius: 12px; padding: 1.75rem; margin-bottom: 1.5rem; }
+    .pb-card h2 { font-family: 'Syne', sans-serif; font-size: 1.15rem; font-weight: 700; color: var(--ink); margin-bottom: 1.25rem; }
+    .pb-card h3 { font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: #777; margin-bottom: .75rem; }
+
+    /* ── University chips ── */
+    .uni-chips { display: flex; flex-wrap: wrap; gap: .6rem; }
+    .uni-chip { display: flex; align-items: center; gap: .4rem; border: 1.5px solid #ddd; border-radius: 8px; padding: .5rem .9rem; cursor: pointer; background: #fff; transition: all .15s; font-size: .9rem; font-weight: 500; color: var(--ink); }
+    .uni-chip:hover { border-color: var(--blue); }
+    .uni-chip.selected { border-color: var(--blue); background: #f0f4ff; color: var(--blue); }
+    .uni-chip .dot { width: 10px; height: 10px; border-radius: 50%; }
+
+    /* ── Tier cards ── */
+    .tier-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .9rem; }
+    .tier-card { border: 1.5px solid #ddd; border-radius: 10px; padding: 1.25rem 1rem; cursor: pointer; background: #fff; transition: all .15s; position: relative; }
+    .tier-card:hover { border-color: var(--blue); }
+    .tier-card.selected { border-color: var(--blue); background: #f0f4ff; }
+    .tier-card .price { font-family: 'Syne', sans-serif; font-size: 1.4rem; font-weight: 800; color: var(--ink); margin: .3rem 0; }
+    .tier-card .price.free { color: var(--green); }
+    .tier-card p { font-size: .82rem; color: #666; margin: 0; line-height: 1.5; }
+    .tier-card h4 { font-weight: 700; font-size: .95rem; margin-bottom: .25rem; }
+    .tier-popular { position: absolute; top: -10px; right: 12px; background: var(--accent); color: #fff; font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; }
+
+    /* ── Form elements ── */
+    .pb-field { margin-bottom: 1rem; }
+    .pb-field label { display: block; font-size: .82rem; font-weight: 600; color: #555; margin-bottom: .35rem; }
+    .pb-field input, .pb-field select, .pb-field textarea { width: 100%; border: 1.5px solid #ddd; border-radius: 7px; padding: .55rem .75rem; font-size: .9rem; font-family: 'DM Sans', sans-serif; background: #fafafa; color: var(--ink); outline: none; box-sizing: border-box; transition: border-color .15s; }
+    .pb-field input:focus, .pb-field select:focus, .pb-field textarea:focus { border-color: var(--blue); background: #fff; }
+    .pb-field textarea { resize: vertical; min-height: 120px; }
+    .pb-field .hint { font-size: .75rem; color: #999; margin-top: .25rem; }
+    .pb-row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+    @media (max-width: 500px) { .pb-row { grid-template-columns: 1fr; } }
+
+    /* ── Upload zone ── */
+    .upload-zone { border: 2px dashed #ddd; border-radius: 10px; padding: 2rem; text-align: center; cursor: pointer; transition: border-color .15s; position: relative; }
+    .upload-zone:hover, .upload-zone.dragover { border-color: var(--blue); background: #f8faff; }
+    .upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .upload-zone p { color: #777; font-size: .9rem; margin: .5rem 0 0; }
+    .upload-zone .icon { font-size: 2rem; }
+    .upload-name { font-size: .85rem; color: var(--green); font-weight: 600; margin-top: .5rem; }
+
+    /* ── Tabs (paste/upload) ── */
+    .pb-tabs { display: flex; gap: 0; border: 1.5px solid #ddd; border-radius: 8px; overflow: hidden; margin-bottom: 1rem; }
+    .pb-tab { flex: 1; padding: .55rem; text-align: center; font-size: .85rem; font-weight: 600; cursor: pointer; background: #fafafa; color: #777; transition: all .15s; border: none; }
+    .pb-tab.active { background: var(--blue); color: #fff; }
+
+    /* ── Chapter block ── */
+    .chapter-block { border: 1.5px solid #eee; border-radius: 8px; padding: 1rem; margin-bottom: .75rem; background: #fafafa; }
+    .chapter-block h4 { font-size: .85rem; font-weight: 700; color: var(--ink); margin-bottom: .75rem; }
+
+    /* ── Student row ── */
+    .student-row { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin-bottom: .6rem; }
+    @media (max-width: 500px) { .student-row { grid-template-columns: 1fr; } }
+
+    /* ── Word counter ── */
+    .word-counter { font-size: .75rem; color: #999; text-align: right; margin-top: .2rem; }
+    .word-counter.warn { color: var(--accent); }
+    .word-counter.ok { color: var(--green); }
+
+    /* ── Buttons ── */
+    .pb-btn { display: inline-flex; align-items: center; gap: .5rem; border: none; border-radius: 8px; padding: .7rem 1.5rem; font-size: .95rem; font-weight: 700; font-family: 'DM Sans', sans-serif; cursor: pointer; transition: all .15s; }
+    .pb-btn-primary { background: var(--blue); color: #fff; }
+    .pb-btn-primary:hover { background: #152f6a; }
+    .pb-btn-primary:disabled { background: #aaa; cursor: not-allowed; }
+    .pb-btn-secondary { background: #fff; color: var(--ink); border: 1.5px solid #ddd; }
+    .pb-btn-secondary:hover { border-color: var(--blue); color: var(--blue); }
+    .pb-btn-green { background: var(--green); color: #fff; font-size: 1rem; padding: .8rem 2rem; }
+    .pb-btn-green:hover { background: #1aad54; }
+    .pb-btn-download { background: var(--blue); color: #fff; font-size: 1.05rem; padding: .85rem 2rem; }
+    .pb-btn-row { display: flex; gap: .75rem; justify-content: flex-end; margin-top: 1.25rem; flex-wrap: wrap; }
+
+    /* ── Spinner ── */
+    .pb-spinner { text-align: center; padding: 3rem 1rem; }
+    .spinner-ring { width: 56px; height: 56px; border: 4px solid #eee; border-top-color: var(--blue); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 1.5rem; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .pb-spinner h3 { font-family: 'Syne', sans-serif; font-size: 1.2rem; font-weight: 700; color: var(--ink); margin-bottom: .5rem; }
+    .pb-spinner p { color: #777; font-size: .9rem; }
+
+    /* ── Download card ── */
+    .pb-download-card { text-align: center; padding: 2.5rem 1rem; }
+    .pb-download-card .check { font-size: 3rem; margin-bottom: 1rem; }
+    .pb-download-card h2 { font-family: 'Syne', sans-serif; font-size: 1.5rem; font-weight: 800; color: var(--ink); margin-bottom: .5rem; }
+    .pb-download-card p { color: #666; margin-bottom: 1.5rem; }
+
+    /* ── CTA strip ── */
+    .pb-cta-strip { background: var(--green); border-radius: 12px; padding: 1.5rem 2rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-top: 1.5rem; }
+    .pb-cta-strip h3 { font-family: 'Syne', sans-serif; font-size: 1.05rem; font-weight: 700; color: #fff; margin: 0; }
+    .pb-cta-strip p { color: rgba(255,255,255,.85); font-size: .85rem; margin: .2rem 0 0; }
+
+    /* ── Error ── */
+    .pb-error { background: #fff0f0; border: 1.5px solid #ffbcbc; border-radius: 8px; padding: .85rem 1rem; color: #c0392b; font-size: .88rem; margin-top: 1rem; display: none; }
+
+    /* ── Hidden utility ── */
+    .pb-hidden { display: none !important; }
+
+    /* ── Section dividers ── */
+    .pb-section-title { font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; color: var(--ink); margin: 1.5rem 0 .75rem; padding-bottom: .4rem; border-bottom: 2px solid #f0ebe2; }
   </style>
 </head>
 <body>
-  <!-- Visible only if both meta-refresh and JS fail (very rare) -->
-  <noscript>
-    <meta http-equiv="refresh" content="0; url=/academic.html">
-  </noscript>
-  <div class="box">
-    <h1>This page has moved</h1>
-    <p>The Academic Project Builder is now at our updated order page.</p>
-    <p><a href="/academic.html">Continue to /academic.html →</a></p>
-  </div>
+  <!-- ── Navigation (matches site) ── -->
+  <nav class="navbar">
+    <a href="/" class="logo">Printosky</a>
+    <div class="nav-links">
+      <a href="/academic">Academic Orders</a>
+      <a href="/project-builder" class="active">Project Builder</a>
+      <a href="/#contact">Contact</a>
+    </div>
+  </nav>
+
+  <div class="pb-page">
+
+    <!-- ── Hero ── -->
+    <div class="pb-hero">
+      <h1>Project Report Builder <span class="pb-badge">New</span></h1>
+      <p>Format your university project report correctly — margins, heading styles, page numbering — without fighting Word. Free template or let us do it for you.</p>
+    </div>
+
+    <!-- ── Step indicator ── -->
+    <div class="pb-steps" id="stepIndicator">
+      <div class="pb-step-dot active" id="sdot0">1</div>
+      <div class="pb-step-line" id="sline01"></div>
+      <div class="pb-step-dot" id="sdot1">2</div>
+      <div class="pb-step-line" id="sline12"></div>
+      <div class="pb-step-dot" id="sdot2">3</div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         STEP 0 — University + Tier selection
+    ════════════════════════════════════════════════════════════════ -->
+    <div id="step0">
+
+      <!-- University selector -->
+      <div class="pb-card">
+        <h2>Your University</h2>
+        <div class="uni-chips">
+          <div class="uni-chip selected" data-uni="ktu">
+            <div class="dot" style="background:#1B3F8B"></div> KTU
+          </div>
+          <div class="uni-chip" data-uni="mg_university">
+            <div class="dot" style="background:#155724"></div> MG University
+          </div>
+          <div class="uni-chip" data-uni="calicut_university">
+            <div class="dot" style="background:#6d1d1d"></div> Calicut University
+          </div>
+          <div class="uni-chip" data-uni="cusat">
+            <div class="dot" style="background:#0a3055"></div> CUSAT
+          </div>
+          <div class="uni-chip" data-uni="other">
+            <div class="dot" style="background:#555"></div> Other / Generic
+          </div>
+        </div>
+      </div>
+
+      <!-- Tier selector -->
+      <div class="pb-card">
+        <h2>What do you need?</h2>
+        <div class="tier-grid">
+
+          <div class="tier-card" data-tier="free" onclick="selectTier('free')">
+            <h4>Free Template</h4>
+            <div class="price free">Free</div>
+            <p>Download a pre-built .docx with your university's exact margins, fonts, heading styles, and page numbering. Fill in your content.</p>
+          </div>
+
+          <div class="tier-card selected" data-tier="format_fix" onclick="selectTier('format_fix')">
+            <div class="tier-popular">Most popular</div>
+            <h4>Format Fixer</h4>
+            <div class="price">₹49</div>
+            <p>Already written your project? Paste or upload your rough draft — we apply your university's exact format in minutes.</p>
+          </div>
+
+          <div class="tier-card" data-tier="generate" onclick="selectTier('generate')">
+            <h4>Generate from Scratch</h4>
+            <div class="price">₹99 – ₹149</div>
+            <p>Fill in your details and content. We build the full report — cover page, certificate, declaration, all chapters.</p>
+          </div>
+
+        </div>
+      </div>
+
+      <div style="text-align:right">
+        <button class="pb-btn pb-btn-primary" onclick="goStep1()">Continue →</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         STEP 1 — Content input
+    ════════════════════════════════════════════════════════════════ -->
+    <div id="step1" class="pb-hidden">
+
+      <!-- FREE: just download -->
+      <div id="panel-free">
+        <div class="pb-card">
+          <h2>Download Free Template</h2>
+          <p style="color:#555; margin-bottom:1.25rem">Your university's project report template — margins, fonts, page numbering all set up. Open in Microsoft Word and fill in your content.</p>
+          <p style="color:#999; font-size:.82rem; margin-bottom:1.5rem">⚠️ You'll still need to fill in your Certificate, Declaration, and student details manually.</p>
+          <button class="pb-btn pb-btn-download" id="downloadBtn" onclick="downloadFreeTemplate()">⬇ Download .docx Template</button>
+          <div class="pb-error" id="freeError"></div>
+        </div>
+        <div class="pb-cta-strip">
+          <div>
+            <h3>Ready to print and bind?</h3>
+            <p>Once your report is ready — bring it to us or share on WhatsApp</p>
+          </div>
+          <a href="https://wa.me/919495706405?text=Hi%2C%20I%20need%20to%20print%20and%20bind%20my%20project%20report" target="_blank" class="pb-btn pb-btn-green" style="text-decoration:none">💬 WhatsApp 9495706405</a>
+        </div>
+        <div style="margin-top:1rem; text-align:left">
+          <button class="pb-btn pb-btn-secondary" onclick="goBack()">← Back</button>
+        </div>
+      </div>
+
+      <!-- FORMAT FIX: paste or upload -->
+      <div id="panel-format-fix" class="pb-hidden">
+        <div class="pb-card">
+          <h2>Format Fixer <span style="color:#aaa;font-weight:400;font-size:.9rem">— ₹49</span></h2>
+          <p style="color:#555; margin-bottom:1.25rem">Paste your project content or upload your rough .docx / .pdf — we apply your university's exact format.</p>
+          <p style="color:#999; font-size:.8rem; margin-bottom:1.25rem">Note: Images and figures from original may not transfer. Certificate/Declaration pages need your details filled in.</p>
+
+          <div class="pb-tabs">
+            <button class="pb-tab active" onclick="switchTab('paste')">Paste text</button>
+            <button class="pb-tab" onclick="switchTab('upload')">Upload file</button>
+          </div>
+
+          <div id="tab-paste">
+            <div class="pb-field">
+              <label>Paste your project content here</label>
+              <textarea id="pasteContent" rows="12" placeholder="Paste your project report text here — chapters, sections, references. Structure will be identified automatically."></textarea>
+              <div class="hint">Minimum 200 words recommended for best results.</div>
+            </div>
+          </div>
+
+          <div id="tab-upload" class="pb-hidden">
+            <div class="upload-zone" id="uploadZone">
+              <input type="file" id="uploadFile" accept=".docx,.pdf" onchange="handleFileSelect(this)">
+              <div class="icon">📄</div>
+              <p>Click to choose or drag and drop</p>
+              <p style="font-size:.8rem; color:#bbb; margin-top:.25rem">.docx or .pdf — max 10 MB</p>
+              <div class="upload-name" id="uploadFileName"></div>
+            </div>
+          </div>
+
+          <div class="pb-error" id="ffError"></div>
+        </div>
+
+        <div class="pb-btn-row">
+          <button class="pb-btn pb-btn-secondary" onclick="goBack()">← Back</button>
+          <button class="pb-btn pb-btn-primary" onclick="startPayment('format_fix')">Pay ₹49 & Format →</button>
+        </div>
+      </div>
+
+      <!-- GENERATE: full form -->
+      <div id="panel-generate" class="pb-hidden">
+        <div class="pb-card">
+          <h2>Generate from Scratch <span style="color:#aaa;font-weight:400;font-size:.9rem">— ₹99–₹149</span></h2>
+
+          <div class="pb-section-title">Report Details</div>
+          <div class="pb-field">
+            <label>Project Title *</label>
+            <input type="text" id="g_title" maxlength="200" placeholder="e.g. Smart Traffic Control System Using IoT">
+          </div>
+          <div class="pb-row">
+            <div class="pb-field">
+              <label>College Name *</label>
+              <input type="text" id="g_college" placeholder="e.g. MES College of Engineering">
+            </div>
+            <div class="pb-field">
+              <label>Academic Year *</label>
+              <input type="text" id="g_year" placeholder="e.g. 2025–26">
+            </div>
+          </div>
+          <div class="pb-row">
+            <div class="pb-field">
+              <label>Department *</label>
+              <select id="g_dept">
+                <option value="">Select department</option>
+                <option>CSE</option><option>ECE</option><option>EEE</option>
+                <option>Civil</option><option>Mechanical</option><option>IT</option>
+                <option>BCA</option><option>MCA</option><option>BSc CS</option>
+                <option>BSc Electronics</option><option>Other</option>
+              </select>
+            </div>
+            <div class="pb-field">
+              <label>Report Type *</label>
+              <select id="g_type">
+                <option value="">Select type</option>
+                <option>B.Tech Final Year Project</option>
+                <option>B.Tech Mini Project</option>
+                <option>Seminar Report</option>
+                <option>MCA Project</option>
+                <option>BCA Project</option>
+                <option>BSc Project</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="pb-section-title">Students</div>
+          <div class="pb-field">
+            <label>Number of Students</label>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setStudentCount(1)" id="sc1">1</button>
+              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setStudentCount(2)" id="sc2">2</button>
+              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setStudentCount(3)" id="sc3">3</button>
+              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setStudentCount(4)" id="sc4">4</button>
+            </div>
+          </div>
+          <div id="studentRows"></div>
+
+          <div class="pb-section-title">Faculty</div>
+          <div class="pb-row">
+            <div class="pb-field">
+              <label>Guide Name *</label>
+              <input type="text" id="g_guide_name" placeholder="e.g. Dr. Rajesh Kumar">
+            </div>
+            <div class="pb-field">
+              <label>Guide Designation *</label>
+              <input type="text" id="g_guide_desig" placeholder="e.g. Assistant Professor">
+            </div>
+          </div>
+          <div class="pb-row">
+            <div class="pb-field">
+              <label>Co-Guide Name <span style="color:#aaa">(optional)</span></label>
+              <input type="text" id="g_coguide_name" placeholder="e.g. Ms. Anitha Thomas">
+            </div>
+            <div class="pb-field">
+              <label>Co-Guide Designation</label>
+              <input type="text" id="g_coguide_desig" placeholder="e.g. Assistant Professor">
+            </div>
+          </div>
+          <div class="pb-row">
+            <div class="pb-field">
+              <label>HOD Name *</label>
+              <input type="text" id="g_hod_name" placeholder="e.g. Prof. Suresh Menon">
+            </div>
+            <div class="pb-field">
+              <label>HOD Designation *</label>
+              <input type="text" id="g_hod_desig" placeholder="e.g. Professor & HOD">
+            </div>
+          </div>
+
+          <div class="pb-section-title">Content</div>
+          <div class="pb-field">
+            <label>Abstract * <span style="color:#aaa;font-weight:400">(100–300 words)</span></label>
+            <textarea id="g_abstract" rows="6" placeholder="Write your abstract here..." oninput="updateWordCount(this, 'wc_abstract', 100, 300)"></textarea>
+            <div class="word-counter" id="wc_abstract">0 words</div>
+          </div>
+          <div class="pb-field">
+            <label>Keywords * <span style="color:#aaa;font-weight:400">(5–7 keywords, comma-separated)</span></label>
+            <input type="text" id="g_keywords" placeholder="e.g. IoT, Smart Traffic, Arduino, Machine Learning, Embedded Systems">
+          </div>
+
+          <div class="pb-field">
+            <label>Number of Chapters</label>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setChapterCount(3)" id="cc3">3</button>
+              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setChapterCount(4)" id="cc4">4</button>
+              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setChapterCount(5)" id="cc5">5</button>
+              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setChapterCount(6)" id="cc6">6</button>
+            </div>
+          </div>
+          <div id="chapterBlocks"></div>
+
+          <div class="pb-field">
+            <label>References * <span style="color:#aaa;font-weight:400">(one reference per line)</span></label>
+            <textarea id="g_references" rows="6" placeholder="[1] R. Smith, &quot;Title of paper,&quot; Journal Name, vol. 1, no. 1, pp. 1-10, 2024.&#10;[2] ..."></textarea>
+            <div class="hint">Type your references in IEEE or APA format — we'll apply the correct style.</div>
+          </div>
+          <div class="pb-field">
+            <label>Appendices <span style="color:#aaa">(optional)</span></label>
+            <textarea id="g_appendices" rows="4" placeholder="Appendix A: Code listing, Appendix B: Circuit diagrams, etc."></textarea>
+          </div>
+
+          <div class="pb-error" id="genError"></div>
+        </div>
+
+        <div id="genPriceNote" style="text-align:right;color:#777;font-size:.88rem;margin-bottom:.5rem"></div>
+        <div class="pb-btn-row">
+          <button class="pb-btn pb-btn-secondary" onclick="goBack()">← Back</button>
+          <button class="pb-btn pb-btn-primary" id="genPayBtn" onclick="startPayment('generate')">Pay & Generate Report →</button>
+        </div>
+      </div>
+
+    </div><!-- /step1 -->
+
+    <!-- ═══════════════════════════════════════════════════════════
+         STEP 2 — Processing spinner
+    ════════════════════════════════════════════════════════════════ -->
+    <div id="step2" class="pb-hidden">
+      <div class="pb-card pb-spinner">
+        <div class="spinner-ring"></div>
+        <h3 id="spinnerTitle">Formatting your report…</h3>
+        <p id="spinnerSub">This usually takes 20–40 seconds. Please don't close this tab.</p>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         STEP 3 — Download
+    ════════════════════════════════════════════════════════════════ -->
+    <div id="step3" class="pb-hidden">
+      <div class="pb-card pb-download-card">
+        <div class="check">✅</div>
+        <h2>Your report is ready!</h2>
+        <p>Download your formatted .docx file below. Open in Microsoft Word — headings and TOC will update automatically.</p>
+        <button class="pb-btn pb-btn-download" id="dlFinalBtn">⬇ Download Report.docx</button>
+        <p style="font-size:.8rem;color:#aaa;margin-top:1rem">Remember to fill in any <span style="color:var(--accent)">highlighted placeholder text</span> with your specific details.</p>
+        <div class="pb-error" id="dlError" style="display:none"></div>
+      </div>
+      <div class="pb-cta-strip">
+        <div>
+          <h3>Ready to print and bind?</h3>
+          <p>We print, hard-bind and can deliver — same day in Thrissur</p>
+        </div>
+        <a href="https://wa.me/919495706405?text=Hi%2C%20my%20project%20report%20is%20ready.%20I%20need%20printing%20and%20hard%20binding." target="_blank" class="pb-btn pb-btn-green" style="text-decoration:none">💬 WhatsApp 9495706405</a>
+      </div>
+      <div style="margin-top:1rem;text-align:center">
+        <button class="pb-btn pb-btn-secondary" onclick="resetAll()">← Start Over</button>
+      </div>
+    </div>
+
+  </div><!-- /pb-page -->
+
+  <script>
+  // ── State ────────────────────────────────────────────────────────────────────
+  const state = {
+    university: 'ktu',
+    tier: 'format_fix',
+    uploadTab: 'paste',
+    studentCount: 2,
+    chapterCount: 4,
+    fileBytes: null,
+    fileName: null,
+    downloadBlob: null,
+    downloadName: 'report.docx',
+  };
+
+  const API = '';   // same origin
+
+  // ── Utility ──────────────────────────────────────────────────────────────────
+  function $(id) { return document.getElementById(id); }
+  function showErr(id, msg) {
+    const el = $(id);
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+  function hideErr(id) { $(id).style.display = 'none'; }
+  function show(id) { $(id).classList.remove('pb-hidden'); }
+  function hide(id) { $(id).classList.add('pb-hidden'); }
+
+  // ── University selection ──────────────────────────────────────────────────────
+  document.querySelectorAll('.uni-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.uni-chip').forEach(c => c.classList.remove('selected'));
+      chip.classList.add('selected');
+      state.university = chip.dataset.uni;
+    });
+  });
+
+  // ── Tier selection ────────────────────────────────────────────────────────────
+  function selectTier(tier) {
+    document.querySelectorAll('.tier-card').forEach(c => c.classList.remove('selected'));
+    document.querySelector(`.tier-card[data-tier="${tier}"]`).classList.add('selected');
+    state.tier = tier;
+  }
+
+  // ── Step navigation ───────────────────────────────────────────────────────────
+  function goStep1() {
+    hide('step0');
+    show('step1');
+    // Show the right panel
+    hide('panel-free');
+    hide('panel-format-fix');
+    hide('panel-generate');
+    if (state.tier === 'free')        show('panel-free');
+    else if (state.tier === 'format_fix') show('panel-format-fix');
+    else                              show('panel-generate');
+    setStepUI(1);
+    window.scrollTo(0,0);
+  }
+
+  function goBack() {
+    hide('step1');
+    hide('step2');
+    show('step0');
+    setStepUI(0);
+    window.scrollTo(0,0);
+  }
+
+  function goStep2() {
+    hide('step1');
+    show('step2');
+    setStepUI(2);
+    window.scrollTo(0,0);
+  }
+
+  function goStep3() {
+    hide('step2');
+    show('step3');
+    setStepUI(3);
+    window.scrollTo(0,0);
+  }
+
+  function setStepUI(step) {
+    for (let i=0; i<3; i++) {
+      const dot = $('sdot'+i);
+      dot.classList.remove('active','done');
+      if (i < step) dot.classList.add('done');
+      else if (i === step) dot.classList.add('active');
+    }
+    for (let i=0; i<2; i++) {
+      const line = $('sline0'+(i+1) in {} ? 'sline0'+(i+1) : 'sline'+(i)+(i+1));
+      // update lines
+    }
+    $('sline01').className = 'pb-step-line' + (step > 0 ? ' done' : '');
+    $('sline12').className = 'pb-step-line' + (step > 1 ? ' done' : '');
+  }
+
+  function resetAll() {
+    state.downloadBlob = null;
+    state.fileBytes = null;
+    state.fileName = null;
+    hide('step1'); hide('step2'); hide('step3');
+    show('step0');
+    setStepUI(0);
+    window.scrollTo(0,0);
+  }
+
+  // ── Tab switching (paste/upload) ──────────────────────────────────────────────
+  function switchTab(tab) {
+    state.uploadTab = tab;
+    document.querySelectorAll('.pb-tab').forEach((t,i) => {
+      t.classList.toggle('active', (i===0 && tab==='paste')||(i===1 && tab==='upload'));
+    });
+    if (tab === 'paste') { show('tab-paste'); hide('tab-upload'); }
+    else                 { hide('tab-paste'); show('tab-upload'); }
+  }
+
+  // ── File selection ────────────────────────────────────────────────────────────
+  function handleFileSelect(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      showErr('ffError', 'File is too large (max 10 MB). Please compress or use paste instead.');
+      return;
+    }
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['docx','pdf'].includes(ext)) {
+      showErr('ffError', 'Only .docx and .pdf files are supported.');
+      return;
+    }
+    hideErr('ffError');
+    $('uploadFileName').textContent = '📎 ' + file.name;
+    state.fileName = file.name;
+    const reader = new FileReader();
+    reader.onload = e => {
+      state.fileBytes = e.target.result.split(',')[1];  // base64
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // ── Drag & drop ───────────────────────────────────────────────────────────────
+  const uploadZone = $('uploadZone');
+  uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      $('uploadFile').files = e.dataTransfer.files;
+      handleFileSelect($('uploadFile'));
+    }
+  });
+
+  // ── Student count ─────────────────────────────────────────────────────────────
+  function setStudentCount(n) {
+    state.studentCount = n;
+    [1,2,3,4].forEach(i => {
+      $('sc'+i).style.background = (i===n) ? 'var(--blue)' : '';
+      $('sc'+i).style.color = (i===n) ? '#fff' : '';
+      $('sc'+i).style.borderColor = (i===n) ? 'var(--blue)' : '';
+    });
+    renderStudentRows();
+  }
+
+  function renderStudentRows() {
+    const container = $('studentRows');
+    container.innerHTML = '';
+    for (let i=1; i<=state.studentCount; i++) {
+      const div = document.createElement('div');
+      div.className = 'student-row';
+      div.innerHTML = `
+        <div class="pb-field"><label>Student ${i} Name</label><input type="text" id="g_sname${i}" placeholder="Full name"></div>
+        <div class="pb-field"><label>Roll Number</label><input type="text" id="g_sroll${i}" placeholder="e.g. KTU/IT/2024/001"></div>
+      `;
+      container.appendChild(div);
+    }
+  }
+
+  // ── Chapter count ─────────────────────────────────────────────────────────────
+  function setChapterCount(n) {
+    state.chapterCount = n;
+    [3,4,5,6].forEach(i => {
+      $('cc'+i).style.background = (i===n) ? 'var(--blue)' : '';
+      $('cc'+i).style.color = (i===n) ? '#fff' : '';
+      $('cc'+i).style.borderColor = (i===n) ? 'var(--blue)' : '';
+    });
+    renderChapterBlocks();
+    updateGenPrice();
+  }
+
+  const DEFAULT_CHAPTERS = ['Introduction','Literature Survey','System Design','Implementation','Results and Discussion','Conclusion'];
+
+  function renderChapterBlocks() {
+    const container = $('chapterBlocks');
+    container.innerHTML = '';
+    for (let i=1; i<=state.chapterCount; i++) {
+      const div = document.createElement('div');
+      div.className = 'chapter-block';
+      div.innerHTML = `
+        <h4>Chapter ${i}</h4>
+        <div class="pb-field"><label>Chapter Title</label><input type="text" id="g_ctitle${i}" value="${DEFAULT_CHAPTERS[i-1]||''}"></div>
+        <div class="pb-field"><label>Chapter Content</label><textarea id="g_ccontent${i}" rows="5" placeholder="Write the content for Chapter ${i} here…"></textarea></div>
+      `;
+      container.appendChild(div);
+    }
+  }
+
+  function updateGenPrice() {
+    // Rough estimate: 5 chapters ≈ 50+ pages = Rs.149, else Rs.99
+    const price = state.chapterCount >= 5 ? 149 : 99;
+    $('genPriceNote').textContent = `Estimated price: ₹${price} (based on ${state.chapterCount} chapters)`;
+    $('genPayBtn').textContent = `Pay ₹${price} & Generate Report →`;
+    state._genPrice = price;
+  }
+
+  // ── Word counter ──────────────────────────────────────────────────────────────
+  function updateWordCount(el, counterId, min, max) {
+    const words = el.value.trim() ? el.value.trim().split(/\s+/).length : 0;
+    const el2 = $(counterId);
+    el2.textContent = `${words} words`;
+    el2.className = 'word-counter' + (words < min ? ' warn' : words <= max ? ' ok' : ' warn');
+  }
+
+  // ── Free template download ────────────────────────────────────────────────────
+  async function downloadFreeTemplate() {
+    const btn = $('downloadBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating…';
+    hideErr('freeError');
+    try {
+      const uni = state.university === 'other' ? 'ktu' : state.university;
+      const res = await fetch(`${API}/project-builder/templates/${uni}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `Server error ${res.status}`);
+      }
+      const blob = await res.blob();
+      triggerDownload(blob, `${uni}_project_template.docx`);
+    } catch(e) {
+      showErr('freeError', e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '⬇ Download .docx Template';
+    }
+  }
+
+  // ── Trigger browser download ──────────────────────────────────────────────────
+  function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  // ── Payment flow ──────────────────────────────────────────────────────────────
+  async function startPayment(service) {
+    // Validate inputs first
+    if (service === 'format_fix') {
+      if (state.uploadTab === 'paste' && !$('pasteContent').value.trim()) {
+        showErr('ffError', 'Please paste your project content before proceeding.'); return;
+      }
+      if (state.uploadTab === 'upload' && !state.fileBytes) {
+        showErr('ffError', 'Please select a .docx or .pdf file to upload.'); return;
+      }
+      hideErr('ffError');
+    } else if (service === 'generate') {
+      if (!validateGenerateForm()) return;
+      hideErr('genError');
+    }
+
+    // Estimate word count for pricing
+    let wordCount = 0;
+    if (service === 'format_fix') {
+      const txt = state.uploadTab === 'paste' ? $('pasteContent').value : (state.fileName || '');
+      wordCount = txt.split(/\s+/).filter(Boolean).length;
+    } else {
+      wordCount = state.chapterCount * 1500; // rough estimate
+    }
+
+    // Create Razorpay order
+    let orderData;
+    try {
+      const res = await fetch(`${API}/project-builder/create-order`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ service, university: state.university, word_count: wordCount }),
+      });
+      orderData = await res.json();
+      if (!res.ok) throw new Error(orderData.error || 'Failed to create payment order');
+    } catch(e) {
+      const errId = service === 'format_fix' ? 'ffError' : 'genError';
+      showErr(errId, 'Payment setup failed: ' + e.message);
+      return;
+    }
+
+    // Open Razorpay checkout
+    const options = {
+      key: orderData.key_id,
+      amount: orderData.amount,
+      currency: orderData.currency,
+      order_id: orderData.razorpay_order_id,
+      name: 'Printosky',
+      description: service === 'format_fix' ? 'Project Report Format Fixer' : 'Project Report Generation',
+      theme: { color: '#1B3F8B' },
+      handler: async function(response) {
+        await processAfterPayment(service, response);
+      },
+      modal: {
+        ondismiss: function() { /* user closed checkout — do nothing */ }
+      }
+    };
+    const rzp = new Razorpay(options);
+    rzp.open();
+  }
+
+  // ── Process after payment verified ───────────────────────────────────────────
+  async function processAfterPayment(service, paymentResponse) {
+    goStep2();
+
+    if (service === 'format_fix') {
+      $('spinnerTitle').textContent = 'Formatting your report…';
+      $('spinnerSub').textContent = 'Parsing structure and applying university formatting. ~20–40 seconds.';
+    } else {
+      $('spinnerTitle').textContent = 'Building your report…';
+      $('spinnerSub').textContent = 'Generating all sections — cover page, certificate, chapters, references. ~30–60 seconds.';
+    }
+
+    const payload = {
+      razorpay_payment_id: paymentResponse.razorpay_payment_id,
+      razorpay_order_id:   paymentResponse.razorpay_order_id,
+      razorpay_signature:  paymentResponse.razorpay_signature,
+      service,
+      university: state.university === 'other' ? 'ktu' : state.university,
+    };
+
+    if (service === 'format_fix') {
+      if (state.uploadTab === 'paste') {
+        payload.content = $('pasteContent').value;
+      } else {
+        payload.content_b64 = state.fileBytes;
+        payload.filename = state.fileName;
+      }
+    } else {
+      payload.form_data = collectFormData();
+    }
+
+    try {
+      const res = await fetch(`${API}/project-builder/process`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `Server error ${res.status}`);
+      }
+      const blob = await res.blob();
+      state.downloadBlob = blob;
+      const uni = state.university === 'other' ? 'generic' : state.university;
+      state.downloadName = service === 'format_fix' ? `${uni}_formatted_report.docx` : `${uni}_project_report.docx`;
+      goStep3();
+      $('dlFinalBtn').onclick = () => triggerDownload(state.downloadBlob, state.downloadName);
+    } catch(e) {
+      hide('step2');
+      show('step1');
+      goStep1();
+      const errId = service === 'format_fix' ? 'ffError' : 'genError';
+      showErr(errId, 'Processing failed: ' + e.message + '. Your payment was captured — please WhatsApp us at 9495706405 and we will fix it.');
+    }
+  }
+
+  // ── Validate generate form ────────────────────────────────────────────────────
+  function validateGenerateForm() {
+    const required = [
+      ['g_title','Project title'],['g_college','College name'],
+      ['g_year','Academic year'],['g_dept','Department'],
+      ['g_type','Report type'],['g_guide_name','Guide name'],
+      ['g_guide_desig','Guide designation'],['g_hod_name','HOD name'],
+      ['g_hod_desig','HOD designation'],['g_abstract','Abstract'],
+      ['g_keywords','Keywords'],['g_references','References'],
+    ];
+    for (const [id, label] of required) {
+      if (!$(id) || !$(id).value.trim()) {
+        showErr('genError', `${label} is required.`);
+        $(id) && $(id).focus();
+        return false;
+      }
+    }
+    // Check at least one student
+    if (!$('g_sname1') || !$('g_sname1').value.trim()) {
+      showErr('genError', 'At least one student name is required.');
+      return false;
+    }
+    return true;
+  }
+
+  // ── Collect generate form data ────────────────────────────────────────────────
+  function collectFormData() {
+    const students = [];
+    for (let i=1; i<=state.studentCount; i++) {
+      students.push({ name: $('g_sname'+i)?.value.trim()||'', roll: $('g_sroll'+i)?.value.trim()||'' });
+    }
+    const chapters = [];
+    for (let i=1; i<=state.chapterCount; i++) {
+      chapters.push({ number: i, heading: $('g_ctitle'+i)?.value.trim()||`Chapter ${i}`, content: $('g_ccontent'+i)?.value.trim()||'' });
+    }
+    return {
+      title:      $('g_title').value.trim(),
+      college:    $('g_college').value.trim(),
+      year:       $('g_year').value.trim(),
+      department: $('g_dept').value,
+      report_type:$('g_type').value,
+      students,
+      guide_name:     $('g_guide_name').value.trim(),
+      guide_desig:    $('g_guide_desig').value.trim(),
+      coguide_name:   $('g_coguide_name').value.trim(),
+      coguide_desig:  $('g_coguide_desig').value.trim(),
+      hod_name:       $('g_hod_name').value.trim(),
+      hod_desig:      $('g_hod_desig').value.trim(),
+      abstract:   $('g_abstract').value.trim(),
+      keywords:   $('g_keywords').value.trim(),
+      chapters,
+      references: $('g_references').value.trim(),
+      appendices: $('g_appendices').value.trim(),
+    };
+  }
+
+  // ── Initialise defaults ───────────────────────────────────────────────────────
+  setStudentCount(2);
+  setChapterCount(4);
+  updateGenPrice();
+
+  </script>
 </body>
 </html>

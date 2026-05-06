@@ -179,6 +179,53 @@ def create_academic_payment_link(
         return {"error": str(e)}
 
 
+# ── Project Builder — inline Razorpay checkout ────────────────────────────────
+
+def create_project_order(amount_paise: int, receipt: str) -> dict:
+    """
+    Create a Razorpay Order for inline checkout (Project Builder paid tiers).
+    Returns full order object on success, {"error": str} on failure.
+
+    amount_paise: amount in paise (Rs.49 = 4900, Rs.99 = 9900, Rs.149 = 14900).
+    receipt: short identifier string — max 40 chars.
+    """
+    payload = {
+        "amount":   amount_paise,
+        "currency": "INR",
+        "receipt":  receipt[:40],
+        "notes":    {"store": "Oxygen Students Paradise, Thrissur"},
+    }
+    try:
+        r    = requests.post(f"{BASE_URL}/orders", json=payload, auth=_auth(), timeout=10)
+        data = r.json()
+        if r.status_code == 200:
+            logger.info(f"Project order created: {data.get('id')} receipt={receipt}")
+            return data  # caller uses data["id"], data["amount"], data["currency"]
+        logger.error(f"Razorpay create_project_order error: {data}")
+        return {"error": (data.get("error") or {}).get("description", "Unknown error")}
+    except Exception as e:
+        logger.error(f"Razorpay create_project_order request failed: {e}")
+        return {"error": str(e)}
+
+
+def verify_checkout_payment(order_id: str, payment_id: str, signature: str) -> bool:
+    """
+    Verify the Razorpay inline checkout payment signature.
+    Razorpay signs HMAC_SHA256("{order_id}|{payment_id}", KEY_SECRET).
+    Returns True if the signature is valid, False otherwise.
+    """
+    try:
+        expected = hmac.new(
+            RAZORPAY_KEY_SECRET.encode(),
+            f"{order_id}|{payment_id}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected, signature)
+    except Exception as e:
+        logger.warning(f"verify_checkout_payment error: {e}")
+        return False
+
+
 # ── Verify webhook signature ──────────────────────────────────────────────────
 def verify_webhook(payload_bytes: bytes, signature: str) -> bool:
     """

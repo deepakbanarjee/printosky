@@ -1578,6 +1578,159 @@ def _handle_admin_send_file(h, body: bytes) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+# ── Project Builder handlers ─────────────────────────────────────────────────
+
+def _pb_docx_response(h, docx_bytes: bytes, filename: str) -> None:
+    """Send a .docx file as an HTTP response with CORS headers."""
+    h.send_response(200)
+    h.send_header(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    h.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+    h.send_header("Content-Length", str(len(docx_bytes)))
+    h.send_header("Access-Control-Allow-Origin", "*")
+    h.end_headers()
+    h.wfile.write(docx_bytes)
+
+
+def _handle_pb_templates_get(h) -> None:
+    """GET /project-builder/templates — return list of supported universities."""
+    import docx_engine
+    unis = docx_engine.list_universities()
+    _json_response(h, 200, {"universities": unis})
+
+
+def _handle_pb_template_download(h, university_id: str) -> None:
+    """GET /project-builder/templates/{id} — generate and return free .docx template."""
+    import docx_engine
+    try:
+        docx_bytes = docx_engine.generate_free_template(university_id)
+        cfg        = docx_engine.load_university_config(university_id)
+    except ValueError as e:
+        _json_response(h, 400, {"error": str(e)})
+        return
+    filename = cfg["short_name"].replace(" ", "_") + "_Project_Template.docx"
+    _pb_docx_response(h, docx_bytes, filename)
+
+
+def _handle_pb_create_order(h, body: bytes) -> None:
+    """POST /project-builder/create-order — create Razorpay order for paid tier."""
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    service    = data.get("service", "")
+    university = data.get("university", "")
+    word_count = int(data.get("word_count", 0))
+
+    if service not in ("format_fix", "generate"):
+        _json_response(h, 400, {"error": "service must be 'format_fix' or 'generate'"})
+        return
+    if not university:
+        _json_response(h, 400, {"error": "university is required"})
+        return
+
+    # Pricing: format_fix = Rs.49, generate = Rs.99 (<50 pages est.) or Rs.149
+    if service == "format_fix":
+        amount_inr = 49
+    else:
+        est_pages  = max(1, word_count // 250)
+        amount_inr = 99 if est_pages < 50 else 149
+
+    from razorpay_integration import create_project_order
+    result = create_project_order(
+        amount_paise=amount_inr * 100,
+        receipt=f"pb_{service[:3]}_{university[:6]}",
+    )
+
+    if "error" in result:
+        _json_response(h, 500, {"error": result["error"]})
+        return
+
+    _json_response(h, 200, {
+        "razorpay_order_id": result["id"],
+        "amount":            result["amount"],
+        "currency":          result["currency"],
+        "key_id":            os.environ.get("RAZORPAY_KEY_ID", ""),
+    })
+
+
+def _handle_pb_process(h, body: bytes) -> None:
+    """POST /project-builder/process — verify Razorpay payment, generate DOCX."""
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    payment_id = data.get("razorpay_payment_id", "")
+    order_id   = data.get("razorpay_order_id", "")
+    signature  = data.get("razorpay_signature", "")
+
+    from razorpay_integration import verify_checkout_payment
+    if not verify_checkout_payment(order_id, payment_id, signature):
+        _json_response(h, 403, {"error": "Payment verification failed"})
+        return
+
+    service    = data.get("service", "")
+    university = data.get("university", "")
+
+    if service not in ("format_fix", "generate"):
+        _json_response(h, 400, {"error": "invalid service"})
+        return
+
+    import docx_engine
+
+    try:
+        if service == "format_fix":
+            content_b64  = data.get("content_b64", "")
+            content_type = data.get("content_type", "text")  # "text"|"docx"|"pdf"
+            content      = data.get("content", "")
+
+            if content_b64:
+                import base64 as _b64
+                file_bytes = _b64.b64decode(content_b64)
+                if content_type == "docx":
+                    text = docx_engine.extract_text_from_docx(file_bytes)
+                elif content_type == "pdf":
+                    text = docx_engine.extract_text_from_pdf(file_bytes)
+                else:
+                    text = file_bytes.decode("utf-8", errors="replace")
+            elif content:
+                text = content
+            else:
+                _json_response(h, 400, {"error": "content or content_b64 required"})
+                return
+
+            if len(text) > 200_000:
+                _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
+                return
+
+            docx_bytes = docx_engine.format_fix(text, university)
+
+        else:  # generate
+            form_data = data.get("form_data", {})
+            if not form_data:
+                _json_response(h, 400, {"error": "form_data required for generate service"})
+                return
+            docx_bytes = docx_engine.generate_from_form(form_data, university)
+
+    except ValueError as e:
+        _json_response(h, 400, {"error": str(e)})
+        return
+    except Exception as e:
+        logger.error(f"project-builder process error: {e}")
+        _json_response(h, 500, {"error": "Document generation failed. Please try again."})
+        return
+
+    cfg      = docx_engine.load_university_config(university)
+    filename = cfg["short_name"].replace(" ", "_") + "_Project_Report.docx"
+    _pb_docx_response(h, docx_bytes, filename)
+
+
 # ── Vercel request handler ────────────────────────────────────────────────────
 
 class handler(BaseHTTPRequestHandler):
@@ -1645,6 +1798,16 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path.startswith("/api/health"):
             _handle_health(self)
+            return
+
+        # ── Project Builder ──────────────────────────────────────────────────
+        if self.path == "/project-builder/templates":
+            _handle_pb_templates_get(self)
+            return
+
+        _pb = re.match(r"^/project-builder/templates/([^/?]+)$", self.path.split("?")[0])
+        if _pb:
+            _handle_pb_template_download(self, _pb.group(1))
             return
 
         # Health check
@@ -1768,6 +1931,15 @@ class handler(BaseHTTPRequestHandler):
         # ── Referral store-credit redemption (staff) ─────────────────────────
         if self.path == "/referrals/redeem":
             _handle_referrals_redeem(self, body)
+            return
+
+        # ── Project Builder ──────────────────────────────────────────────────
+        if self.path == "/project-builder/create-order":
+            _handle_pb_create_order(self, body)
+            return
+
+        if self.path == "/project-builder/process":
+            _handle_pb_process(self, body)
             return
 
         self.send_response(404)
