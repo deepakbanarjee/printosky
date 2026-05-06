@@ -13,9 +13,12 @@ Handles:
 
 import io
 import json
+import logging
 import os
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from docx import Document
 from docx.enum.section import WD_SECTION
@@ -38,7 +41,8 @@ def load_university_config(university_id: str) -> dict:
     """Load and return JSON config for a university by ID."""
     config_path = _CONFIG_DIR / f"{university_id}.json"
     if not config_path.exists():
-        raise ValueError(f"Unknown university ID: {university_id!r}")
+        logger.warning("Unknown university ID %r — falling back to ktu", university_id)
+        config_path = _CONFIG_DIR / "ktu.json"
     with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -71,15 +75,23 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
-    """Extract plain text from a PDF supplied as bytes."""
+    """Extract plain text from a PDF supplied as bytes.
+
+    Returns empty string if the PDF cannot be parsed (corrupt, encrypted, etc.)
+    rather than raising — callers should handle empty text gracefully.
+    """
     import pdfplumber
-    parts = []
-    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        for page in pdf.pages:
-            page_text = page.extract_text()
-            if page_text:
-                parts.append(page_text.strip())
-    return "\n\n".join(parts)
+    try:
+        parts = []
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    parts.append(page_text.strip())
+        return "\n\n".join(parts)
+    except Exception as exc:
+        logger.warning("extract_text_from_pdf failed: %s", exc)
+        return ""
 
 
 # ---------------------------------------------------------------------------
