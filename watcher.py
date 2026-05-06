@@ -31,6 +31,8 @@ from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
+from store_config import get_store_config
+
 # â”€â”€ Google Sheets (optional â€” works without it if no credentials) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 try:
     import gspread
@@ -147,8 +149,9 @@ GSHEETS_SPREADSHEET_NAME = "Printosky Job Tracker"
 GSHEETS_WORKSHEET_NAME = "Job Log"
 
 # â”€â”€ Phase 3: Printer IPs (confirmed 2026-03-12 via arp -a) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-KONICA_IP  = "192.168.55.110"   # Konica Bizhub Pro 1100 (MAC: 00-50-aa-2c-78-4c)
-EPSON_IP   = "192.168.55.202"   # Epson WF-C21000       (MAC: e0-bb-9e-d6-52-2e)
+_PRINTERS  = get_store_config().printers
+KONICA_IP  = _PRINTERS.konica_ip   # Konica Bizhub Pro 1100 (MAC: 00-50-aa-2c-78-4c)
+EPSON_IP   = _PRINTERS.epson_ip    # Epson WF-C21000       (MAC: e0-bb-9e-d6-52-2e)
 # Access EWS at: http://192.168.55.110  and  http://192.168.55.202
 # Phase 3 will poll these for page counts to cross-check jobs received vs printed
 

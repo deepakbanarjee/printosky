@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Track Your Order – Printosky</title>
+  <style>
+    :root {
+      --bg: #f7f7f8;
+      --card: #ffffff;
+      --ink: #1a1a1a;
+      --muted: #6a6a73;
+      --line: #e6e6ea;
+      --accent: #0e7c4a;
+      --accent-soft: #e6f4ec;
+      --warn: #b85c00;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    .wrap {
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 32px 16px 64px;
+    }
+    h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
+    .brand { color: var(--accent); }
+    .sub { color: var(--muted); font-size: 14px; margin: 0 0 24px; }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .lookup label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    .lookup input[type="text"] {
+      width: 100%;
+      padding: 12px 14px;
+      font-size: 18px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      outline: none;
+    }
+    .lookup input:focus { border-color: var(--accent); }
+    .lookup button {
+      margin-top: 12px;
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      color: white;
+      background: var(--accent);
+      border: 0;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .lookup button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .code-pill {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: 0.06em;
+    }
+    .status-line { font-size: 18px; font-weight: 600; margin: 16px 0 4px; }
+    .status-meta { font-size: 14px; color: var(--muted); margin: 0; }
+
+    .timeline { margin-top: 18px; padding-left: 0; list-style: none; }
+    .timeline li {
+      position: relative;
+      padding: 8px 0 8px 28px;
+      color: var(--muted);
+    }
+    .timeline li::before {
+      content: "";
+      position: absolute;
+      left: 8px; top: 14px;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--line);
+    }
+    .timeline li.done { color: var(--ink); }
+    .timeline li.done::before { background: var(--accent); }
+    .timeline li.current { color: var(--ink); font-weight: 600; }
+    .timeline li.current::before {
+      background: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-soft);
+    }
+
+    .pickup-box {
+      margin-top: 16px;
+      padding: 14px;
+      background: var(--accent-soft);
+      border-radius: 8px;
+      color: var(--accent);
+    }
+    .pickup-box .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .pickup-box .name { font-size: 17px; font-weight: 700; margin-top: 4px; }
+    .pickup-box .addr { font-size: 14px; color: var(--ink); margin-top: 2px; }
+
+    .err {
+      color: var(--warn);
+      background: #fff4e6;
+      border: 1px solid #ffd9a8;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 32px;
+    }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1><span class="brand">Printosky</span> – Track your order</h1>
+    <p class="sub">Enter the code from your WhatsApp message, e.g. <strong>P-7K2N</strong>.</p>
+
+    <div class="card lookup">
+      <label for="code-input">Pickup code</label>
+      <input id="code-input" type="text" maxlength="6" autocomplete="off" inputmode="text" placeholder="P-XXXX">
+      <button id="lookup-btn" type="button">Track</button>
+    </div>
+
+    <div id="result"></div>
+
+    <footer>
+      <a href="https://wa.me/919495706405">Need help? WhatsApp us</a>
+    </footer>
+  </div>
+
+  <script>
+    const STAGES = [
+      { key: "received",  label: "Received" },
+      { key: "paid",      label: "Paid" },
+      { key: "printed",   label: "Printing" },
+      { key: "ready",     label: "Ready for pickup" },
+      { key: "delivered", label: "Picked up" },
+    ];
+
+    function stageOf(status) {
+      const s = (status || "").toLowerCase();
+      if (s === "delivered" || s === "completed") return "delivered";
+      if (s === "ready") return "ready";
+      if (s === "printed" || s === "printing") return "printed";
+      if (s === "paid") return "paid";
+      return "received";
+    }
+
+    function fmtTime(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return iso;
+      return d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+    }
+
+    function escape(text) {
+      return String(text == null ? "" : text)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    function render(data) {
+      const cur = stageOf(data.status);
+      const items = STAGES.map((stage, idx) => {
+        const curIdx = STAGES.findIndex(s => s.key === cur);
+        const cls = idx < curIdx ? "done" : (idx === curIdx ? "current" : "");
+        return `<li class="${cls}">${escape(stage.label)}</li>`;
+      }).join("");
+
+      const showPickup = (cur === "ready" || cur === "delivered" || cur === "printed")
+                        && data.pickup_address;
+      const pickupHtml = showPickup ? `
+        <div class="pickup-box">
+          <div class="label">Pickup at</div>
+          ${data.pickup_label ? `<div class="name">${escape(data.pickup_label)}</div>` : ""}
+          <div class="addr">${escape(data.pickup_address)}</div>
+        </div>` : "";
+
+      const greeting = data.first_name
+        ? `Hi ${escape(data.first_name)}! `
+        : "";
+
+      document.getElementById("result").innerHTML = `
+        <div class="card">
+          <span class="code-pill">${escape(data.pickup_code)}</span>
+          <div class="status-line">${greeting}Status: ${escape(STAGES.find(s => s.key === cur).label)}</div>
+          ${data.received_at ? `<p class="status-meta">Received: ${escape(fmtTime(data.received_at))}</p>` : ""}
+          ${data.pickup_ready_at ? `<p class="status-meta">Ready: ${escape(fmtTime(data.pickup_ready_at))}</p>` : ""}
+          ${data.delivered_at ? `<p class="status-meta">Picked up: ${escape(fmtTime(data.delivered_at))}</p>` : ""}
+          <ul class="timeline">${items}</ul>
+          ${pickupHtml}
+        </div>
+      `;
+    }
+
+    function showError(msg) {
+      document.getElementById("result").innerHTML =
+        `<div class="card"><div class="err">${escape(msg)}</div></div>`;
+    }
+
+    async function lookup(code) {
+      const cleaned = (code || "").trim().toUpperCase();
+      if (!/^P-[A-Z0-9]{4}$/.test(cleaned)) {
+        showError("That code doesn't look right. Codes look like P-7K2N.");
+        return;
+      }
+      document.getElementById("result").innerHTML = `<div class="card"><p class="status-meta">Looking up…</p></div>`;
+      try {
+        const r = await fetch(`/api/track/${encodeURIComponent(cleaned)}`);
+        if (r.status === 404) {
+          showError("We couldn't find an order with that code. Double-check the code from your WhatsApp message.");
+          return;
+        }
+        if (!r.ok) {
+          showError("Something went wrong looking up your order. Please try again in a moment.");
+          return;
+        }
+        render(await r.json());
+      } catch (_e) {
+        showError("Network error. Please check your connection and try again.");
+      }
+    }
+
+    document.getElementById("lookup-btn").addEventListener("click", () => {
+      lookup(document.getElementById("code-input").value);
+    });
+    document.getElementById("code-input").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") lookup(ev.target.value);
+    });
+
+    // Auto-lookup if ?code=... is present in the URL.
+    const urlCode = new URLSearchParams(window.location.search).get("code");
+    if (urlCode) {
+      const input = document.getElementById("code-input");
+      input.value = urlCode.toUpperCase();
+      lookup(urlCode);
+    }
+  </script>
+</body>
+</html>

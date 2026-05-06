@@ -140,13 +140,57 @@ def send_payment_confirmed(sender: str, job_id: str, amount: float) -> bool:
 
 
 def send_job_ready(sender: str, job_id: str) -> bool:
-    """Notify customer that job is ready to collect."""
+    """Notify customer that job is ready to collect.
+
+    DEPRECATED: single-store-baked. Use ``send_pickup_ready`` for new flows
+    that go through the routing engine.
+    """
     msg = (
         "🎉 *Your print job is ready!*\n\n"
         f"📋 Job: `{job_id}`\n\n"
         "Please collect at your convenience.\n"
         f"📞 {STORE_PHONE}\n\n"
         "— Printosky / Oxygen Globally, Thriprayar 🖨️"
+    )
+    return _send(sender, msg)
+
+
+def send_pickup_ready(sender: str, pickup_code: str,
+                      store_label: str | None,
+                      store_address: str,
+                      deep_link: str | None = None) -> bool:
+    """Notify the customer that their job is ready for pickup.
+
+    This is the *only* customer-facing message in which the fulfilling
+    store's name appears. Multi-store-aware: the platform stays the
+    Printosky brand throughout the rest of the flow.
+    """
+    label_line = f"{store_label}\n" if store_label else ""
+    link_line = f"\n🔗 Track: {deep_link}" if deep_link else ""
+    msg = (
+        "🎉 *Your job is ready for pickup!*\n\n"
+        f"🎫 Code: *{pickup_code}*\n\n"
+        f"📍 *Pickup at:*\n{label_line}{store_address}\n\n"
+        "Please show this code at the counter."
+        f"{link_line}\n\n"
+        "— Printosky 🖨️"
+    )
+    return _send(sender, msg)
+
+
+def send_pickup_completed(sender: str, pickup_code: str,
+                          rating_url: str | None = None) -> bool:
+    """Confirm pickup + (optional) ask for a rating."""
+    rating_line = (
+        f"\n\nHow was your experience? ⭐ {rating_url}"
+        if rating_url else ""
+    )
+    msg = (
+        "✅ *Picked up — thank you!*\n\n"
+        f"🎫 {pickup_code}\n\n"
+        "We hope your prints turned out great."
+        f"{rating_line}\n\n"
+        "— Printosky 🖨️"
     )
     return _send(sender, msg)
 

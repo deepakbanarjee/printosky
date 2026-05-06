@@ -33,6 +33,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
 
+from store_config import get_store_config
+
 load_dotenv()
 
 # Rate card engine (same directory)
@@ -363,9 +365,10 @@ def check_printer_reachable(ip: str, timeout=2) -> bool:
     except Exception:
         return False
 
+_PRINTERS_CFG = get_store_config().printers
 PRINTER_IPS = {
-    "konica": "192.168.55.110",
-    "epson":  "192.168.55.202",
+    "konica": _PRINTERS_CFG.konica_ip,
+    "epson":  _PRINTERS_CFG.epson_ip,
 }
 
 # ── Rate limiter for /staff-login ──────────────────────────────────────────────────────
@@ -584,13 +587,13 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
             return False, f"Print failed: {err}"
     except subprocess.TimeoutExpired:
         return False, "Print command timed out after 60s"
+    except Exception as e:
+        return False, str(e)
     finally:
         try:
             os.remove(named_tmp)
         except OSError:
             pass
-    except Exception as e:
-        return False, str(e)
 
 
 def windows_shell_print(filepath: str, printer_name: str, copies: int):

@@ -26,10 +26,12 @@ import xml.etree.ElementTree as ET
 
 import requests
 
+from store_config import get_store_config
+
 logger = logging.getLogger("konica_fetcher")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-KONICA_IP      = "192.168.55.110"
+KONICA_IP      = get_store_config().printers.konica_ip
 SOAP_PORT      = 30081
 SOAP_ENDPOINT  = f"http://{KONICA_IP}:{SOAP_PORT}/clrc/services/CLRC"
 FETCH_INTERVAL = 1800          # seconds (30 min)

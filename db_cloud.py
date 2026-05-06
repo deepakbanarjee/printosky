@@ -13,6 +13,10 @@ import os
 import logging
 from datetime import datetime
 
+# Note: pickup_code and routing.engine are imported lazily inside
+# update_job_paid (see below). Keeping them out of module-top means a
+# missing module in deployment cannot kill every db_cloud importer.
+
 logger = logging.getLogger("db_cloud")
 
 # ── Supabase client (lazy singleton) ─────────────────────────────────────────
@@ -131,14 +135,70 @@ def update_job_delivery(job_id: str, delivery: int) -> None:
 
 
 def update_job_paid(job_id: str, amount: float, method: str, pay_id: str) -> None:
-    """Mark a job as Paid and record payment details."""
+    """Mark a job as Paid and record payment details.
+
+    Idempotently claims a pickup_code for this job if one is not already
+    set. Razorpay can fire the same webhook more than once; calling this
+    twice for the same job_id will not generate a second pickup code.
+    """
+    client = _client()
+
+    update_payload: dict[str, object] = {
+        "status":              "Paid",
+        "amount_collected":    amount,
+        "payment_mode":        method,
+        "razorpay_payment_id": pay_id,
+    }
+
     try:
-        _client().table("jobs").update({
-            "status":              "Paid",
-            "amount_collected":    amount,
-            "payment_mode":        method,
-            "razorpay_payment_id": pay_id,
-        }).eq("job_id", job_id).execute()
+        existing = (
+            client.table("jobs")
+            .select("pickup_code")
+            .eq("job_id", job_id)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(existing, "data", None) or []
+        existing_code = rows[0].get("pickup_code") if rows else None
+        if not existing_code:
+            try:
+                # Lazy import: a missing pickup_code module must not kill
+                # every db_cloud importer.
+                from pickup_code import claim_unique_pickup_code
+                update_payload["pickup_code"] = claim_unique_pickup_code(client)
+            except Exception as e:
+                logger.error(
+                    f"update_job_paid: could not claim pickup_code for {job_id}: {e}; "
+                    "payment status will still be recorded but the customer cannot be "
+                    "given a pickup code automatically"
+                )
+    except Exception as e:
+        logger.error(f"update_job_paid: pickup_code lookup failed for {job_id}: {e}")
+
+    # Routing decision (block 3). Gated by MULTISTORE_ROUTING_ENABLED so a
+    # bad deploy can be reverted without code rollback — flip the env var
+    # to false and the path becomes a no-op.
+    if os.environ.get("MULTISTORE_ROUTING_ENABLED", "").lower() in ("1", "true", "yes"):
+        try:
+            # Lazy import: a missing routing/ package must not kill every
+            # db_cloud importer.
+            from routing.engine import (
+                JobSpec,
+                decide as _routing_decide,
+                load_eligible_partners as _routing_load_partners,
+                record_decision as _routing_record,
+            )
+            candidates = _routing_load_partners(client)
+            spec = JobSpec(job_id=job_id)
+            decision = _routing_decide(spec, candidates)
+            _routing_record(client, decision)
+            if decision.chosen_store_id:
+                update_payload["assigned_store_id"] = decision.chosen_store_id
+        except Exception as e:
+            logger.error(f"update_job_paid: routing failed for {job_id}: {e}")
+
+    try:
+        client.table("jobs").update(update_payload).eq("job_id", job_id).execute()
     except Exception as e:
         logger.error(f"update_job_paid error for {job_id}: {e}")
 

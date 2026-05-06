@@ -22,6 +22,8 @@ import requests
 from datetime import datetime, date
 from dotenv import load_dotenv
 
+from store_config import get_store_config
+
 load_dotenv()
 
 logger = logging.getLogger("supabase_sync")
@@ -30,7 +32,7 @@ logger = logging.getLogger("supabase_sync")
 SUPABASE_URL         = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY         = os.environ.get("SUPABASE_KEY", "")          # anon key (project id)
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")  # service_role key (bypasses RLS)
-STORE_ID     = "OSP"       # Oxygen Students Paradise — change per store
+STORE_ID     = get_store_config().store_id  # from store_config.json; falls back to "OSP"
 SYNC_INTERVAL = 300        # seconds (5 minutes)
 
 # ── Supabase REST API headers ─────────────────────────────────────────────────

@@ -33,6 +33,8 @@ import requests
 import urllib3
 from datetime import datetime
 
+from store_config import get_store_config
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -44,7 +46,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger("epson_fetcher")
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-EPSON_IP           = "192.168.55.202"
+EPSON_IP           = get_store_config().printers.epson_ip
 EPSON_BASE         = f"https://{EPSON_IP}"
 EPSON_USER         = os.environ.get("EPSON_USER", "Oxygen")
 EPSON_PASS         = os.environ.get("EPSON_PASS", "Oxygen@1234")

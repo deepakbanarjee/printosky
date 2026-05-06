@@ -1,6 +1,11 @@
 # Netlify
 .netlify
 
+# Node
+node_modules/
+scripts/node_modules/
+scripts/package-lock.json
+
 # WhatsApp browser session (large, locked files)
 whatsapp_capture/.wwebjs_auth/
 whatsapp_capture/.wwebjs_cache/
@@ -18,6 +23,9 @@ __pycache__/
 
 # Env files
 *.env
+
+# Per-store config (template is store_config.example.json)
+store_config.json
 
 # Logs
 logs/
