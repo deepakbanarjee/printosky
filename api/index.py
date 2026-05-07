@@ -1614,6 +1614,66 @@ def _handle_pb_template_download(h, university_id: str) -> None:
     _pb_docx_response(h, docx_bytes, filename)
 
 
+def _handle_pb_analyse(h, body: bytes) -> None:
+    """POST /project-builder/analyse — free chapter detection before payment."""
+    import base64
+    try:
+        data = json.loads(body)
+        content_b64 = data.get("content_b64", "")
+        filename = data.get("filename", "document.docx")
+
+        if not content_b64:
+            _json_response(h, 400, {"error": "No file content provided"})
+            return
+
+        file_bytes = base64.b64decode(content_b64)
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+        if ext == "docx":
+            text = docx_engine.extract_text_from_docx(file_bytes)
+        elif ext == "pdf":
+            text = docx_engine.extract_text_from_pdf(file_bytes)
+        else:
+            _json_response(h, 400, {"error": "Unsupported file type. Only .docx and .pdf are supported."})
+            return
+
+        if not text.strip():
+            _json_response(h, 422, {"error": "Could not extract text. The file may be image-based or corrupted."})
+            return
+
+        word_count = len(text.split())
+        structure = docx_engine._parse_structure_with_claude(text)
+
+        if "error" in structure:
+            _json_response(h, 200, {
+                "title": "",
+                "chapters": [],
+                "word_count": word_count,
+                "structured": False,
+            })
+            return
+
+        result_chapters = []
+        for ch in structure.get("chapters", []):
+            words = sum(len(s.get("content", "").split()) for s in ch.get("sections", []))
+            result_chapters.append({
+                "number": ch.get("number", 0),
+                "heading": ch.get("heading", ""),
+                "word_count": words,
+            })
+
+        _json_response(h, 200, {
+            "title": structure.get("title", ""),
+            "chapters": result_chapters,
+            "word_count": word_count,
+            "structured": True,
+        })
+
+    except Exception as exc:
+        logger.error("pb analyse error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_pb_create_order(h, body: bytes) -> None:
     """POST /project-builder/create-order — create Razorpay order for paid tier."""
     try:
@@ -1934,6 +1994,10 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # ── Project Builder ──────────────────────────────────────────────────
+        if self.path == "/project-builder/analyse":
+            _handle_pb_analyse(self, body)
+            return
+
         if self.path == "/project-builder/create-order":
             _handle_pb_create_order(self, body)
             return

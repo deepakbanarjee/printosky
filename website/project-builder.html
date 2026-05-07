@@ -260,9 +260,17 @@
             <div class="upload-zone" id="uploadZone">
               <input type="file" id="uploadFile" accept=".docx,.pdf" onchange="handleFileSelect(this)">
               <div class="icon">📄</div>
-              <p>Click to choose or drag and drop</p>
+              <p>Click to choose or drag and drop your Word file</p>
               <p style="font-size:.8rem; color:#bbb; margin-top:.25rem">.docx or .pdf — max 10 MB</p>
               <div class="upload-name" id="uploadFileName"></div>
+            </div>
+            <div id="detectWrap" class="pb-hidden" style="margin-top:.75rem">
+              <button class="pb-btn pb-btn-secondary" id="detectBtn" onclick="analyseDocument()" style="width:100%;font-size:.95rem">🔍 Detect Chapters →</button>
+            </div>
+            <div id="detectedStructure" class="pb-hidden" style="margin-top:1rem;background:#f6f8f2;border:1px solid #d4e0c8;border-radius:8px;padding:1rem 1.25rem">
+              <div style="font-weight:600;margin-bottom:.6rem;color:#2a2a2a" id="detectedTitle"></div>
+              <div id="detectedChapters"></div>
+              <div id="detectedNote" style="margin-top:.6rem;font-size:.82rem"></div>
             </div>
           </div>
 
@@ -436,6 +444,7 @@
     chapterCount: 8,
     fileBytes: null,
     fileName: null,
+    analysed: false,
     downloadBlob: null,
     downloadName: 'report.docx',
   };
@@ -557,6 +566,9 @@
     hideErr('ffError');
     $('uploadFileName').textContent = '📎 ' + file.name;
     state.fileName = file.name;
+    state.analysed = false;
+    hide('detectedStructure');
+    show('detectWrap');
     const reader = new FileReader();
     reader.onload = e => {
       state.fileBytes = e.target.result.split(',')[1];  // base64
@@ -577,6 +589,52 @@
       handleFileSelect($('uploadFile'));
     }
   });
+
+  // ── Chapter detection (free pre-payment step) ────────────────────────────────
+  async function analyseDocument() {
+    if (!state.fileBytes) { showErr('ffError', 'Please select a file first.'); return; }
+    const btn = $('detectBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Detecting…';
+    hideErr('ffError');
+    hide('detectedStructure');
+    try {
+      const res = await fetch(`${API}/project-builder/analyse`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({content_b64: state.fileBytes, filename: state.fileName})
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Detection failed');
+
+      $('detectedTitle').textContent = '📄 ' + (data.title || state.fileName);
+
+      if (data.structured && data.chapters.length > 0) {
+        $('detectedChapters').innerHTML = data.chapters.map(ch =>
+          `<div style="display:flex;justify-content:space-between;padding:.3rem 0;border-bottom:1px solid #e4edda;font-size:.88rem">
+             <span>Ch ${ch.number}: ${ch.heading}</span>
+             <span style="color:#888">${ch.word_count ? ch.word_count.toLocaleString() + ' words' : ''}</span>
+           </div>`
+        ).join('');
+        const note = $('detectedNote');
+        note.style.color = '#2d6e2d';
+        note.textContent = `✓ ${data.chapters.length} chapters detected · ${data.word_count.toLocaleString()} words total`;
+      } else {
+        $('detectedChapters').innerHTML = '<div style="color:#888;font-size:.88rem">No clear chapter structure detected — will be formatted as continuous text with all body styles applied.</div>';
+        const note = $('detectedNote');
+        note.style.color = '#777';
+        note.textContent = `${data.word_count.toLocaleString()} words extracted.`;
+      }
+
+      show('detectedStructure');
+      state.analysed = true;
+    } catch(e) {
+      showErr('ffError', 'Detection failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔍 Detect Chapters →';
+    }
+  }
 
   // ── Students ──────────────────────────────────────────────────────────────────
   function getStudentData() {
