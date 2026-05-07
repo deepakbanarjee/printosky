@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF B&W Converter — Printosky Staff</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:      #0a0e13;
+    --surface: #111820;
+    --card:    #161d26;
+    --border:  #1e2a36;
+    --accent:  #00c8ff;
+    --green:   #00e676;
+    --amber:   #ffab40;
+    --red:     #ff5252;
+    --text:    #e0eaf5;
+    --muted:   #5a7080;
+    --mono:    'IBM Plex Mono', monospace;
+    --sans:    'IBM Plex Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+  }
+
+  /* ── LOGIN SCREEN ─────────────────────────────────────────────────── */
+  #login-screen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: radial-gradient(ellipse at 40% 50%, #001a2e 0%, var(--bg) 70%);
+  }
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    padding: 2.5rem;
+    width: 340px;
+    animation: fadeUp .35s ease;
+  }
+  .login-logo {
+    font-family: var(--mono);
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: .15em;
+    margin-bottom: .2rem;
+  }
+  .login-sub {
+    font-family: var(--mono);
+    font-size: .7rem;
+    color: var(--muted);
+    letter-spacing: .06em;
+    margin-bottom: 2rem;
+  }
+  .login-label {
+    display: block;
+    font-family: var(--mono);
+    font-size: .68rem;
+    color: var(--muted);
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    margin-bottom: .4rem;
+  }
+  .login-input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: .9rem;
+    padding: .65rem .8rem;
+    outline: none;
+    transition: border-color .2s;
+    margin-bottom: 1.1rem;
+  }
+  .login-input:focus { border-color: var(--accent); }
+  .login-btn {
+    display: block;
+    width: 100%;
+    padding: .72rem;
+    background: var(--accent);
+    color: #000;
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: .82rem;
+    letter-spacing: .1em;
+    border: none;
+    cursor: pointer;
+    transition: opacity .2s;
+  }
+  .login-btn:hover { opacity: .85; }
+  .login-err {
+    margin-top: .9rem;
+    font-family: var(--mono);
+    font-size: .72rem;
+    color: var(--red);
+    display: none;
+  }
+  .login-hint {
+    margin-top: 1rem;
+    font-family: var(--mono);
+    font-size: .65rem;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  /* ── TOOL SCREEN ──────────────────────────────────────────────────── */
+  #tool-screen { display: none; min-height: 100vh; flex-direction: column; }
+
+  .tool-header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: .85rem 1.6rem;
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+  }
+  .tool-logo {
+    font-family: var(--mono);
+    font-size: .95rem;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: .12em;
+  }
+  .tool-title {
+    font-family: var(--mono);
+    font-size: .78rem;
+    color: var(--muted);
+    letter-spacing: .06em;
+  }
+  .header-sep { flex: 1; }
+  .staff-badge {
+    font-family: var(--mono);
+    font-size: .68rem;
+    color: var(--muted);
+    letter-spacing: .06em;
+  }
+  .logout-btn {
+    font-family: var(--mono);
+    font-size: .68rem;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--border);
+    padding: .3rem .65rem;
+    cursor: pointer;
+    letter-spacing: .06em;
+    transition: color .15s, border-color .15s;
+  }
+  .logout-btn:hover { color: var(--text); border-color: var(--muted); }
+
+  .tool-body {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 400px 1fr;
+    min-height: 0;
+  }
+
+  /* ── PANELS ───────────────────────────────────────────────────────── */
+  .left-panel {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 1.6rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1.3rem;
+  }
+  .right-panel {
+    padding: 1.6rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+  }
+
+  /* ── CARDS ────────────────────────────────────────────────────────── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    padding: 1.1rem;
+  }
+  .card-title {
+    font-family: var(--mono);
+    font-size: .65rem;
+    color: var(--muted);
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    margin-bottom: .9rem;
+  }
+
+  /* ── DROP ZONE ────────────────────────────────────────────────────── */
+  .dropzone {
+    border: 2px dashed var(--border);
+    background: var(--bg);
+    padding: 1.8rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    position: relative;
+  }
+  .dropzone:hover, .dropzone.over { border-color: var(--accent); background: #0d1a24; }
+  .dropzone input[type="file"] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+  .dz-icon  { font-size: 1.8rem; margin-bottom: .5rem; line-height: 1; }
+  .dz-label { font-family: var(--mono); font-size: .75rem; color: var(--muted); }
+  .dz-name  {
+    margin-top: .55rem; font-family: var(--mono); font-size: .78rem;
+    color: var(--accent); word-break: break-all; display: none;
+  }
+
+  /* ── PRESETS ──────────────────────────────────────────────────────── */
+  .preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
+  .preset-btn {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: .68rem;
+    letter-spacing: .04em;
+    padding: .5rem .55rem;
+    cursor: pointer;
+    text-align: left;
+    line-height: 1.5;
+    transition: color .15s, border-color .15s;
+  }
+  .preset-btn:hover { color: var(--text); border-color: var(--accent); }
+  .preset-btn.active { color: var(--accent); border-color: var(--accent); }
+  .preset-sub { font-size: .58rem; color: var(--muted); }
+
+  /* ── SLIDERS ──────────────────────────────────────────────────────── */
+  .section-sep {
+    font-family: var(--mono);
+    font-size: .6rem;
+    color: var(--muted);
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: .3rem;
+    margin: .9rem 0 .7rem;
+  }
+  .section-sep:first-child { margin-top: 0; }
+
+  .sl-row { margin-bottom: .9rem; }
+  .sl-row:last-child { margin-bottom: 0; }
+  .sl-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: .25rem;
+  }
+  .sl-name { font-family: var(--mono); font-size: .72rem; color: var(--text); }
+  .sl-val  {
+    font-family: var(--mono); font-size: .82rem;
+    color: var(--accent); font-weight: 600; min-width: 3rem; text-align: right;
+  }
+  .sl-hint {
+    font-family: var(--sans); font-size: .67rem;
+    color: var(--muted); line-height: 1.4; margin-bottom: .32rem;
+  }
+  input[type="range"] {
+    -webkit-appearance: none; width: 100%; height: 3px;
+    background: var(--border); outline: none; cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--accent);
+    border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--accent);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg);
+  }
+
+  /* ── CONVERT BUTTON ───────────────────────────────────────────────── */
+  #convert-btn {
+    width: 100%; padding: .85rem;
+    background: var(--accent); color: #000;
+    font-family: var(--mono); font-weight: 600;
+    font-size: .88rem; letter-spacing: .12em;
+    border: none; cursor: pointer; transition: opacity .2s;
+  }
+  #convert-btn:hover:not(:disabled) { opacity: .85; }
+  #convert-btn:disabled {
+    background: var(--border); color: var(--muted); cursor: not-allowed;
+  }
+
+  /* ── STATUS ───────────────────────────────────────────────────────── */
+  .status-box {
+    background: var(--bg); border: 1px solid var(--border);
+    padding: 1rem 1.1rem; min-height: 68px;
+    display: flex; align-items: center; gap: .75rem;
+  }
+  .s-icon { font-size: 1.3rem; flex-shrink: 0; }
+  .s-text { font-family: var(--mono); font-size: .78rem; color: var(--muted); line-height: 1.5; }
+  .s-text.ok   { color: var(--green); }
+  .s-text.err  { color: var(--red); }
+  .s-text.busy { color: var(--amber); }
+  .spinner {
+    width: 18px; height: 18px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--amber);
+    animation: spin .65s linear infinite; flex-shrink: 0; display: none;
+  }
+
+  /* ── STATS ────────────────────────────────────────────────────────── */
+  .stats-row {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: .45rem; display: none;
+  }
+  .stat-cell {
+    background: var(--bg); border: 1px solid var(--border);
+    padding: .55rem .4rem; text-align: center;
+  }
+  .stat-val { font-family: var(--mono); font-size: .9rem; font-weight: 600; color: var(--accent); display: block; }
+  .stat-lbl { font-family: var(--mono); font-size: .58rem; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+
+  /* ── DOWNLOAD ─────────────────────────────────────────────────────── */
+  #dl-btn {
+    display: none; width: 100%; padding: .78rem;
+    background: var(--green); color: #000;
+    font-family: var(--mono); font-weight: 600;
+    font-size: .85rem; letter-spacing: .1em;
+    border: none; cursor: pointer; text-align: center;
+    text-decoration: none; transition: opacity .2s;
+  }
+  #dl-btn:hover { opacity: .85; }
+
+  /* ── TUNING TABLE ─────────────────────────────────────────────────── */
+  .tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: .7rem; }
+  .tbl th {
+    text-align: left; font-size: .6rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted);
+    padding: .4rem .55rem; border-bottom: 1px solid var(--border);
+  }
+  .tbl td {
+    padding: .42rem .55rem; border-bottom: 1px solid var(--border);
+    color: var(--text); vertical-align: top; line-height: 1.4;
+  }
+  .tbl td:first-child { color: var(--muted); }
+  .tbl tr:last-child td { border-bottom: none; }
+  .up   { color: var(--green); }
+  .down { color: var(--amber); }
+
+  /* ── ANIMATIONS ───────────────────────────────────────────────────── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ LOGIN ═══════════════════════════════════════════ -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">PRINTOSKY</div>
+    <div class="login-sub">BW CONVERTER // STAFF TOOL</div>
+    <label class="login-label">Staff PIN</label>
+    <input class="login-input" type="password" id="pin-input"
+           placeholder="6-digit PIN" maxlength="6"
+           onkeydown="if(event.key==='Enter')tryLogin()">
+    <button class="login-btn" onclick="tryLogin()">ENTER →</button>
+    <div class="login-err" id="login-err"></div>
+    <div class="login-hint">Store PC only — tools server must be running</div>
+  </div>
+</div>
+
+
+<!-- ═══════════════ TOOL ═════════════════════════════════════════════ -->
+<div id="tool-screen">
+
+  <div class="tool-header">
+    <span class="tool-logo">PRINTOSKY</span>
+    <span class="tool-title">PDF → B&W CONVERTER</span>
+    <span class="header-sep"></span>
+    <span class="staff-badge" id="staff-name"></span>
+    <button class="logout-btn" onclick="doLogout()">LOGOUT</button>
+  </div>
+
+  <div class="tool-body">
+
+    <!-- LEFT: Controls -->
+    <div class="left-panel">
+
+      <div class="card">
+        <div class="card-title">PDF File</div>
+        <div class="dropzone" id="dropzone"
+             ondragover="dzOver(event)" ondragleave="dzLeave()" ondrop="dzDrop(event)">
+          <input type="file" accept=".pdf" id="file-input" onchange="filePicked()">
+          <div class="dz-icon">📄</div>
+          <div class="dz-label">Drop PDF here or click to browse</div>
+          <div class="dz-name" id="dz-name"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Quick Presets</div>
+        <div class="preset-grid">
+          <button class="preset-btn active" onclick="preset('default',this)">
+            Default<br><span class="preset-sub">Book scan</span>
+          </button>
+          <button class="preset-btn" onclick="preset('faded',this)">
+            Faded ink<br><span class="preset-sub">Light strokes</span>
+          </button>
+          <button class="preset-btn" onclick="preset('noisy',this)">
+            Noisy paper<br><span class="preset-sub">Spotted bg</span>
+          </button>
+          <button class="preset-btn" onclick="preset('hires',this)">
+            High-res<br><span class="preset-sub">Fine print</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Parameters</div>
+
+        <div class="section-sep">Text pages</div>
+
+        <div class="sl-row">
+          <div class="sl-top">
+            <span class="sl-name">DPI</span>
+            <span class="sl-val" id="v-dpi">200</span>
+          </div>
+          <div class="sl-hint">Render resolution. 200 suits most book scans; 300 for very small text (slower).</div>
+          <input type="range" id="s-dpi" min="100" max="400" step="10" value="200"
+                 oninput="sv('dpi',this.value,0)">
+        </div>
+
+        <div class="sl-row">
+          <div class="sl-top">
+            <span class="sl-name">Sensitivity</span>
+            <span class="sl-val" id="v-sensitivity">0.10</span>
+          </div>
+          <div class="sl-hint">Bradley threshold aggressiveness. ↑ saves faint strokes · ↓ cuts paper noise.</div>
+          <input type="range" id="s-sensitivity" min="0.01" max="0.30" step="0.01" value="0.10"
+                 oninput="sv('sensitivity',this.value,2)">
+        </div>
+
+        <div class="sl-row">
+          <div class="sl-top">
+            <span class="sl-name">Window size (px)</span>
+            <span class="sl-val" id="v-window">40</span>
+          </div>
+          <div class="sl-hint">Local neighbourhood for adaptive thresholding. Larger = smoother transitions.</div>
+          <input type="range" id="s-window" min="10" max="100" step="5" value="40"
+                 oninput="sv('window',this.value,0)">
+        </div>
+
+        <div class="section-sep">Page classification</div>
+
+        <div class="sl-row">
+          <div class="sl-top">
+            <span class="sl-name">Tone split</span>
+            <span class="sl-val" id="v-tone_split">0.30</span>
+          </div>
+          <div class="sl-hint">Mid-tone ratio above which a page is a photo (not text). Text ≈ 22 %, photos ≈ 45 %.</div>
+          <input type="range" id="s-tone_split" min="0.10" max="0.60" step="0.01" value="0.30"
+                 oninput="sv('tone_split',this.value,2)">
+        </div>
+
+        <div class="section-sep">Image / illustration pages</div>
+
+        <div class="sl-row">
+          <div class="sl-top">
+            <span class="sl-name">White point clip</span>
+            <span class="sl-val" id="v-white_point">220</span>
+          </div>
+          <div class="sl-hint">Pixels above this on photo pages → pure white. Lower if prints still look grey.</div>
+          <input type="range" id="s-white_point" min="180" max="255" step="5" value="220"
+                 oninput="sv('white_point',this.value,0)">
+        </div>
+      </div>
+
+      <button id="convert-btn" onclick="doConvert()" disabled>SELECT A PDF FIRST</button>
+
+    </div><!-- /left-panel -->
+
+
+    <!-- RIGHT: Output -->
+    <div class="right-panel">
+
+      <div class="card">
+        <div class="card-title">Status</div>
+        <div class="status-box">
+          <div class="spinner" id="spinner"></div>
+          <div class="s-icon"  id="s-icon">⏳</div>
+          <div class="s-text"  id="s-text">Upload a PDF and click Convert.</div>
+        </div>
+      </div>
+
+      <div class="stats-row" id="stats-row">
+        <div class="stat-cell"><span class="stat-val" id="st-text">—</span><span class="stat-lbl">Text pages</span></div>
+        <div class="stat-cell"><span class="stat-val" id="st-img">—</span><span class="stat-lbl">Photo pages</span></div>
+        <div class="stat-cell"><span class="stat-val" id="st-sec">—</span><span class="stat-lbl">Seconds</span></div>
+        <div class="stat-cell"><span class="stat-val" id="st-in">—</span><span class="stat-lbl">Input MB</span></div>
+        <div class="stat-cell"><span class="stat-val" id="st-out">—</span><span class="stat-lbl">Output MB</span></div>
+      </div>
+
+      <a id="dl-btn" href="#" download>⬇ DOWNLOAD B&W PDF</a>
+
+      <div class="card">
+        <div class="card-title">Tuning Guide</div>
+        <table class="tbl">
+          <tr><th>Symptom</th><th>Fix</th></tr>
+          <tr><td>Thin strokes disappear</td><td><span class="up">↑ Sensitivity</span></td></tr>
+          <tr><td>Paper texture prints as dots</td><td><span class="down">↓ Sensitivity</span></td></tr>
+          <tr><td>Grey tint on photo pages</td><td><span class="down">↓ White point clip</span></td></tr>
+          <tr><td>Photo pages look washed out</td><td><span class="up">↑ White point clip</span></td></tr>
+          <tr><td>Wrong pages treated as photos</td><td>Adjust Tone split</td></tr>
+          <tr><td>Conversion too slow</td><td><span class="down">↓ DPI</span></td></tr>
+          <tr><td>Output looks soft / blurry</td><td><span class="up">↑ DPI</span></td></tr>
+        </table>
+      </div>
+
+      <div style="font-family:var(--mono);font-size:.63rem;color:var(--muted);line-height:1.7">
+        Tools server: <span id="tools-url" style="color:var(--text)"></span><br>
+        Start with <span style="color:var(--accent)">pdf_tools_server.bat</span> before converting.
+      </div>
+
+    </div><!-- /right-panel -->
+  </div><!-- /tool-body -->
+</div><!-- /tool-screen -->
+
+
+<script>
+// ── Config (mirrors admin.html localStorage pattern) ─────────────────
+const STORE_URL = localStorage.getItem('storePcUrl')     || 'http://localhost:3005';
+const TOOLS_URL = localStorage.getItem('toolsServerUrl') || 'http://localhost:3006';
+document.getElementById('tools-url').textContent = TOOLS_URL;
+
+// ── Auth ──────────────────────────────────────────────────────────────
+async function tryLogin() {
+  const pin = document.getElementById('pin-input').value.trim();
+  if (!pin) return;
+  try {
+    const r = await fetch(`${STORE_URL}/staff-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin, pc_id: 'BW-CONVERTER' }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      sessionStorage.setItem('bw_auth', '1');
+      sessionStorage.setItem('bw_name', j.name || 'Staff');
+      showTool(j.name || 'Staff');
+    } else {
+      loginErr('Incorrect PIN');
+    }
+  } catch {
+    loginErr('Store PC offline — cannot verify PIN');
+  }
+}
+
+function loginErr(msg) {
+  const el = document.getElementById('login-err');
+  el.textContent   = msg;
+  el.style.display = 'block';
+}
+
+function showTool(name) {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('tool-screen').style.display  = 'flex';
+  document.getElementById('staff-name').textContent     = name;
+}
+
+function doLogout() {
+  sessionStorage.removeItem('bw_auth');
+  sessionStorage.removeItem('bw_name');
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('tool-screen').style.display  = 'none';
+  document.getElementById('pin-input').value            = '';
+  document.getElementById('login-err').style.display    = 'none';
+}
+
+// Auto-login if session is still alive
+if (sessionStorage.getItem('bw_auth') === '1') {
+  showTool(sessionStorage.getItem('bw_name') || 'Staff');
+}
+
+// ── Presets ───────────────────────────────────────────────────────────
+const PRESETS = {
+  default: { dpi:200, sensitivity:0.10, window:40, tone_split:0.30, white_point:220 },
+  faded:   { dpi:200, sensitivity:0.14, window:40, tone_split:0.30, white_point:220 },
+  noisy:   { dpi:200, sensitivity:0.07, window:40, tone_split:0.30, white_point:200 },
+  hires:   { dpi:300, sensitivity:0.10, window:50, tone_split:0.30, white_point:220 },
+};
+
+function preset(name, btn) {
+  const p = PRESETS[name];
+  Object.entries(p).forEach(([k, v]) => {
+    document.getElementById('s-' + k).value = v;
+    const dec = Number.isInteger(v) ? 0 : 2;
+    document.getElementById('v-' + k).textContent = Number(v).toFixed(dec);
+  });
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── Slider sync ───────────────────────────────────────────────────────
+function sv(key, val, dec) {
+  document.getElementById('v-' + key).textContent = Number(val).toFixed(dec);
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+}
+
+// ── File upload ───────────────────────────────────────────────────────
+let currentFile = null;
+
+function setFile(f) {
+  currentFile = f;
+  document.getElementById('dz-name').textContent   = f.name;
+  document.getElementById('dz-name').style.display = 'block';
+  const btn = document.getElementById('convert-btn');
+  btn.textContent = 'CONVERT TO B&W';
+  btn.disabled    = false;
+  resetOutput();
+}
+
+function filePicked() {
+  const f = document.getElementById('file-input').files[0];
+  if (f) setFile(f);
+}
+function dzOver(e) { e.preventDefault(); document.getElementById('dropzone').classList.add('over'); }
+function dzLeave()  { document.getElementById('dropzone').classList.remove('over'); }
+function dzDrop(e) {
+  e.preventDefault(); document.getElementById('dropzone').classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.toLowerCase().endsWith('.pdf')) setFile(f);
+  else setStatus('err','❌','Only PDF files are accepted.');
+}
+
+function resetOutput() {
+  setStatus('','⏳','Ready — click Convert to start.');
+  document.getElementById('stats-row').style.display = 'none';
+  document.getElementById('dl-btn').style.display    = 'none';
+}
+
+// ── Status helpers ────────────────────────────────────────────────────
+function setStatus(cls, icon, msg) {
+  document.getElementById('spinner').style.display = 'none';
+  document.getElementById('s-icon').style.display  = '';
+  document.getElementById('s-icon').textContent    = icon;
+  document.getElementById('s-text').textContent    = msg;
+  document.getElementById('s-text').className      = 's-text ' + cls;
+}
+function setBusy(msg) {
+  document.getElementById('spinner').style.display = 'block';
+  document.getElementById('s-icon').style.display  = 'none';
+  document.getElementById('s-text').textContent    = msg;
+  document.getElementById('s-text').className      = 's-text busy';
+}
+
+// ── Convert ───────────────────────────────────────────────────────────
+async function doConvert() {
+  if (!currentFile) return;
+  const btn = document.getElementById('convert-btn');
+  btn.disabled    = true;
+  btn.textContent = 'CONVERTING...';
+  document.getElementById('stats-row').style.display = 'none';
+  document.getElementById('dl-btn').style.display    = 'none';
+  setBusy('Converting… this may take 2–3 minutes for long documents.');
+
+  const fd = new FormData();
+  fd.append('pdf',         currentFile);
+  fd.append('dpi',         document.getElementById('s-dpi').value);
+  fd.append('sensitivity', document.getElementById('s-sensitivity').value);
+  fd.append('window',      document.getElementById('s-window').value);
+  fd.append('tone_split',  document.getElementById('s-tone_split').value);
+  fd.append('white_point', document.getElementById('s-white_point').value);
+
+  const ctrl    = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 10 * 60 * 1000);
+
+  try {
+    const resp = await fetch(`${TOOLS_URL}/bw-convert`, {
+      method: 'POST', body: fd, signal: ctrl.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!resp.ok) {
+      let msg = `Server error ${resp.status}`;
+      try { msg = (await resp.json()).error || msg; } catch {}
+      setStatus('err', '❌', msg);
+      return;
+    }
+
+    // Stats from response headers
+    const h = resp.headers;
+    document.getElementById('st-text').textContent = h.get('X-Text-Pages')  || '—';
+    document.getElementById('st-img').textContent  = h.get('X-Image-Pages') || '—';
+    document.getElementById('st-sec').textContent  = h.get('X-Elapsed-Sec') || '—';
+    document.getElementById('st-in').textContent   = h.get('X-Input-MB')    || '—';
+    document.getElementById('st-out').textContent  = h.get('X-Output-MB')   || '—';
+    document.getElementById('stats-row').style.display = 'grid';
+
+    // Download link
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    const dl   = document.getElementById('dl-btn');
+    dl.href     = url;
+    dl.download = currentFile.name.replace(/\.pdf$/i, '_BW.pdf');
+    dl.style.display = 'block';
+
+    const tp = h.get('X-Text-Pages') || '?';
+    const ip = h.get('X-Image-Pages') || '?';
+    setStatus('ok', '✅', `Done — ${tp} text pages binarised, ${ip} photo pages normalised.`);
+
+  } catch (e) {
+    clearTimeout(timeout);
+    if (e.name === 'AbortError') {
+      setStatus('err', '❌', 'Timed out after 10 min. Try reducing DPI.');
+    } else if (e.message.includes('fetch') || e.message.includes('Network')) {
+      setStatus('err', '❌', `Cannot reach tools server at ${TOOLS_URL}. Is pdf_tools_server.bat running?`);
+    } else {
+      setStatus('err', '❌', e.message);
+    }
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = 'CONVERT TO B&W';
+  }
+}
+</script>
+</body>
+</html>
