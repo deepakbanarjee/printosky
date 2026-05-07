@@ -141,3 +141,13 @@ class TestClaimUniquePickupCode:
         client = _FakeClient(taken_codes={"P-XXXX"})
         with pytest.raises(RuntimeError, match="failed to find a unique pickup code"):
             claim_unique_pickup_code(client)
+
+
+class TestPickupCodePublicAPI:
+    """Regression guard: assert the symbol print_server.py imports actually exists."""
+
+    def test_generate_pickup_code_is_importable_and_callable(self):
+        from pickup_code import generate_pickup_code
+        assert callable(generate_pickup_code)
+        code = generate_pickup_code()
+        assert code and len(code) == 6

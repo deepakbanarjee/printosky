@@ -491,6 +491,20 @@ def update_job_status(job_id: str, status: str, printer: str, staff_id: str = No
     threading.Thread(target=_push_job_status_supabase, args=(job_id, status, printer), daemon=True).start()
 
 
+_sb_client = None
+
+
+def _supabase_client():
+    """Lazy singleton Supabase SDK client for pickup-code uniqueness checks."""
+    global _sb_client
+    if _sb_client is None:
+        from supabase import create_client
+        url = os.environ["SUPABASE_URL"]
+        key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ["SUPABASE_KEY"]
+        _sb_client = create_client(url, key)
+    return _sb_client
+
+
 def _push_job_status_supabase(job_id: str, status: str, printer: str):
     """PATCH job status to Supabase using service key (bypasses RLS)."""
     import json as _json
@@ -761,7 +775,8 @@ def handle_mark_ready(body: dict) -> dict:
 
     conn = _db()
     row = conn.execute(
-        "SELECT sender, filename, customer_name FROM jobs WHERE job_id=?", (job_id,)
+        "SELECT sender, filename, customer_name, pickup_code FROM jobs WHERE job_id=?",
+        (job_id,)
     ).fetchone()
 
     if not row:
@@ -772,29 +787,60 @@ def handle_mark_ready(body: dict) -> dict:
     filename = row["filename"] or job_id
     name     = row["customer_name"] or "Customer"
 
-    # Update status
+    code = row["pickup_code"]
+    if not code:
+        try:
+            from pickup_code import claim_unique_pickup_code
+            code = claim_unique_pickup_code(_supabase_client())
+        except Exception:
+            code = None
+
+    # Update status + pickup fields (COALESCE preserves existing code/timestamp
+    # if staff clicks Ready twice on the same job)
     conn.execute("""
         UPDATE jobs SET status='Ready',
+               pickup_code=COALESCE(pickup_code, ?),
+               pickup_ready_at=COALESCE(pickup_ready_at, ?),
                notes=COALESCE(notes||' | ','') || ?
         WHERE job_id=?
-    """, (f"Ready notified at {_now()} by {staff_id}", job_id))
+    """, (code, _now(), f"Ready notified at {_now()} by {staff_id}", job_id))
     conn.commit()
     conn.close()
 
-    # Send WhatsApp
+    # Send WhatsApp — pickup-code-aware message with track link
     whatsapp_sent = False
-    if phone:
-        msg = (f"Hi! Your print job is ready for collection at Printosky, Thriprayar.\n"
-               f"Job: {job_id}\n"
-               f"Please collect at your earliest convenience.")
+    if phone and code:
+        try:
+            from whatsapp_notify import send_pickup_ready
+            from store_config import get_store_config
+            cfg = get_store_config()
+            track_link = f"https://printosky.com/track?code={code}"
+            whatsapp_sent = send_pickup_ready(
+                phone, code,
+                store_label=None,
+                store_address=cfg.store_name,
+                deep_link=track_link,
+            )
+        except Exception as _e:
+            logging.warning("send_pickup_ready failed, using fallback: %s", _e)
+            msg = (f"🎉 Your print job is ready!\n\n"
+                   f"🎫 Pickup code: *{code}*\n"
+                   f"🔗 Track: https://printosky.com/track?code={code}\n\n"
+                   f"Show this code at the counter.")
+            whatsapp_sent = _send_whatsapp(phone, msg)
+    elif phone:
+        msg = (f"Hi! Your print job is ready for collection at Printosky.\n"
+               f"Job: {job_id}")
         whatsapp_sent = _send_whatsapp(phone, msg)
 
-    logging.info("Job %s marked Ready (WhatsApp: %s)", job_id, "sent" if whatsapp_sent else "skipped")
+    logging.info("Job %s marked Ready code=%s (WhatsApp: %s)",
+                 job_id, code, "sent" if whatsapp_sent else "skipped")
     _jt_log(DB_PATH, job_id, "job_ready",
             from_status=None, to_status="Ready",
             staff_id=staff_id,
-            notes=f"whatsapp={'sent' if whatsapp_sent else 'skipped'}")
-    return {"ok": True, "whatsapp_sent": whatsapp_sent, "phone": phone or "walk-in"}
+            notes=f"code={code} whatsapp={'sent' if whatsapp_sent else 'skipped'}")
+    return {"ok": True, "whatsapp_sent": whatsapp_sent, "phone": phone or "walk-in",
+            "pickup_code": code}
 
 
 # ── A4: Complete job ──────────────────────────────────────────────────────────
@@ -820,17 +866,21 @@ def handle_complete_job(body: dict) -> dict:
         return {"ok": False, "error": "amount_collected must be a number"}
 
     conn = _db()
-    row = conn.execute("SELECT sender FROM jobs WHERE job_id=?", (job_id,)).fetchone()
-    phone = row["sender"] if row else None
+    row = conn.execute(
+        "SELECT sender, pickup_code FROM jobs WHERE job_id=?", (job_id,)
+    ).fetchone()
+    phone       = row["sender"]       if row else None
+    pickup_code = row["pickup_code"]  if row else None
     conn.execute("""
         UPDATE jobs SET
             status='Completed',
             amount_collected=?,
             payment_mode=?,
             completed_at=?,
+            delivered_at=COALESCE(delivered_at, ?),
             notes=COALESCE(notes||' | ','') || ?
         WHERE job_id=?
-    """, (amount, mode, _now(),
+    """, (amount, mode, _now(), _now(),
           f"Completed at {_now()} by {staff_id} — Rs.{amount:.0f} {mode}",
           job_id))
     conn.commit()
@@ -842,8 +892,14 @@ def handle_complete_job(body: dict) -> dict:
             staff_id=staff_id,
             notes=f"Rs.{amount:.0f} {mode}")
 
-    # Schedule review request 30 min after collection
+    # Pickup confirmation + schedule review request 30 min after collection
     if phone:
+        if pickup_code:
+            try:
+                from whatsapp_notify import send_pickup_completed
+                send_pickup_completed(phone, pickup_code)
+            except Exception as _e:
+                logging.warning("send_pickup_completed failed: %s", _e)
         _rv_schedule(DB_PATH, job_id, phone, _send_whatsapp)
 
     return {"ok": True, "job_id": job_id, "amount": amount, "mode": mode}

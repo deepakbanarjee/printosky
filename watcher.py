@@ -262,6 +262,10 @@ def setup_database():
         ("queued_at",         "TEXT"),
         ("printing_at",       "TEXT"),
         ("printed_at",        "TEXT"),
+        # v17: pickup / delivery tracking
+        ("pickup_code",       "TEXT"),
+        ("pickup_ready_at",   "TEXT"),
+        ("delivered_at",      "TEXT"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE jobs ADD COLUMN {col} {typedef}")

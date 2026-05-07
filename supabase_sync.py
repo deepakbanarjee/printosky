@@ -83,7 +83,8 @@ def collect_jobs(db_path):
             SELECT job_id, received_at, filename, file_extension, file_size_kb,
                    source, sender, status, customer_name, service_type,
                    amount_quoted, amount_collected, payment_mode, completed_at,
-                   filepath, printer, page_count, copies, colour, size, printed_by
+                   filepath, printer, page_count, copies, colour, size, printed_by,
+                   pickup_code, pickup_ready_at, delivered_at
             FROM jobs ORDER BY received_at DESC LIMIT 500
         """)
         rows = []

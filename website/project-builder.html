@@ -279,7 +279,7 @@
 
         <div class="pb-btn-row">
           <button class="pb-btn pb-btn-secondary" onclick="goBack()">← Back</button>
-          <button class="pb-btn pb-btn-primary" onclick="startPayment('format_fix')">Pay ₹49 & Format →</button>
+          <button class="pb-btn pb-btn-primary" onclick="formatPreview('format_fix')">Format My Report → <small style="font-weight:400;opacity:.8">(free preview)</small></button>
         </div>
       </div>
 
@@ -391,7 +391,7 @@
         <div id="genPriceNote" style="text-align:right;color:#777;font-size:.88rem;margin-bottom:.5rem"></div>
         <div class="pb-btn-row">
           <button class="pb-btn pb-btn-secondary" onclick="goBack()">← Back</button>
-          <button class="pb-btn pb-btn-primary" id="genPayBtn" onclick="startPayment('generate')">Pay & Generate Report →</button>
+          <button class="pb-btn pb-btn-primary" id="genPayBtn" onclick="formatPreview('generate')">Generate My Report → <small style="font-weight:400;opacity:.8">(free preview)</small></button>
         </div>
       </div>
 
@@ -412,11 +412,22 @@
          STEP 3 — Download
     ════════════════════════════════════════════════════════════════ -->
     <div id="step3" class="pb-hidden">
-      <div class="pb-card pb-download-card">
+      <!-- State A: Preview before payment -->
+      <div id="step3preview" class="pb-card pb-download-card">
+        <div class="check">🔍</div>
+        <h2>Your report is formatted!</h2>
+        <p id="previewSubtext">University formatting applied. Pay to download the .docx file.</p>
+        <div id="previewChapters" style="text-align:left;margin-bottom:1.5rem;max-height:260px;overflow-y:auto"></div>
+        <button class="pb-btn pb-btn-primary" id="payToDownloadBtn" style="font-size:1.05rem;padding:.85rem 2rem" onclick="startDownloadPayment()">Pay ₹49 to Download →</button>
+        <p style="font-size:.8rem;color:#aaa;margin-top:.75rem">Secure payment via Razorpay · Download link valid for 24 hours</p>
+        <div class="pb-error" id="previewPayError" style="display:none;margin-top:.75rem"></div>
+      </div>
+      <!-- State B: Download after payment confirmed -->
+      <div id="step3download" class="pb-card pb-download-card pb-hidden">
         <div class="check">✅</div>
-        <h2>Your report is ready!</h2>
-        <p>Download your formatted .docx file below. Open in Microsoft Word — headings and TOC will update automatically.</p>
-        <button class="pb-btn pb-btn-download" id="dlFinalBtn">⬇ Download Report.docx</button>
+        <h2>Payment confirmed!</h2>
+        <p>Open in Microsoft Word — headings and TOC will update automatically.</p>
+        <a id="dlFinalLink" class="pb-btn pb-btn-download" style="display:inline-block;text-decoration:none" href="#" target="_blank">⬇ Download Report.docx</a>
         <p style="font-size:.8rem;color:#aaa;margin-top:1rem">Remember to fill in any <span style="color:var(--accent)">highlighted placeholder text</span> with your specific details.</p>
         <div class="pb-error" id="dlError" style="display:none"></div>
       </div>
@@ -445,8 +456,8 @@
     fileBytes: null,
     fileName: null,
     analysed: false,
-    downloadBlob: null,
-    downloadName: 'report.docx',
+    fileToken: null,
+    currentService: null,
   };
 
   const API = '';   // same origin
@@ -531,7 +542,8 @@
   }
 
   function resetAll() {
-    state.downloadBlob = null;
+    state.fileToken = null;
+    state.currentService = null;
     state.fileBytes = null;
     state.fileName = null;
     hide('step1'); hide('step2'); hide('step3');
@@ -798,31 +810,100 @@
   }
 
   // ── Payment flow ──────────────────────────────────────────────────────────────
-  async function startPayment(service) {
-    // Validate inputs first
+  // ── Step 1: Free generation → show preview ───────────────────────────────────
+  async function formatPreview(service) {
     if (service === 'format_fix') {
       if (state.uploadTab === 'paste' && !$('pasteContent').value.trim()) {
-        showErr('ffError', 'Please paste your project content before proceeding.'); return;
+        showErr('ffError', 'Please paste your project content first.'); return;
       }
       if (state.uploadTab === 'upload' && !state.fileBytes) {
-        showErr('ffError', 'Please select a .docx or .pdf file to upload.'); return;
+        showErr('ffError', 'Please select a .docx or .pdf file first.'); return;
       }
       hideErr('ffError');
-    } else if (service === 'generate') {
+    } else {
       if (!validateGenerateForm()) return;
       hideErr('genError');
     }
 
-    // Estimate word count for pricing
-    let wordCount = 0;
+    goStep2();
+    $('spinnerTitle').textContent = service === 'format_fix' ? 'Formatting your report…' : 'Building your report…';
+    $('spinnerSub').textContent = 'This is free — we\'ll show you the result before you pay. ~20–40 seconds.';
+
+    const uni = state.university === 'other' ? 'ktu' : state.university;
+    const payload = { service, university: uni };
+
     if (service === 'format_fix') {
-      const txt = state.uploadTab === 'paste' ? $('pasteContent').value : (state.fileName || '');
-      wordCount = txt.split(/\s+/).filter(Boolean).length;
+      if (state.uploadTab === 'paste') {
+        payload.content = $('pasteContent').value;
+      } else {
+        payload.content_b64 = state.fileBytes;
+        payload.content_type = state.fileType || 'docx';
+      }
     } else {
-      wordCount = state.chapterCount * 1500; // rough estimate
+      payload.form_data = collectFormData();
     }
 
-    // Create Razorpay order
+    try {
+      const res = await fetch(`${API}/project-builder/format-preview`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+
+      state.fileToken = data.file_token;
+      state.currentService = service;
+      _showStep3Preview(data, service);
+    } catch(e) {
+      hide('step2'); show('step1'); goStep1();
+      const errId = service === 'format_fix' ? 'ffError' : 'genError';
+      showErr(errId, 'Generation failed: ' + e.message);
+    }
+  }
+
+  function _showStep3Preview(data, service) {
+    const price = service === 'format_fix' ? 49 : (data.size_bytes > 50 * 1024 ? 149 : 99);
+    const uni   = data.university || state.university.toUpperCase();
+
+    $('previewSubtext').textContent =
+      `Formatted per ${uni} guidelines. Pay ₹${price} to download your .docx file.`;
+
+    const chapters = (data.preview && data.preview.chapters) || [];
+    if (chapters.length) {
+      $('previewChapters').innerHTML =
+        `<p style="font-weight:600;margin-bottom:.5rem;font-size:.9rem">Chapters detected (${chapters.length}):</p>` +
+        `<ul style="list-style:none;padding:0;margin:0;font-size:.88rem">` +
+        chapters.map(ch =>
+          `<li style="padding:.3rem 0;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between">` +
+          `<span><span style="color:#aaa">${ch.number}.</span> ${ch.heading}</span>` +
+          (ch.word_count ? `<span style="color:#bbb;flex-shrink:0;margin-left:.5rem">${ch.word_count} w</span>` : '') +
+          `</li>`
+        ).join('') +
+        `</ul>`;
+    } else {
+      $('previewChapters').innerHTML =
+        `<p style="color:#888;font-size:.88rem">Formatting applied — open in Word to review structure.</p>`;
+    }
+
+    const btn = $('payToDownloadBtn');
+    btn.textContent = `Pay ₹${price} to Download →`;
+    btn.disabled = false;
+    btn.onclick = () => startDownloadPayment(service, price);
+    hideErr('previewPayError');
+    show('step3preview');
+    hide('step3download');
+    goStep3();
+  }
+
+  // ── Step 2: Razorpay checkout for download unlock ─────────────────────────────
+  async function startDownloadPayment(service, price) {
+    const btn = $('payToDownloadBtn');
+    btn.disabled = true;
+    btn.textContent = 'Setting up payment…';
+    hideErr('previewPayError');
+
+    const wordCount = service === 'format_fix' ? 5000 : state.chapterCount * 1500;
     let orderData;
     try {
       const res = await fetch(`${API}/project-builder/create-order`, {
@@ -833,84 +914,72 @@
       orderData = await res.json();
       if (!res.ok) throw new Error(orderData.error || 'Failed to create payment order');
     } catch(e) {
-      const errId = service === 'format_fix' ? 'ffError' : 'genError';
-      showErr(errId, 'Payment setup failed: ' + e.message);
+      btn.disabled = false;
+      btn.textContent = `Pay ₹${price} to Download →`;
+      showErr('previewPayError', 'Payment setup failed: ' + e.message);
       return;
     }
 
-    // Open Razorpay checkout
+    btn.disabled = false;
+    btn.textContent = `Pay ₹${price} to Download →`;
+
     const options = {
-      key: orderData.key_id,
-      amount: orderData.amount,
+      key:      orderData.key_id,
+      amount:   orderData.amount,
       currency: orderData.currency,
       order_id: orderData.razorpay_order_id,
-      name: 'Printosky',
+      name:     'Printosky',
       description: service === 'format_fix' ? 'Project Report Format Fixer' : 'Project Report Generation',
       theme: { color: '#1B3F8B' },
       handler: async function(response) {
-        await processAfterPayment(service, response);
+        await processAfterPayment(service, price, response);
       },
-      modal: {
-        ondismiss: function() { /* user closed checkout — do nothing */ }
-      }
+      modal: { ondismiss: function() {} },
     };
-    const rzp = new Razorpay(options);
-    rzp.open();
+    new Razorpay(options).open();
   }
 
-  // ── Process after payment verified ───────────────────────────────────────────
-  async function processAfterPayment(service, paymentResponse) {
-    goStep2();
-
-    if (service === 'format_fix') {
-      $('spinnerTitle').textContent = 'Formatting your report…';
-      $('spinnerSub').textContent = 'Parsing structure and applying university formatting. ~20–40 seconds.';
-    } else {
-      $('spinnerTitle').textContent = 'Building your report…';
-      $('spinnerSub').textContent = 'Generating all sections — cover page, certificate, chapters, references. ~30–60 seconds.';
-    }
-
-    const payload = {
-      razorpay_payment_id: paymentResponse.razorpay_payment_id,
-      razorpay_order_id:   paymentResponse.razorpay_order_id,
-      razorpay_signature:  paymentResponse.razorpay_signature,
-      service,
-      university: state.university === 'other' ? 'ktu' : state.university,
-    };
-
-    if (service === 'format_fix') {
-      if (state.uploadTab === 'paste') {
-        payload.content = $('pasteContent').value;
-      } else {
-        payload.content_b64 = state.fileBytes;
-        payload.filename = state.fileName;
-      }
-    } else {
-      payload.form_data = collectFormData();
-    }
+  // ── Step 3: Payment confirmed → unlock download URL ───────────────────────────
+  async function processAfterPayment(service, price, paymentResponse) {
+    const btn = $('payToDownloadBtn');
+    btn.disabled = true;
+    btn.textContent = 'Confirming payment…';
 
     try {
       const res = await fetch(`${API}/project-builder/process`, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          razorpay_payment_id: paymentResponse.razorpay_payment_id,
+          razorpay_order_id:   paymentResponse.razorpay_order_id,
+          razorpay_signature:  paymentResponse.razorpay_signature,
+          service,
+          university: state.university === 'other' ? 'ktu' : state.university,
+          file_token: state.fileToken,
+        }),
       });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error || `Server error ${res.status}`);
-      }
-      const blob = await res.blob();
-      state.downloadBlob = blob;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+
       const uni = state.university === 'other' ? 'generic' : state.university;
-      state.downloadName = service === 'format_fix' ? `${uni}_formatted_report.docx` : `${uni}_project_report.docx`;
-      goStep3();
-      $('dlFinalBtn').onclick = () => triggerDownload(state.downloadBlob, state.downloadName);
+      const filename = service === 'format_fix'
+        ? `${uni}_formatted_report.docx`
+        : `${uni}_project_report.docx`;
+
+      const link = $('dlFinalLink');
+      link.href = data.download_url;
+      link.download = filename;
+      link.textContent = '⬇ Download Report.docx';
+
+      hide('step3preview');
+      show('step3download');
+      window.scrollTo(0, 0);
     } catch(e) {
-      hide('step2');
-      show('step1');
-      goStep1();
-      const errId = service === 'format_fix' ? 'ffError' : 'genError';
-      showErr(errId, 'Processing failed: ' + e.message + '. Your payment was captured — please WhatsApp us at 9495706405 and we will fix it.');
+      btn.disabled = false;
+      btn.textContent = `Pay ₹${price} to Download →`;
+      showErr('previewPayError',
+        'Payment captured but download setup failed. WhatsApp 9495706405 with payment ID: ' +
+        paymentResponse.razorpay_payment_id);
     }
   }
 
