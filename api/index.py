@@ -1184,7 +1184,13 @@ def _handle_track(h, code: str) -> None:
         })
     except Exception as e:
         logger.error(f"track lookup error for {code!r}: {e}")
-        _json_response(h, 500, {"error": "server error"})
+        # TEMPORARY: surface exception detail to diagnose preview 500.
+        # Will be reverted in the next commit.
+        _json_response(h, 500, {
+            "error": "server error",
+            "_debug_exc_type": type(e).__name__,
+            "_debug_exc_msg":  str(e)[:300],
+        })
 
 
 def _handle_acad_order_get(h, pid: str) -> None:
