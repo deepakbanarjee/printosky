@@ -298,13 +298,7 @@
           <div class="pb-row">
             <div class="pb-field">
               <label>Department *</label>
-              <select id="g_dept">
-                <option value="">Select department</option>
-                <option>CSE</option><option>ECE</option><option>EEE</option>
-                <option>Civil</option><option>Mechanical</option><option>IT</option>
-                <option>BCA</option><option>MCA</option><option>BSc CS</option>
-                <option>BSc Electronics</option><option>Other</option>
-              </select>
+              <input type="text" id="g_dept" placeholder="e.g. Computer Science and Engineering">
             </div>
             <div class="pb-field">
               <label>Report Type *</label>
@@ -321,16 +315,8 @@
           </div>
 
           <div class="pb-section-title">Students</div>
-          <div class="pb-field">
-            <label>Number of Students</label>
-            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setStudentCount(1)" id="sc1">1</button>
-              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setStudentCount(2)" id="sc2">2</button>
-              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setStudentCount(3)" id="sc3">3</button>
-              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setStudentCount(4)" id="sc4">4</button>
-            </div>
-          </div>
           <div id="studentRows"></div>
+          <button class="pb-btn pb-btn-secondary" style="margin-top:.25rem;font-size:.9rem" onclick="addStudent()">＋ Add Student</button>
 
           <div class="pb-section-title">Faculty</div>
           <div class="pb-row">
@@ -343,9 +329,12 @@
               <input type="text" id="g_guide_desig" placeholder="e.g. Assistant Professor">
             </div>
           </div>
-          <div class="pb-row">
+          <div style="margin-bottom:.75rem">
+            <button class="pb-btn pb-btn-secondary" id="coGuideToggle" onclick="toggleCoGuide()" style="font-size:.85rem;padding:.35rem .9rem">＋ Add Co-Guide (optional)</button>
+          </div>
+          <div id="coGuideRow" class="pb-row pb-hidden">
             <div class="pb-field">
-              <label>Co-Guide Name <span style="color:#aaa">(optional)</span></label>
+              <label>Co-Guide Name</label>
               <input type="text" id="g_coguide_name" placeholder="e.g. Ms. Anitha Thomas">
             </div>
             <div class="pb-field">
@@ -371,20 +360,12 @@
             <div class="word-counter" id="wc_abstract">0 words</div>
           </div>
           <div class="pb-field">
-            <label>Keywords * <span style="color:#aaa;font-weight:400">(5–7 keywords, comma-separated)</span></label>
+            <label>Keywords <span style="color:#aaa;font-weight:400">(optional — comma-separated)</span></label>
             <input type="text" id="g_keywords" placeholder="e.g. IoT, Smart Traffic, Arduino, Machine Learning, Embedded Systems">
           </div>
 
-          <div class="pb-field">
-            <label>Number of Chapters</label>
-            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setChapterCount(3)" id="cc3">3</button>
-              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setChapterCount(4)" id="cc4">4</button>
-              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setChapterCount(5)" id="cc5">5</button>
-              <button class="pb-btn pb-btn-secondary" style="padding:.4rem .9rem;font-size:.85rem" onclick="setChapterCount(6)" id="cc6">6</button>
-            </div>
-          </div>
           <div id="chapterBlocks"></div>
+          <button class="pb-btn pb-btn-secondary" style="margin-top:.25rem;font-size:.9rem" onclick="addChapter()">＋ Add Chapter</button>
 
           <div class="pb-field">
             <label>References * <span style="color:#aaa;font-weight:400">(one reference per line)</span></label>
@@ -451,8 +432,8 @@
     university: 'ktu',
     tier: 'format_fix',
     uploadTab: 'paste',
-    studentCount: 2,
-    chapterCount: 4,
+    studentCount: 1,
+    chapterCount: 8,
     fileBytes: null,
     fileName: null,
     downloadBlob: null,
@@ -597,66 +578,122 @@
     }
   });
 
-  // ── Student count ─────────────────────────────────────────────────────────────
-  function setStudentCount(n) {
-    state.studentCount = n;
-    [1,2,3,4].forEach(i => {
-      $('sc'+i).style.background = (i===n) ? 'var(--blue)' : '';
-      $('sc'+i).style.color = (i===n) ? '#fff' : '';
-      $('sc'+i).style.borderColor = (i===n) ? 'var(--blue)' : '';
-    });
-    renderStudentRows();
+  // ── Students ──────────────────────────────────────────────────────────────────
+  function getStudentData() {
+    const data = [];
+    for (let i=1; i<=state.studentCount; i++) {
+      data.push({ name: ($('g_sname'+i)||{}).value||'', roll: ($('g_sroll'+i)||{}).value||'' });
+    }
+    return data;
   }
 
-  function renderStudentRows() {
+  function addStudent() {
+    if (state.studentCount >= 4) return;
+    const data = getStudentData();
+    data.push({name:'', roll:''});
+    state.studentCount++;
+    renderStudentRows(data);
+  }
+
+  function removeStudent(idx) {
+    if (state.studentCount <= 1) return;
+    const data = getStudentData();
+    data.splice(idx, 1);
+    state.studentCount--;
+    renderStudentRows(data);
+  }
+
+  function renderStudentRows(savedData) {
     const container = $('studentRows');
+    if (!savedData) savedData = Array.from({length: state.studentCount}, () => ({name:'', roll:''}));
     container.innerHTML = '';
     for (let i=1; i<=state.studentCount; i++) {
+      const {name, roll} = savedData[i-1] || {name:'', roll:''};
       const div = document.createElement('div');
-      div.className = 'student-row';
+      div.style.cssText = 'display:flex;gap:1rem;align-items:flex-end;margin-bottom:.75rem';
       div.innerHTML = `
-        <div class="pb-field"><label>Student ${i} Name</label><input type="text" id="g_sname${i}" placeholder="Full name"></div>
-        <div class="pb-field"><label>Roll Number</label><input type="text" id="g_sroll${i}" placeholder="e.g. KTU/IT/2024/001"></div>
+        <div class="pb-field" style="flex:1"><label>Student ${i} Name</label><input type="text" id="g_sname${i}" placeholder="Full name" value="${name.replace(/"/g,'&quot;')}"></div>
+        <div class="pb-field" style="flex:1"><label>Roll Number</label><input type="text" id="g_sroll${i}" placeholder="e.g. KTU/IT/2024/001" value="${roll.replace(/"/g,'&quot;')}"></div>
+        ${state.studentCount > 1 ? `<button onclick="removeStudent(${i-1})" style="background:none;border:none;color:#c00;font-size:1.1rem;cursor:pointer;padding:.4rem;flex-shrink:0;margin-bottom:.15rem" title="Remove student">✕</button>` : ''}
       `;
       container.appendChild(div);
     }
   }
 
-  // ── Chapter count ─────────────────────────────────────────────────────────────
-  function setChapterCount(n) {
-    state.chapterCount = n;
-    [3,4,5,6].forEach(i => {
-      $('cc'+i).style.background = (i===n) ? 'var(--blue)' : '';
-      $('cc'+i).style.color = (i===n) ? '#fff' : '';
-      $('cc'+i).style.borderColor = (i===n) ? 'var(--blue)' : '';
-    });
-    renderChapterBlocks();
+  // ── Chapters ──────────────────────────────────────────────────────────────────
+  const DEFAULT_CHAPTERS = [
+    'Introduction','Literature Survey','Problem Statement','System Design',
+    'Implementation','Testing','Results and Discussion','Conclusion and Future Work'
+  ];
+
+  function getChapterData() {
+    const data = [];
+    for (let i=1; i<=state.chapterCount; i++) {
+      data.push({ title: ($('g_ctitle'+i)||{}).value||'', content: ($('g_ccontent'+i)||{}).value||'' });
+    }
+    return data;
+  }
+
+  function addChapter() {
+    const data = getChapterData();
+    data.push({title: DEFAULT_CHAPTERS[state.chapterCount]||'', content:''});
+    state.chapterCount++;
+    renderChapterBlocks(data);
     updateGenPrice();
   }
 
-  const DEFAULT_CHAPTERS = ['Introduction','Literature Survey','System Design','Implementation','Results and Discussion','Conclusion'];
+  function removeChapter(idx) {
+    if (state.chapterCount <= 1) return;
+    const data = getChapterData();
+    data.splice(idx, 1);
+    state.chapterCount--;
+    renderChapterBlocks(data);
+    updateGenPrice();
+  }
 
-  function renderChapterBlocks() {
+  function renderChapterBlocks(savedData) {
     const container = $('chapterBlocks');
+    if (!savedData) {
+      savedData = Array.from({length: state.chapterCount}, (_, i) => ({title: DEFAULT_CHAPTERS[i]||'', content:''}));
+    }
     container.innerHTML = '';
     for (let i=1; i<=state.chapterCount; i++) {
+      const {title, content} = savedData[i-1] || {title: DEFAULT_CHAPTERS[i-1]||'', content:''};
       const div = document.createElement('div');
       div.className = 'chapter-block';
       div.innerHTML = `
-        <h4>Chapter ${i}</h4>
-        <div class="pb-field"><label>Chapter Title</label><input type="text" id="g_ctitle${i}" value="${DEFAULT_CHAPTERS[i-1]||''}"></div>
-        <div class="pb-field"><label>Chapter Content</label><textarea id="g_ccontent${i}" rows="5" placeholder="Write the content for Chapter ${i} here…"></textarea></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+          <h4 style="margin:0">Chapter ${i}</h4>
+          ${state.chapterCount > 1 ? `<button onclick="removeChapter(${i-1})" style="background:none;border:none;color:#c00;font-size:.85rem;cursor:pointer;padding:.2rem .6rem">✕ Remove</button>` : ''}
+        </div>
+        <div class="pb-field"><label>Chapter Title</label><input type="text" id="g_ctitle${i}" value="${title.replace(/"/g,'&quot;')}"></div>
+        <div class="pb-field"><label>Chapter Content</label><textarea id="g_ccontent${i}" rows="5" placeholder="Write the content for Chapter ${i} here…">${content.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
       `;
       container.appendChild(div);
     }
   }
 
   function updateGenPrice() {
-    // Rough estimate: 5 chapters ≈ 50+ pages = Rs.149, else Rs.99
-    const price = state.chapterCount >= 5 ? 149 : 99;
+    const price = state.chapterCount > 5 ? 149 : 99;
     $('genPriceNote').textContent = `Estimated price: ₹${price} (based on ${state.chapterCount} chapters)`;
     $('genPayBtn').textContent = `Pay ₹${price} & Generate Report →`;
     state._genPrice = price;
+  }
+
+  // ── Co-guide toggle ───────────────────────────────────────────────────────────
+  function toggleCoGuide() {
+    const row = $('coGuideRow');
+    const btn = $('coGuideToggle');
+    const hidden = row.classList.contains('pb-hidden');
+    if (hidden) {
+      row.classList.remove('pb-hidden');
+      btn.textContent = '− Remove Co-Guide';
+    } else {
+      row.classList.add('pb-hidden');
+      btn.textContent = '＋ Add Co-Guide (optional)';
+      $('g_coguide_name').value = '';
+      $('g_coguide_desig').value = '';
+    }
   }
 
   // ── Word counter ──────────────────────────────────────────────────────────────
@@ -827,7 +864,7 @@
       ['g_type','Report type'],['g_guide_name','Guide name'],
       ['g_guide_desig','Guide designation'],['g_hod_name','HOD name'],
       ['g_hod_desig','HOD designation'],['g_abstract','Abstract'],
-      ['g_keywords','Keywords'],['g_references','References'],
+      ['g_references','References'],
     ];
     for (const [id, label] of required) {
       if (!$(id) || !$(id).value.trim()) {
@@ -876,8 +913,8 @@
   }
 
   // ── Initialise defaults ───────────────────────────────────────────────────────
-  setStudentCount(2);
-  setChapterCount(4);
+  renderStudentRows();
+  renderChapterBlocks();
   updateGenPrice();
 
   </script>
