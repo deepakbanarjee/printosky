@@ -330,6 +330,69 @@ def _store_media_only(sender: str, media_id: str, mime_type: str,
     return dest_name
 
 
+def _notify_pickup_ready(job_id: str) -> None:
+    """Block 5: customer-facing pickup-ready WhatsApp on store READY."""
+    from db_cloud import _client
+    from whatsapp_notify import send_pickup_ready
+    client = _client()
+    job_rows = (
+        client.table("jobs")
+        .select("job_id,sender,pickup_code,assigned_store_id,store_id")
+        .eq("job_id", job_id)
+        .limit(1)
+        .execute()
+    )
+    rows = getattr(job_rows, "data", None) or []
+    if not rows:
+        return
+    job = rows[0]
+    sender = job.get("sender")
+    code = job.get("pickup_code")
+    if not sender or not code:
+        return
+    partner_id = job.get("assigned_store_id") or job.get("store_id") or "OSP"
+    partner_rows = (
+        client.table("partners")
+        .select("display_pickup_label,pickup_address,name")
+        .eq("store_id", partner_id)
+        .limit(1)
+        .execute()
+    )
+    prows = getattr(partner_rows, "data", None) or []
+    partner = prows[0] if prows else {}
+    deep_link = f"https://printosky.com/track.html?code={code}"
+    send_pickup_ready(
+        sender=sender,
+        pickup_code=code,
+        store_label=partner.get("display_pickup_label"),
+        store_address=partner.get("pickup_address") or partner.get("name") or "",
+        deep_link=deep_link,
+    )
+
+
+def _notify_pickup_completed(job_id: str) -> None:
+    """Block 5: thank-you / rate-us message on store DELIVERED."""
+    from db_cloud import _client
+    from whatsapp_notify import send_pickup_completed
+    client = _client()
+    job_rows = (
+        client.table("jobs")
+        .select("sender,pickup_code")
+        .eq("job_id", job_id)
+        .limit(1)
+        .execute()
+    )
+    rows = getattr(job_rows, "data", None) or []
+    if not rows:
+        return
+    job = rows[0]
+    sender = job.get("sender")
+    code = job.get("pickup_code")
+    if not sender or not code:
+        return
+    send_pickup_completed(sender=sender, pickup_code=code, rating_url=None)
+
+
 def _process_meta_webhook(data: dict) -> None:
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
@@ -345,7 +408,48 @@ def _process_meta_webhook(data: dict) -> None:
                 if msg_type == "text":
                     text = (msg.get("text") or {}).get("body", "").strip()
                     if text:
-                        _handle_text(sender, text)
+                        # Block 5: if the sender is a known store-owner
+                        # dispatch number AND the text parses as a known
+                        # action (ACCEPT/READY/DELIVERED/REJECT/QUERY),
+                        # route to store_dispatch instead of the customer
+                        # flow. Falls through to _handle_text on parse miss
+                        # so a store owner can still chat with us normally.
+                        handled_as_store = False
+                        try:
+                            from store_dispatch import (
+                                parse_store_reply,
+                                apply_store_reply,
+                            )
+                            from db_cloud import _client
+                            parsed = parse_store_reply(text)
+                            if parsed is not None:
+                                result = apply_store_reply(_client(), sender, parsed)
+                                if result.ok:
+                                    handled_as_store = True
+                                    logger.info(
+                                        "store_dispatch handled %s reply: %s",
+                                        sender, result.message,
+                                    )
+                                    # Customer-side fan-out for state transitions
+                                    if result.new_status == "Ready":
+                                        try:
+                                            _notify_pickup_ready(result.job_id)
+                                        except Exception as e:
+                                            logger.error(
+                                                "pickup-ready notify failed: %s", e
+                                            )
+                                    elif result.new_status == "Delivered":
+                                        try:
+                                            _notify_pickup_completed(result.job_id)
+                                        except Exception as e:
+                                            logger.error(
+                                                "pickup-completed notify failed: %s", e
+                                            )
+                        except Exception as e:
+                            logger.error("store_dispatch routing failed: %s", e)
+
+                        if not handled_as_store:
+                            _handle_text(sender, text)
                         try:
                             from db_cloud import log_message, upsert_contact
                             log_message(sender, "inbound", text, message_type="text")

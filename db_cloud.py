@@ -194,6 +194,49 @@ def update_job_paid(job_id: str, amount: float, method: str, pay_id: str) -> Non
             _routing_record(client, decision)
             if decision.chosen_store_id:
                 update_payload["assigned_store_id"] = decision.chosen_store_id
+                # Block 5: dispatch the job to the chosen store's owner.
+                # Best-effort — a dispatch failure does not block payment
+                # status from being recorded. The store dispatcher uses
+                # WhatsApp; no software install required at the store.
+                try:
+                    from store_dispatch import dispatch_job
+                    chosen = next(
+                        (c for c in candidates
+                         if c.store_id == decision.chosen_store_id),
+                        None,
+                    )
+                    if chosen is not None:
+                        job_after = (
+                            client.table("jobs")
+                            .select("job_id,pickup_code,customer_name,"
+                                    "page_count,copies,colour,size,"
+                                    "finishing,file_url")
+                            .eq("job_id", job_id)
+                            .limit(1)
+                            .execute()
+                        )
+                        rows_after = getattr(job_after, "data", None) or []
+                        job_row = rows_after[0] if rows_after else {"job_id": job_id}
+                        if "pickup_code" in update_payload:
+                            job_row["pickup_code"] = update_payload["pickup_code"]
+                        partner_rows = (
+                            client.table("partners")
+                            .select("store_id,dispatch_whatsapp")
+                            .eq("store_id", chosen.store_id)
+                            .limit(1)
+                            .execute()
+                        )
+                        prows = getattr(partner_rows, "data", None) or []
+                        partner_row = prows[0] if prows else {
+                            "store_id": chosen.store_id,
+                            "dispatch_whatsapp": "",
+                        }
+                        file_url = job_row.get("file_url") or ""
+                        dispatch_job(job_row, partner_row, file_url)
+                except Exception as e:
+                    logger.error(
+                        f"update_job_paid: dispatch failed for {job_id}: {e}"
+                    )
         except Exception as e:
             logger.error(f"update_job_paid: routing failed for {job_id}: {e}")
 
