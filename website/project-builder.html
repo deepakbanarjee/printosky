@@ -457,6 +457,7 @@
     fileName: null,
     analysed: false,
     fileToken: null,
+    fileType: null,
     currentService: null,
   };
 
@@ -543,6 +544,7 @@
 
   function resetAll() {
     state.fileToken = null;
+    state.fileType = null;
     state.currentService = null;
     state.fileBytes = null;
     state.fileName = null;
@@ -578,6 +580,7 @@
     hideErr('ffError');
     $('uploadFileName').textContent = '📎 ' + file.name;
     state.fileName = file.name;
+    state.fileType = ext;
     state.analysed = false;
     hide('detectedStructure');
     show('detectWrap');
@@ -745,8 +748,8 @@
 
   function updateGenPrice() {
     const price = state.chapterCount > 5 ? 149 : 99;
-    $('genPriceNote').textContent = `Estimated price: ₹${price} (based on ${state.chapterCount} chapters)`;
-    $('genPayBtn').textContent = `Pay ₹${price} & Generate Report →`;
+    $('genPriceNote').textContent = `Price after preview: ₹${price} (based on ${state.chapterCount} chapters)`;
+    $('genPayBtn').innerHTML = `Generate My Report → <small style="font-weight:400;opacity:.8">(free preview)</small>`;
     state._genPrice = price;
   }
 
