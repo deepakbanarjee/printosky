@@ -913,7 +913,7 @@
     [$('payDocxBtn'), $('payPdfBtn')].forEach(b => { if (b) b.disabled = false; });
 
     hideErr('previewPayError');
-    $('adminDlBtn').style.display = localStorage.getItem('adminAuth') === '1' ? 'inline-block' : 'none';
+    $('adminDlBtn').style.display = 'inline-block';
     show('step3preview');
     hide('step3download');
     goStep3();
