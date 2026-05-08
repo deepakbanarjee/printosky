@@ -1940,12 +1940,12 @@ def _handle_pb_process(h, body: bytes) -> None:
     # Admin bypass — skip Razorpay if correct admin key provided
     admin_key = data.get("admin_key", "")
     if admin_key:
-        admin_pass = os.environ.get("PRINTOSKY_ADMIN_PASSWORD", "")
+        admin_pass = os.environ.get("PB_BYPASS_KEY", "")
         if not admin_pass:
-            _json_response(h, 500, {"error": "PRINTOSKY_ADMIN_PASSWORD not set on server"})
+            _json_response(h, 500, {"error": "PB_BYPASS_KEY not set on server"})
             return
         if admin_key != admin_pass:
-            _json_response(h, 403, {"error": "Wrong admin password"})
+            _json_response(h, 403, {"error": "Wrong bypass password"})
             return
         # Password correct — bypass payment
         file_token = data.get("file_token", "")
