@@ -841,3 +841,157 @@ def generate_from_form(form_data: dict, university_id: str) -> bytes:
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# In-place DOCX reformatter — preserves images, tables, all existing content
+# ---------------------------------------------------------------------------
+
+def detect_structure_from_docx(docx_bytes: bytes) -> dict:
+    """Detect document structure by reading actual Word heading styles.
+
+    No AI call needed. Much more accurate than text extraction + Claude
+    because it reads what the author already marked as headings.
+    Returns the same shape as _parse_structure_with_claude.
+    """
+    doc = Document(io.BytesIO(docx_bytes))
+
+    title = ""
+    chapters: list = []
+    current_chapter: dict | None = None
+    current_section: dict | None = None
+
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text:
+            continue
+        sname = (para.style.name or "Normal") if para.style else "Normal"
+
+        if sname == "Title":
+            title = text
+        elif sname == "Heading 1":
+            if not title and not chapters:
+                title = text
+                continue
+            current_section = None
+            current_chapter = {
+                "number":   len(chapters) + 1,
+                "heading":  text,
+                "sections": [],
+                "content":  "",
+            }
+            chapters.append(current_chapter)
+        elif sname == "Heading 2":
+            if current_chapter is None:
+                current_chapter = {
+                    "number":   len(chapters) + 1,
+                    "heading":  text,
+                    "sections": [],
+                    "content":  "",
+                }
+                chapters.append(current_chapter)
+                current_section = None
+            else:
+                current_section = {
+                    "number":  f"{len(chapters)}.{len(current_chapter['sections']) + 1}",
+                    "heading": text,
+                    "content": "",
+                }
+                current_chapter["sections"].append(current_section)
+        else:
+            if current_section is not None:
+                current_section["content"] = (
+                    current_section["content"] + " " + text
+                ).strip()
+            elif current_chapter is not None:
+                current_chapter["content"] = (
+                    current_chapter["content"] + " " + text
+                ).strip()
+
+    if not chapters and not title:
+        return {"error": "no_headings_found"}
+
+    return {
+        "title":      title or "PROJECT REPORT",
+        "chapters":   chapters,
+        "references": [],
+    }
+
+
+def _reformat_para_inplace(para, doc: Document, config: dict) -> None:
+    """Classify a paragraph and apply the correct style without touching content.
+
+    Paragraphs already using Word heading styles are left alone — their style
+    definition was already fixed by _apply_university_styles.
+    Plain paragraphs that look like headings get reclassified.
+    Everything else gets Normal body formatting.
+    """
+    text = para.text.strip()
+    if not text:
+        return
+
+    sname = (para.style.name or "Normal") if para.style else "Normal"
+
+    if sname.startswith("Heading") or sname == "Title":
+        return  # already correct, style def fixed by _apply_university_styles
+
+    body_font = config["body_font"]
+    body_size = config["body_size_pt"]
+    spacing   = config["line_spacing"]
+    sp_before = config["para_space_before_pt"]
+    sp_after  = config["para_space_after_pt"]
+
+    is_bold  = any(run.bold for run in para.runs if run.text.strip())
+    is_short = len(text) < 120
+    is_upper = text == text.upper() and len(text) > 3
+
+    run_sizes = [run.font.size.pt for run in para.runs if run.font.size]
+    max_size  = max(run_sizes) if run_sizes else body_size
+
+    if is_bold and is_short and (max_size >= 14 or is_upper):
+        para.style = doc.styles["Heading 1"]
+    elif is_bold and is_short and max_size >= 12:
+        para.style = doc.styles["Heading 2"]
+    else:
+        para.style = doc.styles["Normal"]
+        pf = para.paragraph_format
+        pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+        pf.line_spacing      = spacing
+        pf.space_before      = Pt(sp_before)
+        pf.space_after       = Pt(sp_after)
+        for run in para.runs:
+            run.font.name = body_font
+            run.font.size = Pt(body_size)
+
+
+def format_fix_docx_inplace(docx_bytes: bytes, university_id: str) -> bytes:
+    """Reformat an existing DOCX in place — preserves images, tables, all content.
+
+    Use this for .docx uploads instead of format_fix() which destroys
+    images and tables by extracting text and rebuilding from scratch.
+    """
+    config = load_university_config(university_id)
+    doc = Document(io.BytesIO(docx_bytes))
+
+    _apply_university_styles(doc, config)
+
+    body_font = config["body_font"]
+    body_size = config["body_size_pt"]
+
+    for para in doc.paragraphs:
+        _reformat_para_inplace(para, doc, config)
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        run.font.name = body_font
+                        if run.font.size:
+                            run.font.size = Pt(body_size)
+
+    _add_footer_cta(doc)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()

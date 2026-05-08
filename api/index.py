@@ -1753,24 +1753,25 @@ def _handle_pb_analyse(h, body: bytes) -> None:
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
         if ext == "docx":
-            text = docx_engine.extract_text_from_docx(file_bytes)
+            # Read heading styles directly — no text extraction, no Claude call
+            structure  = docx_engine.detect_structure_from_docx(file_bytes)
+            text       = docx_engine.extract_text_from_docx(file_bytes)
+            word_count = len(text.split())
         elif ext == "pdf":
             text = docx_engine.extract_text_from_pdf(file_bytes)
+            if not text.strip():
+                _json_response(h, 422, {"error": "Could not extract text. The PDF may be image-based or corrupted."})
+                return
+            word_count = len(text.split())
+            structure  = docx_engine._parse_structure_with_claude(text)
         else:
             _json_response(h, 400, {"error": "Unsupported file type. Only .docx and .pdf are supported."})
             return
 
-        if not text.strip():
-            _json_response(h, 422, {"error": "Could not extract text. The file may be image-based or corrupted."})
-            return
-
-        word_count = len(text.split())
-        structure = docx_engine._parse_structure_with_claude(text)
-
         if "error" in structure:
             _json_response(h, 200, {
-                "title": "",
-                "chapters": [],
+                "title":      "",
+                "chapters":   [],
                 "word_count": word_count,
                 "structured": False,
             })
@@ -1778,16 +1779,18 @@ def _handle_pb_analyse(h, body: bytes) -> None:
 
         result_chapters = []
         for ch in structure.get("chapters", []):
-            words = sum(len(s.get("content", "").split()) for s in ch.get("sections", []))
+            words = len(ch.get("content", "").split()) + sum(
+                len(s.get("content", "").split()) for s in ch.get("sections", [])
+            )
             result_chapters.append({
-                "number": ch.get("number", 0),
-                "heading": ch.get("heading", ""),
+                "number":     ch.get("number", 0),
+                "heading":    ch.get("heading", ""),
                 "word_count": words,
             })
 
         _json_response(h, 200, {
-            "title": structure.get("title", ""),
-            "chapters": result_chapters,
+            "title":      structure.get("title", ""),
+            "chapters":   result_chapters,
             "word_count": word_count,
             "structured": True,
         })
@@ -1872,27 +1875,42 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
                 import base64 as _b64
                 file_bytes = _b64.b64decode(content_b64)
                 if content_type == "docx":
-                    text = docx_engine.extract_text_from_docx(file_bytes)
+                    # In-place reformat: images and tables are preserved
+                    docx_bytes = docx_engine.format_fix_docx_inplace(file_bytes, university)
+                    structure  = docx_engine.detect_structure_from_docx(file_bytes)
                 elif content_type == "pdf":
                     text = docx_engine.extract_text_from_pdf(file_bytes)
+                    if len(text) > 200_000:
+                        _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
+                        return
+                    docx_bytes = docx_engine.format_fix(text, university)
+                    try:
+                        structure = docx_engine._parse_structure_with_claude(text)
+                    except Exception:
+                        structure = {}
                 else:
                     text = file_bytes.decode("utf-8", errors="replace")
+                    if len(text) > 200_000:
+                        _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
+                        return
+                    docx_bytes = docx_engine.format_fix(text, university)
+                    try:
+                        structure = docx_engine._parse_structure_with_claude(text)
+                    except Exception:
+                        structure = {}
             elif content:
                 text = content
+                if len(text) > 200_000:
+                    _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
+                    return
+                docx_bytes = docx_engine.format_fix(text, university)
+                try:
+                    structure = docx_engine._parse_structure_with_claude(text)
+                except Exception:
+                    structure = {}
             else:
                 _json_response(h, 400, {"error": "content or content_b64 required"})
                 return
-
-            if len(text) > 200_000:
-                _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
-                return
-
-            docx_bytes = docx_engine.format_fix(text, university)
-            # Best-effort structure for preview card
-            try:
-                structure = docx_engine._parse_structure_with_claude(text)
-            except Exception:
-                structure = {}
 
         else:  # generate
             form_data = data.get("form_data", {})
