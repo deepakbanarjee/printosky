@@ -34,6 +34,8 @@ import hashlib
 import json
 import logging
 import re
+import time
+import collections
 import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler
@@ -41,6 +43,22 @@ from urllib.parse import parse_qs, urlparse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 logger = logging.getLogger("api.webhook")
+
+# ── Bypass rate limiter — max 5 wrong attempts per IP per 15 min ─────────────
+_bypass_attempts: dict = collections.defaultdict(list)  # ip → [timestamp, ...]
+_BYPASS_MAX_ATTEMPTS = 5
+_BYPASS_WINDOW_SEC   = 900  # 15 minutes
+
+def _check_bypass_rate_limit(ip: str) -> bool:
+    """Return True if the IP is allowed, False if rate-limited."""
+    now = time.time()
+    attempts = _bypass_attempts[ip]
+    # Drop attempts older than the window
+    _bypass_attempts[ip] = [t for t in attempts if now - t < _BYPASS_WINDOW_SEC]
+    return len(_bypass_attempts[ip]) < _BYPASS_MAX_ATTEMPTS
+
+def _record_bypass_failure(ip: str) -> None:
+    _bypass_attempts[ip].append(time.time())
 
 # ── Config (from env vars set in Vercel dashboard) ───────────────────────────
 META_APP_SECRET           = os.environ.get("META_APP_SECRET", "")
@@ -1940,12 +1958,18 @@ def _handle_pb_process(h, body: bytes) -> None:
     # Admin bypass — skip Razorpay if correct admin key provided
     admin_key = data.get("admin_key", "")
     if admin_key:
+        client_ip = h.headers.get("x-forwarded-for", h.client_address[0]).split(",")[0].strip()
+        if not _check_bypass_rate_limit(client_ip):
+            _json_response(h, 429, {"error": "Too many attempts. Try again in 15 minutes."})
+            return
         admin_pass = os.environ.get("PB_BYPASS_KEY", "")
         if not admin_pass:
             _json_response(h, 500, {"error": "PB_BYPASS_KEY not set on server"})
             return
         if admin_key != admin_pass:
-            _json_response(h, 403, {"error": "Wrong bypass password"})
+            _record_bypass_failure(client_ip)
+            remaining = _BYPASS_MAX_ATTEMPTS - len(_bypass_attempts[client_ip])
+            _json_response(h, 403, {"error": f"Wrong bypass password. {remaining} attempt(s) left."})
             return
         # Password correct — bypass payment
         file_token = data.get("file_token", "")
