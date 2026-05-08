@@ -419,8 +419,7 @@
         <p id="previewSubtext">University formatting applied. Pay to download the .docx file.</p>
         <div id="previewChapters" style="text-align:left;margin-bottom:1.5rem;max-height:260px;overflow-y:auto"></div>
         <div id="formatBtns" style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
-          <button class="pb-btn pb-btn-primary" id="payDocxBtn" style="font-size:1rem;padding:.75rem 1.5rem" onclick="startDownloadPayment('docx')">📄 Pay &amp; Download .docx</button>
-          <button class="pb-btn pb-btn-secondary" id="payPdfBtn"  style="font-size:1rem;padding:.75rem 1.5rem" onclick="startDownloadPayment('pdf')">📃 Pay &amp; Download .pdf</button>
+          <button class="pb-btn pb-btn-primary" id="payDocxBtn" style="font-size:1rem;padding:.75rem 1.5rem" onclick="startDownloadPayment()">📄 Pay &amp; Download .docx</button>
         </div>
         <p style="font-size:.8rem;color:#aaa;margin-top:.75rem">Secure payment via Razorpay · ₹49 · Download link valid for 24 hours</p>
         <button id="adminDlBtn" class="pb-btn pb-btn-secondary" style="display:none;margin-top:.5rem;font-size:.85rem" onclick="adminDownload()">🔑 Admin Download (skip payment)</button>
@@ -906,11 +905,7 @@
     }
     $('previewChapters').innerHTML = html;
 
-    // PDF button — only show if backend generated PDF successfully
-    $('payPdfBtn').style.display = data.has_pdf ? 'inline-flex' : 'none';
-
-    // Reset both format buttons
-    [$('payDocxBtn'), $('payPdfBtn')].forEach(b => { if (b) b.disabled = false; });
+    $('payDocxBtn').disabled = false;
 
     hideErr('previewPayError');
     $('adminDlBtn').style.display = 'inline-block';
@@ -920,10 +915,10 @@
   }
 
   // ── Step 2: Razorpay checkout for download unlock ─────────────────────────────
-  async function startDownloadPayment(format) {
+  async function startDownloadPayment() {
     const service = state.currentService;
     const price   = state._previewPrice || 49;
-    const btn     = format === 'pdf' ? $('payPdfBtn') : $('payDocxBtn');
+    const btn     = $('payDocxBtn');
     btn.disabled = true;
     btn.textContent = 'Setting up payment…';
     hideErr('previewPayError');
@@ -940,14 +935,13 @@
       if (!res.ok) throw new Error(orderData.error || 'Failed to create payment order');
     } catch(e) {
       btn.disabled = false;
-      btn.disabled = false;
-      btn.textContent = format === 'pdf' ? `📃 Pay & Download .pdf` : `📄 Pay & Download .docx`;
+      btn.textContent = '📄 Pay & Download .docx';
       showErr('previewPayError', 'Payment setup failed: ' + e.message);
       return;
     }
 
     btn.disabled = false;
-    btn.textContent = format === 'pdf' ? `📃 Pay & Download .pdf` : `📄 Pay & Download .docx`;
+    btn.textContent = '📄 Pay & Download .docx';
 
     const options = {
       key:      orderData.key_id,
@@ -958,7 +952,7 @@
       description: service === 'format_fix' ? 'Project Report Format Fixer' : 'Project Report Generation',
       theme: { color: '#1B3F8B' },
       handler: async function(response) {
-        await processAfterPayment(service, price, format, response);
+        await processAfterPayment(service, price, response);
       },
       modal: { ondismiss: function() {} },
     };
@@ -966,8 +960,8 @@
   }
 
   // ── Step 3: Payment confirmed → unlock download URL ───────────────────────────
-  async function processAfterPayment(service, price, format, paymentResponse) {
-    const btn = format === 'pdf' ? $('payPdfBtn') : $('payDocxBtn');
+  async function processAfterPayment(service, price, paymentResponse) {
+    const btn = $('payDocxBtn');
     btn.disabled = true;
     btn.textContent = 'Confirming payment…';
 
@@ -982,29 +976,27 @@
           service,
           university: state.university === 'other' ? 'ktu' : state.university,
           file_token: state.fileToken,
-          format,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
 
       const uni = state.university === 'other' ? 'generic' : state.university;
-      const ext = format === 'pdf' ? 'pdf' : 'docx';
       const filename = service === 'format_fix'
-        ? `${uni}_formatted_report.${ext}`
-        : `${uni}_project_report.${ext}`;
+        ? `${uni}_formatted_report.docx`
+        : `${uni}_project_report.docx`;
 
       const link = $('dlFinalLink');
       link.href = data.download_url;
       link.download = filename;
-      link.textContent = format === 'pdf' ? '⬇ Download Report.pdf' : '⬇ Download Report.docx';
+      link.textContent = '⬇ Download Report.docx';
 
       hide('step3preview');
       show('step3download');
       window.scrollTo(0, 0);
     } catch(e) {
       btn.disabled = false;
-      btn.textContent = format === 'pdf' ? '📃 Pay & Download .pdf' : '📄 Pay & Download .docx';
+      btn.textContent = '📄 Pay & Download .docx';
       showErr('previewPayError',
         'Payment captured but download setup failed. WhatsApp 9495706405 with payment ID: ' +
         paymentResponse.razorpay_payment_id);
@@ -1016,7 +1008,6 @@
     const btn = $('adminDlBtn');
     const pwd = prompt('Admin password:');
     if (!pwd) return;
-    const fmt = confirm('Download as PDF?\n(Cancel = Download as DOCX)') ? 'pdf' : 'docx';
     btn.disabled = true;
     btn.textContent = 'Downloading…';
     try {
@@ -1028,20 +1019,18 @@
           file_token: state.fileToken,
           service:    state.currentService,
           university: state.university === 'other' ? 'ktu' : state.university,
-          format:     fmt,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
       const uni = state.university === 'other' ? 'generic' : state.university;
-      const ext = fmt === 'pdf' ? 'pdf' : 'docx';
       const filename = state.currentService === 'format_fix'
-        ? `${uni}_formatted_report.${ext}`
-        : `${uni}_project_report.${ext}`;
+        ? `${uni}_formatted_report.docx`
+        : `${uni}_project_report.docx`;
       const link = $('dlFinalLink');
       link.href = data.download_url;
       link.download = filename;
-      link.textContent = fmt === 'pdf' ? '⬇ Download Report.pdf' : '⬇ Download Report.docx';
+      link.textContent = '⬇ Download Report.docx';
       hide('step3preview');
       show('step3download');
       window.scrollTo(0, 0);
