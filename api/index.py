@@ -1898,21 +1898,31 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "Document generation failed. Please try again."})
         return
 
-    # Upload to Supabase Storage under a UUID — public bucket, unguessable path
+    # Upload DOCX to Supabase Storage under a UUID — public bucket, unguessable path
     import uuid as _uuid
     token = str(_uuid.uuid4())
     cfg   = docx_engine.load_university_config(university)
-    path  = f"project-builder/previews/{token}.docx"
-    mime  = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    mime_docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
     from db_cloud import upload_file
-    url = upload_file(path, docx_bytes, mime)
+    url = upload_file(f"project-builder/previews/{token}.docx", docx_bytes, mime_docx)
     if not url:
         _json_response(h, 500, {"error": "Upload failed. Please try again."})
         return
 
+    # Also generate and upload a PDF version
+    has_pdf = False
+    try:
+        pdf_bytes = docx_engine.generate_pdf_bytes(docx_bytes, university)
+        pdf_url   = upload_file(f"project-builder/previews/{token}_pdf.pdf",
+                                pdf_bytes, "application/pdf")
+        has_pdf   = bool(pdf_url)
+    except Exception as _pdf_err:
+        logger.warning(f"PDF generation skipped: {_pdf_err}")
+
     _json_response(h, 200, {
         "file_token": token,
+        "has_pdf":    has_pdf,
         "size_bytes": len(docx_bytes),
         "university": cfg.get("short_name", university.upper()),
         "preview":    structure,
@@ -1934,7 +1944,11 @@ def _handle_pb_process(h, body: bytes) -> None:
         file_token = data.get("file_token", "")
         if file_token:
             from db_cloud import get_media_url
-            dl_url = get_media_url(f"project-builder/previews/{file_token}.docx")
+            fmt    = data.get("format", "docx")
+            path   = (f"project-builder/previews/{file_token}_pdf.pdf"
+                      if fmt == "pdf"
+                      else f"project-builder/previews/{file_token}.docx")
+            dl_url = get_media_url(path)
             _json_response(h, 200, {"download_url": dl_url})
             return
         _json_response(h, 400, {"error": "admin_key requires file_token"})
@@ -1953,7 +1967,12 @@ def _handle_pb_process(h, body: bytes) -> None:
     file_token = data.get("file_token", "")
     if file_token:
         from db_cloud import get_media_url
-        dl_url = get_media_url(f"project-builder/previews/{file_token}.docx")
+        fmt = data.get("format", "docx")
+        if fmt == "pdf":
+            path = f"project-builder/previews/{file_token}_pdf.pdf"
+        else:
+            path = f"project-builder/previews/{file_token}.docx"
+        dl_url = get_media_url(path)
         _json_response(h, 200, {"download_url": dl_url})
         return
 
