@@ -1916,7 +1916,7 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
             structure = {
                 "title": form_data.get("title", ""),
                 "chapters": [
-                    {"number": i + 1, "heading": ch.get("title", f"Chapter {i + 1}")}
+                    {"number": i + 1, "heading": ch.get("title") or ch.get("heading", f"Chapter {i + 1}")}
                     for i, ch in enumerate(form_data.get("chapters", []))
                 ],
             }

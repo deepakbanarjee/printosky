@@ -340,7 +340,7 @@ def _build_title_page(doc: Document, config: dict, meta: dict) -> None:
     _add_centered_bold(doc, "Submitted by", size_pt=12)
     for s in meta.get("students", []):
         name = s.get("name", "")
-        roll = s.get("roll_no", "")
+        roll = s.get("roll_no") or s.get("roll", "")
         if name:
             sp = doc.add_paragraph()
             sp.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -431,7 +431,7 @@ def _build_declaration_page(doc: Document, config: dict, meta: dict) -> None:
     _add_body_para(doc, "Signature(s):", config)
     for s in students:
         name = s.get("name", "")
-        roll = s.get("roll_no", "")
+        roll = s.get("roll_no") or s.get("roll", "")
         if name:
             _add_body_para(doc, f"\n_______________\n{name} ({roll})", config)
 
@@ -781,7 +781,26 @@ def generate_from_form(form_data: dict, university_id: str) -> bytes:
     """
     Build a complete project report from structured form data (Tier 3).
     Returns .docx as bytes.
+
+    Accepts both the nested API format and the flat web-form format emitted
+    by project-builder.html's collectFormData():
+      - college / college_name
+      - year / academic_year
+      - guide_name + guide_desig  vs  guide: {name, designation}
+      - coguide_name + coguide_desig  vs  co_guide: {name, designation}
+      - hod_name + hod_desig  vs  hod: {name, designation}
+      - chapter.heading  vs  chapter.title
     """
+    def _person(dict_key: str, name_key: str, desig_key: str) -> dict:
+        """Return a {name, designation} dict from either nested or flat fields."""
+        p = form_data.get(dict_key)
+        if isinstance(p, dict):
+            return p
+        return {
+            "name":        form_data.get(name_key, ""),
+            "designation": form_data.get(desig_key, ""),
+        }
+
     config = load_university_config(university_id)
     doc = Document()
     _apply_university_styles(doc, config)
@@ -795,15 +814,15 @@ def generate_from_form(form_data: dict, university_id: str) -> bytes:
 
     meta = {
         "title":        form_data.get("title", "[PROJECT TITLE]"),
-        "college_name": form_data.get("college_name", "[COLLEGE NAME]"),
+        "college_name": form_data.get("college_name") or form_data.get("college", "[COLLEGE NAME]"),
         "department":   form_data.get("department", "[DEPARTMENT]"),
-        "academic_year": form_data.get("academic_year", "[ACADEMIC YEAR]"),
+        "academic_year": form_data.get("academic_year") or form_data.get("year", "[ACADEMIC YEAR]"),
         "report_type":  form_data.get("report_type", "B.Tech Final Year Project"),
         "degree":       form_data.get("degree", "Bachelor of Technology"),
         "students":     form_data.get("students", []),
-        "guide":        form_data.get("guide", {}),
-        "co_guide":     form_data.get("co_guide", {}),
-        "hod":          form_data.get("hod", {}),
+        "guide":        _person("guide",    "guide_name",   "guide_desig"),
+        "co_guide":     _person("co_guide", "coguide_name", "coguide_desig"),
+        "hod":          _person("hod",      "hod_name",     "hod_desig"),
         "abstract":     form_data.get("abstract", ""),
         "keywords":     keywords,
     }
@@ -818,7 +837,7 @@ def generate_from_form(form_data: dict, university_id: str) -> bytes:
         if i > 1:
             doc.add_page_break()
         ch_dict = {
-            "heading":  chapter.get("title", f"Chapter {i}"),
+            "heading":  chapter.get("title") or chapter.get("heading", f"Chapter {i}"),
             "sections": [],
             "content":  chapter.get("content", ""),
         }
