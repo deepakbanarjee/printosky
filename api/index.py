@@ -1721,6 +1721,7 @@ def _handle_pb_template_download(h, university_id: str) -> None:
 def _handle_pb_analyse(h, body: bytes) -> None:
     """POST /project-builder/analyse — free chapter detection before payment."""
     import base64
+    import docx_engine
     try:
         data = json.loads(body)
         content_b64 = data.get("content_b64", "")
