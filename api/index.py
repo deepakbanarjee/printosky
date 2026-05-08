@@ -1752,21 +1752,20 @@ def _handle_pb_analyse(h, body: bytes) -> None:
         file_bytes = base64.b64decode(content_b64)
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
-        if ext == "docx":
-            # Read heading styles directly — no text extraction, no Claude call
-            structure  = docx_engine.detect_structure_from_docx(file_bytes)
-            text       = docx_engine.extract_text_from_docx(file_bytes)
-            word_count = len(text.split())
-        elif ext == "pdf":
-            text = docx_engine.extract_text_from_pdf(file_bytes)
-            if not text.strip():
-                _json_response(h, 422, {"error": "Could not extract text. The PDF may be image-based or corrupted."})
-                return
-            word_count = len(text.split())
-            structure  = docx_engine._parse_structure_with_claude(text)
-        else:
-            _json_response(h, 400, {"error": "Unsupported file type. Only .docx and .pdf are supported."})
+        if ext == "pdf":
+            _json_response(h, 400, {
+                "error": "PDF upload is not supported. Open the PDF in Word, "
+                         "save as .docx, then upload that file."
+            })
             return
+        if ext != "docx":
+            _json_response(h, 400, {"error": "Only .docx files are supported."})
+            return
+
+        # Smart 3-pass detection: Word styles → heuristics → Claude metadata
+        structure  = docx_engine.detect_structure_from_docx(file_bytes)
+        text       = docx_engine.extract_text_from_docx(file_bytes)
+        word_count = len(text.split())
 
         if "error" in structure:
             _json_response(h, 200, {
@@ -1874,20 +1873,16 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
             if content_b64:
                 import base64 as _b64
                 file_bytes = _b64.b64decode(content_b64)
+                if content_type == "pdf":
+                    _json_response(h, 400, {
+                        "error": "PDF upload is not supported. Open the PDF in Word, "
+                                 "save as .docx, then upload that file."
+                    })
+                    return
                 if content_type == "docx":
-                    # In-place reformat: images and tables are preserved
+                    # In-place reformat — images and tables preserved
                     docx_bytes = docx_engine.format_fix_docx_inplace(file_bytes, university)
                     structure  = docx_engine.detect_structure_from_docx(file_bytes)
-                elif content_type == "pdf":
-                    text = docx_engine.extract_text_from_pdf(file_bytes)
-                    if len(text) > 200_000:
-                        _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
-                        return
-                    docx_bytes = docx_engine.format_fix(text, university)
-                    try:
-                        structure = docx_engine._parse_structure_with_claude(text)
-                    except Exception:
-                        structure = {}
                 else:
                     text = file_bytes.decode("utf-8", errors="replace")
                     if len(text) > 200_000:

@@ -847,32 +847,150 @@ def generate_from_form(form_data: dict, university_id: str) -> bytes:
 # In-place DOCX reformatter — preserves images, tables, all existing content
 # ---------------------------------------------------------------------------
 
-def detect_structure_from_docx(docx_bytes: bytes) -> dict:
-    """Detect document structure by reading actual Word heading styles.
+def _classify_with_claude_metadata(paras: list) -> list:
+    """Ask Claude Haiku to classify paragraphs from metadata only — no full text sent.
 
-    No AI call needed. Much more accurate than text extraction + Claude
-    because it reads what the author already marked as headings.
+    Only called when neither Word heading styles nor heuristics find any structure.
+    Sends a compact list: index, first-60-chars snippet, font size, bold, length.
+    Returns a list of strings: 'title'|'h1'|'h2'|'h3'|'body'|'blank'.
+    """
+    import anthropic
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return ["blank" if p["is_blank"] else "body" for p in paras]
+
+    lines = []
+    for i, p in enumerate(paras):
+        if p["is_blank"]:
+            lines.append(f"{i}: BLANK")
+        else:
+            snippet = p["text"][:60].replace("\n", " ")
+            lines.append(
+                f"{i}: text={repr(snippet)}, size={p['max_size']:.0f}pt, "
+                f"bold={p['bold']}, len={p['length']}"
+            )
+
+    prompt = (
+        "Classify each paragraph in an Indian university student project report.\n"
+        "Output ONLY a JSON array of strings, one per line index, using these labels:\n"
+        "  title = project/report title\n"
+        "  h1    = chapter heading (e.g. CHAPTER 1, INTRODUCTION)\n"
+        "  h2    = section heading (e.g. 1.1 Background)\n"
+        "  h3    = sub-section heading\n"
+        "  body  = regular paragraph\n"
+        "  blank = empty line\n\n"
+        "Paragraph metadata:\n"
+        + "\n".join(lines)
+        + "\n\nReturn ONLY the JSON array, no markdown, no explanation."
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        result = json.loads(raw)
+        if len(result) == len(paras):
+            return result
+    except Exception:
+        pass
+
+    return ["blank" if p["is_blank"] else "body" for p in paras]
+
+
+def _classify_paragraphs(doc: Document, body_size: float = 12.0) -> list:
+    """Classify every paragraph in a Document as title/h1/h2/h3/body/blank.
+
+    Three-pass strategy (stops at first success):
+      1. Word heading styles — most accurate, zero cost
+      2. Heuristics — bold + font size + ALL_CAPS patterns
+      3. Claude Haiku on paragraph metadata — fallback when doc has no styling at all
+    """
+    paras = []
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        sname = (para.style.name or "Normal") if para.style else "Normal"
+        is_bold = any(run.bold for run in para.runs if run.text.strip())
+        run_sizes = [run.font.size.pt for run in para.runs if run.font.size]
+        max_size = max(run_sizes) if run_sizes else body_size
+        paras.append({
+            "text":     text,
+            "style":    sname,
+            "bold":     is_bold,
+            "max_size": max_size,
+            "length":   len(text),
+            "is_upper": (text == text.upper() and len(text) > 3) if text else False,
+            "is_blank": not text,
+        })
+
+    # Pass 1 — Word heading styles
+    has_word_headings = any(
+        p["style"].startswith("Heading") or p["style"] == "Title"
+        for p in paras if not p["is_blank"]
+    )
+    if has_word_headings:
+        result = []
+        for p in paras:
+            s = p["style"]
+            if p["is_blank"]:      result.append("blank")
+            elif s == "Title":     result.append("title")
+            elif s == "Heading 1": result.append("h1")
+            elif s == "Heading 2": result.append("h2")
+            elif s == "Heading 3": result.append("h3")
+            else:                  result.append("body")
+        return result
+
+    # Pass 2 — heuristics
+    heuristic = []
+    for p in paras:
+        if p["is_blank"]:
+            heuristic.append("blank")
+        elif p["bold"] and p["length"] < 120 and (p["max_size"] >= 14 or p["is_upper"]):
+            heuristic.append("h1")
+        elif p["bold"] and p["length"] < 120 and p["max_size"] >= 13:
+            heuristic.append("h2")
+        elif p["bold"] and p["length"] < 80:
+            heuristic.append("h3")
+        else:
+            heuristic.append("body")
+
+    if any(c in ("h1", "h2", "h3", "title") for c in heuristic):
+        return heuristic
+
+    # Pass 3 — Claude Haiku on paragraph metadata (last resort)
+    return _classify_with_claude_metadata(paras)
+
+
+def detect_structure_from_docx(docx_bytes: bytes) -> dict:
+    """Detect document structure using smart 3-pass classification.
+
+    Pass 1: reads Word heading styles (zero cost, most accurate).
+    Pass 2: heuristics (bold + font size + ALL_CAPS).
+    Pass 3: Claude Haiku on paragraph metadata (when doc has no styling).
     Returns the same shape as _parse_structure_with_claude.
     """
     doc = Document(io.BytesIO(docx_bytes))
+    classifications = _classify_paragraphs(doc, body_size=12.0)
 
     title = ""
     chapters: list = []
     current_chapter: dict | None = None
     current_section: dict | None = None
 
-    for para in doc.paragraphs:
+    for para, cls in zip(doc.paragraphs, classifications):
         text = para.text.strip()
-        if not text:
+        if not text or cls == "blank":
             continue
-        sname = (para.style.name or "Normal") if para.style else "Normal"
 
-        if sname == "Title":
+        if cls == "title":
             title = text
-        elif sname == "Heading 1":
-            if not title and not chapters:
-                title = text
-                continue
+        elif cls == "h1":
             current_section = None
             current_chapter = {
                 "number":   len(chapters) + 1,
@@ -881,7 +999,7 @@ def detect_structure_from_docx(docx_bytes: bytes) -> dict:
                 "content":  "",
             }
             chapters.append(current_chapter)
-        elif sname == "Heading 2":
+        elif cls == "h2":
             if current_chapter is None:
                 current_chapter = {
                     "number":   len(chapters) + 1,
@@ -898,7 +1016,9 @@ def detect_structure_from_docx(docx_bytes: bytes) -> dict:
                     "content": "",
                 }
                 current_chapter["sections"].append(current_section)
-        else:
+        elif cls == "h3":
+            pass  # don't model deeply
+        else:  # body
             if current_section is not None:
                 current_section["content"] = (
                     current_section["content"] + " " + text
@@ -909,7 +1029,7 @@ def detect_structure_from_docx(docx_bytes: bytes) -> dict:
                 ).strip()
 
     if not chapters and not title:
-        return {"error": "no_headings_found"}
+        return {"error": "no_structure_found"}
 
     return {
         "title":      title or "PROJECT REPORT",
@@ -918,69 +1038,51 @@ def detect_structure_from_docx(docx_bytes: bytes) -> dict:
     }
 
 
-def _reformat_para_inplace(para, doc: Document, config: dict) -> None:
-    """Classify a paragraph and apply the correct style without touching content.
+def format_fix_docx_inplace(docx_bytes: bytes, university_id: str) -> bytes:
+    """Reformat an existing DOCX in place — preserves images, tables, all content.
 
-    Paragraphs already using Word heading styles are left alone — their style
-    definition was already fixed by _apply_university_styles.
-    Plain paragraphs that look like headings get reclassified.
-    Everything else gets Normal body formatting.
+    Uses smart 3-pass heading classification so even unstyled student documents
+    get correct Heading 1/2/3 styles applied.  Page margins and numbering are
+    fixed to university spec.
     """
-    text = para.text.strip()
-    if not text:
-        return
-
-    sname = (para.style.name or "Normal") if para.style else "Normal"
-
-    if sname.startswith("Heading") or sname == "Title":
-        return  # already correct, style def fixed by _apply_university_styles
-
+    config    = load_university_config(university_id)
+    doc       = Document(io.BytesIO(docx_bytes))
     body_font = config["body_font"]
     body_size = config["body_size_pt"]
     spacing   = config["line_spacing"]
     sp_before = config["para_space_before_pt"]
     sp_after  = config["para_space_after_pt"]
 
-    is_bold  = any(run.bold for run in para.runs if run.text.strip())
-    is_short = len(text) < 120
-    is_upper = text == text.upper() and len(text) > 3
-
-    run_sizes = [run.font.size.pt for run in para.runs if run.font.size]
-    max_size  = max(run_sizes) if run_sizes else body_size
-
-    if is_bold and is_short and (max_size >= 14 or is_upper):
-        para.style = doc.styles["Heading 1"]
-    elif is_bold and is_short and max_size >= 12:
-        para.style = doc.styles["Heading 2"]
-    else:
-        para.style = doc.styles["Normal"]
-        pf = para.paragraph_format
-        pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-        pf.line_spacing      = spacing
-        pf.space_before      = Pt(sp_before)
-        pf.space_after       = Pt(sp_after)
-        for run in para.runs:
-            run.font.name = body_font
-            run.font.size = Pt(body_size)
-
-
-def format_fix_docx_inplace(docx_bytes: bytes, university_id: str) -> bytes:
-    """Reformat an existing DOCX in place — preserves images, tables, all content.
-
-    Use this for .docx uploads instead of format_fix() which destroys
-    images and tables by extracting text and rebuilding from scratch.
-    """
-    config = load_university_config(university_id)
-    doc = Document(io.BytesIO(docx_bytes))
-
+    # Fix style definitions first (Normal, Heading 1/2/3 get university spec)
     _apply_university_styles(doc, config)
 
-    body_font = config["body_font"]
-    body_size = config["body_size_pt"]
+    # Classify all paragraphs in one smart pass
+    classifications = _classify_paragraphs(doc, body_size=body_size)
 
-    for para in doc.paragraphs:
-        _reformat_para_inplace(para, doc, config)
+    style_map = {
+        "title": "Heading 1",
+        "h1":    "Heading 1",
+        "h2":    "Heading 2",
+        "h3":    "Heading 3",
+    }
 
+    for para, cls in zip(doc.paragraphs, classifications):
+        if cls == "blank":
+            continue
+        if cls in style_map:
+            para.style = doc.styles[style_map[cls]]
+        else:  # body
+            para.style = doc.styles["Normal"]
+            pf = para.paragraph_format
+            pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            pf.line_spacing      = spacing
+            pf.space_before      = Pt(sp_before)
+            pf.space_after       = Pt(sp_after)
+            for run in para.runs:
+                run.font.name = body_font
+                run.font.size = Pt(body_size)
+
+    # Fix table cell fonts — preserve structure, just fix typography
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
@@ -989,6 +1091,11 @@ def format_fix_docx_inplace(docx_bytes: bytes, university_id: str) -> bytes:
                         run.font.name = body_font
                         if run.font.size:
                             run.font.size = Pt(body_size)
+
+    # Fix page margins and numbering on every section
+    for section in doc.sections:
+        _apply_margins_to_section(section, config)
+        _set_section_page_numbering(section, fmt="decimal", start=1)
 
     _add_footer_cta(doc)
 

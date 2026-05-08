@@ -240,8 +240,8 @@
       <div id="panel-format-fix" class="pb-hidden">
         <div class="pb-card">
           <h2>Format Fixer <span style="color:#aaa;font-weight:400;font-size:.9rem">— ₹49</span></h2>
-          <p style="color:#555; margin-bottom:1.25rem">Paste your project content or upload your rough .docx / .pdf — we apply your university's exact format.</p>
-          <p style="color:#999; font-size:.8rem; margin-bottom:1.25rem">Note: Images and figures from original may not transfer. Certificate/Declaration pages need your details filled in.</p>
+          <p style="color:#555; margin-bottom:1.25rem">Upload your rough <strong>.docx</strong> or paste your content — we apply your university's exact format. Your images and tables are preserved.</p>
+          <p style="color:#e67e22; font-size:.82rem; margin-bottom:1.25rem">📌 Have a PDF? Open it in Word → File → Save As → Word Document (.docx) → upload that file here.</p>
 
           <div class="pb-tabs">
             <button class="pb-tab active" onclick="switchTab('paste')">Paste text</button>
@@ -258,10 +258,10 @@
 
           <div id="tab-upload" class="pb-hidden">
             <div class="upload-zone" id="uploadZone">
-              <input type="file" id="uploadFile" accept=".docx,.pdf" onchange="handleFileSelect(this)">
-              <div class="icon">📄</div>
+              <input type="file" id="uploadFile" accept=".docx" onchange="handleFileSelect(this)">
+              <div class="icon">📝</div>
               <p>Click to choose or drag and drop your Word file</p>
-              <p style="font-size:.8rem; color:#bbb; margin-top:.25rem">.docx or .pdf — max 10 MB</p>
+              <p style="font-size:.8rem; color:#bbb; margin-top:.25rem">.docx only — max 10 MB</p>
               <div class="upload-name" id="uploadFileName"></div>
             </div>
             <div id="detectWrap" class="pb-hidden" style="margin-top:.75rem">
@@ -576,8 +576,8 @@
       return;
     }
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['docx','pdf'].includes(ext)) {
-      showErr('ffError', 'Only .docx and .pdf files are supported.');
+    if (!['docx'].includes(ext)) {
+      showErr('ffError', 'Only .docx files are supported. If you have a PDF, open it in Word and save as .docx first.');
       return;
     }
     hideErr('ffError');
@@ -823,7 +823,7 @@
         showErr('ffError', 'Please paste your project content first.'); return;
       }
       if (state.uploadTab === 'upload' && !state.fileBytes) {
-        showErr('ffError', 'Please select a .docx or .pdf file first.'); return;
+        showErr('ffError', 'Please select a .docx file first.'); return;
       }
       hideErr('ffError');
     } else {
