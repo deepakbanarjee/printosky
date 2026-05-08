@@ -1927,6 +1927,19 @@ def _handle_pb_process(h, body: bytes) -> None:
         _json_response(h, 400, {"error": "invalid JSON"})
         return
 
+    # Admin bypass — skip Razorpay if correct admin key provided
+    admin_key  = data.get("admin_key", "")
+    admin_pass = os.environ.get("PRINTOSKY_ADMIN_PASSWORD", "")
+    if admin_key and admin_pass and admin_key == admin_pass:
+        file_token = data.get("file_token", "")
+        if file_token:
+            from db_cloud import get_media_url
+            dl_url = get_media_url(f"project-builder/previews/{file_token}.docx")
+            _json_response(h, 200, {"download_url": dl_url})
+            return
+        _json_response(h, 400, {"error": "admin_key requires file_token"})
+        return
+
     payment_id = data.get("razorpay_payment_id", "")
     order_id   = data.get("razorpay_order_id", "")
     signature  = data.get("razorpay_signature", "")

@@ -420,6 +420,7 @@
         <div id="previewChapters" style="text-align:left;margin-bottom:1.5rem;max-height:260px;overflow-y:auto"></div>
         <button class="pb-btn pb-btn-primary" id="payToDownloadBtn" style="font-size:1.05rem;padding:.85rem 2rem" onclick="startDownloadPayment()">Pay ₹49 to Download →</button>
         <p style="font-size:.8rem;color:#aaa;margin-top:.75rem">Secure payment via Razorpay · Download link valid for 24 hours</p>
+        <button id="adminDlBtn" class="pb-btn pb-btn-secondary" style="display:none;margin-top:.5rem;font-size:.85rem" onclick="adminDownload()">🔑 Admin Download (skip payment)</button>
         <div class="pb-error" id="previewPayError" style="display:none;margin-top:.75rem"></div>
       </div>
       <!-- State B: Download after payment confirmed -->
@@ -894,6 +895,8 @@
     btn.disabled = false;
     btn.onclick = () => startDownloadPayment(service, price);
     hideErr('previewPayError');
+    // Show admin bypass button if admin is logged in (same localStorage flag as admin.html)
+    $('adminDlBtn').style.display = localStorage.getItem('adminAuth') === '1' ? 'inline-block' : 'none';
     show('step3preview');
     hide('step3download');
     goStep3();
@@ -983,6 +986,44 @@
       showErr('previewPayError',
         'Payment captured but download setup failed. WhatsApp 9495706405 with payment ID: ' +
         paymentResponse.razorpay_payment_id);
+    }
+  }
+
+  // ── Admin download bypass ─────────────────────────────────────────────────────
+  async function adminDownload() {
+    const btn = $('adminDlBtn');
+    const pwd = prompt('Admin password:');
+    if (!pwd) return;
+    btn.disabled = true;
+    btn.textContent = 'Downloading…';
+    try {
+      const res = await fetch(`${API}/project-builder/process`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          admin_key:  pwd,
+          file_token: state.fileToken,
+          service:    state.currentService,
+          university: state.university === 'other' ? 'ktu' : state.university,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+      const uni = state.university === 'other' ? 'generic' : state.university;
+      const filename = state.currentService === 'format_fix'
+        ? `${uni}_formatted_report.docx`
+        : `${uni}_project_report.docx`;
+      const link = $('dlFinalLink');
+      link.href = data.download_url;
+      link.download = filename;
+      hide('step3preview');
+      show('step3download');
+      window.scrollTo(0, 0);
+    } catch(e) {
+      showErr('previewPayError', 'Admin download failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔑 Admin Download (skip payment)';
     }
   }
 
