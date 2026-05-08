@@ -1938,20 +1938,27 @@ def _handle_pb_process(h, body: bytes) -> None:
         return
 
     # Admin bypass — skip Razorpay if correct admin key provided
-    admin_key  = data.get("admin_key", "")
-    admin_pass = os.environ.get("PRINTOSKY_ADMIN_PASSWORD", "")
-    if admin_key and admin_pass and admin_key == admin_pass:
-        file_token = data.get("file_token", "")
-        if file_token:
-            from db_cloud import get_media_url
-            fmt    = data.get("format", "docx")
-            path   = (f"project-builder/previews/{file_token}_pdf.pdf"
-                      if fmt == "pdf"
-                      else f"project-builder/previews/{file_token}.docx")
-            dl_url = get_media_url(path)
-            _json_response(h, 200, {"download_url": dl_url})
+    admin_key = data.get("admin_key", "")
+    if admin_key:
+        admin_pass = os.environ.get("PRINTOSKY_ADMIN_PASSWORD", "")
+        if not admin_pass:
+            _json_response(h, 500, {"error": "PRINTOSKY_ADMIN_PASSWORD not set on server"})
             return
-        _json_response(h, 400, {"error": "admin_key requires file_token"})
+        if admin_key != admin_pass:
+            _json_response(h, 403, {"error": "Wrong admin password"})
+            return
+        # Password correct — bypass payment
+        file_token = data.get("file_token", "")
+        if not file_token:
+            _json_response(h, 400, {"error": "file_token required for admin download"})
+            return
+        from db_cloud import get_media_url
+        fmt    = data.get("format", "docx")
+        path   = (f"project-builder/previews/{file_token}_pdf.pdf"
+                  if fmt == "pdf"
+                  else f"project-builder/previews/{file_token}.docx")
+        dl_url = get_media_url(path)
+        _json_response(h, 200, {"download_url": dl_url})
         return
 
     payment_id = data.get("razorpay_payment_id", "")
