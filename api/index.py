@@ -1299,7 +1299,9 @@ def _handle_admin_thread(h) -> None:
     """GET /admin/thread?phone=X — thread messages for one contact."""
     from urllib.parse import parse_qs, urlparse
     params   = parse_qs(urlparse(h.path).query)
-    admin_pw = params.get("admin_password", [""])[0]
+    admin_pw = h.headers.get("X-Admin-Password", "").strip()
+    if not admin_pw:
+        admin_pw = params.get("admin_password", [""])[0]
     if not _auth_admin_pw(admin_pw):
         _json_response(h, 403, {"error": "Unauthorized"})
         return
