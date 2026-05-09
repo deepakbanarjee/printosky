@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Re-download Your Report — Printosky</title>
+  <link rel="icon" href="https://printosky.com/favicon.ico">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0d1117; color: #e6edf3; min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center;
+      padding: 2rem 1rem;
+    }
+    .logo { font-size: 1.4rem; font-weight: 700; color: #7eb8f7; margin-bottom: 2rem; text-decoration: none; }
+    .card {
+      background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+      padding: 2rem; width: 100%; max-width: 440px;
+    }
+    h1 { font-size: 1.3rem; margin-bottom: .5rem; }
+    .sub { font-size: .88rem; color: #8b949e; margin-bottom: 1.75rem; }
+    label { display: block; font-size: .82rem; color: #7eb8f7; margin-bottom: .35rem; font-weight: 600; }
+    input {
+      width: 100%; padding: .6rem .85rem; background: #0d1117;
+      border: 1px solid #30363d; border-radius: 7px; color: #e6edf3;
+      font-size: .95rem; margin-bottom: 1rem; outline: none;
+    }
+    input:focus { border-color: #7eb8f7; }
+    .btn {
+      display: block; width: 100%; padding: .7rem; border: none; border-radius: 7px;
+      background: #1B3F8B; color: #fff; font-size: 1rem; font-weight: 600;
+      cursor: pointer; transition: background .15s;
+    }
+    .btn:hover { background: #2251b8; }
+    .btn:disabled { background: #333; cursor: not-allowed; }
+    .error { color: #f85149; font-size: .85rem; margin-top: 1rem; display: none; }
+    .result { display: none; margin-top: 1.5rem; text-align: center; }
+    .dl-btn {
+      display: inline-block; padding: .75rem 1.5rem; background: #22c55e;
+      color: #fff; border-radius: 8px; font-weight: 700; text-decoration: none;
+      font-size: 1rem; margin-bottom: .75rem;
+    }
+    .order-meta { font-size: .8rem; color: #8b949e; margin-top: .5rem; }
+    .order-meta strong { color: #7eb8f7; }
+    .back { display: block; text-align: center; margin-top: 2rem; font-size: .85rem; color: #7eb8f7; text-decoration: none; }
+    .back:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <a class="logo" href="https://printosky.com">Printosky</a>
+
+  <div class="card">
+    <h1>🔁 Re-download Your Report</h1>
+    <p class="sub">Enter your Order ID and the WhatsApp number you used when ordering.</p>
+
+    <label for="orderId">Order ID</label>
+    <input type="text" id="orderId" placeholder="PB-20260509-a3f7c2" autocomplete="off" spellcheck="false"
+      oninput="this.value=this.value.toUpperCase()">
+
+    <label for="phone">WhatsApp Number</label>
+    <input type="tel" id="phone" placeholder="10-digit mobile number" maxlength="10"
+      oninput="this.value=this.value.replace(/\D/g,'')">
+
+    <button class="btn" id="fetchBtn" onclick="fetchOrder()">Find My Report</button>
+
+    <div class="error" id="errMsg"></div>
+
+    <div class="result" id="result">
+      <a id="dlLink" class="dl-btn" href="#" target="_blank">⬇ Download Report.docx</a>
+      <p class="order-meta">
+        Order <strong id="rOrderId"></strong>&nbsp;·&nbsp;<span id="rUniversity"></span>
+      </p>
+    </div>
+  </div>
+
+  <a class="back" href="/project-builder">← Format a new report</a>
+
+  <script>
+    const API = 'https://printosky.vercel.app';
+
+    async function fetchOrder() {
+      const orderId = document.getElementById('orderId').value.trim().toUpperCase();
+      const phone   = document.getElementById('phone').value.trim();
+      const btn     = document.getElementById('fetchBtn');
+      const errEl   = document.getElementById('errMsg');
+      const resEl   = document.getElementById('result');
+
+      errEl.style.display = 'none';
+      resEl.style.display = 'none';
+
+      if (!orderId) { showErr('Please enter your Order ID.'); return; }
+      if (!phone || phone.length !== 10) { showErr('Please enter your 10-digit WhatsApp number.'); return; }
+
+      btn.disabled    = true;
+      btn.textContent = 'Looking up…';
+
+      try {
+        const res  = await fetch(
+          `${API}/project-builder/orders/${encodeURIComponent(orderId)}?phone=${encodeURIComponent('91' + phone)}`
+        );
+        const data = await res.json();
+
+        if (!res.ok) {
+          showErr(data.error || 'Order not found. Check your Order ID and phone number.');
+          return;
+        }
+
+        document.getElementById('dlLink').href          = data.download_url;
+        document.getElementById('rOrderId').textContent = data.order_id;
+        document.getElementById('rUniversity').textContent =
+          (data.university || '').replace(/_/g, ' ').toUpperCase();
+        resEl.style.display = 'block';
+
+      } catch(e) {
+        showErr('Network error. Please try again.');
+      } finally {
+        btn.disabled    = false;
+        btn.textContent = 'Find My Report';
+      }
+    }
+
+    function showErr(msg) {
+      const el = document.getElementById('errMsg');
+      el.textContent    = msg;
+      el.style.display  = 'block';
+    }
+
+    document.addEventListener('keydown', e => { if (e.key === 'Enter') fetchOrder(); });
+
+    // Pre-fill order ID from URL param if present (?order=PB-...)
+    const urlParams = new URLSearchParams(window.location.search);
+    const preOrder  = urlParams.get('order');
+    if (preOrder) document.getElementById('orderId').value = preOrder.toUpperCase();
+  </script>
+</body>
+</html>

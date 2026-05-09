@@ -95,6 +95,183 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
+# PDF block-based extraction (positional, no LLM)
+# ---------------------------------------------------------------------------
+
+_PDF_BULLET_RE   = re.compile(r"^[●•▪◆►]\s*")
+_PDF_NUM_LIST_RE = re.compile(r"^(\d{1,2})[\.)]\s+")
+_PDF_PAGE_NUM_RE = re.compile(r"^\(\d+\)$")
+_PDF_ALL_CAPS_RE = re.compile(r"^[A-Z][A-Z \-,&\.\?:!\d]{2,}$")
+_PDF_KV_RE       = re.compile(r"^([A-Z][^:\n]{2,40}?)\s*:\s*(.+)$")
+_PDF_NOISE_TOKENS = ("Map Camera", "Plus Code", " Lat ", " Long ", "GPS")
+
+
+def _pdf_is_noise(line: str) -> bool:
+    return any(tok in line for tok in _PDF_NOISE_TOKENS)
+
+
+def _pdf_merge_sentences(lines: list[str]) -> list[str]:
+    """Join Canva-broken visual lines back into full sentences."""
+    out: list[str] = []
+    for ln in lines:
+        s = ln.rstrip()
+        if not s:
+            continue
+        looks_independent = (
+            _PDF_BULLET_RE.match(s)
+            or _PDF_NUM_LIST_RE.match(s)
+            or (_PDF_ALL_CAPS_RE.match(s) and len(s) < 60)
+            or _PDF_PAGE_NUM_RE.match(s)
+            or _PDF_KV_RE.match(s)
+        )
+        if (out
+                and not out[-1].rstrip().endswith((".", "?", "!", ":", ";"))
+                and not looks_independent
+                and not (_PDF_ALL_CAPS_RE.match(out[-1]) and len(out[-1]) < 60)):
+            out[-1] = out[-1].rstrip() + " " + s.lstrip()
+        else:
+            out.append(s)
+    return out
+
+
+def _pdf_page_blocks(pdf, page_no_0based: int) -> list[str]:
+    """Extract text blocks from a PDF page in true visual reading order."""
+    page = pdf[page_no_0based]
+    raw_blocks = [b for b in page.get_text("blocks") if b[6] == 0]
+    raw_blocks.sort(key=lambda b: (round(b[1], 1), round(b[0], 1)))
+    out: list[str] = []
+    for b in raw_blocks:
+        text = b[4].strip()
+        if not text:
+            continue
+        block_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        merged: list[str] = []
+        buf = ""
+        for ln in block_lines:
+            is_break = (
+                _PDF_BULLET_RE.match(ln)
+                or _PDF_NUM_LIST_RE.match(ln)
+                or (_PDF_ALL_CAPS_RE.match(ln) and len(ln) < 60)
+                or _PDF_PAGE_NUM_RE.match(ln)
+            )
+            if is_break:
+                if buf:
+                    merged.append(buf)
+                    buf = ""
+                merged.append(ln)
+            else:
+                buf = (buf + " " + ln).strip() if buf else ln
+        if buf:
+            merged.append(buf)
+        for m in merged:
+            if not _pdf_is_noise(m):
+                out.append(m)
+    return out
+
+
+def _pdf_build_decorative_xrefs(pdf) -> set[int]:
+    """xrefs whose hash appears on >=3 pages (Canva backgrounds, repeated icons)."""
+    import hashlib
+    import fitz
+    hash_pages: dict[str, set[int]] = {}
+    xref_hash: dict[int, str] = {}
+    for page_no in range(len(pdf)):
+        page = pdf[page_no]
+        for info in page.get_images(full=True):
+            xref = info[0]
+            if xref in xref_hash:
+                hash_pages.setdefault(xref_hash[xref], set()).add(page_no)
+                continue
+            try:
+                pix = fitz.Pixmap(pdf, xref)
+                if pix.alpha or pix.n > 4:
+                    pix = fitz.Pixmap(fitz.csRGB, pix)
+                h = hashlib.md5(pix.tobytes("png")).hexdigest()
+                pix = None
+                xref_hash[xref] = h
+                hash_pages.setdefault(h, set()).add(page_no)
+            except Exception:
+                continue
+    deco_hashes = {h for h, pgs in hash_pages.items() if len(pgs) >= 3}
+    return {xref for xref, h in xref_hash.items() if h in deco_hashes}
+
+
+def extract_text_from_pdf_blocks(file_bytes: bytes) -> str:
+    """PDF text extraction with positional reading order + sentence merging."""
+    import fitz
+    try:
+        with fitz.open(stream=file_bytes, filetype="pdf") as pdf:
+            page_texts: list[str] = []
+            for page_no in range(len(pdf)):
+                lines = _pdf_page_blocks(pdf, page_no)
+                lines = _pdf_merge_sentences(lines)
+                if lines:
+                    page_texts.append("\n".join(lines))
+        return "\n\n".join(page_texts)
+    except Exception as exc:
+        logger.warning("extract_text_from_pdf_blocks failed: %s", exc)
+        return ""
+
+
+def detect_structure_from_pdf(pdf_bytes: bytes) -> dict:
+    """Detect chapter/heading structure from a PDF deterministically.
+
+    Returns the same shape as detect_structure_from_docx. No LLM in path.
+    """
+    import fitz
+    try:
+        pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:
+        logger.warning("detect_structure_from_pdf open failed: %s", exc)
+        return {"error": "pdf_open_failed"}
+    try:
+        title = ""
+        chapters: list = []
+        current_chapter: dict | None = None
+        seen_first_heading = False
+        for page_no in range(len(pdf)):
+            lines = _pdf_page_blocks(pdf, page_no)
+            lines = _pdf_merge_sentences(lines)
+            for ln in lines:
+                if _PDF_PAGE_NUM_RE.match(ln):
+                    continue
+                stripped = ln.strip(" ?:.")
+                if (page_no == 0 and not seen_first_heading
+                        and _PDF_ALL_CAPS_RE.match(ln)
+                        and 8 <= len(ln) <= 80):
+                    title = title or stripped
+                    seen_first_heading = True
+                    continue
+                is_chapter_heading = (
+                    bool(re.match(r"^CHAPTER\s+\d+", ln, re.IGNORECASE))
+                    or (_PDF_ALL_CAPS_RE.match(ln) and 3 <= len(ln) <= 60)
+                )
+                if is_chapter_heading:
+                    seen_first_heading = True
+                    current_chapter = {
+                        "number":   len(chapters) + 1,
+                        "heading":  stripped,
+                        "sections": [],
+                        "content":  "",
+                    }
+                    chapters.append(current_chapter)
+                    continue
+                if current_chapter is not None:
+                    current_chapter["content"] = (
+                        current_chapter["content"] + " " + ln
+                    ).strip()
+        if not chapters and not title:
+            return {"error": "no_structure_found"}
+        return {
+            "title":      title or "PROJECT REPORT",
+            "chapters":   chapters,
+            "references": [],
+        }
+    finally:
+        pdf.close()
+
+
+# ---------------------------------------------------------------------------
 # Claude Haiku — structure parser
 # ---------------------------------------------------------------------------
 
@@ -1121,3 +1298,185 @@ def format_fix_docx_inplace(docx_bytes: bytes, university_id: str) -> bytes:
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# PDF -> formatted DOCX (deterministic, no LLM)
+# ---------------------------------------------------------------------------
+
+def format_fix_pdf(pdf_bytes: bytes, university_id: str) -> bytes:
+    """Reformat a PDF into a university-styled DOCX.
+
+    PDFs have no Word styles, so we build a fresh DOCX from extracted content:
+      - Block-based positional extraction (true visual reading order)
+      - Sentence merging for Canva line breaks
+      - Heading detection via ALL_CAPS short lines and 'Chapter N' patterns
+      - Decorative-image filter (page backgrounds + repeated icons dropped)
+      - Embed remaining images inline at their source page
+      - Apply university styles + black-text font discipline
+    No LLM in path, no content invention.
+    """
+    import fitz
+    from docx.shared import Inches, RGBColor
+
+    config = load_university_config(university_id)
+    pdf    = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        decorative_xrefs = _pdf_build_decorative_xrefs(pdf)
+
+        doc = Document()
+        _apply_university_styles(doc, config)
+
+        body_font = config["body_font"]
+        body_size = config["body_size_pt"]
+        spacing   = config["line_spacing"]
+        sp_before = config["para_space_before_pt"]
+        sp_after  = config["para_space_after_pt"]
+
+        for section in doc.sections:
+            _apply_margins_to_section(section, config)
+            _set_section_page_numbering(section, fmt="decimal", start=1)
+
+        def _add_body(text: str) -> None:
+            p  = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            pf = p.paragraph_format
+            pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            pf.line_spacing      = spacing
+            pf.space_before      = Pt(sp_before)
+            pf.space_after       = Pt(sp_after)
+            r = p.add_run(text)
+            r.font.name = body_font
+            r.font.size = Pt(body_size)
+
+        def _add_heading(text: str, level: int = 1) -> None:
+            h = doc.add_heading(text, level=level)
+            h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        def _add_kv_table(pairs: list[tuple[str, str]]) -> None:
+            tbl = doc.add_table(rows=len(pairs), cols=2)
+            tbl.autofit = False
+            for r_idx, (k, v) in enumerate(pairs):
+                cells = tbl.rows[r_idx].cells
+                cells[0].width = Cm(6.5)
+                cells[1].width = Cm(9.5)
+                cells[0].text  = k.rstrip(":.").strip()
+                cells[1].text  = v.strip()
+                for run in cells[0].paragraphs[0].runs:
+                    run.bold = True
+
+        def _add_image_from_xref(xref: int) -> None:
+            try:
+                pix = fitz.Pixmap(pdf, xref)
+                if pix.alpha or pix.n > 4:
+                    pix = fitz.Pixmap(fitz.csRGB, pix)
+                buf = pix.tobytes("png")
+                pix = None
+                doc.add_picture(io.BytesIO(buf), width=Inches(5.5))
+                doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            except Exception as exc:
+                logger.warning("format_fix_pdf image embed failed: %s", exc)
+
+        for page_no in range(len(pdf)):
+            lines = _pdf_page_blocks(pdf, page_no)
+            lines = _pdf_merge_sentences(lines)
+
+            kv_buffer: list[tuple[str, str]] = []
+
+            def _flush_kv() -> None:
+                nonlocal kv_buffer
+                if len(kv_buffer) >= 3:
+                    _add_kv_table(kv_buffer)
+                else:
+                    for k, v in kv_buffer:
+                        _add_body(f"{k}: {v}")
+                kv_buffer = []
+
+            for ln in lines:
+                if _PDF_PAGE_NUM_RE.match(ln):
+                    continue
+                kv_m = _PDF_KV_RE.match(ln)
+                if kv_m and not _PDF_ALL_CAPS_RE.match(ln):
+                    kv_buffer.append((kv_m.group(1), kv_m.group(2)))
+                    continue
+                elif kv_buffer:
+                    _flush_kv()
+
+                if (re.match(r"^CHAPTER\s+\d+", ln, re.IGNORECASE)
+                        or (_PDF_ALL_CAPS_RE.match(ln) and 4 <= len(ln) <= 60)):
+                    _add_heading(ln.strip(" ?:"), level=1)
+                    continue
+
+                if _PDF_BULLET_RE.match(ln):
+                    cleaned = _PDF_BULLET_RE.sub("", ln).strip()
+                    p = doc.add_paragraph(style="List Bullet")
+                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                    p.add_run(cleaned)
+                    continue
+
+                m = _PDF_NUM_LIST_RE.match(ln)
+                if m:
+                    cleaned = _PDF_NUM_LIST_RE.sub("", ln).strip()
+                    p = doc.add_paragraph(style="List Number")
+                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                    p.add_run(cleaned)
+                    continue
+
+                _add_body(ln)
+
+            if kv_buffer:
+                _flush_kv()
+
+            page = pdf[page_no]
+            for info in page.get_images(full=True):
+                xref = info[0]
+                if xref in decorative_xrefs:
+                    continue
+                _add_image_from_xref(xref)
+
+        def _force_black_tnr(run, *, size: float, bold: bool | None = None) -> None:
+            run.font.name = body_font
+            rPr = run._element.get_or_add_rPr()
+            rFonts = rPr.find(qn("w:rFonts"))
+            if rFonts is None:
+                rFonts = OxmlElement("w:rFonts")
+                rPr.insert(0, rFonts)
+            rFonts.set(qn("w:ascii"),    body_font)
+            rFonts.set(qn("w:hAnsi"),    body_font)
+            rFonts.set(qn("w:cs"),       body_font)
+            rFonts.set(qn("w:eastAsia"), body_font)
+            run.font.size = Pt(size)
+            if bold is not None:
+                run.font.bold = bold
+            run.font.italic    = False
+            run.font.underline = False
+            run.font.color.rgb = RGBColor(0, 0, 0)
+            for color_el in rPr.findall(qn("w:color")):
+                rPr.remove(color_el)
+            new_color = OxmlElement("w:color")
+            new_color.set(qn("w:val"), "000000")
+            rPr.append(new_color)
+
+        def _walk(para) -> None:
+            sn = (para.style.name or "") if para.style else ""
+            is_heading = sn.startswith("Heading")
+            sz = body_size + 2 if is_heading else body_size
+            bd = True if is_heading else None
+            for run in para.runs:
+                _force_black_tnr(run, size=sz, bold=bd)
+
+        for para in doc.paragraphs:
+            _walk(para)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        _walk(para)
+
+        _add_footer_cta(doc)
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        return buf.getvalue()
+    finally:
+        pdf.close()

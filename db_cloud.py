@@ -384,6 +384,88 @@ def get_media_url(path: str) -> str:
     return _client().storage.from_(INCOMING_BUCKET).get_public_url(path)
 
 
+# ── Project Builder orders ────────────────────────────────────────────────────
+
+PB_ORDERS_PREFIX = "project-builder/orders"
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def upload_pb_doc(order_id: str, docx_bytes: bytes) -> str:
+    """Upload a generated project builder DOCX to Supabase Storage.
+
+    Stored under incoming-files/project-builder/orders/{order_id}.docx.
+    The incoming-files bucket is public so the returned URL is permanent.
+    """
+    path = f"{PB_ORDERS_PREFIX}/{order_id}.docx"
+    try:
+        _client().storage.from_(INCOMING_BUCKET).upload(
+            path=path,
+            file=docx_bytes,
+            file_options={"content-type": _DOCX_MIME, "upsert": "true"},
+        )
+        return _client().storage.from_(INCOMING_BUCKET).get_public_url(path)
+    except Exception as e:
+        logger.error(f"upload_pb_doc error for {order_id}: {e}")
+        return ""
+
+
+def save_pb_order(order_id: str, tier: str, university: str,
+                  whatsapp_phone: str, student_name: str,
+                  razorpay_order_id: str, razorpay_payment_id: str,
+                  amount_inr: int, storage_path: str, download_url: str) -> bool:
+    """Insert a project builder order into project_builder_orders table."""
+    try:
+        _client().table("project_builder_orders").insert({
+            "id":                  order_id,
+            "tier":                tier,
+            "university":          university,
+            "whatsapp_phone":      whatsapp_phone,
+            "student_name":        student_name,
+            "razorpay_order_id":   razorpay_order_id,
+            "razorpay_payment_id": razorpay_payment_id,
+            "amount_inr":          amount_inr,
+            "storage_path":        storage_path,
+            "download_url":        download_url,
+            "status":              "delivered",
+        }).execute()
+        return True
+    except Exception as e:
+        logger.error(f"save_pb_order error for {order_id}: {e}")
+        return False
+
+
+def get_pb_order(order_id: str, whatsapp_phone: str | None = None) -> dict | None:
+    """Fetch a project builder order by ID, optionally verifying the phone number."""
+    try:
+        q = _client().table("project_builder_orders").select("*").eq("id", order_id)
+        if whatsapp_phone:
+            digits = "".join(c for c in whatsapp_phone if c.isdigit())
+            if len(digits) == 10:
+                digits = "91" + digits
+            q = q.eq("whatsapp_phone", digits)
+        res = q.limit(1).execute()
+        return res.data[0] if res.data else None
+    except Exception as e:
+        logger.error(f"get_pb_order error: {e}")
+        return None
+
+
+def list_pb_orders(limit: int = 100) -> list:
+    """List all project builder orders newest-first (admin use)."""
+    try:
+        res = (
+            _client().table("project_builder_orders")
+            .select("id,tier,university,whatsapp_phone,student_name,amount_inr,status,created_at,download_url")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        logger.error(f"list_pb_orders error: {e}")
+        return []
+
+
 def upsert_contact(phone: str, name: str | None = None) -> None:
     """Insert or update a WhatsApp contact. Name only written when provided."""
     data: dict = {"phone": phone}

@@ -418,10 +418,18 @@
         <h2>Your report is formatted!</h2>
         <p id="previewSubtext">University formatting applied. Pay to download the .docx file.</p>
         <div id="previewChapters" style="text-align:left;margin-bottom:1.5rem;max-height:260px;overflow-y:auto"></div>
+        <!-- WhatsApp delivery (optional) -->
+        <div style="margin-bottom:1.25rem;text-align:left;background:#0d1117;border:1px solid #1e3a5f;border-radius:8px;padding:.85rem 1rem">
+          <label style="font-size:.82rem;color:#7eb8f7;display:block;margin-bottom:.4rem;font-weight:600">📱 Also send to WhatsApp <span style="color:#555;font-weight:400">(optional)</span></label>
+          <input type="tel" id="waPhoneInput" placeholder="10-digit mobile number" maxlength="10"
+            style="width:100%;padding:.5rem .75rem;border:1px solid #333;border-radius:6px;background:#161b22;color:#e6edf3;font-size:.95rem;box-sizing:border-box;outline:none"
+            oninput="this.value=this.value.replace(/\D/g,'')">
+          <p style="font-size:.75rem;color:#555;margin:.35rem 0 0">We'll send your document link here so you can re-download anytime.</p>
+        </div>
         <div id="formatBtns" style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
           <button class="pb-btn pb-btn-primary" id="payDocxBtn" style="font-size:1rem;padding:.75rem 1.5rem" onclick="startDownloadPayment()">📄 Pay &amp; Download .docx</button>
         </div>
-        <p style="font-size:.8rem;color:#aaa;margin-top:.75rem">Secure payment via Razorpay · ₹49 · Download link valid for 24 hours</p>
+        <p style="font-size:.8rem;color:#aaa;margin-top:.75rem">Secure payment via Razorpay · Permanent download link</p>
         <button id="adminDlBtn" class="pb-btn pb-btn-secondary" style="display:none;margin-top:.5rem;font-size:.85rem" onclick="adminDownload()">🔑 Admin Download (skip payment)</button>
         <div class="pb-error" id="previewPayError" style="display:none;margin-top:.75rem"></div>
       </div>
@@ -431,7 +439,12 @@
         <h2>Payment confirmed!</h2>
         <p>Open in Microsoft Word — headings and TOC will update automatically.</p>
         <a id="dlFinalLink" class="pb-btn pb-btn-download" style="display:inline-block;text-decoration:none" href="#" target="_blank">⬇ Download Report.docx</a>
-        <p style="font-size:.8rem;color:#aaa;margin-top:1rem">Remember to fill in any <span style="color:var(--accent)">highlighted placeholder text</span> with your specific details.</p>
+        <p id="waDeliveryMsg" style="display:none;font-size:.88rem;color:#22c55e;margin-top:.75rem">📱 Document also sent to your WhatsApp!</p>
+        <p style="font-size:.8rem;color:#aaa;margin-top:.75rem">Remember to fill in any <span style="color:var(--accent)">highlighted placeholder text</span> with your specific details.</p>
+        <p id="orderIdDisplay" style="display:none;font-size:.8rem;color:#666;margin-top:.5rem">
+          Order ID: <strong id="orderIdValue" style="color:#7eb8f7;letter-spacing:.03em"></strong>
+          &nbsp;·&nbsp;<a href="/pb-retrieve" style="color:#7eb8f7;text-decoration:none">Re-download anytime →</a>
+        </p>
         <div class="pb-error" id="dlError" style="display:none"></div>
       </div>
       <div class="pb-cta-strip">
@@ -966,6 +979,10 @@
     btn.textContent = 'Confirming payment…';
 
     try {
+      const waPhone      = ($('waPhoneInput') || {value:''}).value.trim();
+      const studentName  = (state.formData && state.formData.students && state.formData.students[0])
+                           ? state.formData.students[0].name || '' : '';
+
       const res = await fetch(`${API}/project-builder/process`, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
@@ -974,8 +991,11 @@
           razorpay_order_id:   paymentResponse.razorpay_order_id,
           razorpay_signature:  paymentResponse.razorpay_signature,
           service,
-          university: state.university === 'other' ? 'ktu' : state.university,
-          file_token: state.fileToken,
+          university:    state.university === 'other' ? 'ktu' : state.university,
+          file_token:    state.fileToken,
+          whatsapp_phone: waPhone,
+          student_name:   studentName,
+          amount_inr:     price,
         }),
       });
       const data = await res.json();
@@ -990,6 +1010,15 @@
       link.href = data.download_url;
       link.download = filename;
       link.textContent = '⬇ Download Report.docx';
+
+      // Show order ID and WhatsApp confirmation
+      if (data.order_id) {
+        $('orderIdValue').textContent = data.order_id;
+        $('orderIdDisplay').style.display = 'block';
+      }
+      if (waPhone && data.order_id) {
+        $('waDeliveryMsg').style.display = 'block';
+      }
 
       hide('step3preview');
       show('step3download');
