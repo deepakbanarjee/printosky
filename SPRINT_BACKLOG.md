@@ -95,6 +95,14 @@ Last updated: 2026-04-09 (Session 9)
 
 ---
 
+## 🔵 SPRINT 13 — Frontend Unification
+
+| # | Task | Details |
+|---|------|---------|
+| S13-1 | **Unify academic.html + project-builder.html into one page** | Merge into a single `project.html` with a mode toggle after university selection. Mode A = self-serve (upload DOCX → AI analyse → pay → download). Mode B = staff-build (fill form + tables → pay ₹500 advance → staff delivers). Share university picker, student info fields, step indicator, Razorpay code. Keep `/academic` and `/project-builder` API backends separate — only the frontend merges. Discussed 2026-05-09. |
+
+---
+
 ## ✅ COMPLETED (Session 1–6 reference)
 
 - WhatsApp bot + file capture
