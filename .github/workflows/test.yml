@@ -49,7 +49,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov python-dotenv
+          # Test-time + scripts-time deps not pinned in requirements.txt:
+          #  - pyyaml: scripts/check_schema.py (TASK-016) does top-level
+          #    `import yaml` and sys.exit(2)s on ImportError. Without this,
+          #    test_check_schema.py crashes at collection -> pytest exit 3.
+          pip install pytest pytest-cov python-dotenv pyyaml
 
       - name: Run pytest
         run: |
