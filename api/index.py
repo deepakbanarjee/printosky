@@ -1561,10 +1561,8 @@ def _handle_admin_conversations(h) -> None:
 def _handle_admin_thread(h) -> None:
     """GET /admin/thread?phone=X — thread messages for one contact."""
     from urllib.parse import parse_qs, urlparse
-    admin_pw = h.headers.get("X-Admin-Password", "").strip()
-    if not admin_pw:
-        params   = parse_qs(urlparse(h.path).query)
-        admin_pw = params.get("admin_password", [""])[0]
+    params   = parse_qs(urlparse(h.path).query)
+    admin_pw = h.headers.get("X-Admin-Password", "").strip() or params.get("admin_password", [""])[0]
     if not _auth_admin_pw(admin_pw):
         _json_response(h, 403, {"error": "Unauthorized"})
         return
@@ -1701,6 +1699,131 @@ def _handle_admin_send_file(h, body: bytes) -> None:
 
 
 # ── Project Builder helpers ──────────────────────────────────────────────────
+
+def _parse_multipart(body: bytes, content_type: str) -> dict[str, any]:
+    """Parse multipart/form-data. Return dict with form fields and file data.
+
+    Returns {'field_name': 'value', ...file field as 'filename': bytes_data}
+    """
+    parts = {}
+
+    # Extract boundary from Content-Type header
+    if "boundary=" not in content_type:
+        return {}
+
+    boundary_str = content_type.split("boundary=")[-1].strip().strip('"')
+    boundary = b"--" + boundary_str.encode()
+    final_boundary = b"--" + boundary_str.encode() + b"--"
+
+    # Split by boundary
+    segments = body.split(boundary)
+
+    for segment in segments[1:-1]:  # Skip first (before first boundary) and last (after final)
+        if not segment.strip():
+            continue
+
+        # Split headers from content
+        try:
+            header_end = segment.find(b'\r\n\r\n')
+            if header_end == -1:
+                header_end = segment.find(b'\n\n')
+                if header_end == -1:
+                    continue
+                headers = segment[:header_end].decode('utf-8', errors='ignore')
+                content = segment[header_end+2:]
+            else:
+                headers = segment[:header_end].decode('utf-8', errors='ignore')
+                content = segment[header_end+4:]
+        except Exception:
+            continue
+
+        # Remove trailing CRLLF
+        if content.endswith(b'\r\n'):
+            content = content[:-2]
+        elif content.endswith(b'\n'):
+            content = content[:-1]
+
+        # Parse Content-Disposition to get name and filename
+        name = None
+        filename = None
+        for line in headers.split('\n'):
+            if 'name=' in line:
+                match = re.search(r'name="?([^";\r\n]+)"?', line)
+                if match:
+                    name = match.group(1)
+            if 'filename=' in line:
+                match = re.search(r'filename="?([^";\r\n]+)"?', line)
+                if match:
+                    filename = match.group(1)
+
+        if not name:
+            continue
+
+        if filename:
+            # Binary file field
+            parts[name] = {'filename': filename, 'data': content}
+        else:
+            # Text field
+            parts[name] = content.decode('utf-8', errors='ignore')
+
+    return parts
+
+
+def _handle_admin_format_fixer(h, body: bytes) -> None:
+    """POST /admin/format-fixer — admin uploads DOCX, returns fixed DOCX.
+
+    Accepts multipart/form-data with fields:
+    - admin_password: admin password for auth
+    - university_id: university config (optional, defaults to 'default')
+    - file: DOCX file to format
+
+    Returns fixed DOCX as attachment, no storage.
+    """
+    try:
+        # Parse multipart form data
+        content_type = h.headers.get('Content-Type', '')
+        form_data = _parse_multipart(body, content_type)
+
+        # Verify admin auth
+        admin_pw = form_data.get('admin_password', '')
+        if not _auth_admin_pw(admin_pw):
+            _json_response(h, 403, {'error': 'Unauthorized'})
+            return
+
+        # Extract file
+        if 'file' not in form_data or not isinstance(form_data['file'], dict):
+            _json_response(h, 400, {'error': 'No file uploaded'})
+            return
+
+        file_data = form_data['file']
+        file_bytes = file_data.get('data', b'')
+        filename = file_data.get('filename', 'document.docx')
+
+        if not file_bytes:
+            _json_response(h, 400, {'error': 'Empty file'})
+            return
+
+        # Get university_id (optional, defaults to 'default')
+        university_id = form_data.get('university_id', 'default').strip()
+
+        # Format the DOCX
+        import docx_engine
+        fixed_bytes = docx_engine.format_fix_docx_inplace(file_bytes, university_id)
+
+        # Return as attachment
+        h.send_response(200)
+        h.send_header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        h.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+        h.send_header('Content-Length', str(len(fixed_bytes)))
+        h.end_headers()
+        h.wfile.write(fixed_bytes)
+
+        logger.info(f"Admin formatted DOCX: {filename} via university={university_id}")
+
+    except Exception as exc:
+        logger.error(f"admin format-fixer error: {exc}", exc_info=True)
+        _json_response(h, 500, {'error': str(exc)})
+
 
 def _generate_pb_order_id() -> str:
     """Generate a unique project builder order ID: PB-YYYYMMDD-xxxxxx."""
@@ -2423,6 +2546,10 @@ class handler(BaseHTTPRequestHandler):
             return
         if self.path == "/admin/send-file":
             _handle_admin_send_file(self, body)
+            return
+
+        if self.path == "/admin/format-fixer":
+            _handle_admin_format_fixer(self, body)
             return
 
         # ── Referral store-credit redemption (staff) ─────────────────────────
