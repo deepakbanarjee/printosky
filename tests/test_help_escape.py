@@ -34,12 +34,17 @@ sys.modules["watchdog"] = _wd
 sys.modules["watchdog.observers"] = _wd_obs
 sys.modules["watchdog.events"] = _wd_ev
 
-# whatsapp_notify stubbed callables — _handle_help_request imports them lazily
-sys.modules["whatsapp_notify"]._send = lambda *a, **kw: True
-sys.modules["whatsapp_notify"].send_staff_alert = lambda *a, **kw: True
+# Only stub callables that are missing -- never overwrite real module attrs,
+# because conftest.py may have pre-imported the real local module and we'd
+# corrupt it for other tests in the suite.
+def _ensure(mod_name: str, attr: str, value):
+    mod = sys.modules.get(mod_name)
+    if mod is not None and not hasattr(mod, attr):
+        setattr(mod, attr, value)
 
-# db_cloud stubbed log_message — _handle_help_request also imports it lazily
-sys.modules["db_cloud"].log_message = lambda *a, **kw: None
+_ensure("whatsapp_notify", "_send",            lambda *a, **kw: True)
+_ensure("whatsapp_notify", "send_staff_alert", lambda *a, **kw: True)
+_ensure("db_cloud",        "log_message",      lambda *a, **kw: None)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -130,16 +135,18 @@ class TestMarkSessionNeedsHuman:
     """`_client` is imported lazily from db_cloud inside the function — patch
     the stub on sys.modules['db_cloud']._client, not on api.index."""
 
-    def test_supabase_failure_does_not_raise(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_supabase_failure_does_not_raise(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """The internal try/except must swallow Supabase errors and warn."""
         bad_client = MagicMock()
         bad_client.table.return_value.upsert.return_value.execute.side_effect = RuntimeError("boom")
-        sys.modules["db_cloud"]._client = lambda: bad_client
+        monkeypatch.setattr(sys.modules["db_cloud"], "_client", lambda: bad_client, raising=False)
         with caplog.at_level(logging.WARNING):
             api_mod._mark_session_needs_human("91222")  # must not raise
         assert any("_mark_session_needs_human" in r.message for r in caplog.records)
 
-    def test_upsert_payload_shape(self) -> None:
+    def test_upsert_payload_shape(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Upsert payload includes phone, needs_human=True, ISO-8601 Z timestamp."""
         captured: dict = {}
 
@@ -157,7 +164,7 @@ class TestMarkSessionNeedsHuman:
                 captured["table"] = name
                 return _FakeTable()
 
-        sys.modules["db_cloud"]._client = lambda: _FakeClient()
+        monkeypatch.setattr(sys.modules["db_cloud"], "_client", lambda: _FakeClient(), raising=False)
         api_mod._mark_session_needs_human("91333")
 
         assert captured["table"] == "bot_sessions"
@@ -172,11 +179,13 @@ class TestMarkSessionNeedsHuman:
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestHandleTextShortCircuit:
-    def test_help_skips_state_machine(self) -> None:
+    def test_help_skips_state_machine(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Help keyword must not reach _capture_referral_code or handle_message."""
         called = {"capture": 0, "bot": 0, "help": 0}
-        sys.modules["whatsapp_bot"].handle_message = (
-            lambda **kw: called.__setitem__("bot", called["bot"] + 1) or []
+        monkeypatch.setattr(
+            sys.modules["whatsapp_bot"], "handle_message",
+            lambda **kw: called.__setitem__("bot", called["bot"] + 1) or [],
+            raising=False,
         )
 
         with patch.object(api_mod, "_capture_referral_code",
@@ -187,10 +196,13 @@ class TestHandleTextShortCircuit:
 
         assert called == {"capture": 0, "bot": 0, "help": 1}
 
-    def test_non_help_falls_through(self) -> None:
+    def test_non_help_falls_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Normal text must still reach _capture_referral_code."""
         called = {"capture": 0, "help": 0}
-        sys.modules["whatsapp_bot"].handle_message = lambda **kw: []
+        monkeypatch.setattr(
+            sys.modules["whatsapp_bot"], "handle_message",
+            lambda **kw: [], raising=False,
+        )
 
         with patch.object(api_mod, "_capture_referral_code",
                           side_effect=lambda *a, **kw: called.__setitem__("capture", called["capture"] + 1)), \

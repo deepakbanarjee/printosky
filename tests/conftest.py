@@ -3,6 +3,7 @@ Pytest configuration for Printosky tests.
 Sets PRINTOSKY_DB to an in-memory path so no real DB is needed.
 """
 import os
+import sys
 import datetime
 from pathlib import Path
 
@@ -10,6 +11,44 @@ import pytest
 from dotenv import load_dotenv
 
 os.environ.setdefault("PRINTOSKY_DB", ":memory:")
+
+# Ensure repo root is on sys.path so the pre-imports below resolve the local
+# modules in this repo (not a different installed package of the same name).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Pre-import real local modules before any test file's module-level code runs.
+#
+# Several test files (test_security_bugs.py, test_help_escape.py,
+# test_webhook_idempotency.py) stub heavy dependencies via the pattern:
+#
+#     if _mod not in sys.modules:
+#         sys.modules[_mod] = types.ModuleType(_mod)
+#
+# Without this pre-import, pytest's alphabetical collection means those stubs
+# poison sys.modules for files like test_razorpay.py that depend on the *real*
+# module. Pre-importing here caches the real modules first; the stub guard then
+# correctly becomes a no-op.
+#
+# Wrapped in try/except so modules with heavy non-installed deps (e.g.
+# `db_cloud` imports `supabase`) silently fall through and remain stubbable.
+for _real_mod in (
+    "razorpay_integration",
+    "whatsapp_notify",
+    "whatsapp_bot",
+    "webhook_receiver",
+    "webhook_checker",
+    "db_cloud",
+    "db_cloud_academic",
+    "academic_whatsapp",
+    "review_manager",
+    "rate_card",
+):
+    try:
+        __import__(_real_mod)
+    except Exception:
+        # Module not importable in this env (missing dep, etc.) -- leave it
+        # for test files to stub.
+        pass
 
 _dotenv_loaded = False
 

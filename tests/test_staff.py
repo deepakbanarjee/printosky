@@ -56,33 +56,33 @@ def staff_db(tmp_path, monkeypatch):
 
 class TestStaffDbOperations:
     def test_add_staff(self, staff_db):
-        staff_setup.cmd_add("Alice", "1234")
+        staff_setup.cmd_add("Alice", "123456")
         conn = sqlite3.connect(staff_db)
         rows = conn.execute("SELECT * FROM staff WHERE name='Alice'").fetchall()
         conn.close()
         assert len(rows) == 1
 
     def test_add_stores_hashed_pin(self, staff_db):
-        staff_setup.cmd_add("Bob", "5678")
+        staff_setup.cmd_add("Bob", "567890")
         conn = sqlite3.connect(staff_db)
         row = conn.execute("SELECT pin_hash FROM staff WHERE name='Bob'").fetchone()
         conn.close()
-        assert row[0] == staff_setup.sha256("5678")
-        assert row[0] != "5678"  # not stored plain
+        assert row[0] == staff_setup.sha256("567890")
+        assert row[0] != "567890"  # not stored plain
 
     def test_reset_pin(self, staff_db):
-        staff_setup.cmd_add("Carol", "1111")
+        staff_setup.cmd_add("Carol", "111111")
         conn = sqlite3.connect(staff_db)
         id = conn.execute("SELECT id FROM staff WHERE name='Carol'").fetchone()[0]
         conn.close()
-        staff_setup.cmd_reset_pin(id, "9999")
+        staff_setup.cmd_reset_pin(id, "999999")
         conn = sqlite3.connect(staff_db)
         row = conn.execute("SELECT pin_hash FROM staff WHERE id=?", (id,)).fetchone()
         conn.close()
-        assert row[0] == staff_setup.sha256("9999")
+        assert row[0] == staff_setup.sha256("999999")
 
     def test_deactivate_staff(self, staff_db):
-        staff_setup.cmd_add("Dave", "2222")
+        staff_setup.cmd_add("Dave", "222222")
         conn = sqlite3.connect(staff_db)
         id = conn.execute("SELECT id FROM staff WHERE name='Dave'").fetchone()[0]
         conn.close()
@@ -93,7 +93,7 @@ class TestStaffDbOperations:
         assert row[0] == 0
 
     def test_activate_staff(self, staff_db):
-        staff_setup.cmd_add("Eve", "3333")
+        staff_setup.cmd_add("Eve", "333333")
         conn = sqlite3.connect(staff_db)
         id = conn.execute("SELECT id FROM staff WHERE name='Eve'").fetchone()[0]
         conn.close()

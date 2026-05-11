@@ -25,24 +25,32 @@ for _mod in ("requests", "dotenv", "db_cloud", "whatsapp_bot",
 
 sys.modules["dotenv"].load_dotenv = lambda *a, **kw: None
 
-sys.modules["whatsapp_notify"]._send = lambda *a, **kw: True
-sys.modules["whatsapp_notify"].send_staff_alert = lambda *a, **kw: True
-sys.modules["whatsapp_notify"].send_payment_confirmed = lambda *a, **kw: True
+# Only stub callables that are missing -- never overwrite real module attrs,
+# because conftest.py may have pre-imported the real local module and we'd
+# corrupt it for other tests in the suite.
+def _ensure(mod_name: str, attr: str, value):
+    mod = sys.modules.get(mod_name)
+    if mod is not None and not hasattr(mod, attr):
+        setattr(mod, attr, value)
 
-sys.modules["db_cloud"].log_message = lambda *a, **kw: None
-sys.modules["db_cloud"].get_batch = lambda *a, **kw: None
-sys.modules["db_cloud"].get_job = lambda *a, **kw: {}
-sys.modules["db_cloud"].update_job_paid = lambda *a, **kw: None
-sys.modules["db_cloud"].update_batch_paid = lambda *a, **kw: None
-sys.modules["db_cloud"].update_jobs_payment_link = lambda *a, **kw: None
+_ensure("whatsapp_notify", "_send",                  lambda *a, **kw: True)
+_ensure("whatsapp_notify", "send_staff_alert",       lambda *a, **kw: True)
+_ensure("whatsapp_notify", "send_payment_confirmed", lambda *a, **kw: True)
 
-sys.modules["razorpay_integration"].parse_payment_webhook = lambda *a, **kw: None
-sys.modules["razorpay_integration"].verify_webhook = lambda *a, **kw: True
+_ensure("db_cloud", "log_message",              lambda *a, **kw: None)
+_ensure("db_cloud", "get_batch",                lambda *a, **kw: None)
+_ensure("db_cloud", "get_job",                  lambda *a, **kw: {})
+_ensure("db_cloud", "update_job_paid",          lambda *a, **kw: None)
+_ensure("db_cloud", "update_batch_paid",        lambda *a, **kw: None)
+_ensure("db_cloud", "update_jobs_payment_link", lambda *a, **kw: None)
 
-sys.modules["db_cloud_academic"].get_order = lambda *a, **kw: None
-sys.modules["db_cloud_academic"].update_fields = lambda *a, **kw: None
-sys.modules["db_cloud_academic"].update_status = lambda *a, **kw: None
-sys.modules["academic_whatsapp"].notify_advance_paid = lambda *a, **kw: None
+_ensure("razorpay_integration", "parse_payment_webhook", lambda *a, **kw: None)
+_ensure("razorpay_integration", "verify_webhook",        lambda *a, **kw: True)
+
+_ensure("db_cloud_academic", "get_order",     lambda *a, **kw: None)
+_ensure("db_cloud_academic", "update_fields", lambda *a, **kw: None)
+_ensure("db_cloud_academic", "update_status", lambda *a, **kw: None)
+_ensure("academic_whatsapp", "notify_advance_paid", lambda *a, **kw: None)
 
 _wd = types.ModuleType("watchdog")
 _wd_obs = types.ModuleType("watchdog.observers"); _wd_obs.Observer = object
@@ -66,39 +74,41 @@ class TestMarkWebhookProcessed:
         """No event_id -> can't dedupe -> proceed (don't drop)."""
         assert api_mod._mark_webhook_processed("", "meta") is True
 
-    def test_successful_insert_returns_true(self) -> None:
+    def test_successful_insert_returns_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """First-time event -> insert succeeds with data -> proceed."""
         client = MagicMock()
         client.table.return_value.insert.return_value.execute.return_value = MagicMock(
             data=[{"event_id": "evt_1", "handler": "meta"}]
         )
-        sys.modules["db_cloud"]._client = lambda: client
+        monkeypatch.setattr(sys.modules["db_cloud"], "_client", lambda: client, raising=False)
         assert api_mod._mark_webhook_processed("evt_1", "meta") is True
 
-    def test_duplicate_key_returns_false(self) -> None:
+    def test_duplicate_key_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Unique-violation -> already processed -> skip."""
         client = MagicMock()
         client.table.return_value.insert.return_value.execute.side_effect = Exception(
             'duplicate key value violates unique constraint "processed_webhooks_pkey"'
         )
-        sys.modules["db_cloud"]._client = lambda: client
+        monkeypatch.setattr(sys.modules["db_cloud"], "_client", lambda: client, raising=False)
         assert api_mod._mark_webhook_processed("evt_dup", "meta") is False
 
-    def test_postgres_errno_23505_returns_false(self) -> None:
+    def test_postgres_errno_23505_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = MagicMock()
         client.table.return_value.insert.return_value.execute.side_effect = Exception(
             "PostgrestAPIError: 23505 unique violation"
         )
-        sys.modules["db_cloud"]._client = lambda: client
+        monkeypatch.setattr(sys.modules["db_cloud"], "_client", lambda: client, raising=False)
         assert api_mod._mark_webhook_processed("evt_x", "meta") is False
 
-    def test_other_db_error_returns_true_fail_open(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_other_db_error_returns_true_fail_open(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """A non-dup DB error must not drop the event; log a warning."""
         client = MagicMock()
         client.table.return_value.insert.return_value.execute.side_effect = Exception(
             "connection reset by peer"
         )
-        sys.modules["db_cloud"]._client = lambda: client
+        monkeypatch.setattr(sys.modules["db_cloud"], "_client", lambda: client, raising=False)
         with caplog.at_level(logging.WARNING):
             assert api_mod._mark_webhook_processed("evt_net", "meta") is True
         assert any("_mark_webhook_processed" in r.message for r in caplog.records)
@@ -175,22 +185,27 @@ class TestMetaIdempotency:
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestRazorpayPrintIdempotency:
-    def test_duplicate_event_skipped_before_parse(self) -> None:
+    def test_duplicate_event_skipped_before_parse(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """If guard says dup, parse_payment_webhook must never be called."""
         called = {"parse": 0}
-        sys.modules["razorpay_integration"].parse_payment_webhook = (
-            lambda *a, **kw: called.__setitem__("parse", called["parse"] + 1)
+        monkeypatch.setattr(
+            sys.modules["razorpay_integration"], "parse_payment_webhook",
+            lambda *a, **kw: called.__setitem__("parse", called["parse"] + 1),
+            raising=False,
         )
         with patch.object(api_mod, "_mark_webhook_processed", return_value=False):
             api_mod._process_razorpay_payment({"id": "evt_dup", "event": "payment.captured"})
         assert called["parse"] == 0
 
-    def test_first_event_reaches_parse(self) -> None:
+    def test_first_event_reaches_parse(self, monkeypatch: pytest.MonkeyPatch) -> None:
         called = {"parse": 0}
         def fake_parse(data):
             called["parse"] += 1
             return None
-        sys.modules["razorpay_integration"].parse_payment_webhook = fake_parse
+        monkeypatch.setattr(
+            sys.modules["razorpay_integration"], "parse_payment_webhook",
+            fake_parse, raising=False,
+        )
         with patch.object(api_mod, "_mark_webhook_processed", return_value=True):
             api_mod._process_razorpay_payment({"id": "evt_new", "event": "payment.captured"})
         assert called["parse"] == 1
