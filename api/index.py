@@ -465,6 +465,37 @@ def _notify_pickup_completed(job_id: str) -> None:
     send_pickup_completed(sender=sender, pickup_code=code, rating_url=None)
 
 
+def _mark_webhook_processed(event_id: str, handler: str) -> bool:
+    """Record that we've handled this webhook event_id; return True if the
+    caller should proceed with processing, False if it's a duplicate retry.
+
+    Uses processed_webhooks.event_id as a Postgres PRIMARY KEY for race-safe
+    dedupe (any concurrent retry from Meta/Razorpay loses on UNIQUE conflict).
+
+    Failure modes:
+      - empty event_id -> return True (we can't dedupe without a key; better
+        to risk a duplicate than to silently drop a real event)
+      - DB unique-violation (duplicate event) -> return False
+      - any other DB error -> return True (log + let through; missing dedupe
+        is recoverable, dropped payments are not)
+    """
+    if not event_id:
+        return True
+    try:
+        from db_cloud import _client
+        resp = _client().table("processed_webhooks").insert(
+            {"event_id": event_id, "handler": handler}
+        ).execute()
+        return bool(getattr(resp, "data", None))
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "duplicate" in msg or "23505" in msg or "unique" in msg or "conflict" in msg:
+            logger.info(f"Webhook event {event_id} ({handler}) already processed -- skipping")
+            return False
+        logger.warning(f"_mark_webhook_processed({event_id}, {handler}) failed: {exc}")
+        return True  # fail-open: don't drop real events on a DB hiccup
+
+
 def _process_meta_webhook(data: dict) -> None:
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
@@ -473,6 +504,12 @@ def _process_meta_webhook(data: dict) -> None:
             pushname = (contacts[0].get("profile", {}).get("name")
                         if contacts else None)
             for msg in value.get("messages", []):
+                # Idempotency guard (TASK-013): Meta retries on slow handlers.
+                # Each WhatsApp message has a unique wamid (msg.id). Skip
+                # silently if we've already processed this exact message.
+                if not _mark_webhook_processed(msg.get("id", ""), "meta"):
+                    continue
+
                 sender   = msg.get("from", "")
                 msg_type = msg.get("type", "")
                 logger.info(f"Meta message from {sender}: type={msg_type}")
@@ -568,6 +605,11 @@ def _process_razorpay_payment(data: dict) -> None:
     from whatsapp_notify import send_payment_confirmed
     from db_cloud import (get_batch, get_job, update_job_paid,
                           update_batch_paid, update_jobs_payment_link)
+
+    # Idempotency guard (TASK-013): Razorpay can fire the same payment.captured
+    # event twice. data.id is the unique webhook event ID. Skip duplicates.
+    if not _mark_webhook_processed(data.get("id", ""), "razorpay_print"):
+        return
 
     payment = parse_payment_webhook(data)
     if not payment:
@@ -1503,6 +1545,14 @@ def _handle_acad_razorpay_webhook(h, body: bytes) -> None:
     except Exception:
         _json_response(h, 400, {"error": "invalid json"})
         return
+
+    # Idempotency guard (TASK-013): Razorpay retries on slow ACKs. payload.id
+    # is the webhook event ID. Skip duplicates with 200 so Razorpay stops
+    # retrying.
+    if not _mark_webhook_processed(payload.get("id", ""), "razorpay_acad"):
+        _json_response(h, 200, {"status": "already_processed"})
+        return
+
     event = payload.get("event", "")
     notes = (
         payload.get("payload", {})
