@@ -25,6 +25,7 @@ try:
     import fitz  # PyMuPDF
     FITZ_AVAILABLE = True
 except ImportError:
+    fitz = None  # so monkeypatch.setattr(cd, "fitz", ...) in tests has an attr to patch
     FITZ_AVAILABLE = False
     logger.warning("PyMuPDF (fitz) not installed — colour detection unavailable")
 

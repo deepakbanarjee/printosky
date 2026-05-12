@@ -49,13 +49,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # Test-time + scripts-time deps not pinned in requirements.txt:
-          #  - pyyaml: only required by scripts/check_schema.py's
-          #    load_manifest/dump_manifest; tests cover only the pure
-          #    diff_schemas function. Kept here so anyone running the CLI in
-          #    CI (e.g. a future `check schema drift` job) doesn't hit a
-          #    missing-PyYAML exit at first use.
-          pip install pytest pytest-cov python-dotenv pyyaml
+          # Test-time + scripts-time deps NOT pinned in requirements.txt
+          # (production Vercel function doesn't need them, but tests exercise
+          # store-PC code paths that do):
+          #  - pyyaml      : scripts/check_schema.py manifest read/write
+          #  - pymupdf     : colour_detector.py uses `fitz` for PDF colour-
+          #                  page detection (store-PC only). Tests at
+          #                  tests/test_colour_detector.py monkeypatch
+          #                  `colour_detector.fitz`.
+          #  - reportlab   : b2b_manager.generate_invoice_pdf() builds
+          #                  invoice PDFs on the store PC. Tests at
+          #                  tests/test_b2b_manager.py exercise that path.
+          #                  (Module is retired in PR #9 -- but until that
+          #                  merges, the tests still exist and need this.)
+          pip install pytest pytest-cov python-dotenv pyyaml pymupdf reportlab
 
       - name: Run pytest
         run: |
