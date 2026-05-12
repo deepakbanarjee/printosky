@@ -108,16 +108,9 @@ except ImportError:
 
 # ── Konica Windows username → PC identifier mapping ───────────────────────────
 # PC1 = Priya/Deepak/Anu  |  PC2 = Revana  |  PC3 = rarely used (Nirmal)
-KONICA_USER_PC_MAP = {
-    # Current Windows usernames (as they appear in Konica job log)
-    "ABC":        "PC1",   # Priya / Deepak / Anu
-    "OXYGEN":     "PC2",   # Revana
-    "NIRMAL":     "PC3",   # rarely used
-    # Future — after Windows computer names are renamed
-    "OXYGEN PC1": "PC1",
-    "OXYGEN PC2": "PC2",
-    "OXYGEN PC3": "PC3",
-}
+# KONICA_USER_PC_MAP retired 2026-05-12 (0/4507 attribution rate); see
+# retired/2026-05-12-graveyard/konica_attribution.py for the dict and the
+# four root-cause failures documented in that file's header.
 
 # ── Staff session helpers ──────────────────────────────────────────────────────
 _active_sessions = {}   # pc_id → {staff_id, name, session_id}  (in-memory cache)
@@ -316,33 +309,8 @@ def get_active_staff(db_path: str, pc_id: str):
     return {"staff_id": None}
 
 
-def attribute_konica_jobs(db_path: str):
-    """Attribute unattributed konica_jobs to staff via active session at print time."""
-    conn = sqlite3.connect(db_path)
-    unattr = conn.execute(
-        "SELECT job_number, user_name, job_date FROM konica_jobs WHERE attributed_to IS NULL"
-    ).fetchall()
-    updated = 0
-    for job_number, user_name, job_date in unattr:
-        pc_id = KONICA_USER_PC_MAP.get(user_name)
-        if not pc_id or not job_date:
-            continue
-        row = conn.execute("""
-            SELECT staff_id FROM staff_sessions
-            WHERE pc_id=? AND login_at <= ?
-              AND (logout_at IS NULL OR logout_at >= ?)
-            ORDER BY login_at DESC LIMIT 1
-        """, (pc_id, job_date, job_date)).fetchone()
-        if row:
-            conn.execute(
-                "UPDATE konica_jobs SET attributed_to=? WHERE job_number=?",
-                (row[0], job_number)
-            )
-            updated += 1
-    if updated:
-        conn.commit()
-        logging.info("Attributed %d konica_jobs to staff", updated)
-    conn.close()
+# attribute_konica_jobs() retired 2026-05-12 -- 0/4507 attribution rate.
+# Function extracted to retired/2026-05-12-graveyard/konica_attribution.py.
 
 # ── Internet / network health check ──────────────────────────────────────────
 def check_internet(host="8.8.8.8", port=53, timeout=3) -> bool:
@@ -1487,40 +1455,10 @@ def handle_session_end(body: dict) -> dict:
 
 # ── A9: Print receipt (thermal printer stub) ──────────────────────────────────
 
-RECEIPT_PRINTER = None  # Set to {"vendor": 0xXXXX, "product": 0xXXXX} when hardware arrives
-
-def handle_print_receipt(body: dict) -> dict:
-    """
-    POST /print-receipt
-    Fire thermal receipt printer. Currently a stub — returns not-configured if no hardware.
-    """
-    if RECEIPT_PRINTER is None:
-        return {"ok": False, "error": "Receipt printer not configured"}
-
-    job_id = body.get("job_id", "")
-    if not job_id:
-        return {"ok": False, "error": "job_id required"}
-
-    try:
-        conn = _db()
-        row = conn.execute(
-            "SELECT * FROM jobs WHERE job_id=?", (job_id,)
-        ).fetchone()
-        conn.close()
-        if not row:
-            return {"ok": False, "error": "Job not found"}
-
-        # When hardware arrives: format receipt and send via python-escpos
-        # from escpos.printer import Usb
-        # p = Usb(RECEIPT_PRINTER["vendor"], RECEIPT_PRINTER["product"])
-        # p.text(f"PRINTOSKY\n{job_id}\n...")
-        # p.cut()
-
-        logging.info("Receipt printer: job %s (hardware not yet connected)", job_id)
-        return {"ok": True, "note": "Hardware not connected yet"}
-
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+# RECEIPT_PRINTER + handle_print_receipt() retired 2026-05-12 -- no hardware
+# was ever connected; the stub returned {"ok": False, ...} on every call.
+# See retired/2026-05-12-graveyard/receipt_printer.py for the dropped code and
+# revival instructions for when a thermal printer is actually purchased.
 
 
 # ── GET /vendors ──────────────────────────────────────────────────────────────
@@ -1950,10 +1888,7 @@ class PrintHandler(BaseHTTPRequestHandler):
             self._json(200, handle_vendor_return(body))
             return
 
-        if path == "/print-receipt":
-            body = self._read_body()
-            self._json(200, handle_print_receipt(body))
-            return
+        # /print-receipt route retired 2026-05-12; see retired/2026-05-12-graveyard/
 
         if path == "/detect-colour":
             body = self._read_body()

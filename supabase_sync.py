@@ -287,12 +287,9 @@ def sync_once(db_path):
         logger.debug("Supabase not configured — skipping sync")
         return
 
-    # Attribute konica jobs to staff before syncing
-    try:
-        from print_server import attribute_konica_jobs, KONICA_USER_PC_MAP
-        attribute_konica_jobs(db_path)
-    except Exception as e:
-        logger.debug(f"attribute_konica_jobs skipped: {e}")
+    # Konica attribution retired 2026-05-12 (0/4507 attribution rate).
+    # See retired/2026-05-12-graveyard/konica_attribution.py for the dropped
+    # call sequence and the four root causes documented there.
 
     jobs          = collect_jobs(db_path)
     printers      = collect_printer_counters(db_path)
