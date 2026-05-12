@@ -50,9 +50,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           # Test-time + scripts-time deps not pinned in requirements.txt:
-          #  - pyyaml: scripts/check_schema.py (TASK-016) does top-level
-          #    `import yaml` and sys.exit(2)s on ImportError. Without this,
-          #    test_check_schema.py crashes at collection -> pytest exit 3.
+          #  - pyyaml: only required by scripts/check_schema.py's
+          #    load_manifest/dump_manifest; tests cover only the pure
+          #    diff_schemas function. Kept here so anyone running the CLI in
+          #    CI (e.g. a future `check schema drift` job) doesn't hit a
+          #    missing-PyYAML exit at first use.
           pip install pytest pytest-cov python-dotenv pyyaml
 
       - name: Run pytest

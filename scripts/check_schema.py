@@ -28,11 +28,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+# PyYAML is required by load_manifest / dump_manifest, but NOT by diff_schemas
+# (the pure function under unit test). Keep import-time failure soft so the
+# module is always importable by tooling (pytest collection, linters, IDEs);
+# defer the hard exit to the first call site that actually needs yaml.
 try:
     import yaml
 except ImportError:
-    sys.stderr.write("ERROR: PyYAML is required. Install with: pip install pyyaml\n")
-    sys.exit(2)
+    yaml = None  # type: ignore[assignment]
+
+
+def _require_yaml() -> None:
+    """Hard-exit at the first manifest read/write if PyYAML isn't installed."""
+    if yaml is None:
+        sys.stderr.write("ERROR: PyYAML is required. Install with: pip install pyyaml\n")
+        sys.exit(2)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -207,6 +217,7 @@ def fetch_live_schema_via_psycopg2(dsn: str) -> dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
+    _require_yaml()
     if not path.exists():
         sys.stderr.write(f"ERROR: manifest not found at {path}\n")
         sys.exit(2)
@@ -215,6 +226,7 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
 
 
 def dump_manifest(live: dict[str, Any], path: Path = MANIFEST_PATH) -> None:
+    _require_yaml()
     out: dict[str, Any] = {
         "views": sorted(live.get("views", [])),
         "tables": live.get("tables", {}),
