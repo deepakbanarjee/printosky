@@ -1,0 +1,12 @@
+{
+  "store_id": "OSP",
+  "store_name": "Oxygen Students Paradise, Thrissur",
+  "printers": {
+    "konica_ip": "192.168.55.110",
+    "epson_ip": "192.168.55.202"
+  },
+  "hot_folder": "C:\\Printosky\\Jobs\\Incoming",
+  "db_path": "C:\\Printosky\\Data\\jobs.db",
+  "agent_secret": null,
+  "platform_url": null
+}

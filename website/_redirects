@@ -1,2 +1,6 @@
 /admin    /admin.html    200
 /superadmin    /superadmin.html    200
+/project-builder    /project-builder.html    200
+/track    /track.html    200
+/bw-converter    /bw-converter.html    200
+/pb-retrieve     /pb-retrieve.html     200

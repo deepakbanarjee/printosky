@@ -1,0 +1,38 @@
+{
+  "id": "mg_university",
+  "name": "Mahatma Gandhi University",
+  "short_name": "MG University",
+  "margins": {
+    "left_cm": 3.5,
+    "right_cm": 2.5,
+    "top_cm": 2.5,
+    "bottom_cm": 2.5
+  },
+  "body_font": "Times New Roman",
+  "body_size_pt": 12,
+  "heading1": { "size_pt": 14, "bold": true, "all_caps": true, "align": "center" },
+  "heading2": { "size_pt": 12, "bold": true, "all_caps": false, "align": "left" },
+  "heading3": { "size_pt": 12, "bold": true, "all_caps": false, "align": "left" },
+  "line_spacing": 1.5,
+  "para_space_before_pt": 0,
+  "para_space_after_pt": 6,
+  "front_matter_numbering": "roman",
+  "chapter_numbering_start": 1,
+  "figure_caption_position": "below",
+  "table_caption_position": "above",
+  "figure_numbering": "chapter_wise",
+  "reference_format": "APA",
+  "cover_color": "Dark Green",
+  "cover_text_color": "Gold",
+  "paper": "A4",
+  "paper_gsm": 80,
+  "one_sided": false,
+  "copies_required": 3,
+  "front_matter_order": [
+    "title_page", "certificate", "declaration",
+    "acknowledgement", "abstract", "toc",
+    "list_of_figures", "list_of_tables", "list_of_abbreviations"
+  ],
+  "certificate_text": "This is to certify that the dissertation/thesis entitled [TITLE] is a bonafide record of the research work carried out by [STUDENT_NAMES] under my/our supervision and guidance in partial fulfillment of the requirements for the award of the Degree of [DEGREE] in [DEPARTMENT] of Mahatma Gandhi University, Kottayam. The results embodied in this thesis have not been submitted to any other University or Institute for the award of any degree or diploma.",
+  "declaration_text": "I/We hereby declare that the dissertation entitled [TITLE] submitted to Mahatma Gandhi University in partial fulfillment of the requirements for the award of the degree of [DEGREE] in [DEPARTMENT] is a bonafide record of original work done by me/us under the supervision of [GUIDE_NAME]. The content of this dissertation has not been submitted by me/us for the award of any degree, diploma or any other title to any other University or Institution."
+}

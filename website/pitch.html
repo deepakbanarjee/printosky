@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Printosky Marketplace — Partner Pitch</title>
+  <meta name="description" content="Printosky is building a WhatsApp-first print marketplace connecting customers with multiple printing stores in Thrissur. Join as a partner store.">
+  <link rel="canonical" href="https://printosky.com/pitch.html">
+  <meta property="og:title" content="Printosky Marketplace — Partner Pitch">
+  <meta property="og:description" content="WhatsApp-first print marketplace for Thrissur. One number, multiple stores, automatic routing and payouts.">
+  <meta property="og:url" content="https://printosky.com/pitch.html">
+  <meta property="og:type" content="website">
+
+  <!-- Printosky brand + nav/footer styles -->
+  <link rel="stylesheet" href="styles.css">
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+  <!-- Reveal.js CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4/dist/reveal.css">
+
+  <style>
+    /* ── Presentation container ── */
+    .pitch-deck-wrap {
+      width: 100%;
+      height: calc(100vh - 68px);
+      min-height: 480px;
+      background: #0D1117;
+      overflow: hidden;
+    }
+    .reveal {
+      width: 100%;
+      height: 100%;
+      font-family: 'DM Sans', sans-serif;
+    }
+    .reveal .slides {
+      text-align: left;
+    }
+    .reveal .slides section {
+      padding: 44px 52px;
+      height: 100%;
+      box-sizing: border-box;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Typography ── */
+    .reveal h1, .reveal h2, .reveal h3 {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      text-transform: none;
+      line-height: 1.1;
+      margin: 0 0 0.3em;
+    }
+    .reveal p, .reveal li, .reveal span {
+      font-family: 'DM Sans', sans-serif;
+    }
+
+    /* ── Slide colour themes ── */
+    .s-dark  { background: #0D1117 !important; color: #fff; }
+    .s-navy  { background: #1B3F8B !important; color: #fff; }
+    .s-light { background: #F5F1EB !important; color: #0D1117; }
+    .s-white { background: #ffffff  !important; color: #0D1117; }
+
+    /* ── Label chip ── */
+    .chip {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #E8500A;
+      border: 1px solid rgba(232,80,10,0.4);
+      border-radius: 20px;
+      padding: 3px 10px;
+      margin-bottom: 14px;
+    }
+
+    /* ── Headline sizes ── */
+    .reveal .h-xl { font-size: 3em;   line-height: 1.05; }
+    .reveal .h-lg { font-size: 2.1em; line-height: 1.1;  }
+    .reveal .h-md { font-size: 1.5em; line-height: 1.2;  }
+
+    /* ── Body / muted text ── */
+    .reveal .lead {
+      font-size: 0.9em;
+      font-weight: 300;
+      line-height: 1.75;
+      color: rgba(255,255,255,0.6);
+      max-width: 560px;
+      margin-top: 14px;
+    }
+    .s-light .lead, .s-white .lead { color: #6B7280; }
+
+    /* ── Accent helpers ── */
+    .ac  { color: #E8500A !important; }
+    .dim { color: rgba(255,255,255,0.45); }
+    .s-light .dim, .s-white .dim { color: #6B7280; }
+
+    /* ── Two-column grid ── */
+    .cols {
+      display: grid;
+      gap: 36px;
+      align-items: start;
+      margin-top: 20px;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .cols-2   { grid-template-columns: 1fr 1fr; }
+    .cols-3-2 { grid-template-columns: 3fr 2fr; }
+
+    /* ── Big stat block ── */
+    .stats-row { display: flex; gap: 40px; margin-top: 20px; }
+    .stat { flex: 1; }
+    .stat .n {
+      font-family: 'Syne', sans-serif;
+      font-size: 2.5em;
+      font-weight: 800;
+      letter-spacing: -0.05em;
+      line-height: 1;
+      color: #fff;
+    }
+    .s-light .stat .n, .s-white .stat .n { color: #0D1117; }
+    .stat .lbl {
+      font-size: 0.72em;
+      color: rgba(255,255,255,0.45);
+      margin-top: 3px;
+      font-weight: 300;
+    }
+    .s-light .stat .lbl, .s-white .stat .lbl { color: #6B7280; }
+
+    /* ── Blue callout panel ── */
+    .blue-panel {
+      background: #1B3F8B;
+      border-radius: 12px;
+      padding: 28px;
+      height: 100%;
+      box-sizing: border-box;
+      position: relative;
+      overflow: hidden;
+    }
+    .blue-panel::before {
+      content: '';
+      position: absolute;
+      width: 240px; height: 240px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 50%;
+      top: -60px; right: -60px;
+    }
+    .blue-panel .n {
+      font-family: 'Syne', sans-serif;
+      font-size: 2.6em;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      color: #fff;
+      position: relative; z-index: 1;
+    }
+    .blue-panel .lbl {
+      font-size: 0.72em;
+      color: rgba(255,255,255,0.5);
+      margin: 3px 0 20px;
+      position: relative; z-index: 1;
+    }
+    .blue-panel .divider {
+      width: 36px; height: 2px;
+      background: #E8500A;
+      margin-bottom: 20px;
+      position: relative; z-index: 1;
+    }
+
+    /* ── Card grid ── */
+    .cards {
+      display: grid;
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .cards-3 { grid-template-columns: repeat(3, 1fr); }
+    .cards-2 { grid-template-columns: repeat(2, 1fr); }
+    .card {
+      border-radius: 9px;
+      padding: 14px 16px;
+      background: rgba(255,255,255,0.07);
+    }
+    .s-light .card, .s-white .card {
+      background: #fff;
+      border: 1px solid rgba(0,0,0,0.07);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    .card .ico   { font-size: 1.2em; margin-bottom: 4px; }
+    .card .ct    { font-family: 'Syne', sans-serif; font-size: 0.8em; font-weight: 700; margin-bottom: 0; }
+    .card .cd    { font-size: 0.72em; line-height: 1.6; color: rgba(255,255,255,0.5); }
+    .s-light .card .cd, .s-white .card .cd { color: #6B7280; }
+
+    /* ── Step list ── */
+    .steps { list-style: none; padding: 0; margin: 20px 0 0; display: flex; flex-direction: column; gap: 14px; }
+    .step  { display: flex; gap: 14px; align-items: flex-start; }
+    .step-n {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #E8500A; color: #fff;
+      font-family: 'Syne', sans-serif; font-weight: 800; font-size: 0.72em;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .step-t { font-size: 0.85em; font-weight: 500; margin-bottom: 2px; }
+    .step-d { font-size: 0.72em; line-height: 1.6; color: rgba(255,255,255,0.45); }
+    .s-light .step-t, .s-white .step-t { color: #0D1117; }
+    .s-light .step-d, .s-white .step-d { color: #6B7280; }
+
+    /* ── Pain point list ── */
+    .pains { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+    .pain  {
+      display: flex; gap: 10px; align-items: flex-start;
+      background: rgba(0,0,0,0.04);
+      border-radius: 7px;
+      padding: 12px 14px;
+    }
+    .pain-i { font-size: 1.1em; flex-shrink: 0; margin-top: 1px; }
+    .pain-t { font-size: 0.77em; line-height: 1.6; color: #0D1117; font-weight: 400; }
+    .pain-t strong { font-weight: 600; }
+
+    /* ── WhatsApp chat preview ── */
+    .chat {
+      background: #F5F1EB;
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      height: 100%;
+      box-sizing: border-box;
+    }
+    .chat-row { border-radius: 8px; padding: 12px 14px; }
+    .chat-who { font-size: 0.65em; font-weight: 600; margin-bottom: 3px; }
+    .chat-msg { font-size: 0.76em; line-height: 1.5; }
+    .chat-from { background: #fff; }
+    .chat-from .chat-who { color: #25D366; }
+    .chat-from .chat-msg { color: #0D1117; }
+    .chat-to { background: #E8500A; }
+    .chat-to .chat-who, .chat-to .chat-msg { color: #fff; }
+    .chat-sys { background: #1B3F8B; }
+    .chat-sys .chat-who, .chat-sys .chat-msg { color: #fff; }
+
+    /* ── Routing flow visual ── */
+    .routing-flow {
+      display: flex; align-items: stretch; gap: 8px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 10px; padding: 18px 20px;
+      margin-top: 20px;
+    }
+    .r-box {
+      flex: 1; background: rgba(255,255,255,0.07);
+      border-radius: 7px; padding: 14px 10px;
+      text-align: center;
+    }
+    .r-box.engine { background: #E8500A; }
+    .r-box .rb-lbl { font-size: 0.62em; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(255,255,255,0.45); margin-bottom: 4px; }
+    .r-box.engine .rb-lbl { color: rgba(255,255,255,0.8); }
+    .r-box .rb-val { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 0.82em; color: #fff; }
+    .r-arrow { color: rgba(255,255,255,0.2); font-size: 1.1em; display: flex; align-items: center; }
+
+    /* ── Payment split visual ── */
+    .pay-split { display: flex; flex-direction: column; gap: 10px; }
+    .pay-row   {
+      border-radius: 8px; padding: 12px 16px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .pay-row .pr-lbl { font-size: 0.78em; }
+    .pay-row .pr-amt { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1em; }
+    .pay-in  { background: #fff; border: 1px solid rgba(0,0,0,0.08); }
+    .pay-in  .pr-lbl, .pay-in  .pr-amt { color: #0D1117; }
+    .pay-fee { background: #E8500A; }
+    .pay-fee .pr-lbl, .pay-fee .pr-amt { color: #fff; }
+    .pay-out { background: #1B3F8B; }
+    .pay-out .pr-lbl, .pay-out .pr-amt { color: #fff; }
+    .pay-note { font-size: 0.65em; color: #6B7280; text-align: center; margin-top: 4px; }
+
+    /* ── Pickup code display ── */
+    .pickup-code {
+      font-family: 'Syne', sans-serif;
+      font-size: 2.2em;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      background: #E8500A;
+      color: #fff;
+      border-radius: 10px;
+      padding: 14px 26px;
+      display: inline-block;
+      margin: 16px 0;
+    }
+
+    /* ── Status tracker ── */
+    .tracker { display: flex; flex-direction: column; gap: 7px; }
+    .tr-step {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 14px;
+      background: #F5F1EB;
+      border-radius: 7px;
+    }
+    .tr-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .tr-lbl  { font-size: 0.75em; flex: 1; }
+    .tr-badge { font-size: 0.65em; }
+    .tr-done  .tr-dot  { background: #6B7280; }
+    .tr-done  .tr-lbl  { color: #6B7280; }
+    .tr-active .tr-dot  { background: #E8500A; }
+    .tr-active .tr-lbl  { color: #0D1117; font-weight: 500; }
+    .tr-active .tr-badge { color: #E8500A; }
+    .tr-future .tr-dot  { background: rgba(0,0,0,0.12); }
+    .tr-future .tr-lbl  { color: rgba(0,0,0,0.25); }
+    .tr-caption { font-size: 0.65em; color: #6B7280; text-align: center; margin-top: 6px; }
+
+    /* ── CTA slide buttons ── */
+    .cta-btns { display: flex; gap: 14px; margin-top: 32px; flex-wrap: wrap; align-items: center; }
+    .btn-wa-big {
+      display: inline-flex; align-items: center; gap: 9px;
+      background: #25D366; color: #fff;
+      padding: 13px 22px; border-radius: 8px;
+      font-family: 'DM Sans', sans-serif; font-size: 0.88em; font-weight: 500;
+      text-decoration: none;
+    }
+    .btn-outline-light {
+      display: inline-flex; align-items: center; gap: 9px;
+      border: 1.5px solid rgba(255,255,255,0.25); color: rgba(255,255,255,0.8);
+      padding: 12px 20px; border-radius: 8px;
+      font-family: 'DM Sans', sans-serif; font-size: 0.88em; font-weight: 400;
+      text-decoration: none;
+    }
+
+    /* ── Reveal.js control overrides ── */
+    .reveal .controls button { color: #E8500A; }
+    .reveal .progress span   { background: #E8500A; }
+    .reveal .slide-number    { font-family: 'DM Sans', sans-serif; font-size: 12px; color: rgba(255,255,255,0.3); }
+
+    /* ── Below-deck download strip ── */
+    .pitch-dl {
+      background: #fff;
+      border-top: 1px solid rgba(0,0,0,0.07);
+      padding: 44px 60px;
+      display: flex; align-items: center; justify-content: space-between; gap: 24px;
+      flex-wrap: wrap;
+    }
+    .pitch-dl h3 {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.25em; font-weight: 800;
+      color: #0D1117; margin: 0 0 6px;
+    }
+    .pitch-dl p { font-size: 0.88em; color: #6B7280; font-weight: 300; margin: 0; }
+    .pitch-dl-btns { display: flex; gap: 12px; flex-wrap: wrap; }
+
+    @media (max-width: 768px) {
+      .pitch-deck-wrap { height: calc(100vh - 60px); }
+      .pitch-dl { padding: 32px 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="logo">Print<span>osky</span></a>
+  <ul class="nav-links">
+    <li><a href="services.html">Services</a></li>
+    <li><a href="about.html">About</a></li>
+    <li><a href="contact.html">Contact</a></li>
+    <li><a href="order.html" class="nav-cta">Place Order →</a></li>
+  </ul>
+  <button class="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></button>
+</nav>
+<div class="mobile-menu" id="mobileMenu">
+  <a href="services.html">Services</a>
+  <a href="about.html">About</a>
+  <a href="contact.html">Contact</a>
+  <a href="order.html" class="mob-cta">Place Order →</a>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     REVEAL.JS PRESENTATION
+════════════════════════════════════════════ -->
+<div class="pitch-deck-wrap" tabindex="0">
+  <div class="reveal">
+    <div class="slides">
+
+      <!-- ── 1 · COVER ── -->
+      <section class="s-dark" style="display:flex;flex-direction:column;justify-content:center;position:relative;">
+        <div style="max-width:660px;position:relative;z-index:1;">
+          <div class="chip">Partner Pitch · 2026</div>
+          <h1 class="h-xl" style="color:#fff;margin-bottom:10px;">
+            Print<span class="ac">osky</span>
+          </h1>
+          <h2 style="font-family:'Syne',sans-serif;font-size:1.55em;font-weight:700;color:rgba(255,255,255,0.8);letter-spacing:-0.02em;margin:0 0 20px;">
+            The Print Marketplace<br>for Thrissur.
+          </h2>
+          <p class="lead" style="font-size:0.88em;">
+            WhatsApp → Quote → Pay → Print → Pickup<br>
+            One brand. Multiple stores. Zero friction.
+          </p>
+        </div>
+        <div style="position:absolute;right:-80px;bottom:-80px;width:320px;height:320px;border-radius:50%;background:rgba(232,80,10,0.06);pointer-events:none;z-index:0;"></div>
+      </section>
+
+      <!-- ── 2 · PROBLEM ── -->
+      <section class="s-light">
+        <div class="chip">The Problem</div>
+        <h2 class="h-md">Printing shouldn't require a treasure hunt.</h2>
+        <div class="cols cols-3-2">
+          <ul class="pains">
+            <li class="pain">
+              <span class="pain-i">🗺️</span>
+              <span class="pain-t"><strong>Students waste 30 min hunting for a free shop</strong> — walk in, find a queue, walk out. Repeat.</span>
+            </li>
+            <li class="pain">
+              <span class="pain-i">📵</span>
+              <span class="pain-t"><strong>No way to know if a shop is free</strong> before making the trip. Every visit is a gamble.</span>
+            </li>
+            <li class="pain">
+              <span class="pain-i">💸</span>
+              <span class="pain-t"><strong>Stores lose jobs to each other</strong> based on proximity alone — not quality, speed, or availability.</span>
+            </li>
+            <li class="pain">
+              <span class="pain-i">🧾</span>
+              <span class="pain-t"><strong>No digital record</strong> of jobs, payments, or customers. Zero structured repeat-customer pipeline.</span>
+            </li>
+          </ul>
+          <div class="blue-panel">
+            <div class="n">73<span class="ac">%</span></div>
+            <div class="lbl">of Thrissur students print at least once a month</div>
+            <div class="divider"></div>
+            <div class="n">0</div>
+            <div class="lbl">of those print shops have a digital ordering system</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 3 · SOLUTION ── -->
+      <section class="s-navy" style="display:flex;flex-direction:column;justify-content:center;position:relative;">
+        <div style="position:relative;z-index:1;">
+          <div class="chip">The Solution</div>
+          <h2 class="h-lg" style="color:#fff;max-width:620px;">
+            One WhatsApp number.<br>Every print shop in Thrissur.
+          </h2>
+          <div class="stats-row">
+            <div class="stat">
+              <div class="n">1</div>
+              <div class="lbl">WhatsApp number for all stores</div>
+            </div>
+            <div class="stat">
+              <div class="n">N</div>
+              <div class="lbl">Partner stores sharing the job stream</div>
+            </div>
+            <div class="stat">
+              <div class="n">0</div>
+              <div class="lbl">Software installs required to join</div>
+            </div>
+          </div>
+        </div>
+        <div style="position:absolute;right:-60px;top:50%;transform:translateY(-50%);width:260px;height:260px;border-radius:50%;background:rgba(255,255,255,0.03);pointer-events:none;"></div>
+      </section>
+
+      <!-- ── 4 · HOW IT WORKS ── -->
+      <section class="s-white">
+        <div class="chip">Customer Journey</div>
+        <h2 class="h-md">How it works — in 4 steps.</h2>
+        <div class="cols cols-2">
+          <ul class="steps">
+            <li class="step">
+              <div class="step-n">1</div>
+              <div>
+                <div class="step-t">Send file via WhatsApp</div>
+                <div class="step-d">Customer messages <strong style="color:#0D1117;">+91 94957 06405</strong> with their PDF. The bot responds with a quote in seconds.</div>
+              </div>
+            </li>
+            <li class="step">
+              <div class="step-n">2</div>
+              <div>
+                <div class="step-t">Confirm &amp; pay online</div>
+                <div class="step-d">Customer approves the quote and pays via Razorpay — UPI, card, or net banking. Full amount upfront.</div>
+              </div>
+            </li>
+            <li class="step">
+              <div class="step-n">3</div>
+              <div>
+                <div class="step-t">Job auto-routed to best store</div>
+                <div class="step-d">Routing engine scores every partner by capacity and queue depth, assigns in real time — no manual steps.</div>
+              </div>
+            </li>
+            <li class="step">
+              <div class="step-n">4</div>
+              <div>
+                <div class="step-t">Pickup with secure code</div>
+                <div class="step-d">Customer gets a unique <strong style="color:#0D1117;">P-XXXX</strong> code on WhatsApp. Show it at the counter, collect the job.</div>
+              </div>
+            </li>
+          </ul>
+          <div class="chat">
+            <div class="chat-row chat-from">
+              <div class="chat-who">💬 Customer → Printosky</div>
+              <div class="chat-msg">"Hi, 40 pages B&amp;W A4, single side. Need by evening."</div>
+            </div>
+            <div class="chat-row chat-to">
+              <div class="chat-who">🤖 Printosky</div>
+              <div class="chat-msg">40 pages B&amp;W A4 = <strong>₹20</strong>. Pay here → [razorpay link]</div>
+            </div>
+            <div class="chat-row chat-from">
+              <div class="chat-who" style="color:#6B7280;">✅ After payment</div>
+              <div class="chat-msg">"Your order is confirmed. Job routed to OSP Thriprayar."</div>
+            </div>
+            <div class="chat-row chat-sys">
+              <div class="chat-who">🔔 When ready</div>
+              <div class="chat-msg">Your job is ready for pickup!<br>Pickup code: <strong>P-4K8X</strong><br>Address: OSP, Thriprayar</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 5 · FOR PARTNER STORES ── -->
+      <section class="s-light">
+        <div class="chip">For Partner Stores</div>
+        <h2 class="h-md">Join Printosky. Get jobs. No software needed.</h2>
+        <div class="cards cards-3" style="margin-top:16px;">
+          <div class="card">
+            <div class="ico">📱</div>
+            <div class="ct">WhatsApp dispatch</div>
+          </div>
+          <div class="card">
+            <div class="ico">⚡</div>
+            <div class="ct">Automatic routing</div>
+          </div>
+          <div class="card">
+            <div class="ico">💳</div>
+            <div class="ct">Instant Razorpay payouts</div>
+          </div>
+          <div class="card">
+            <div class="ico">🔒</div>
+            <div class="ct">Pickup code verification</div>
+          </div>
+          <div class="card">
+            <div class="ico">📊</div>
+            <div class="ct">Live order tracking</div>
+          </div>
+          <div class="card">
+            <div class="ico">🛠️</div>
+            <div class="ct">Keep your setup</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 6 · SMART ROUTING ── -->
+      <section class="s-dark">
+        <div class="chip">The Technology</div>
+        <h2 class="h-md" style="color:#fff;max-width:560px;">Smart routing. Every job to the right store.</h2>
+        <p class="lead" style="max-width:540px;">
+          When a customer pays, our routing engine scores every partner store in real time — by capacity, queue depth, and paper availability — then assigns automatically.
+        </p>
+        <div class="routing-flow">
+          <div class="r-box">
+            <div class="rb-lbl">Incoming Job</div>
+            <div class="rb-val">40pg B&amp;W A4</div>
+          </div>
+          <div class="r-arrow">→</div>
+          <div class="r-box engine">
+            <div class="rb-lbl">Routing Engine</div>
+            <div class="rb-val">⚡ Scoring stores</div>
+          </div>
+          <div class="r-arrow">→</div>
+          <div class="r-box">
+            <div class="rb-lbl">Best Store</div>
+            <div class="rb-val">OSP Thriprayar</div>
+          </div>
+        </div>
+        <div class="cards cards-3" style="margin-top:16px;">
+          <div class="card">
+            <div class="ct">60 s ack timeout</div>
+            <div class="cd">Store doesn't respond in 60 seconds? Job auto-routes to the next best store. No job left behind.</div>
+          </div>
+          <div class="card">
+            <div class="ct">Capacity-aware</div>
+            <div class="cd">Stores declare daily capacity and paper types. The engine never overloads a store.</div>
+          </div>
+          <div class="card">
+            <div class="ct">Full audit trail</div>
+            <div class="cd">Every routing decision is logged. Fairness disputes resolved with data, not arguments.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 7 · AUTOMATIC PAYOUTS ── -->
+      <section class="s-white">
+        <div class="chip">Payments</div>
+        <h2 class="h-md">Razorpay Route splits every payment instantly.</h2>
+        <div class="cols cols-2">
+          <div>
+            <p class="lead" style="color:#6B7280;margin-top:4px;">
+              When a customer pays, <strong style="color:#0D1117;">Razorpay Route</strong> automatically splits the payment between Printosky's platform fee and the partner store's share — no manual reconciliation, ever.
+            </p>
+            <ul class="steps" style="margin-top:20px;">
+              <li class="step">
+                <div class="step-n" style="font-size:0.65em;">₹</div>
+                <div>
+                  <div class="step-t">Customer pays full amount upfront</div>
+                  <div class="step-d">Collected at order time via UPI, card, or net banking.</div>
+                </div>
+              </li>
+              <li class="step">
+                <div class="step-n" style="font-size:0.55em;">⚡</div>
+                <div>
+                  <div class="step-t">Razorpay Route splits on payment capture</div>
+                  <div class="step-d">Platform fee separated automatically. Partner's share transferred directly to their account.</div>
+                </div>
+              </li>
+              <li class="step">
+                <div class="step-n" style="font-size:0.55em;">✓</div>
+                <div>
+                  <div class="step-t">Settlement in your Razorpay account</div>
+                  <div class="step-d">No intermediaries. Direct to the partner's registered bank account.</div>
+                </div>
+              </li>
+            </ul>
+          </div>
+          <div style="display:flex;flex-direction:column;justify-content:center;">
+            <div style="font-size:0.72em;color:#6B7280;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.1em;">Example: ₹100 print job</div>
+            <div class="pay-split">
+              <div class="pay-row pay-in">
+                <span class="pr-lbl">Customer pays</span>
+                <span class="pr-amt">₹100</span>
+              </div>
+              <div class="pay-row pay-fee">
+                <span class="pr-lbl">Printosky platform fee</span>
+                <span class="pr-amt">₹10</span>
+              </div>
+              <div class="pay-row pay-out">
+                <span class="pr-lbl">Partner store receives</span>
+                <span class="pr-amt">₹90</span>
+              </div>
+              <div class="pay-note">Take-rate is configurable per partner store.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 8 · PICKUP EXPERIENCE ── -->
+      <section class="s-light">
+        <div class="chip">Customer Experience</div>
+        <h2 class="h-md">Frictionless pickup. Zero confusion.</h2>
+        <div class="cols cols-2">
+          <div>
+            <p class="lead" style="color:#6B7280;margin-top:4px;">
+              Every paid job gets a <strong style="color:#0D1117;">cryptographically random 4-character code</strong>. Customer shows it at the counter — no name lookup, no receipt, no phone call.
+            </p>
+            <div class="pickup-code">P&#8209;4K8X</div>
+            <ul class="steps" style="margin-top:8px;">
+              <li class="step">
+                <div class="step-n" style="font-size:0.55em;">📲</div>
+                <div>
+                  <div class="step-t">Sent via WhatsApp when job is ready</div>
+                  <div class="step-d">Store marks ready → WhatsApp notification fires instantly.</div>
+                </div>
+              </li>
+              <li class="step">
+                <div class="step-n" style="font-size:0.55em;">🔍</div>
+                <div>
+                  <div class="step-t">Live tracking at printosky.com/track</div>
+                  <div class="step-d">No login. 5 stages: Received → Paid → Printing → Ready → Delivered.</div>
+                </div>
+              </li>
+            </ul>
+          </div>
+          <div style="background:#fff;border-radius:12px;padding:22px;border:1px solid rgba(0,0,0,0.07);display:flex;flex-direction:column;justify-content:center;">
+            <div style="font-size:0.68em;text-transform:uppercase;letter-spacing:0.1em;color:#6B7280;margin-bottom:12px;">Order #P&#8209;4K8X · Live Status</div>
+            <div class="tracker">
+              <div class="tr-step tr-done">
+                <div class="tr-dot"></div>
+                <span class="tr-lbl">Received</span>
+                <span class="tr-badge">✓</span>
+              </div>
+              <div class="tr-step tr-done">
+                <div class="tr-dot"></div>
+                <span class="tr-lbl">Paid</span>
+                <span class="tr-badge">✓</span>
+              </div>
+              <div class="tr-step tr-active">
+                <div class="tr-dot"></div>
+                <span class="tr-lbl">Printing</span>
+                <span class="tr-badge">⟳ In progress</span>
+              </div>
+              <div class="tr-step tr-future">
+                <div class="tr-dot"></div>
+                <span class="tr-lbl">Ready for pickup</span>
+              </div>
+              <div class="tr-step tr-future">
+                <div class="tr-dot"></div>
+                <span class="tr-lbl">Delivered</span>
+              </div>
+            </div>
+            <div class="tr-caption">printosky.com/track · No login required</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 9 · TRACTION ── -->
+      <section class="s-navy" style="position:relative;">
+        <div style="position:relative;z-index:1;">
+          <div class="chip">Traction</div>
+          <h2 class="h-md" style="color:#fff;">Built on a real, live store.</h2>
+          <p class="lead" style="max-width:580px;">
+            Printosky is not a concept deck. It runs live at <strong style="color:#fff;">Oxygen Students Paradise, Thriprayar, Thrissur</strong> — processing real print jobs, real payments, real customers every day.
+          </p>
+          <div class="stats-row">
+            <div class="stat">
+              <div class="n">134<span class="ac">+</span></div>
+              <div class="lbl">Jobs processed via the platform</div>
+            </div>
+            <div class="stat">
+              <div class="n">2<span class="ac">+</span></div>
+              <div class="lbl">Production printers (Konica + Epson)</div>
+            </div>
+            <div class="stat">
+              <div class="n">₹0</div>
+              <div class="lbl">Cash — 100% digital payments via Razorpay</div>
+            </div>
+          </div>
+          <div style="margin-top:24px;background:rgba(255,255,255,0.07);border-radius:9px;padding:16px 20px;font-size:0.72em;color:rgba(255,255,255,0.55);max-width:640px;line-height:1.8;">
+            Full production stack since 2025: Store PC → Watcher → Konica / Epson · WhatsApp Cloud API (Meta) · Razorpay · Supabase · Vercel API · Netlify website
+          </div>
+        </div>
+        <div style="position:absolute;right:-40px;bottom:-60px;width:280px;height:280px;border-radius:50%;background:rgba(255,255,255,0.03);pointer-events:none;z-index:0;"></div>
+      </section>
+
+      <!-- ── 10 · CTA ── -->
+      <section class="s-dark" style="display:flex;flex-direction:column;justify-content:center;position:relative;">
+        <div style="position:relative;z-index:1;">
+          <div class="chip">Join the Marketplace</div>
+          <h2 class="h-lg" style="color:#fff;max-width:580px;">
+            Ready to receive pre-paid<br>jobs — automatically?
+          </h2>
+          <p class="lead" style="max-width:500px;">
+            We're onboarding the first wave of partner stores in Thrissur. If your shop handles print jobs and you want a guaranteed pipeline of digital customers — let's talk.
+          </p>
+          <div class="cta-btns">
+            <a href="https://wa.me/919495706405?text=I'm%20interested%20in%20joining%20Printosky%20as%20a%20partner%20store"
+               class="btn-wa-big" target="_blank" rel="noopener">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347zM12 0C5.373 0 0 5.373 0 12c0 2.112.549 4.09 1.508 5.812L0 24l6.335-1.652A11.955 11.955 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.852 0-3.595-.5-5.09-1.373l-.364-.218-3.78.985.999-3.67-.239-.378A9.96 9.96 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
+              </svg>
+              Message us on WhatsApp
+            </a>
+            <a href="pitch.pptx" class="btn-outline-light" download>↓ Download this deck</a>
+          </div>
+        </div>
+        <div style="position:absolute;left:-80px;top:50%;transform:translateY(-50%);width:300px;height:300px;border-radius:50%;background:rgba(232,80,10,0.05);pointer-events:none;z-index:0;"></div>
+      </section>
+
+    </div><!-- /.slides -->
+  </div><!-- /.reveal -->
+</div><!-- /.pitch-deck-wrap -->
+
+<!-- ── Download strip ── -->
+<div class="pitch-dl">
+  <div>
+    <h3>Take the deck with you.</h3>
+    <p>Download the full Printosky marketplace pitch as a PowerPoint file — share it offline or present it to your team.</p>
+  </div>
+  <div class="pitch-dl-btns">
+    <a href="pitch.pptx" class="btn-primary" download>↓ Download .pptx</a>
+    <a href="https://wa.me/919495706405?text=I'm%20interested%20in%20joining%20Printosky%20as%20a%20partner%20store"
+       class="btn-wa" target="_blank" rel="noopener">WhatsApp Us →</a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-grid">
+    <div>
+      <div class="footer-logo">Print<span>osky</span></div>
+      <p class="footer-tagline">WhatsApp-first print marketplace.</p>
+      <p class="footer-address">Oxygen Students Paradise · Thriprayar, Thrissur</p>
+    </div>
+    <div>
+      <div class="footer-col-title">Platform</div>
+      <a href="services.html">Services</a>
+      <a href="order.html">Place Order</a>
+      <a href="track.html">Track Order</a>
+      <a href="pitch.html" class="active">Partner Pitch</a>
+    </div>
+    <div>
+      <div class="footer-col-title">Company</div>
+      <a href="about.html">About</a>
+      <a href="contact.html">Contact</a>
+      <a href="https://wa.me/919495706405" target="_blank" rel="noopener">WhatsApp</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2026 Printosky · Oxygen Students Paradise, Thrissur</div>
+</footer>
+
+<!-- ── Reveal.js init ── -->
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@4/dist/reveal.js"></script>
+<script>
+  const deck = new Reveal(document.querySelector('.pitch-deck-wrap .reveal'), {
+    embedded: true,
+    width: 960,
+    height: 540,
+    margin: 0,
+    minScale: 0.2,
+    maxScale: 2.0,
+    controls: true,
+    controlsTutorial: false,
+    controlsLayout: 'bottom-right',
+    progress: true,
+    slideNumber: 'c/t',
+    history: false,
+    keyboard: true,
+    overview: true,
+    center: false,
+    touch: true,
+    loop: false,
+    transition: 'slide',
+    transitionSpeed: 'fast',
+    backgroundTransition: 'fade',
+    display: 'flex',
+  });
+  deck.initialize();
+
+  // Enable keyboard nav when deck is focused
+  document.querySelector('.pitch-deck-wrap').addEventListener('click', function() {
+    this.focus();
+  });
+</script>
+
+</body>
+</html>

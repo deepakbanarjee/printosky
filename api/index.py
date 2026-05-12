@@ -34,6 +34,8 @@ import hashlib
 import json
 import logging
 import re
+import time
+import collections
 import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler
@@ -41,6 +43,22 @@ from urllib.parse import parse_qs, urlparse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 logger = logging.getLogger("api.webhook")
+
+# ── Bypass rate limiter — max 5 wrong attempts per IP per 15 min ─────────────
+_bypass_attempts: dict = collections.defaultdict(list)  # ip → [timestamp, ...]
+_BYPASS_MAX_ATTEMPTS = 5
+_BYPASS_WINDOW_SEC   = 900  # 15 minutes
+
+def _check_bypass_rate_limit(ip: str) -> bool:
+    """Return True if the IP is allowed, False if rate-limited."""
+    now = time.time()
+    attempts = _bypass_attempts[ip]
+    # Drop attempts older than the window
+    _bypass_attempts[ip] = [t for t in attempts if now - t < _BYPASS_WINDOW_SEC]
+    return len(_bypass_attempts[ip]) < _BYPASS_MAX_ATTEMPTS
+
+def _record_bypass_failure(ip: str) -> None:
+    _bypass_attempts[ip].append(time.time())
 
 # ── Config (from env vars set in Vercel dashboard) ───────────────────────────
 META_APP_SECRET           = os.environ.get("META_APP_SECRET", "")
@@ -158,13 +176,16 @@ def _credit_referrer(phone: str, order_id: str) -> None:
         if dup.data:
             logger.info(f"Referral credit already exists for {code} / {order_id} — skipping")
             return
+        # Look up campaign-specific credit amount; default 20 for regular referrers
+        ref_row = _client().table("referrers").select("credit_amount").eq("code", code).execute()
+        credit_amount = int((ref_row.data[0].get("credit_amount") or 20) if ref_row.data else 20)
         _client().table("referral_credits").insert({
             "referrer_code": code,
             "customer_phone": phone,
             "order_id": order_id,
-            "amount_inr": 20,
+            "amount_inr": credit_amount,
         }).execute()
-        logger.info(f"Referral credit Rs.20 logged -> {code!r} for order {order_id}")
+        logger.info(f"Referral credit Rs.{credit_amount} logged -> {code!r} for order {order_id}")
     except Exception as e:
         logger.error(f"_credit_referrer error for {phone} / {order_id}: {e}")
 
@@ -306,6 +327,90 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
     return dest_name  # storage path — callers store this in media_url column
 
 
+def _store_media_only(sender: str, media_id: str, mime_type: str,
+                      orig_filename: str) -> str | None:
+    """Download a WhatsApp attachment and upload to Supabase — no job, no reply."""
+    from db_cloud import upload_file
+    ext = FILE_MIME_TYPES.get(mime_type, "")
+    ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if orig_filename and "." in orig_filename:
+        base_name = re.sub(r"[^\w.\- ]", "_", os.path.basename(orig_filename)).strip()
+    else:
+        base_name = f"{sender}_{ts}{ext or '.bin'}"
+    dest_name = f"{sender}_{ts}_{base_name}"
+    content = _download_meta_media(media_id)
+    if content is None:
+        logger.error(f"Failed to download chat media {media_id} from {sender}")
+        return None
+    content = _compress_lossless(content, mime_type or "")
+    upload_file(dest_name, content, mime_type or "application/octet-stream")
+    logger.info(f"Stored chat media {dest_name} ({len(content)} bytes)")
+    return dest_name
+
+
+def _notify_pickup_ready(job_id: str) -> None:
+    """Block 5: customer-facing pickup-ready WhatsApp on store READY."""
+    from db_cloud import _client
+    from whatsapp_notify import send_pickup_ready
+    client = _client()
+    job_rows = (
+        client.table("jobs")
+        .select("job_id,sender,pickup_code,assigned_store_id,store_id")
+        .eq("job_id", job_id)
+        .limit(1)
+        .execute()
+    )
+    rows = getattr(job_rows, "data", None) or []
+    if not rows:
+        return
+    job = rows[0]
+    sender = job.get("sender")
+    code = job.get("pickup_code")
+    if not sender or not code:
+        return
+    partner_id = job.get("assigned_store_id") or job.get("store_id") or "OSP"
+    partner_rows = (
+        client.table("partners")
+        .select("display_pickup_label,pickup_address,name")
+        .eq("store_id", partner_id)
+        .limit(1)
+        .execute()
+    )
+    prows = getattr(partner_rows, "data", None) or []
+    partner = prows[0] if prows else {}
+    deep_link = f"https://printosky.com/track.html?code={code}"
+    send_pickup_ready(
+        sender=sender,
+        pickup_code=code,
+        store_label=partner.get("display_pickup_label"),
+        store_address=partner.get("pickup_address") or partner.get("name") or "",
+        deep_link=deep_link,
+    )
+
+
+def _notify_pickup_completed(job_id: str) -> None:
+    """Block 5: thank-you / rate-us message on store DELIVERED."""
+    from db_cloud import _client
+    from whatsapp_notify import send_pickup_completed
+    client = _client()
+    job_rows = (
+        client.table("jobs")
+        .select("sender,pickup_code")
+        .eq("job_id", job_id)
+        .limit(1)
+        .execute()
+    )
+    rows = getattr(job_rows, "data", None) or []
+    if not rows:
+        return
+    job = rows[0]
+    sender = job.get("sender")
+    code = job.get("pickup_code")
+    if not sender or not code:
+        return
+    send_pickup_completed(sender=sender, pickup_code=code, rating_url=None)
+
+
 def _process_meta_webhook(data: dict) -> None:
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
@@ -321,7 +426,48 @@ def _process_meta_webhook(data: dict) -> None:
                 if msg_type == "text":
                     text = (msg.get("text") or {}).get("body", "").strip()
                     if text:
-                        _handle_text(sender, text)
+                        # Block 5: if the sender is a known store-owner
+                        # dispatch number AND the text parses as a known
+                        # action (ACCEPT/READY/DELIVERED/REJECT/QUERY),
+                        # route to store_dispatch instead of the customer
+                        # flow. Falls through to _handle_text on parse miss
+                        # so a store owner can still chat with us normally.
+                        handled_as_store = False
+                        try:
+                            from store_dispatch import (
+                                parse_store_reply,
+                                apply_store_reply,
+                            )
+                            from db_cloud import _client
+                            parsed = parse_store_reply(text)
+                            if parsed is not None:
+                                result = apply_store_reply(_client(), sender, parsed)
+                                if result.ok:
+                                    handled_as_store = True
+                                    logger.info(
+                                        "store_dispatch handled %s reply: %s",
+                                        sender, result.message,
+                                    )
+                                    # Customer-side fan-out for state transitions
+                                    if result.new_status == "Ready":
+                                        try:
+                                            _notify_pickup_ready(result.job_id)
+                                        except Exception as e:
+                                            logger.error(
+                                                "pickup-ready notify failed: %s", e
+                                            )
+                                    elif result.new_status == "Delivered":
+                                        try:
+                                            _notify_pickup_completed(result.job_id)
+                                        except Exception as e:
+                                            logger.error(
+                                                "pickup-completed notify failed: %s", e
+                                            )
+                        except Exception as e:
+                            logger.error("store_dispatch routing failed: %s", e)
+
+                        if not handled_as_store:
+                            _handle_text(sender, text)
                         try:
                             from db_cloud import log_message, upsert_contact
                             log_message(sender, "inbound", text, message_type="text")
@@ -329,13 +475,29 @@ def _process_meta_webhook(data: dict) -> None:
                         except Exception:
                             pass
 
-                elif msg_type in ("document", "image", "video", "audio"):
+                elif msg_type in ("document", "image"):
                     blk      = msg.get(msg_type, {})
                     media_id = blk.get("id", "")
                     mime     = blk.get("mime_type", "")
                     fname    = blk.get("filename", "")
                     if media_id:
                         storage_path = _handle_media(sender, msg_type, media_id, mime, fname)
+                        try:
+                            from db_cloud import log_message, upsert_contact
+                            log_message(sender, "inbound",
+                                        fname or f"[{msg_type}]",
+                                        message_type=msg_type, filename=fname,
+                                        media_url=storage_path)
+                            upsert_contact(sender, name=pushname)
+                        except Exception:
+                            pass
+                elif msg_type in ("audio", "video"):
+                    blk      = msg.get(msg_type, {})
+                    media_id = blk.get("id", "")
+                    mime     = blk.get("mime_type", "")
+                    fname    = blk.get("filename", "")
+                    if media_id:
+                        storage_path = _store_media_only(sender, media_id, mime, fname)
                         try:
                             from db_cloud import log_message, upsert_contact
                             log_message(sender, "inbound",
@@ -519,7 +681,7 @@ def _send_cors_headers(h) -> None:
     """Attach CORS headers. Endpoints are individually auth-gated so * is safe."""
     h.send_header("Access-Control-Allow-Origin",  "*")
     h.send_header("Access-Control-Allow-Methods", "POST, GET, PATCH, OPTIONS")
-    h.send_header("Access-Control-Allow-Headers", "Content-Type, X-Hub-Signature-256, X-Razorpay-Signature, X-Staff-Pin, X-Student-Phone")
+    h.send_header("Access-Control-Allow-Headers", "Content-Type, X-Hub-Signature-256, X-Razorpay-Signature, X-Staff-Pin, X-Student-Phone, X-Admin-Password, X-Whatsapp-Phone")
     h.send_header("Access-Control-Max-Age",       "86400")
 
 
@@ -976,6 +1138,73 @@ def _handle_acad_orders_get(h) -> None:
         _json_response(h, 500, {"error": "server error"})
 
 
+def _handle_track(h, code: str) -> None:
+    """GET /api/track/<code> — public read-only order tracker.
+
+    Returns minimum-PII status + (only after status='Ready') the pickup
+    location. Pickup codes are 30^4=810k random tokens so brute-forcing is
+    impractical; non-existent codes return 404 (no information leaked about
+    code-validity vs. code-existence).
+    """
+    try:
+        from pickup_code import is_valid_pickup_code
+        if not is_valid_pickup_code(code):
+            _json_response(h, 400, {"error": "invalid pickup code format"})
+            return
+
+        from db_cloud import _client
+        client = _client()
+        job_rows = (
+            client.table("jobs")
+            .select("status,customer_name,assigned_store_id,store_id,"
+                    "received_at,pickup_ready_at,delivered_at,pickup_code")
+            .eq("pickup_code", code)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(job_rows, "data", None) or []
+        if not rows:
+            _json_response(h, 404, {"error": "not found"})
+            return
+
+        job = rows[0]
+        status = (job.get("status") or "").strip() or "Pending"
+        is_ready_or_later = status in {"Ready", "Delivered", "Completed", "Printed"}
+
+        partner_id = job.get("assigned_store_id") or job.get("store_id") or "OSP"
+        pickup_label = None
+        pickup_address = None
+        if is_ready_or_later:
+            partner_rows = (
+                client.table("partners")
+                .select("display_pickup_label,pickup_address,name")
+                .eq("store_id", partner_id)
+                .limit(1)
+                .execute()
+            )
+            prows = getattr(partner_rows, "data", None) or []
+            if prows:
+                pickup_label = prows[0].get("display_pickup_label")
+                pickup_address = prows[0].get("pickup_address") or prows[0].get("name")
+
+        full_name = (job.get("customer_name") or "").strip()
+        first_name = full_name.split()[0] if full_name else None
+
+        _json_response(h, 200, {
+            "pickup_code":     code,
+            "status":          status,
+            "first_name":      first_name,
+            "received_at":     job.get("received_at"),
+            "pickup_ready_at": job.get("pickup_ready_at"),
+            "delivered_at":    job.get("delivered_at"),
+            "pickup_label":    pickup_label,
+            "pickup_address":  pickup_address,
+        })
+    except Exception as e:
+        logger.error(f"track lookup error for {code!r}: {e}")
+        _json_response(h, 500, {"error": "server error"})
+
+
 def _handle_acad_order_get(h, pid: str) -> None:
     """GET /academic/orders/{id} — get single order (staff only)."""
     try:
@@ -1007,12 +1236,14 @@ def _handle_acad_orders_post(h, body: bytes) -> None:
             _json_response(h, 400, {"error": f"missing {f}"})
             return
     try:
-        from db_cloud_academic import next_project_id, create_order
+        from db_cloud_academic import next_project_id, create_order, update_fields
         pid = next_project_id()
+        customer_name  = str(payload["customer_name"])[:200]
+        whatsapp_phone = str(payload["whatsapp_phone"])[:20]
         order: dict = {
             "project_id":     pid,
-            "customer_name":  str(payload["customer_name"])[:200],
-            "whatsapp_phone": str(payload["whatsapp_phone"])[:20],
+            "customer_name":  customer_name,
+            "whatsapp_phone": whatsapp_phone,
             "course":         str(payload["course"])[:100],
             "topic":          str(payload["topic"])[:500],
             "study_area":     str(payload.get("study_area", ""))[:200],
@@ -1023,10 +1254,40 @@ def _handle_acad_orders_post(h, body: bytes) -> None:
             "status":         "order_received",
         }
         create_order(order)
-        _json_response(h, 201, {"project_id": pid})
     except Exception as e:
         logger.error(f"acad order create error: {e}")
         _json_response(h, 500, {"error": "server error"})
+        return
+
+    # Best-effort: create the Rs. 500 advance payment link.
+    # If this fails the order still exists — staff can re-send via WhatsApp.
+    advance_url = None
+    try:
+        from razorpay_integration import create_academic_payment_link
+        link = create_academic_payment_link(
+            project_id     = pid,
+            payment_type   = "advance",
+            amount         = 500.0,
+            description    = f"Printosky academic project advance — {pid}",
+            customer_phone = whatsapp_phone,
+            customer_name  = customer_name,
+        )
+        if "url" in link and link["url"]:
+            advance_url = link["url"]
+            try:
+                update_fields(pid, razorpay_advance_link=link["url"])
+            except Exception as e:
+                logger.warning(f"Could not persist razorpay_advance_link for {pid}: {e}")
+        else:
+            logger.error(f"Razorpay link create failed for {pid}: {link.get('error')}")
+    except Exception as e:
+        logger.error(f"Razorpay link create exception for {pid}: {e}")
+
+    _json_response(h, 201, {
+        "project_id":   pid,
+        "payment_url":  advance_url,   # may be null if link creation failed
+        "amount_inr":   500,
+    })
 
 
 def _handle_acad_generate(h, body: bytes, pid: str, phase: str) -> None:
@@ -1218,8 +1479,10 @@ def _handle_acad_razorpay_webhook(h, body: bytes) -> None:
 def _handle_admin_conversations(h) -> None:
     """GET /admin/conversations — inbox: one row per contact, last msg + unread count."""
     from urllib.parse import parse_qs, urlparse
-    params   = parse_qs(urlparse(h.path).query)
-    admin_pw = params.get("admin_password", [""])[0]
+    admin_pw = h.headers.get("X-Admin-Password", "").strip()
+    if not admin_pw:
+        params   = parse_qs(urlparse(h.path).query)
+        admin_pw = params.get("admin_password", [""])[0]
     if not _auth_admin_pw(admin_pw):
         _json_response(h, 403, {"error": "Unauthorized"})
         return
@@ -1299,7 +1562,7 @@ def _handle_admin_thread(h) -> None:
     """GET /admin/thread?phone=X — thread messages for one contact."""
     from urllib.parse import parse_qs, urlparse
     params   = parse_qs(urlparse(h.path).query)
-    admin_pw = params.get("admin_password", [""])[0]
+    admin_pw = h.headers.get("X-Admin-Password", "").strip() or params.get("admin_password", [""])[0]
     if not _auth_admin_pw(admin_pw):
         _json_response(h, 403, {"error": "Unauthorized"})
         return
@@ -1316,11 +1579,12 @@ def _handle_admin_thread(h) -> None:
             _dbc().table("conversation_log")
             .select("id,direction,message_type,body,filename,media_url,created_at")
             .eq("phone", phone)
-            .order("created_at", desc=False)
+            .order("created_at", desc=True)
             .limit(limit)
             .execute()
             .data
         )
+        rows.reverse()  # return oldest→newest for display
         # Resolve storage paths to public URLs
         for row in rows:
             mp = row.get("media_url")
@@ -1434,6 +1698,649 @@ def _handle_admin_send_file(h, body: bytes) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+# ── Project Builder helpers ──────────────────────────────────────────────────
+
+def _parse_multipart(body: bytes, content_type: str) -> dict[str, any]:
+    """Parse multipart/form-data. Return dict with form fields and file data.
+
+    Returns {'field_name': 'value', ...file field as 'filename': bytes_data}
+    """
+    parts = {}
+
+    # Extract boundary from Content-Type header
+    if "boundary=" not in content_type:
+        return {}
+
+    boundary_str = content_type.split("boundary=")[-1].strip().strip('"')
+    boundary = b"--" + boundary_str.encode()
+    final_boundary = b"--" + boundary_str.encode() + b"--"
+
+    # Split by boundary
+    segments = body.split(boundary)
+
+    for segment in segments[1:-1]:  # Skip first (before first boundary) and last (after final)
+        if not segment.strip():
+            continue
+
+        # Split headers from content
+        try:
+            header_end = segment.find(b'\r\n\r\n')
+            if header_end == -1:
+                header_end = segment.find(b'\n\n')
+                if header_end == -1:
+                    continue
+                headers = segment[:header_end].decode('utf-8', errors='ignore')
+                content = segment[header_end+2:]
+            else:
+                headers = segment[:header_end].decode('utf-8', errors='ignore')
+                content = segment[header_end+4:]
+        except Exception:
+            continue
+
+        # Remove trailing CRLLF
+        if content.endswith(b'\r\n'):
+            content = content[:-2]
+        elif content.endswith(b'\n'):
+            content = content[:-1]
+
+        # Parse Content-Disposition to get name and filename
+        name = None
+        filename = None
+        for line in headers.split('\n'):
+            if 'name=' in line:
+                match = re.search(r'name="?([^";\r\n]+)"?', line)
+                if match:
+                    name = match.group(1)
+            if 'filename=' in line:
+                match = re.search(r'filename="?([^";\r\n]+)"?', line)
+                if match:
+                    filename = match.group(1)
+
+        if not name:
+            continue
+
+        if filename:
+            # Binary file field
+            parts[name] = {'filename': filename, 'data': content}
+        else:
+            # Text field
+            parts[name] = content.decode('utf-8', errors='ignore')
+
+    return parts
+
+
+def _handle_admin_format_fixer(h, body: bytes) -> None:
+    """POST /admin/format-fixer — admin uploads DOCX, returns fixed DOCX.
+
+    Accepts multipart/form-data with fields:
+    - admin_password: admin password for auth
+    - university_id: university config (optional, defaults to 'default')
+    - file: DOCX file to format
+
+    Returns fixed DOCX as attachment, no storage.
+    """
+    try:
+        # Parse multipart form data
+        content_type = h.headers.get('Content-Type', '')
+        form_data = _parse_multipart(body, content_type)
+
+        # Verify admin auth
+        admin_pw = form_data.get('admin_password', '')
+        if not _auth_admin_pw(admin_pw):
+            _json_response(h, 403, {'error': 'Unauthorized'})
+            return
+
+        # Extract file
+        if 'file' not in form_data or not isinstance(form_data['file'], dict):
+            _json_response(h, 400, {'error': 'No file uploaded'})
+            return
+
+        file_data = form_data['file']
+        file_bytes = file_data.get('data', b'')
+        filename = file_data.get('filename', 'document.docx')
+
+        if not file_bytes:
+            _json_response(h, 400, {'error': 'Empty file'})
+            return
+
+        # Get university_id (optional, defaults to 'default')
+        university_id = form_data.get('university_id', 'default').strip()
+
+        # Format the DOCX
+        import docx_engine
+        fixed_bytes = docx_engine.format_fix_docx_inplace(file_bytes, university_id)
+
+        # Return as attachment
+        h.send_response(200)
+        h.send_header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        h.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+        h.send_header('Content-Length', str(len(fixed_bytes)))
+        h.end_headers()
+        h.wfile.write(fixed_bytes)
+
+        logger.info(f"Admin formatted DOCX: {filename} via university={university_id}")
+
+    except Exception as exc:
+        logger.error(f"admin format-fixer error: {exc}", exc_info=True)
+        _json_response(h, 500, {'error': str(exc)})
+
+
+def _generate_pb_order_id() -> str:
+    """Generate a unique project builder order ID: PB-YYYYMMDD-xxxxxx."""
+    import uuid
+    return f"PB-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6]}"
+
+
+def _send_pb_whatsapp(phone: str, order_id: str, download_url: str) -> None:
+    """Send the formatted document download link via WhatsApp.
+
+    NOTE: Works within the 24-hour Meta service window (customer initiated).
+    For students who have never messaged the WABA number, this will fail
+    silently — the browser download link is the primary delivery mechanism.
+    A pre-approved template should be submitted to Meta for all-India cold reach.
+    """
+    from whatsapp_notify import _send_meta
+    msg = (
+        f"✅ Your project report is ready!\n\n"
+        f"📄 Download link:\n{download_url}\n\n"
+        f"🔖 Order ID: *{order_id}*\n"
+        f"Save this — you can re-download at printosky.com/pb-retrieve\n\n"
+        f"Need corrections? Reply with your Order ID.\n\n"
+        f"— Printosky | printosky.com"
+    )
+    try:
+        _send_meta(phone, msg)
+    except Exception as e:
+        logger.warning(f"_send_pb_whatsapp failed for {order_id}: {e}")
+
+
+# ── Project Builder handlers ─────────────────────────────────────────────────
+
+def _pb_docx_response(h, docx_bytes: bytes, filename: str) -> None:
+    """Send a .docx file as an HTTP response with CORS headers."""
+    h.send_response(200)
+    h.send_header(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    h.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+    h.send_header("Content-Length", str(len(docx_bytes)))
+    h.send_header("Access-Control-Allow-Origin", "*")
+    h.end_headers()
+    h.wfile.write(docx_bytes)
+
+
+def _handle_pb_templates_get(h) -> None:
+    """GET /project-builder/templates — return list of supported universities."""
+    import docx_engine
+    unis = docx_engine.list_universities()
+    _json_response(h, 200, {"universities": unis})
+
+
+def _handle_pb_template_download(h, university_id: str) -> None:
+    """GET /project-builder/templates/{id} — generate and return free .docx template."""
+    import docx_engine
+    try:
+        docx_bytes = docx_engine.generate_free_template(university_id)
+        cfg        = docx_engine.load_university_config(university_id)
+    except ValueError as e:
+        _json_response(h, 400, {"error": str(e)})
+        return
+    filename = cfg["short_name"].replace(" ", "_") + "_Project_Template.docx"
+    _pb_docx_response(h, docx_bytes, filename)
+
+
+def _handle_pb_analyse(h, body: bytes) -> None:
+    """POST /project-builder/analyse — free chapter detection before payment."""
+    import base64
+    import docx_engine
+    try:
+        data = json.loads(body)
+        content_b64 = data.get("content_b64", "")
+        filename = data.get("filename", "document.docx")
+
+        if not content_b64:
+            _json_response(h, 400, {"error": "No file content provided"})
+            return
+
+        file_bytes = base64.b64decode(content_b64)
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+        if ext == "pdf":
+            _json_response(h, 400, {
+                "error": "PDF upload is not supported. Open the PDF in Word, "
+                         "save as .docx, then upload that file."
+            })
+            return
+        if ext != "docx":
+            _json_response(h, 400, {"error": "Only .docx files are supported."})
+            return
+
+        # Smart 3-pass detection: Word styles → heuristics → Claude metadata
+        structure  = docx_engine.detect_structure_from_docx(file_bytes)
+        text       = docx_engine.extract_text_from_docx(file_bytes)
+        word_count = len(text.split())
+
+        if "error" in structure:
+            _json_response(h, 200, {
+                "title":      "",
+                "chapters":   [],
+                "word_count": word_count,
+                "structured": False,
+            })
+            return
+
+        result_chapters = []
+        for ch in structure.get("chapters", []):
+            words = len(ch.get("content", "").split()) + sum(
+                len(s.get("content", "").split()) for s in ch.get("sections", [])
+            )
+            result_chapters.append({
+                "number":     ch.get("number", 0),
+                "heading":    ch.get("heading", ""),
+                "word_count": words,
+            })
+
+        _json_response(h, 200, {
+            "title":      structure.get("title", ""),
+            "chapters":   result_chapters,
+            "word_count": word_count,
+            "structured": True,
+        })
+
+    except Exception as exc:
+        logger.error("pb analyse error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_pb_create_order(h, body: bytes) -> None:
+    """POST /project-builder/create-order — create Razorpay order for paid tier."""
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    service    = data.get("service", "")
+    university = data.get("university", "")
+    word_count = int(data.get("word_count", 0))
+
+    if service not in ("format_fix", "generate"):
+        _json_response(h, 400, {"error": "service must be 'format_fix' or 'generate'"})
+        return
+    if not university:
+        _json_response(h, 400, {"error": "university is required"})
+        return
+
+    # Pricing: format_fix = Rs.49, generate = Rs.99 (<50 pages est.) or Rs.149
+    if service == "format_fix":
+        amount_inr = 49
+    else:
+        est_pages  = max(1, word_count // 250)
+        amount_inr = 99 if est_pages < 50 else 149
+
+    from razorpay_integration import create_project_order
+    result = create_project_order(
+        amount_paise=amount_inr * 100,
+        receipt=f"pb_{service[:3]}_{university[:6]}",
+    )
+
+    if "error" in result:
+        _json_response(h, 500, {"error": result["error"]})
+        return
+
+    _json_response(h, 200, {
+        "razorpay_order_id": result["id"],
+        "amount":            result["amount"],
+        "currency":          result["currency"],
+        "key_id":            os.environ.get("RAZORPAY_KEY_ID", ""),
+    })
+
+
+def _handle_pb_format_preview(h, body: bytes) -> None:
+    """POST /project-builder/format-preview — free generation, upload to Supabase, return token.
+
+    No payment required. Generates the DOCX, uploads it under a UUID path, and
+    returns the token so the client can show a preview before charging.
+    """
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    service    = data.get("service", "format_fix")
+    university = data.get("university", "")
+
+    if service not in ("format_fix", "generate"):
+        _json_response(h, 400, {"error": "invalid service"})
+        return
+
+    import docx_engine
+
+    try:
+        if service == "format_fix":
+            content_b64  = data.get("content_b64", "")
+            content_type = data.get("content_type", "text")   # "text"|"docx"|"pdf"
+            content      = data.get("content", "")
+
+            if content_b64:
+                import base64 as _b64
+                file_bytes = _b64.b64decode(content_b64)
+                if content_type == "pdf":
+                    _json_response(h, 400, {
+                        "error": "PDF upload is not supported. Open the PDF in Word, "
+                                 "save as .docx, then upload that file."
+                    })
+                    return
+                if content_type == "docx":
+                    # In-place reformat — images and tables preserved
+                    docx_bytes = docx_engine.format_fix_docx_inplace(file_bytes, university)
+                    structure  = docx_engine.detect_structure_from_docx(file_bytes)
+                else:
+                    text = file_bytes.decode("utf-8", errors="replace")
+                    if len(text) > 200_000:
+                        _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
+                        return
+                    docx_bytes = docx_engine.format_fix(text, university)
+                    try:
+                        structure = docx_engine._parse_structure_with_claude(text)
+                    except Exception:
+                        structure = {}
+            elif content:
+                text = content
+                if len(text) > 200_000:
+                    _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
+                    return
+                docx_bytes = docx_engine.format_fix(text, university)
+                try:
+                    structure = docx_engine._parse_structure_with_claude(text)
+                except Exception:
+                    structure = {}
+            else:
+                _json_response(h, 400, {"error": "content or content_b64 required"})
+                return
+
+        else:  # generate
+            form_data = data.get("form_data", {})
+            if not form_data:
+                _json_response(h, 400, {"error": "form_data required for generate service"})
+                return
+            docx_bytes = docx_engine.generate_from_form(form_data, university)
+            structure = {
+                "title": form_data.get("title", ""),
+                "chapters": [
+                    {"number": i + 1, "heading": ch.get("title") or ch.get("heading", f"Chapter {i + 1}")}
+                    for i, ch in enumerate(form_data.get("chapters", []))
+                ],
+            }
+
+    except ValueError as e:
+        _json_response(h, 400, {"error": str(e)})
+        return
+    except Exception as e:
+        logger.error(f"project-builder format-preview generation error: {e}")
+        _json_response(h, 500, {"error": "Document generation failed. Please try again."})
+        return
+
+    # Upload DOCX to Supabase Storage under a UUID — public bucket, unguessable path
+    import uuid as _uuid
+    token = str(_uuid.uuid4())
+    cfg   = docx_engine.load_university_config(university)
+    mime_docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    from db_cloud import upload_file
+    url = upload_file(f"project-builder/previews/{token}.docx", docx_bytes, mime_docx)
+    if not url:
+        _json_response(h, 500, {"error": "Upload failed. Please try again."})
+        return
+
+    _json_response(h, 200, {
+        "file_token": token,
+        "size_bytes": len(docx_bytes),
+        "university": cfg.get("short_name", university.upper()),
+        "preview":    structure,
+    })
+
+
+def _handle_pb_process(h, body: bytes) -> None:
+    """POST /project-builder/process — verify Razorpay payment, generate DOCX."""
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    # Admin bypass — skip Razorpay if correct admin key provided
+    admin_key = data.get("admin_key", "")
+    if admin_key:
+        client_ip = h.headers.get("x-forwarded-for", h.client_address[0]).split(",")[0].strip()
+        if not _check_bypass_rate_limit(client_ip):
+            _json_response(h, 429, {"error": "Too many attempts. Try again in 15 minutes."})
+            return
+        admin_pass = os.environ.get("PB_BYPASS_KEY", "")
+        if not admin_pass:
+            _json_response(h, 500, {"error": "PB_BYPASS_KEY not set on server"})
+            return
+        if admin_key != admin_pass:
+            _record_bypass_failure(client_ip)
+            remaining = _BYPASS_MAX_ATTEMPTS - len(_bypass_attempts[client_ip])
+            _json_response(h, 403, {"error": f"Wrong bypass password. {remaining} attempt(s) left."})
+            return
+        # Password correct — bypass payment
+        file_token = data.get("file_token", "")
+        if not file_token:
+            _json_response(h, 400, {"error": "file_token required for admin download"})
+            return
+        from db_cloud import get_media_url
+        path   = f"project-builder/previews/{file_token}.docx"
+        dl_url = get_media_url(path)
+        _json_response(h, 200, {"download_url": dl_url})
+        return
+
+    payment_id = data.get("razorpay_payment_id", "")
+    order_id   = data.get("razorpay_order_id", "")
+    signature  = data.get("razorpay_signature", "")
+
+    from razorpay_integration import verify_checkout_payment
+    if not verify_checkout_payment(order_id, payment_id, signature):
+        _json_response(h, 403, {"error": "Payment verification failed"})
+        return
+
+    # Token mode: file was pre-generated by /format-preview — return URL + save order
+    file_token = data.get("file_token", "")
+    if file_token:
+        from db_cloud import get_media_url, save_pb_order
+        path   = f"project-builder/previews/{file_token}.docx"
+        dl_url = get_media_url(path)
+
+        # Collect optional student metadata from request
+        wa_phone     = _normalize_phone(data.get("whatsapp_phone", ""))
+        student_name = str(data.get("student_name", ""))[:100]
+        service_type = data.get("service", "format_fix")
+        university   = data.get("university", "")
+        try:
+            amount_inr = int(data.get("amount_inr", 49))
+        except (ValueError, TypeError):
+            amount_inr = 49
+
+        pb_oid = _generate_pb_order_id()
+        try:
+            save_pb_order(
+                order_id=pb_oid,
+                tier=service_type,
+                university=university,
+                whatsapp_phone=wa_phone,
+                student_name=student_name,
+                razorpay_order_id=order_id,
+                razorpay_payment_id=payment_id,
+                amount_inr=amount_inr,
+                storage_path=path,
+                download_url=dl_url,
+            )
+        except Exception as _e:
+            logger.warning(f"save_pb_order non-critical failure for {pb_oid}: {_e}")
+
+        if wa_phone:
+            _send_pb_whatsapp(wa_phone, pb_oid, dl_url)
+
+        _json_response(h, 200, {"download_url": dl_url, "order_id": pb_oid})
+        return
+
+    service    = data.get("service", "")
+    university = data.get("university", "")
+
+    if service not in ("format_fix", "generate"):
+        _json_response(h, 400, {"error": "invalid service"})
+        return
+
+    import docx_engine
+
+    try:
+        if service == "format_fix":
+            content_b64  = data.get("content_b64", "")
+            content_type = data.get("content_type", "text")  # "text"|"docx"|"pdf"
+            content      = data.get("content", "")
+
+            if content_b64:
+                import base64 as _b64
+                file_bytes = _b64.b64decode(content_b64)
+                if content_type == "docx":
+                    text = docx_engine.extract_text_from_docx(file_bytes)
+                elif content_type == "pdf":
+                    text = docx_engine.extract_text_from_pdf(file_bytes)
+                else:
+                    text = file_bytes.decode("utf-8", errors="replace")
+            elif content:
+                text = content
+            else:
+                _json_response(h, 400, {"error": "content or content_b64 required"})
+                return
+
+            if len(text) > 200_000:
+                _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
+                return
+
+            docx_bytes = docx_engine.format_fix(text, university)
+
+        else:  # generate
+            form_data = data.get("form_data", {})
+            if not form_data:
+                _json_response(h, 400, {"error": "form_data required for generate service"})
+                return
+            docx_bytes = docx_engine.generate_from_form(form_data, university)
+
+    except ValueError as e:
+        _json_response(h, 400, {"error": str(e)})
+        return
+    except Exception as e:
+        logger.error(f"project-builder process error: {e}")
+        _json_response(h, 500, {"error": "Document generation failed. Please try again."})
+        return
+
+    # Upload to storage and return URL (consistent with token-mode response)
+    from db_cloud import upload_pb_doc, save_pb_order
+    pb_oid = _generate_pb_order_id()
+    dl_url = upload_pb_doc(pb_oid, docx_bytes)
+    if not dl_url:
+        _json_response(h, 500, {"error": "Storage upload failed. Please try again."})
+        return
+
+    wa_phone     = _normalize_phone(data.get("whatsapp_phone", ""))
+    student_name = str(data.get("student_name", ""))[:100]
+    try:
+        amount_inr = int(data.get("amount_inr", 99))
+    except (ValueError, TypeError):
+        amount_inr = 99
+
+    try:
+        save_pb_order(
+            order_id=pb_oid,
+            tier=service,
+            university=university,
+            whatsapp_phone=wa_phone,
+            student_name=student_name,
+            razorpay_order_id=order_id,
+            razorpay_payment_id=payment_id,
+            amount_inr=amount_inr,
+            storage_path=f"project-builder/orders/{pb_oid}.docx",
+            download_url=dl_url,
+        )
+    except Exception as _e:
+        logger.warning(f"save_pb_order non-critical failure for {pb_oid}: {_e}")
+
+    if wa_phone:
+        _send_pb_whatsapp(wa_phone, pb_oid, dl_url)
+
+    _json_response(h, 200, {"download_url": dl_url, "order_id": pb_oid})
+
+
+# ── Project Builder — order retrieval (Phase 3) ───────────────────────────────
+
+def _handle_pb_order_get(h, order_id: str) -> None:
+    """GET /project-builder/orders/{id}?phone=91XXXXXXXXXX — retrieve an order.
+
+    Requires X-Whatsapp-Phone header or ?phone= query param matching the stored
+    phone number. Returns the download_url so the student can re-download.
+    """
+    from db_cloud import get_pb_order
+    # Accept phone from header or query param
+    phone = h.headers.get("X-Whatsapp-Phone", "")
+    if not phone:
+        params = parse_qs(urlparse(h.path).query)
+        phone  = params.get("phone", [""])[0]
+
+    order = get_pb_order(order_id, _normalize_phone(phone) if phone else None)
+    if not order:
+        _json_response(h, 404, {"error": "Order not found or phone number mismatch."})
+        return
+    _json_response(h, 200, {
+        "order_id":     order["id"],
+        "tier":         order["tier"],
+        "university":   order["university"],
+        "download_url": order["download_url"],
+        "status":       order["status"],
+        "created_at":   order["created_at"],
+    })
+
+
+def _handle_pb_orders_admin(h) -> None:
+    """GET /project-builder/orders — list all orders (admin auth required)."""
+    admin_pw = h.headers.get("X-Admin-Password", "").strip()
+    if not admin_pw:
+        params   = parse_qs(urlparse(h.path).query)
+        admin_pw = params.get("admin_password", [""])[0]
+    if not _auth_admin_pw(admin_pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    from db_cloud import list_pb_orders
+    orders = list_pb_orders(limit=200)
+    _json_response(h, 200, {"orders": orders, "count": len(orders)})
+
+
+def _handle_pb_order_resend(h, order_id: str) -> None:
+    """POST /project-builder/orders/{id}/resend — re-send WhatsApp (admin only)."""
+    admin_pw = h.headers.get("X-Admin-Password", "").strip()
+    if not _auth_admin_pw(admin_pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    from db_cloud import get_pb_order
+    order = get_pb_order(order_id, whatsapp_phone=None)
+    if not order:
+        _json_response(h, 404, {"error": "Order not found"})
+        return
+    phone = order.get("whatsapp_phone", "")
+    dl    = order.get("download_url", "")
+    if not phone:
+        _json_response(h, 400, {"error": "No WhatsApp phone on record for this order"})
+        return
+    if not dl:
+        _json_response(h, 400, {"error": "No download URL on record for this order"})
+        return
+    _send_pb_whatsapp(phone, order_id, dl)
+    _json_response(h, 200, {"ok": True, "sent_to": phone})
+
+
 # ── Vercel request handler ────────────────────────────────────────────────────
 
 class handler(BaseHTTPRequestHandler):
@@ -1456,6 +2363,15 @@ class handler(BaseHTTPRequestHandler):
                 self.send_response(403)
                 self.end_headers()
                 logger.warning("Meta webhook verify failed — token mismatch")
+            return
+
+        # ── Public order tracker (no auth) ───────────────────────────────────
+        if self.path.startswith("/api/track/"):
+            m = re.match(r"^/api/track/([^/?]+)$", self.path.split("?")[0])
+            if m:
+                _handle_track(self, m.group(1))
+            else:
+                _json_response(self, 400, {"error": "missing pickup code"})
             return
 
         # ── Academic project orders ──────────────────────────────────────────
@@ -1492,6 +2408,26 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path.startswith("/api/health"):
             _handle_health(self)
+            return
+
+        # ── Project Builder ──────────────────────────────────────────────────
+        if self.path == "/project-builder/templates":
+            _handle_pb_templates_get(self)
+            return
+
+        _pb = re.match(r"^/project-builder/templates/([^/?]+)$", self.path.split("?")[0])
+        if _pb:
+            _handle_pb_template_download(self, _pb.group(1))
+            return
+
+        # ── Project Builder — order retrieval ────────────────────────────────
+        if self.path == "/project-builder/orders":
+            _handle_pb_orders_admin(self)
+            return
+
+        _pb_order = re.match(r"^/project-builder/orders/([^/?]+)$", self.path.split("?")[0])
+        if _pb_order:
+            _handle_pb_order_get(self, _pb_order.group(1))
             return
 
         # Health check
@@ -1612,9 +2548,35 @@ class handler(BaseHTTPRequestHandler):
             _handle_admin_send_file(self, body)
             return
 
+        if self.path == "/admin/format-fixer":
+            _handle_admin_format_fixer(self, body)
+            return
+
         # ── Referral store-credit redemption (staff) ─────────────────────────
         if self.path == "/referrals/redeem":
             _handle_referrals_redeem(self, body)
+            return
+
+        # ── Project Builder ──────────────────────────────────────────────────
+        if self.path == "/project-builder/analyse":
+            _handle_pb_analyse(self, body)
+            return
+
+        if self.path == "/project-builder/format-preview":
+            _handle_pb_format_preview(self, body)
+            return
+
+        if self.path == "/project-builder/create-order":
+            _handle_pb_create_order(self, body)
+            return
+
+        if self.path == "/project-builder/process":
+            _handle_pb_process(self, body)
+            return
+
+        _pb_resend = re.match(r"^/project-builder/orders/([^/?]+)/resend$", self.path.split("?")[0])
+        if _pb_resend:
+            _handle_pb_order_resend(self, _pb_resend.group(1))
             return
 
         self.send_response(404)

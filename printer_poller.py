@@ -31,22 +31,32 @@ import threading
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
+import os
 import re
 import requests
 import urllib3
+
+from store_config import get_store_config
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ── Config ─────────────────────────────────────────────────────────────────────
-KONICA_IP            = "192.168.55.110"
-EPSON_IP             = "192.168.55.202"
+_PRINTERS            = get_store_config().printers
+KONICA_IP            = _PRINTERS.konica_ip
+EPSON_IP             = _PRINTERS.epson_ip
 POLL_INTERVAL        = 300          # seconds (5 minutes)
 SNMP_COMMUNITY       = "public"
 SNMP_TIMEOUT         = 3            # seconds
 HTTP_TIMEOUT         = 10           # seconds
 
 EPSON_BASE      = f"https://{EPSON_IP}"
-EPSON_USER      = "Oxygen"
-EPSON_PASS      = "Oxygen@1234"
+EPSON_USER      = os.environ.get("EPSON_USER", "Oxygen")
+EPSON_PASS      = os.environ.get("EPSON_PASS", "Oxygen@1234")
 EPSON_LOGIN_URL = f"{EPSON_BASE}/PRESENTATION/ADVANCED/PASSWORD/SET"
 EPSON_USAGE_URL = f"{EPSON_BASE}/PRESENTATION/ADVANCED/INFO_MENTINFO/TOP"
 

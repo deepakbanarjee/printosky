@@ -1,0 +1,1482 @@
+"""
+docx_engine.py — Document generation and formatting engine for Printosky Project Builder.
+
+Handles:
+- Loading university formatting configs from university_configs/*.json
+- Extracting text from uploaded .docx and .pdf files
+- Parsing document structure via Claude Haiku
+- Generating formatted .docx output for all three product tiers:
+    - generate_free_template()  → blank template with placeholders
+    - format_fix()              → re-format pasted or extracted text
+    - generate_from_form()      → full report from structured form data
+"""
+
+import io
+import json
+import logging
+import os
+import re
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+from docx import Document
+from docx.enum.section import WD_SECTION
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Cm, Pt
+from dotenv import load_dotenv
+
+load_dotenv()
+
+_CONFIG_DIR = Path(__file__).parent / "university_configs"
+
+
+# ---------------------------------------------------------------------------
+# Config helpers
+# ---------------------------------------------------------------------------
+
+def load_university_config(university_id: str) -> dict:
+    """Load and return JSON config for a university by ID."""
+    config_path = _CONFIG_DIR / f"{university_id}.json"
+    if not config_path.exists():
+        logger.warning("Unknown university ID %r — falling back to ktu", university_id)
+        config_path = _CONFIG_DIR / "ktu.json"
+    with open(config_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def list_universities() -> list:
+    """Return [{id, name, short_name, copies_required, cover_color}] for all configs."""
+    result = []
+    for config_file in sorted(_CONFIG_DIR.glob("*.json")):
+        with open(config_file, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        result.append({
+            "id":              cfg["id"],
+            "name":            cfg["name"],
+            "short_name":      cfg["short_name"],
+            "copies_required": cfg.get("copies_required", 3),
+            "cover_color":     cfg.get("cover_color", ""),
+        })
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Text extraction
+# ---------------------------------------------------------------------------
+
+def extract_text_from_docx(file_bytes: bytes) -> str:
+    """Extract plain text from a .docx file supplied as bytes."""
+    doc = Document(io.BytesIO(file_bytes))
+    parts = [para.text.strip() for para in doc.paragraphs if para.text.strip()]
+    return "\n\n".join(parts)
+
+
+def extract_text_from_pdf(file_bytes: bytes) -> str:
+    """Extract plain text from a PDF supplied as bytes.
+
+    Returns empty string if the PDF cannot be parsed (corrupt, encrypted, etc.)
+    rather than raising — callers should handle empty text gracefully.
+    """
+    import pdfplumber
+    try:
+        parts = []
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    parts.append(page_text.strip())
+        return "\n\n".join(parts)
+    except Exception as exc:
+        logger.warning("extract_text_from_pdf failed: %s", exc)
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# PDF block-based extraction (positional, no LLM)
+# ---------------------------------------------------------------------------
+
+_PDF_BULLET_RE   = re.compile(r"^[●•▪◆►]\s*")
+_PDF_NUM_LIST_RE = re.compile(r"^(\d{1,2})[\.)]\s+")
+_PDF_PAGE_NUM_RE = re.compile(r"^\(\d+\)$")
+_PDF_ALL_CAPS_RE = re.compile(r"^[A-Z][A-Z \-,&\.\?:!\d]{2,}$")
+_PDF_KV_RE       = re.compile(r"^([A-Z][^:\n]{2,40}?)\s*:\s*(.+)$")
+_PDF_NOISE_TOKENS = ("Map Camera", "Plus Code", " Lat ", " Long ", "GPS")
+
+
+def _pdf_is_noise(line: str) -> bool:
+    return any(tok in line for tok in _PDF_NOISE_TOKENS)
+
+
+def _pdf_merge_sentences(lines: list[str]) -> list[str]:
+    """Join Canva-broken visual lines back into full sentences."""
+    out: list[str] = []
+    for ln in lines:
+        s = ln.rstrip()
+        if not s:
+            continue
+        looks_independent = (
+            _PDF_BULLET_RE.match(s)
+            or _PDF_NUM_LIST_RE.match(s)
+            or (_PDF_ALL_CAPS_RE.match(s) and len(s) < 60)
+            or _PDF_PAGE_NUM_RE.match(s)
+            or _PDF_KV_RE.match(s)
+        )
+        if (out
+                and not out[-1].rstrip().endswith((".", "?", "!", ":", ";"))
+                and not looks_independent
+                and not (_PDF_ALL_CAPS_RE.match(out[-1]) and len(out[-1]) < 60)):
+            out[-1] = out[-1].rstrip() + " " + s.lstrip()
+        else:
+            out.append(s)
+    return out
+
+
+def _pdf_page_blocks(pdf, page_no_0based: int) -> list[str]:
+    """Extract text blocks from a PDF page in true visual reading order."""
+    page = pdf[page_no_0based]
+    raw_blocks = [b for b in page.get_text("blocks") if b[6] == 0]
+    raw_blocks.sort(key=lambda b: (round(b[1], 1), round(b[0], 1)))
+    out: list[str] = []
+    for b in raw_blocks:
+        text = b[4].strip()
+        if not text:
+            continue
+        block_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        merged: list[str] = []
+        buf = ""
+        for ln in block_lines:
+            is_break = (
+                _PDF_BULLET_RE.match(ln)
+                or _PDF_NUM_LIST_RE.match(ln)
+                or (_PDF_ALL_CAPS_RE.match(ln) and len(ln) < 60)
+                or _PDF_PAGE_NUM_RE.match(ln)
+            )
+            if is_break:
+                if buf:
+                    merged.append(buf)
+                    buf = ""
+                merged.append(ln)
+            else:
+                buf = (buf + " " + ln).strip() if buf else ln
+        if buf:
+            merged.append(buf)
+        for m in merged:
+            if not _pdf_is_noise(m):
+                out.append(m)
+    return out
+
+
+def _pdf_build_decorative_xrefs(pdf) -> set[int]:
+    """xrefs whose hash appears on >=3 pages (Canva backgrounds, repeated icons)."""
+    import hashlib
+    import fitz
+    hash_pages: dict[str, set[int]] = {}
+    xref_hash: dict[int, str] = {}
+    for page_no in range(len(pdf)):
+        page = pdf[page_no]
+        for info in page.get_images(full=True):
+            xref = info[0]
+            if xref in xref_hash:
+                hash_pages.setdefault(xref_hash[xref], set()).add(page_no)
+                continue
+            try:
+                pix = fitz.Pixmap(pdf, xref)
+                if pix.alpha or pix.n > 4:
+                    pix = fitz.Pixmap(fitz.csRGB, pix)
+                h = hashlib.md5(pix.tobytes("png")).hexdigest()
+                pix = None
+                xref_hash[xref] = h
+                hash_pages.setdefault(h, set()).add(page_no)
+            except Exception:
+                continue
+    deco_hashes = {h for h, pgs in hash_pages.items() if len(pgs) >= 3}
+    return {xref for xref, h in xref_hash.items() if h in deco_hashes}
+
+
+def extract_text_from_pdf_blocks(file_bytes: bytes) -> str:
+    """PDF text extraction with positional reading order + sentence merging."""
+    import fitz
+    try:
+        with fitz.open(stream=file_bytes, filetype="pdf") as pdf:
+            page_texts: list[str] = []
+            for page_no in range(len(pdf)):
+                lines = _pdf_page_blocks(pdf, page_no)
+                lines = _pdf_merge_sentences(lines)
+                if lines:
+                    page_texts.append("\n".join(lines))
+        return "\n\n".join(page_texts)
+    except Exception as exc:
+        logger.warning("extract_text_from_pdf_blocks failed: %s", exc)
+        return ""
+
+
+def detect_structure_from_pdf(pdf_bytes: bytes) -> dict:
+    """Detect chapter/heading structure from a PDF deterministically.
+
+    Returns the same shape as detect_structure_from_docx. No LLM in path.
+    """
+    import fitz
+    try:
+        pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:
+        logger.warning("detect_structure_from_pdf open failed: %s", exc)
+        return {"error": "pdf_open_failed"}
+    try:
+        title = ""
+        chapters: list = []
+        current_chapter: dict | None = None
+        seen_first_heading = False
+        for page_no in range(len(pdf)):
+            lines = _pdf_page_blocks(pdf, page_no)
+            lines = _pdf_merge_sentences(lines)
+            for ln in lines:
+                if _PDF_PAGE_NUM_RE.match(ln):
+                    continue
+                stripped = ln.strip(" ?:.")
+                if (page_no == 0 and not seen_first_heading
+                        and _PDF_ALL_CAPS_RE.match(ln)
+                        and 8 <= len(ln) <= 80):
+                    title = title or stripped
+                    seen_first_heading = True
+                    continue
+                is_chapter_heading = (
+                    bool(re.match(r"^CHAPTER\s+\d+", ln, re.IGNORECASE))
+                    or (_PDF_ALL_CAPS_RE.match(ln) and 3 <= len(ln) <= 60)
+                )
+                if is_chapter_heading:
+                    seen_first_heading = True
+                    current_chapter = {
+                        "number":   len(chapters) + 1,
+                        "heading":  stripped,
+                        "sections": [],
+                        "content":  "",
+                    }
+                    chapters.append(current_chapter)
+                    continue
+                if current_chapter is not None:
+                    current_chapter["content"] = (
+                        current_chapter["content"] + " " + ln
+                    ).strip()
+        if not chapters and not title:
+            return {"error": "no_structure_found"}
+        return {
+            "title":      title or "PROJECT REPORT",
+            "chapters":   chapters,
+            "references": [],
+        }
+    finally:
+        pdf.close()
+
+
+# ---------------------------------------------------------------------------
+# Claude Haiku — structure parser
+# ---------------------------------------------------------------------------
+
+def _parse_structure_with_claude(text: str) -> dict:
+    """
+    Call Claude Haiku to identify chapter/section structure.
+
+    Returns a dict matching:
+        {
+          "title": str,
+          "chapters": [{"number": int, "heading": str, "sections": [...], "content": str}],
+          "references": [str]
+        }
+    or {"error": "unstructured"} when structure cannot be identified.
+    """
+    import anthropic
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return {"error": "unstructured"}
+
+    client = anthropic.Anthropic(api_key=api_key)
+    truncated = text[:80000]
+
+    prompt = (
+        "Parse this academic project report and identify its structure.\n"
+        "Return ONLY valid JSON with this shape:\n"
+        "{\n"
+        '  "title": "string",\n'
+        '  "chapters": [\n'
+        "    {\n"
+        '      "number": 1,\n'
+        '      "heading": "INTRODUCTION",\n'
+        '      "sections": [\n'
+        '        {"number": "1.1", "heading": "Background", "content": "..."}\n'
+        "      ]\n"
+        "    }\n"
+        "  ],\n"
+        '  "references": ["[1] ...", "[2] ..."]\n'
+        "}\n\n"
+        'If you cannot identify a clear structure, return {"error": "unstructured"}.\n'
+        "Return ONLY the JSON object — no markdown fences, no explanation.\n\n"
+        f"Document text:\n{truncated}"
+    )
+
+    try:
+        message = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = message.content[0].text.strip()
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        return json.loads(raw)
+    except Exception:
+        return {"error": "unstructured"}
+
+
+# ---------------------------------------------------------------------------
+# Style application
+# ---------------------------------------------------------------------------
+
+_ALIGN_MAP = {
+    "center":  WD_ALIGN_PARAGRAPH.CENTER,
+    "left":    WD_ALIGN_PARAGRAPH.LEFT,
+    "right":   WD_ALIGN_PARAGRAPH.RIGHT,
+    "justify": WD_ALIGN_PARAGRAPH.JUSTIFY,
+}
+
+
+def _apply_university_styles(doc: Document, config: dict) -> None:
+    """Apply margins, body font, and heading styles from a university config."""
+    m = config["margins"]
+    for section in doc.sections:
+        section.left_margin   = Cm(m["left_cm"])
+        section.right_margin  = Cm(m["right_cm"])
+        section.top_margin    = Cm(m["top_cm"])
+        section.bottom_margin = Cm(m["bottom_cm"])
+
+    body_font = config["body_font"]
+    body_size = config["body_size_pt"]
+    spacing   = config["line_spacing"]
+    sp_before = config["para_space_before_pt"]
+    sp_after  = config["para_space_after_pt"]
+
+    normal = doc.styles["Normal"]
+    normal.font.name = body_font
+    normal.font.size = Pt(body_size)
+    normal.paragraph_format.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+    normal.paragraph_format.line_spacing      = spacing
+    normal.paragraph_format.space_before      = Pt(sp_before)
+    normal.paragraph_format.space_after       = Pt(sp_after)
+
+    heading_specs = {
+        "Heading 1": config["heading1"],
+        "Heading 2": config["heading2"],
+        "Heading 3": config["heading3"],
+    }
+    for style_name, hcfg in heading_specs.items():
+        try:
+            hstyle = doc.styles[style_name]
+        except KeyError:
+            continue
+        hstyle.font.name     = body_font
+        hstyle.font.size     = Pt(hcfg["size_pt"])
+        hstyle.font.bold     = hcfg["bold"]
+        hstyle.font.all_caps = bool(hcfg.get("all_caps"))
+        hstyle.paragraph_format.alignment = _ALIGN_MAP.get(
+            hcfg.get("align", "left"), WD_ALIGN_PARAGRAPH.LEFT
+        )
+        hstyle.paragraph_format.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+        hstyle.paragraph_format.line_spacing      = spacing
+        hstyle.paragraph_format.space_before      = Pt(12)
+        hstyle.paragraph_format.space_after       = Pt(6)
+
+
+def _set_section_page_numbering(section, fmt: str = "decimal", start: int = 1) -> None:
+    """Set page number format on a section via XML manipulation."""
+    sectPr = section._sectPr
+    for old in sectPr.findall(qn("w:pgNumType")):
+        sectPr.remove(old)
+    pgNumType = OxmlElement("w:pgNumType")
+    pgNumType.set(qn("w:fmt"), fmt)
+    pgNumType.set(qn("w:start"), str(start))
+    sectPr.append(pgNumType)
+
+
+def _apply_margins_to_section(section, config: dict) -> None:
+    m = config["margins"]
+    section.left_margin   = Cm(m["left_cm"])
+    section.right_margin  = Cm(m["right_cm"])
+    section.top_margin    = Cm(m["top_cm"])
+    section.bottom_margin = Cm(m["bottom_cm"])
+
+
+# ---------------------------------------------------------------------------
+# Low-level paragraph helpers
+# ---------------------------------------------------------------------------
+
+def _add_body_para(doc: Document, text: str, config: dict) -> None:
+    para = doc.add_paragraph()
+    para.paragraph_format.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+    para.paragraph_format.line_spacing      = config["line_spacing"]
+    para.paragraph_format.space_before      = Pt(config["para_space_before_pt"])
+    para.paragraph_format.space_after       = Pt(config["para_space_after_pt"])
+    run = para.add_run(text)
+    run.font.name = config["body_font"]
+    run.font.size = Pt(config["body_size_pt"])
+
+
+def _add_centered_bold(
+    doc: Document, text: str, size_pt: int = 14, space_before: int = 0
+) -> None:
+    para = doc.add_paragraph()
+    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    para.paragraph_format.space_before = Pt(space_before)
+    run = para.add_run(text)
+    run.bold = True
+    run.font.size = Pt(size_pt)
+
+
+# ---------------------------------------------------------------------------
+# TOC field
+# ---------------------------------------------------------------------------
+
+def _add_toc_field(doc: Document) -> None:
+    """Insert a Word auto-updating TOC field (update on open in Word)."""
+    para = doc.add_paragraph()
+    para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    def _append_elem(elem):
+        run = para.add_run()
+        run._r.append(elem)
+
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    _append_elem(begin)
+
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = ' TOC \\o "1-3" \\h \\z \\u '
+    run_instr = para.add_run()
+    run_instr._r.append(instr)
+
+    sep = OxmlElement("w:fldChar")
+    sep.set(qn("w:fldCharType"), "separate")
+    _append_elem(sep)
+
+    placeholder = para.add_run()
+    placeholder.text = "[Right-click → Update Field → Update entire table]"
+    placeholder.font.italic = True
+
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    _append_elem(end)
+
+
+# ---------------------------------------------------------------------------
+# Front matter page builders
+# ---------------------------------------------------------------------------
+
+def _build_title_page(doc: Document, config: dict, meta: dict) -> None:
+    doc.add_paragraph()
+    doc.add_paragraph()
+
+    college     = meta.get("college_name", "[COLLEGE NAME]")
+    department  = meta.get("department", "[DEPARTMENT]")
+    title       = meta.get("title", "[PROJECT TITLE]")
+    report_type = meta.get("report_type", "B.Tech Final Year Project")
+    acad_year   = meta.get("academic_year", "[ACADEMIC YEAR]")
+    degree      = meta.get("degree", "Bachelor of Technology")
+
+    _add_centered_bold(doc, college.upper(), size_pt=16)
+    _add_centered_bold(doc, f"DEPARTMENT OF {department.upper()}", size_pt=13)
+
+    doc.add_paragraph()
+    doc.add_paragraph()
+    _add_centered_bold(doc, title.upper(), size_pt=16)
+    doc.add_paragraph()
+
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run(f"A {report_type.upper()} REPORT").bold = True
+
+    p2 = doc.add_paragraph()
+    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p2.add_run("Submitted to")
+
+    _add_centered_bold(doc, config["name"].upper(), size_pt=13)
+
+    p3 = doc.add_paragraph()
+    p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p3.add_run(
+        "in partial fulfillment of the requirements for the award of the Degree of"
+    )
+
+    _add_centered_bold(
+        doc, f"{degree.upper()}\nIN {department.upper()}", size_pt=13
+    )
+
+    doc.add_paragraph()
+    _add_centered_bold(doc, "Submitted by", size_pt=12)
+    for s in meta.get("students", []):
+        name = s.get("name", "")
+        roll = s.get("roll_no") or s.get("roll", "")
+        if name:
+            sp = doc.add_paragraph()
+            sp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            sp.add_run(f"{name}  ({roll})")
+
+    doc.add_paragraph()
+    _add_centered_bold(doc, acad_year, size_pt=12)
+
+    note = doc.add_paragraph()
+    note.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    nr = note.add_run(
+        f"[Print on {config.get('cover_color', 'Navy Blue')} hard cover "
+        f"with {config.get('cover_text_color', 'Gold')} text]"
+    )
+    nr.italic = True
+    nr.font.size = Pt(10)
+
+
+def _build_certificate_page(doc: Document, config: dict, meta: dict) -> None:
+    doc.add_heading("CERTIFICATE", level=1)
+
+    students      = meta.get("students", [])
+    student_names = ", ".join(s.get("name", "") for s in students if s.get("name"))
+    guide         = meta.get("guide", {})
+    hod           = meta.get("hod", {})
+    co_guide      = meta.get("co_guide", {})
+
+    cert = config.get("certificate_text", "")
+    cert = (
+        cert
+        .replace("[TITLE]",         meta.get("title", "[TITLE]"))
+        .replace("[STUDENT_NAMES]", student_names or "[STUDENT NAMES]")
+        .replace("[DEPARTMENT]",    meta.get("department", "[DEPARTMENT]"))
+        .replace("[DEGREE]",        meta.get("degree", "Bachelor of Technology"))
+        .replace("[GUIDE_NAME]",    guide.get("name", "[GUIDE NAME]"))
+    )
+
+    _add_body_para(doc, cert, config)
+    doc.add_paragraph()
+
+    sig_table = doc.add_table(rows=1, cols=2)
+    sig_table.style = "Table Grid"
+    cells = sig_table.rows[0].cells
+    cells[0].text = (
+        f"Guide:\n{guide.get('name', '[Guide Name]')}\n"
+        f"{guide.get('designation', 'Assistant Professor')}"
+    )
+    cells[1].text = (
+        f"Head of Department:\n{hod.get('name', '[HOD Name]')}\n"
+        f"{hod.get('designation', 'Professor & Head')}"
+    )
+
+    if co_guide and co_guide.get("name"):
+        doc.add_paragraph()
+        _add_body_para(
+            doc,
+            f"Co-Guide: {co_guide['name']}, {co_guide.get('designation', '')}",
+            config,
+        )
+
+    doc.add_paragraph()
+    _add_body_para(doc, "Place: _______________", config)
+    _add_body_para(doc, "Date:  _______________", config)
+
+
+def _build_declaration_page(doc: Document, config: dict, meta: dict) -> None:
+    doc.add_heading("DECLARATION", level=1)
+
+    students      = meta.get("students", [])
+    student_names = ", ".join(s.get("name", "") for s in students if s.get("name"))
+    guide         = meta.get("guide", {})
+
+    decl = config.get("declaration_text", "")
+    decl = (
+        decl
+        .replace("[TITLE]",         meta.get("title", "[TITLE]"))
+        .replace("[STUDENT_NAMES]", student_names or "[STUDENT NAMES]")
+        .replace("[DEPARTMENT]",    meta.get("department", "[DEPARTMENT]"))
+        .replace("[DEGREE]",        meta.get("degree", "Bachelor of Technology"))
+        .replace("[GUIDE_NAME]",    guide.get("name", "[GUIDE NAME]"))
+    )
+
+    _add_body_para(doc, decl, config)
+    doc.add_paragraph()
+    _add_body_para(doc, "Place: _______________", config)
+    _add_body_para(doc, "Date:  _______________", config)
+    doc.add_paragraph()
+    _add_body_para(doc, "Signature(s):", config)
+    for s in students:
+        name = s.get("name", "")
+        roll = s.get("roll_no") or s.get("roll", "")
+        if name:
+            _add_body_para(doc, f"\n_______________\n{name} ({roll})", config)
+
+
+def _build_acknowledgement_page(doc: Document, config: dict) -> None:
+    doc.add_heading("ACKNOWLEDGEMENT", level=1)
+    text = (
+        "We express our sincere gratitude to our guide for the invaluable guidance, "
+        "encouragement, and support extended to us throughout this project. We also thank "
+        "the Head of the Department and all faculty members for their help and inspiration. "
+        "We are grateful to the Management and Principal of our college for providing the "
+        "necessary facilities. We express our deep gratitude to our family and friends for "
+        "their continuous support and motivation.\n\n"
+        "[Add your personal acknowledgements here]"
+    )
+    _add_body_para(doc, text, config)
+
+
+def _build_abstract_page(doc: Document, config: dict, meta: dict) -> None:
+    doc.add_heading("ABSTRACT", level=1)
+    abstract = meta.get(
+        "abstract",
+        "[Insert abstract here — 100 to 300 words summarising your project, "
+        "methodology, and key findings.]",
+    )
+    _add_body_para(doc, abstract, config)
+
+    keywords = meta.get("keywords", [])
+    if keywords:
+        doc.add_paragraph()
+        kp = doc.add_paragraph()
+        kr = kp.add_run("Keywords: ")
+        kr.bold = True
+        kr.font.size = Pt(config["body_size_pt"])
+        kp.add_run(", ".join(keywords))
+
+
+def _build_toc_page(doc: Document) -> None:
+    doc.add_heading("TABLE OF CONTENTS", level=1)
+    _add_toc_field(doc)
+    note = doc.add_paragraph()
+    nr = note.add_run(
+        "Note: Open in Word → right-click the table above → Update Field → "
+        "Update entire table."
+    )
+    nr.italic = True
+    nr.font.size = Pt(9)
+
+
+def _build_list_of_figures_page(doc: Document) -> None:
+    doc.add_heading("LIST OF FIGURES", level=1)
+    p = doc.add_paragraph()
+    p.add_run("[Right-click → Update Field after inserting all figures]").italic = True
+
+
+def _build_list_of_tables_page(doc: Document) -> None:
+    doc.add_heading("LIST OF TABLES", level=1)
+    p = doc.add_paragraph()
+    p.add_run("[Right-click → Update Field after inserting all tables]").italic = True
+
+
+def _build_abbreviations_page(doc: Document, config: dict) -> None:
+    doc.add_heading("LIST OF ABBREVIATIONS", level=1)
+    table = doc.add_table(rows=1, cols=2)
+    table.style = "Table Grid"
+    hdr = table.rows[0].cells
+    hdr[0].text = "Abbreviation"
+    hdr[1].text = "Full Form"
+    for _ in range(8):
+        row = table.add_row().cells
+        row[0].text = ""
+        row[1].text = ""
+
+
+# ---------------------------------------------------------------------------
+# Chapter builder
+# ---------------------------------------------------------------------------
+
+def _build_chapter(doc: Document, chapter: dict, chapter_num: int, config: dict) -> None:
+    heading_text = f"CHAPTER {chapter_num}: {chapter.get('heading', '').upper()}"
+    doc.add_heading(heading_text, level=1)
+
+    sections = chapter.get("sections", [])
+    if sections:
+        for sec in sections:
+            sec_num     = sec.get("number", "")
+            sec_heading = sec.get("heading", "")
+            if sec_heading:
+                doc.add_heading(f"{sec_num} {sec_heading}", level=2)
+            content = sec.get("content", "")
+            for line in content.split("\n"):
+                line = line.strip()
+                if line:
+                    _add_body_para(doc, line, config)
+    else:
+        content = chapter.get("content", "[Chapter content goes here]")
+        for line in content.split("\n"):
+            line = line.strip()
+            if line:
+                _add_body_para(doc, line, config)
+
+
+def _build_references_page(doc: Document, references: list, config: dict) -> None:
+    doc.add_heading("REFERENCES", level=1)
+    if references:
+        for i, ref in enumerate(references, 1):
+            ref = ref.strip()
+            if ref:
+                if not ref.startswith("["):
+                    ref = f"[{i}] {ref}"
+                _add_body_para(doc, ref, config)
+    else:
+        _add_body_para(
+            doc,
+            "[Add references here in IEEE/APA format, one per line]",
+            config,
+        )
+
+
+def _build_appendices_page(doc: Document, appendices: str, config: dict) -> None:
+    doc.add_heading("APPENDICES", level=1)
+    content = appendices.strip() if appendices else ""
+    if content:
+        for line in content.split("\n"):
+            line = line.strip()
+            if line:
+                _add_body_para(doc, line, config)
+    else:
+        _add_body_para(
+            doc,
+            "[Appendix content — code listings, data tables, circuit diagrams, etc.]",
+            config,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Page numbering and section management
+# ---------------------------------------------------------------------------
+
+def _add_chapter_section(doc: Document, config: dict) -> None:
+    """Insert a new page section for chapters; set Arabic numbering from 1."""
+    section = doc.add_section(WD_SECTION.NEW_PAGE)
+    _apply_margins_to_section(section, config)
+    _set_section_page_numbering(section, fmt="decimal", start=1)
+
+
+def _set_front_matter_numbering(doc: Document) -> None:
+    """Set Roman numeral page numbering on section 0 (front matter)."""
+    _set_section_page_numbering(doc.sections[0], fmt="upperRoman", start=1)
+
+
+# ---------------------------------------------------------------------------
+# Footer CTA
+# ---------------------------------------------------------------------------
+
+def _add_footer_cta(doc: Document) -> None:
+    for section in doc.sections:
+        footer = section.footer
+        if not footer.paragraphs:
+            footer.add_paragraph()
+        fp = footer.paragraphs[0]
+        fp.clear()
+        fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        fr = fp.add_run(
+            "Once your report is ready — Print, bind & deliver with Printosky, Thrissur. "
+            "WhatsApp: 9495706405"
+        )
+        fr.font.size = Pt(9)
+        fr.italic = True
+
+
+# ---------------------------------------------------------------------------
+# Shared front matter dispatch table
+# ---------------------------------------------------------------------------
+
+_DEFAULT_FRONT_MATTER_ORDER = [
+    "title_page", "certificate", "declaration", "acknowledgement",
+    "abstract", "toc", "list_of_figures", "list_of_tables", "list_of_abbreviations",
+]
+
+
+def _build_front_matter(doc: Document, config: dict, meta: dict) -> None:
+    """Build all front matter pages in university-specified order."""
+    order = config.get("front_matter_order", _DEFAULT_FRONT_MATTER_ORDER)
+
+    builders = {
+        "title_page":            lambda: _build_title_page(doc, config, meta),
+        "certificate":           lambda: _build_certificate_page(doc, config, meta),
+        "declaration":           lambda: _build_declaration_page(doc, config, meta),
+        "acknowledgement":       lambda: _build_acknowledgement_page(doc, config),
+        "abstract":              lambda: _build_abstract_page(doc, config, meta),
+        "toc":                   lambda: _build_toc_page(doc),
+        "list_of_figures":       lambda: _build_list_of_figures_page(doc),
+        "list_of_tables":        lambda: _build_list_of_tables_page(doc),
+        "list_of_abbreviations": lambda: _build_abbreviations_page(doc, config),
+    }
+
+    for i, item in enumerate(order):
+        if i > 0:
+            doc.add_page_break()
+        builder = builders.get(item)
+        if builder:
+            builder()
+
+
+# ---------------------------------------------------------------------------
+# Public API — three product tiers
+# ---------------------------------------------------------------------------
+
+def generate_free_template(university_id: str) -> bytes:
+    """
+    Build a blank .docx template with placeholder text and correct university formatting.
+    Returns .docx as bytes.
+    """
+    config = load_university_config(university_id)
+    doc = Document()
+    _apply_university_styles(doc, config)
+    _set_front_matter_numbering(doc)
+
+    placeholder_meta = {
+        "title":        "[YOUR PROJECT TITLE]",
+        "college_name": "[YOUR COLLEGE NAME]",
+        "department":   "[YOUR DEPARTMENT]",
+        "academic_year": "[ACADEMIC YEAR e.g. 2025-26]",
+        "report_type":  "B.Tech Final Year Project",
+        "degree":       "Bachelor of Technology",
+        "students": [
+            {"name": "[Student Name 1]", "roll_no": "[Roll No]"},
+            {"name": "[Student Name 2]", "roll_no": "[Roll No]"},
+        ],
+        "guide":    {"name": "[Guide Name]",  "designation": "Assistant Professor"},
+        "co_guide": {"name": "",              "designation": ""},
+        "hod":      {"name": "[HOD Name]",    "designation": "Professor & Head"},
+        "abstract": (
+            "[Write your abstract here — 100 to 300 words summarising the problem, "
+            "methodology, and results of your project.]"
+        ),
+        "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"],
+    }
+
+    _build_front_matter(doc, config, placeholder_meta)
+
+    # Chapters section (Arabic numbering from page 1)
+    _add_chapter_section(doc, config)
+
+    placeholder_chapters = [
+        ("INTRODUCTION", [
+            ("1.1", "Background",  "[Background content here]"),
+            ("1.2", "Objectives",  "[Project objectives here]"),
+            ("1.3", "Scope",       "[Scope of the project here]"),
+        ]),
+        ("LITERATURE REVIEW",       []),
+        ("METHODOLOGY",             []),
+        ("IMPLEMENTATION",          []),
+        ("RESULTS AND DISCUSSION",  []),
+        ("CONCLUSION AND FUTURE WORK", []),
+    ]
+
+    for i, (ch_heading, sections) in enumerate(placeholder_chapters, 1):
+        if i > 1:
+            doc.add_page_break()
+        doc.add_heading(f"CHAPTER {i}: {ch_heading}", level=1)
+        if sections:
+            for sec_num, sec_heading, sec_content in sections:
+                doc.add_heading(f"{sec_num} {sec_heading}", level=2)
+                _add_body_para(doc, sec_content, config)
+        else:
+            _add_body_para(doc, f"[{ch_heading.title()} content goes here]", config)
+
+    doc.add_page_break()
+    _build_references_page(doc, [], config)
+    doc.add_page_break()
+    _build_appendices_page(doc, "", config)
+
+    _add_footer_cta(doc)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def format_fix(text: str, university_id: str) -> bytes:
+    """
+    Re-format a document (pasted text or extracted from uploaded file).
+    Uses Claude Haiku to parse structure; falls back gracefully if unstructured.
+    Returns .docx as bytes.
+    """
+    config = load_university_config(university_id)
+    doc = Document()
+    _apply_university_styles(doc, config)
+    _set_front_matter_numbering(doc)
+
+    structure = _parse_structure_with_claude(text)
+
+    if "error" in structure:
+        # Unstructured fallback: apply body formatting, add guidance note
+        doc.add_heading("FORMATTED DOCUMENT", level=1)
+        note_para = doc.add_paragraph()
+        note_run = note_para.add_run(
+            "Note: We could not automatically identify the chapter structure of your "
+            "document. Body text formatting has been applied. Please manually select your "
+            "chapter headings in Word and apply Heading 1 / Heading 2 / Heading 3 styles "
+            "from the Styles panel."
+        )
+        note_run.italic = True
+        doc.add_paragraph()
+
+        for line in text.split("\n"):
+            line = line.strip()
+            if line:
+                _add_body_para(doc, line, config)
+    else:
+        title      = structure.get("title", "PROJECT REPORT")
+        chapters   = structure.get("chapters", [])
+        references = structure.get("references", [])
+
+        doc.add_heading(title.upper(), level=1)
+        _add_body_para(
+            doc,
+            f"University: {config['name']}\n"
+            "[Fill in: college name, department, student names, guide, etc.]",
+            config,
+        )
+
+        doc.add_page_break()
+        _build_toc_page(doc)
+
+        _add_chapter_section(doc, config)
+
+        for i, chapter in enumerate(chapters, 1):
+            if i > 1:
+                doc.add_page_break()
+            _build_chapter(doc, chapter, i, config)
+
+        if references:
+            doc.add_page_break()
+            _build_references_page(doc, references, config)
+
+    _add_footer_cta(doc)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def generate_from_form(form_data: dict, university_id: str) -> bytes:
+    """
+    Build a complete project report from structured form data (Tier 3).
+    Returns .docx as bytes.
+
+    Accepts both the nested API format and the flat web-form format emitted
+    by project-builder.html's collectFormData():
+      - college / college_name
+      - year / academic_year
+      - guide_name + guide_desig  vs  guide: {name, designation}
+      - coguide_name + coguide_desig  vs  co_guide: {name, designation}
+      - hod_name + hod_desig  vs  hod: {name, designation}
+      - chapter.heading  vs  chapter.title
+    """
+    def _person(dict_key: str, name_key: str, desig_key: str) -> dict:
+        """Return a {name, designation} dict from either nested or flat fields."""
+        p = form_data.get(dict_key)
+        if isinstance(p, dict):
+            return p
+        return {
+            "name":        form_data.get(name_key, ""),
+            "designation": form_data.get(desig_key, ""),
+        }
+
+    config = load_university_config(university_id)
+    doc = Document()
+    _apply_university_styles(doc, config)
+    _set_front_matter_numbering(doc)
+
+    keywords_raw = form_data.get("keywords", "")
+    if isinstance(keywords_raw, str):
+        keywords = [k.strip() for k in keywords_raw.split(",") if k.strip()]
+    else:
+        keywords = list(keywords_raw)
+
+    meta = {
+        "title":        form_data.get("title", "[PROJECT TITLE]"),
+        "college_name": form_data.get("college_name") or form_data.get("college", "[COLLEGE NAME]"),
+        "department":   form_data.get("department", "[DEPARTMENT]"),
+        "academic_year": form_data.get("academic_year") or form_data.get("year", "[ACADEMIC YEAR]"),
+        "report_type":  form_data.get("report_type", "B.Tech Final Year Project"),
+        "degree":       form_data.get("degree", "Bachelor of Technology"),
+        "students":     form_data.get("students", []),
+        "guide":        _person("guide",    "guide_name",   "guide_desig"),
+        "co_guide":     _person("co_guide", "coguide_name", "coguide_desig"),
+        "hod":          _person("hod",      "hod_name",     "hod_desig"),
+        "abstract":     form_data.get("abstract", ""),
+        "keywords":     keywords,
+    }
+
+    _build_front_matter(doc, config, meta)
+
+    # Chapters section (Arabic numbering from page 1)
+    _add_chapter_section(doc, config)
+
+    chapters = form_data.get("chapters", [])
+    for i, chapter in enumerate(chapters, 1):
+        if i > 1:
+            doc.add_page_break()
+        ch_dict = {
+            "heading":  chapter.get("title") or chapter.get("heading", f"Chapter {i}"),
+            "sections": [],
+            "content":  chapter.get("content", ""),
+        }
+        _build_chapter(doc, ch_dict, i, config)
+
+    # References
+    refs_raw   = form_data.get("references", "")
+    references = [r.strip() for r in refs_raw.split("\n") if r.strip()] if refs_raw else []
+    doc.add_page_break()
+    _build_references_page(doc, references, config)
+
+    # Appendices (optional)
+    appendices = form_data.get("appendices", "")
+    if appendices and appendices.strip():
+        doc.add_page_break()
+        _build_appendices_page(doc, appendices, config)
+
+    _add_footer_cta(doc)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# In-place DOCX reformatter — preserves images, tables, all existing content
+# ---------------------------------------------------------------------------
+
+def _classify_with_claude_metadata(paras: list) -> list:
+    """Ask Claude Haiku to classify paragraphs from metadata only — no full text sent.
+
+    Only called when neither Word heading styles nor heuristics find any structure.
+    Sends a compact list: index, first-60-chars snippet, font size, bold, length.
+    Returns a list of strings: 'title'|'h1'|'h2'|'h3'|'body'|'blank'.
+    """
+    import anthropic
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return ["blank" if p["is_blank"] else "body" for p in paras]
+
+    lines = []
+    for i, p in enumerate(paras):
+        if p["is_blank"]:
+            lines.append(f"{i}: BLANK")
+        else:
+            snippet = p["text"][:60].replace("\n", " ")
+            lines.append(
+                f"{i}: text={repr(snippet)}, size={p['max_size']:.0f}pt, "
+                f"bold={p['bold']}, len={p['length']}"
+            )
+
+    prompt = (
+        "Classify each paragraph in an Indian university student project report.\n"
+        "Output ONLY a JSON array of strings, one per line index, using these labels:\n"
+        "  title = project/report title\n"
+        "  h1    = chapter heading (e.g. CHAPTER 1, INTRODUCTION)\n"
+        "  h2    = section heading (e.g. 1.1 Background)\n"
+        "  h3    = sub-section heading\n"
+        "  body  = regular paragraph\n"
+        "  blank = empty line\n\n"
+        "Paragraph metadata:\n"
+        + "\n".join(lines)
+        + "\n\nReturn ONLY the JSON array, no markdown, no explanation."
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        result = json.loads(raw)
+        if len(result) == len(paras):
+            return result
+    except Exception:
+        pass
+
+    return ["blank" if p["is_blank"] else "body" for p in paras]
+
+
+def _classify_paragraphs(doc: Document, body_size: float = 12.0) -> list:
+    """Classify every paragraph in a Document as title/h1/h2/h3/body/blank.
+
+    Three-pass strategy (stops at first success):
+      1. Word heading styles — most accurate, zero cost
+      2. Heuristics — bold + font size + ALL_CAPS patterns
+      3. Claude Haiku on paragraph metadata — fallback when doc has no styling at all
+    """
+    paras = []
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        sname = (para.style.name or "Normal") if para.style else "Normal"
+        is_bold = any(run.bold for run in para.runs if run.text.strip())
+        run_sizes = [run.font.size.pt for run in para.runs if run.font.size]
+        max_size = max(run_sizes) if run_sizes else body_size
+        paras.append({
+            "text":     text,
+            "style":    sname,
+            "bold":     is_bold,
+            "max_size": max_size,
+            "length":   len(text),
+            "is_upper": (text == text.upper() and len(text) > 3) if text else False,
+            "is_blank": not text,
+        })
+
+    # Pass 1 — Word heading styles
+    has_word_headings = any(
+        p["style"].startswith("Heading") or p["style"] == "Title"
+        for p in paras if not p["is_blank"]
+    )
+    if has_word_headings:
+        result = []
+        for p in paras:
+            s = p["style"]
+            if p["is_blank"]:      result.append("blank")
+            elif s == "Title":     result.append("title")
+            elif s == "Heading 1": result.append("h1")
+            elif s == "Heading 2": result.append("h2")
+            elif s == "Heading 3": result.append("h3")
+            else:                  result.append("body")
+        return result
+
+    # Pass 2 — heuristics
+    heuristic = []
+    for p in paras:
+        if p["is_blank"]:
+            heuristic.append("blank")
+        elif p["bold"] and p["length"] < 120 and (p["max_size"] >= 14 or p["is_upper"]):
+            heuristic.append("h1")
+        elif p["bold"] and p["length"] < 120 and p["max_size"] >= 13:
+            heuristic.append("h2")
+        elif p["bold"] and p["length"] < 80:
+            heuristic.append("h3")
+        else:
+            heuristic.append("body")
+
+    if any(c in ("h1", "h2", "h3", "title") for c in heuristic):
+        return heuristic
+
+    # Pass 3 — Claude Haiku on paragraph metadata (last resort)
+    return _classify_with_claude_metadata(paras)
+
+
+def detect_structure_from_docx(docx_bytes: bytes) -> dict:
+    """Detect document structure using smart 3-pass classification.
+
+    Pass 1: reads Word heading styles (zero cost, most accurate).
+    Pass 2: heuristics (bold + font size + ALL_CAPS).
+    Pass 3: Claude Haiku on paragraph metadata (when doc has no styling).
+    Returns the same shape as _parse_structure_with_claude.
+    """
+    doc = Document(io.BytesIO(docx_bytes))
+    classifications = _classify_paragraphs(doc, body_size=12.0)
+
+    title = ""
+    chapters: list = []
+    current_chapter: dict | None = None
+    current_section: dict | None = None
+
+    for para, cls in zip(doc.paragraphs, classifications):
+        text = para.text.strip()
+        if not text or cls == "blank":
+            continue
+
+        if cls == "title":
+            title = text
+        elif cls == "h1":
+            current_section = None
+            current_chapter = {
+                "number":   len(chapters) + 1,
+                "heading":  text,
+                "sections": [],
+                "content":  "",
+            }
+            chapters.append(current_chapter)
+        elif cls == "h2":
+            if current_chapter is None:
+                current_chapter = {
+                    "number":   len(chapters) + 1,
+                    "heading":  text,
+                    "sections": [],
+                    "content":  "",
+                }
+                chapters.append(current_chapter)
+                current_section = None
+            else:
+                current_section = {
+                    "number":  f"{len(chapters)}.{len(current_chapter['sections']) + 1}",
+                    "heading": text,
+                    "content": "",
+                }
+                current_chapter["sections"].append(current_section)
+        elif cls == "h3":
+            pass  # don't model deeply
+        else:  # body
+            if current_section is not None:
+                current_section["content"] = (
+                    current_section["content"] + " " + text
+                ).strip()
+            elif current_chapter is not None:
+                current_chapter["content"] = (
+                    current_chapter["content"] + " " + text
+                ).strip()
+
+    if not chapters and not title:
+        return {"error": "no_structure_found"}
+
+    return {
+        "title":      title or "PROJECT REPORT",
+        "chapters":   chapters,
+        "references": [],
+    }
+
+
+def format_fix_docx_inplace(docx_bytes: bytes, university_id: str) -> bytes:
+    """Reformat an existing DOCX in place — preserves images, tables, all content.
+
+    Uses smart 3-pass heading classification so even unstyled student documents
+    get correct Heading 1/2/3 styles applied.  Page margins and numbering are
+    fixed to university spec.
+    """
+    config    = load_university_config(university_id)
+    doc       = Document(io.BytesIO(docx_bytes))
+    body_font = config["body_font"]
+    body_size = config["body_size_pt"]
+    spacing   = config["line_spacing"]
+    sp_before = config["para_space_before_pt"]
+    sp_after  = config["para_space_after_pt"]
+
+    # Fix style definitions first (Normal, Heading 1/2/3 get university spec)
+    _apply_university_styles(doc, config)
+
+    # Classify all paragraphs in one smart pass
+    classifications = _classify_paragraphs(doc, body_size=body_size)
+
+    style_map = {
+        "title": "Heading 1",
+        "h1":    "Heading 1",
+        "h2":    "Heading 2",
+        "h3":    "Heading 3",
+    }
+
+    for para, cls in zip(doc.paragraphs, classifications):
+        if cls == "blank":
+            continue
+        if cls in style_map:
+            para.style = doc.styles[style_map[cls]]
+        else:  # body
+            para.style = doc.styles["Normal"]
+            pf = para.paragraph_format
+            pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            pf.line_spacing      = spacing
+            pf.space_before      = Pt(sp_before)
+            pf.space_after       = Pt(sp_after)
+            for run in para.runs:
+                run.font.name = body_font
+                run.font.size = Pt(body_size)
+
+    # Fix table cell fonts — preserve structure, just fix typography
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        run.font.name = body_font
+                        if run.font.size:
+                            run.font.size = Pt(body_size)
+
+    # Fix page margins and numbering on every section
+    for section in doc.sections:
+        _apply_margins_to_section(section, config)
+        _set_section_page_numbering(section, fmt="decimal", start=1)
+
+    _add_footer_cta(doc)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# PDF -> formatted DOCX (deterministic, no LLM)
+# ---------------------------------------------------------------------------
+
+def format_fix_pdf(pdf_bytes: bytes, university_id: str) -> bytes:
+    """Reformat a PDF into a university-styled DOCX.
+
+    PDFs have no Word styles, so we build a fresh DOCX from extracted content:
+      - Block-based positional extraction (true visual reading order)
+      - Sentence merging for Canva line breaks
+      - Heading detection via ALL_CAPS short lines and 'Chapter N' patterns
+      - Decorative-image filter (page backgrounds + repeated icons dropped)
+      - Embed remaining images inline at their source page
+      - Apply university styles + black-text font discipline
+    No LLM in path, no content invention.
+    """
+    import fitz
+    from docx.shared import Inches, RGBColor
+
+    config = load_university_config(university_id)
+    pdf    = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        decorative_xrefs = _pdf_build_decorative_xrefs(pdf)
+
+        doc = Document()
+        _apply_university_styles(doc, config)
+
+        body_font = config["body_font"]
+        body_size = config["body_size_pt"]
+        spacing   = config["line_spacing"]
+        sp_before = config["para_space_before_pt"]
+        sp_after  = config["para_space_after_pt"]
+
+        for section in doc.sections:
+            _apply_margins_to_section(section, config)
+            _set_section_page_numbering(section, fmt="decimal", start=1)
+
+        def _add_body(text: str) -> None:
+            p  = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            pf = p.paragraph_format
+            pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            pf.line_spacing      = spacing
+            pf.space_before      = Pt(sp_before)
+            pf.space_after       = Pt(sp_after)
+            r = p.add_run(text)
+            r.font.name = body_font
+            r.font.size = Pt(body_size)
+
+        def _add_heading(text: str, level: int = 1) -> None:
+            h = doc.add_heading(text, level=level)
+            h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        def _add_kv_table(pairs: list[tuple[str, str]]) -> None:
+            tbl = doc.add_table(rows=len(pairs), cols=2)
+            tbl.autofit = False
+            for r_idx, (k, v) in enumerate(pairs):
+                cells = tbl.rows[r_idx].cells
+                cells[0].width = Cm(6.5)
+                cells[1].width = Cm(9.5)
+                cells[0].text  = k.rstrip(":.").strip()
+                cells[1].text  = v.strip()
+                for run in cells[0].paragraphs[0].runs:
+                    run.bold = True
+
+        def _add_image_from_xref(xref: int) -> None:
+            try:
+                pix = fitz.Pixmap(pdf, xref)
+                if pix.alpha or pix.n > 4:
+                    pix = fitz.Pixmap(fitz.csRGB, pix)
+                buf = pix.tobytes("png")
+                pix = None
+                doc.add_picture(io.BytesIO(buf), width=Inches(5.5))
+                doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            except Exception as exc:
+                logger.warning("format_fix_pdf image embed failed: %s", exc)
+
+        for page_no in range(len(pdf)):
+            lines = _pdf_page_blocks(pdf, page_no)
+            lines = _pdf_merge_sentences(lines)
+
+            kv_buffer: list[tuple[str, str]] = []
+
+            def _flush_kv() -> None:
+                nonlocal kv_buffer
+                if len(kv_buffer) >= 3:
+                    _add_kv_table(kv_buffer)
+                else:
+                    for k, v in kv_buffer:
+                        _add_body(f"{k}: {v}")
+                kv_buffer = []
+
+            for ln in lines:
+                if _PDF_PAGE_NUM_RE.match(ln):
+                    continue
+                kv_m = _PDF_KV_RE.match(ln)
+                if kv_m and not _PDF_ALL_CAPS_RE.match(ln):
+                    kv_buffer.append((kv_m.group(1), kv_m.group(2)))
+                    continue
+                elif kv_buffer:
+                    _flush_kv()
+
+                if (re.match(r"^CHAPTER\s+\d+", ln, re.IGNORECASE)
+                        or (_PDF_ALL_CAPS_RE.match(ln) and 4 <= len(ln) <= 60)):
+                    _add_heading(ln.strip(" ?:"), level=1)
+                    continue
+
+                if _PDF_BULLET_RE.match(ln):
+                    cleaned = _PDF_BULLET_RE.sub("", ln).strip()
+                    p = doc.add_paragraph(style="List Bullet")
+                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                    p.add_run(cleaned)
+                    continue
+
+                m = _PDF_NUM_LIST_RE.match(ln)
+                if m:
+                    cleaned = _PDF_NUM_LIST_RE.sub("", ln).strip()
+                    p = doc.add_paragraph(style="List Number")
+                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                    p.add_run(cleaned)
+                    continue
+
+                _add_body(ln)
+
+            if kv_buffer:
+                _flush_kv()
+
+            page = pdf[page_no]
+            for info in page.get_images(full=True):
+                xref = info[0]
+                if xref in decorative_xrefs:
+                    continue
+                _add_image_from_xref(xref)
+
+        def _force_black_tnr(run, *, size: float, bold: bool | None = None) -> None:
+            run.font.name = body_font
+            rPr = run._element.get_or_add_rPr()
+            rFonts = rPr.find(qn("w:rFonts"))
+            if rFonts is None:
+                rFonts = OxmlElement("w:rFonts")
+                rPr.insert(0, rFonts)
+            rFonts.set(qn("w:ascii"),    body_font)
+            rFonts.set(qn("w:hAnsi"),    body_font)
+            rFonts.set(qn("w:cs"),       body_font)
+            rFonts.set(qn("w:eastAsia"), body_font)
+            run.font.size = Pt(size)
+            if bold is not None:
+                run.font.bold = bold
+            run.font.italic    = False
+            run.font.underline = False
+            run.font.color.rgb = RGBColor(0, 0, 0)
+            for color_el in rPr.findall(qn("w:color")):
+                rPr.remove(color_el)
+            new_color = OxmlElement("w:color")
+            new_color.set(qn("w:val"), "000000")
+            rPr.append(new_color)
+
+        def _walk(para) -> None:
+            sn = (para.style.name or "") if para.style else ""
+            is_heading = sn.startswith("Heading")
+            sz = body_size + 2 if is_heading else body_size
+            bd = True if is_heading else None
+            for run in para.runs:
+                _force_black_tnr(run, size=sz, bold=bd)
+
+        for para in doc.paragraphs:
+            _walk(para)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        _walk(para)
+
+        _add_footer_cta(doc)
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        return buf.getvalue()
+    finally:
+        pdf.close()

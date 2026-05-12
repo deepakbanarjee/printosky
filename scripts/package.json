@@ -1,0 +1,12 @@
+{
+  "name": "printosky-scripts",
+  "version": "1.0.0",
+  "description": "Utility scripts for Printosky (pptx generation, etc.)",
+  "private": true,
+  "scripts": {
+    "generate-pitch": "node generate_pitch_pptx.js"
+  },
+  "dependencies": {
+    "pptxgenjs": "^3.12.0"
+  }
+}

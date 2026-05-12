@@ -13,6 +13,10 @@ import os
 import logging
 from datetime import datetime
 
+# Note: pickup_code and routing.engine are imported lazily inside
+# update_job_paid (see below). Keeping them out of module-top means a
+# missing module in deployment cannot kill every db_cloud importer.
+
 logger = logging.getLogger("db_cloud")
 
 # ── Supabase client (lazy singleton) ─────────────────────────────────────────
@@ -131,14 +135,113 @@ def update_job_delivery(job_id: str, delivery: int) -> None:
 
 
 def update_job_paid(job_id: str, amount: float, method: str, pay_id: str) -> None:
-    """Mark a job as Paid and record payment details."""
+    """Mark a job as Paid and record payment details.
+
+    Idempotently claims a pickup_code for this job if one is not already
+    set. Razorpay can fire the same webhook more than once; calling this
+    twice for the same job_id will not generate a second pickup code.
+    """
+    client = _client()
+
+    update_payload: dict[str, object] = {
+        "status":              "Paid",
+        "amount_collected":    amount,
+        "payment_mode":        method,
+        "razorpay_payment_id": pay_id,
+    }
+
     try:
-        _client().table("jobs").update({
-            "status":              "Paid",
-            "amount_collected":    amount,
-            "payment_mode":        method,
-            "razorpay_payment_id": pay_id,
-        }).eq("job_id", job_id).execute()
+        existing = (
+            client.table("jobs")
+            .select("pickup_code")
+            .eq("job_id", job_id)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(existing, "data", None) or []
+        existing_code = rows[0].get("pickup_code") if rows else None
+        if not existing_code:
+            try:
+                # Lazy import: a missing pickup_code module must not kill
+                # every db_cloud importer.
+                from pickup_code import claim_unique_pickup_code
+                update_payload["pickup_code"] = claim_unique_pickup_code(client)
+            except Exception as e:
+                logger.error(
+                    f"update_job_paid: could not claim pickup_code for {job_id}: {e}; "
+                    "payment status will still be recorded but the customer cannot be "
+                    "given a pickup code automatically"
+                )
+    except Exception as e:
+        logger.error(f"update_job_paid: pickup_code lookup failed for {job_id}: {e}")
+
+    # Routing decision (block 3). Gated by MULTISTORE_ROUTING_ENABLED so a
+    # bad deploy can be reverted without code rollback — flip the env var
+    # to false and the path becomes a no-op.
+    if os.environ.get("MULTISTORE_ROUTING_ENABLED", "").lower() in ("1", "true", "yes"):
+        try:
+            # Lazy import: a missing routing/ package must not kill every
+            # db_cloud importer.
+            from routing.engine import (
+                JobSpec,
+                decide as _routing_decide,
+                load_eligible_partners as _routing_load_partners,
+                record_decision as _routing_record,
+            )
+            candidates = _routing_load_partners(client)
+            spec = JobSpec(job_id=job_id)
+            decision = _routing_decide(spec, candidates)
+            _routing_record(client, decision)
+            if decision.chosen_store_id:
+                update_payload["assigned_store_id"] = decision.chosen_store_id
+                # Block 5: dispatch the job to the chosen store's owner.
+                # Best-effort — a dispatch failure does not block payment
+                # status from being recorded. The store dispatcher uses
+                # WhatsApp; no software install required at the store.
+                try:
+                    from store_dispatch import dispatch_job
+                    chosen = next(
+                        (c for c in candidates
+                         if c.store_id == decision.chosen_store_id),
+                        None,
+                    )
+                    if chosen is not None:
+                        job_after = (
+                            client.table("jobs")
+                            .select("job_id,pickup_code,customer_name,"
+                                    "page_count,copies,colour,size,"
+                                    "finishing,file_url")
+                            .eq("job_id", job_id)
+                            .limit(1)
+                            .execute()
+                        )
+                        rows_after = getattr(job_after, "data", None) or []
+                        job_row = rows_after[0] if rows_after else {"job_id": job_id}
+                        if "pickup_code" in update_payload:
+                            job_row["pickup_code"] = update_payload["pickup_code"]
+                        partner_rows = (
+                            client.table("partners")
+                            .select("store_id,dispatch_whatsapp")
+                            .eq("store_id", chosen.store_id)
+                            .limit(1)
+                            .execute()
+                        )
+                        prows = getattr(partner_rows, "data", None) or []
+                        partner_row = prows[0] if prows else {
+                            "store_id": chosen.store_id,
+                            "dispatch_whatsapp": "",
+                        }
+                        file_url = job_row.get("file_url") or ""
+                        dispatch_job(job_row, partner_row, file_url)
+                except Exception as e:
+                    logger.error(
+                        f"update_job_paid: dispatch failed for {job_id}: {e}"
+                    )
+        except Exception as e:
+            logger.error(f"update_job_paid: routing failed for {job_id}: {e}")
+
+    try:
+        client.table("jobs").update(update_payload).eq("job_id", job_id).execute()
     except Exception as e:
         logger.error(f"update_job_paid error for {job_id}: {e}")
 
@@ -279,6 +382,88 @@ def get_media_url(path: str) -> str:
     If the bucket ever goes private, change this to create_signed_url().
     """
     return _client().storage.from_(INCOMING_BUCKET).get_public_url(path)
+
+
+# ── Project Builder orders ────────────────────────────────────────────────────
+
+PB_ORDERS_PREFIX = "project-builder/orders"
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def upload_pb_doc(order_id: str, docx_bytes: bytes) -> str:
+    """Upload a generated project builder DOCX to Supabase Storage.
+
+    Stored under incoming-files/project-builder/orders/{order_id}.docx.
+    The incoming-files bucket is public so the returned URL is permanent.
+    """
+    path = f"{PB_ORDERS_PREFIX}/{order_id}.docx"
+    try:
+        _client().storage.from_(INCOMING_BUCKET).upload(
+            path=path,
+            file=docx_bytes,
+            file_options={"content-type": _DOCX_MIME, "upsert": "true"},
+        )
+        return _client().storage.from_(INCOMING_BUCKET).get_public_url(path)
+    except Exception as e:
+        logger.error(f"upload_pb_doc error for {order_id}: {e}")
+        return ""
+
+
+def save_pb_order(order_id: str, tier: str, university: str,
+                  whatsapp_phone: str, student_name: str,
+                  razorpay_order_id: str, razorpay_payment_id: str,
+                  amount_inr: int, storage_path: str, download_url: str) -> bool:
+    """Insert a project builder order into project_builder_orders table."""
+    try:
+        _client().table("project_builder_orders").insert({
+            "id":                  order_id,
+            "tier":                tier,
+            "university":          university,
+            "whatsapp_phone":      whatsapp_phone,
+            "student_name":        student_name,
+            "razorpay_order_id":   razorpay_order_id,
+            "razorpay_payment_id": razorpay_payment_id,
+            "amount_inr":          amount_inr,
+            "storage_path":        storage_path,
+            "download_url":        download_url,
+            "status":              "delivered",
+        }).execute()
+        return True
+    except Exception as e:
+        logger.error(f"save_pb_order error for {order_id}: {e}")
+        return False
+
+
+def get_pb_order(order_id: str, whatsapp_phone: str | None = None) -> dict | None:
+    """Fetch a project builder order by ID, optionally verifying the phone number."""
+    try:
+        q = _client().table("project_builder_orders").select("*").eq("id", order_id)
+        if whatsapp_phone:
+            digits = "".join(c for c in whatsapp_phone if c.isdigit())
+            if len(digits) == 10:
+                digits = "91" + digits
+            q = q.eq("whatsapp_phone", digits)
+        res = q.limit(1).execute()
+        return res.data[0] if res.data else None
+    except Exception as e:
+        logger.error(f"get_pb_order error: {e}")
+        return None
+
+
+def list_pb_orders(limit: int = 100) -> list:
+    """List all project builder orders newest-first (admin use)."""
+    try:
+        res = (
+            _client().table("project_builder_orders")
+            .select("id,tier,university,whatsapp_phone,student_name,amount_inr,status,created_at,download_url")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        logger.error(f"list_pb_orders error: {e}")
+        return []
 
 
 def upsert_contact(phone: str, name: str | None = None) -> None:

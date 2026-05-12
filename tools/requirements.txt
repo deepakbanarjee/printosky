@@ -1,0 +1,8 @@
+# tools/requirements.txt — Store PC dependencies for the PDF tools server.
+# Install once on the store PC:
+#   pip install -r tools/requirements.txt
+
+flask>=3.0.0
+pymupdf>=1.24.0
+numpy>=1.26.0
+Pillow>=10.0.0

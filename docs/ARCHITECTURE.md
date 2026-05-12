@@ -12,7 +12,7 @@ _Last updated: 2026-04-29 — reflects commit 8930eaf_
 | Print server | `print_server.py` | 3005 | Staff auth (PBKDF2+salt PIN), `/print` `/quote` `/staff-login` `/staff-logout` `/printers`; drives SumatraPDF |
 | WhatsApp client | `whatsapp_capture/index.js` | 3001 (send), 3004 (doc) | WhatsApp Web session; saves incoming files to hot folder; delegates state to `whatsapp_bot.py` |
 | Dashboard | `dashboard.py` | 5000 (HTTP), 5001 (WS) | Live job stats browser push |
-| Webhook receiver | `webhook_receiver.py` | 3002 | Razorpay print payment confirmations (store PC local only) |
+| ~~Webhook receiver~~ | ~~`webhook_receiver.py`~~ | ~~3002~~ | **DEPRECATED 2026-05-01** — migrated to Vercel as `_process_razorpay_payment` in `api/index.py`. Cloudflare tunnel `pay.printosky.com` that fronted this is now obsolete. See `vault/infrastructure.md` Cloudflare section. |
 
 ### Vercel (`api/index.py`)
 All routes → single Python handler. Deployed from `main` branch.
