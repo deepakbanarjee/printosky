@@ -637,6 +637,114 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _count_pages_from_list(page_list: str, total_pages: int) -> int:
+    """
+    Count the number of pages a SumatraPDF-style page-list expression refers to.
+
+    Mirrors _build_page_range_arg() semantics so the spec row we write matches
+    what we actually dispatched to the printer.
+
+    Examples:
+      'all'         + total=10  -> 10
+      '' / None     + total=10  -> 10
+      '1-5'                     -> 5
+      '1,3,5'                   -> 3
+      '1-5,10-15'               -> 5 + 6 = 11
+    Returns 0 if the expression can't be parsed.
+    """
+    total = max(int(total_pages or 0), 0)
+    if not page_list or str(page_list).strip().lower() in ("all", ""):
+        return total
+
+    count = 0
+    for part in str(page_list).strip().split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            try:
+                a, b = part.split("-", 1)
+                a_i, b_i = int(a.strip()), int(b.strip())
+                if b_i >= a_i:
+                    count += (b_i - a_i + 1)
+            except ValueError:
+                continue
+        else:
+            try:
+                int(part)
+                count += 1
+            except ValueError:
+                continue
+    return count
+
+
+def _write_epson_spec_row(
+    job_id: str,
+    item_number: int,
+    file_name: str,
+    pages_per_copy: int,
+    copies: int,
+    colour: str,
+    paper_size: str,
+) -> None:
+    """
+    Write a source='spec' row to local epson_jobs table on successful Epson dispatch.
+
+    Captures what we *told* the printer to do (mono/colour/copies/paper). The
+    weblog scraper later writes a parallel source='weblog' row with what the
+    printer *reports* happened. They join on attributed_job_id = printosky job_id,
+    enabling end-to-end reconciliation.
+
+    Why this exists: Epson's free Web Config CSV and SNMP OIDs do not expose
+    per-job mono/colour split, copies, or paper size. Per-job accounting is only
+    available via paid Epson Print Admin Serverless. This function gives us the
+    same data for free by capturing it at dispatch time, when we already know it.
+
+    Note: local SQLite epson_jobs has no store_id column — supabase_sync.py
+    injects store_id at upload time. Same convention as weblog/delta rows.
+
+    Failures are logged but NEVER block the print flow.
+    """
+    try:
+        pages_printed = max(int(pages_per_copy or 0), 0) * max(int(copies or 0), 0)
+        is_colour = (colour or "").lower() in ("col", "colour", "color")
+        mono_pages  = 0 if is_colour else pages_printed
+        color_pages = pages_printed if is_colour else 0
+
+        now = _now()
+        # Unique per dispatch — timestamp suffix keeps re-prints distinct and
+        # never collides with weblog rows (those use plain integer job_numbers).
+        ts_compact = datetime.now().strftime("%Y%m%d%H%M%S")
+        spec_job_number = f"{job_id}-{int(item_number)}-{ts_compact}"
+
+        conn = _db()
+        conn.execute("""
+            INSERT INTO epson_jobs (
+                source, job_number, file_name,
+                pages_printed, mono_pages, color_pages, copies,
+                paper_size, job_date, print_end_date,
+                attributed_job_id, imported_at, result
+            ) VALUES ('spec', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OK')
+        """, (
+            spec_job_number, file_name,
+            pages_printed, mono_pages, color_pages, int(copies or 1),
+            paper_size or "A4", now, now,
+            job_id, now,
+        ))
+        conn.commit()
+        conn.close()
+        logging.info(
+            "epson_jobs spec row: %s (%s) pages=%d mono=%d color=%d copies=%s paper=%s",
+            spec_job_number, file_name, pages_printed, mono_pages, color_pages,
+            copies, paper_size,
+        )
+    except Exception as e:
+        logging.warning(
+            "Failed to write epson_jobs spec row for %s item %d: %s",
+            job_id, item_number, e,
+        )
+
+
 def _send_whatsapp(phone: str, message: str) -> bool:
     """Send WhatsApp message via Meta Cloud API. Returns True on success."""
     if not phone:
@@ -1669,6 +1777,25 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None) -> di
         return {"ok": False, "error": "Print command timed out after 90s"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+    # ── Epson per-job accounting hook ─────────────────────────────────────────
+    # On successful Epson dispatch, write a source='spec' row to epson_jobs so
+    # we have the mono/colour/copies/paper data Epson's free APIs do not expose.
+    # Konica dispatches are skipped (Konica has its own per-job log via XML).
+    if printer_key == "epson":
+        pages_per_copy = _count_pages_from_list(page_list, job["page_count"] or 0)
+        paper_size_val = "A4"
+        if "paper_size" in job.keys():
+            paper_size_val = job["paper_size"] or "A4"
+        _write_epson_spec_row(
+            job_id=job_id,
+            item_number=item_number,
+            file_name=file_name2,
+            pages_per_copy=pages_per_copy,
+            copies=copies,
+            colour=colour,
+            paper_size=paper_size_val,
+        )
 
     # Mark this item as Printed
     now = _now()

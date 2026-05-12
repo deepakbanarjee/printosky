@@ -204,7 +204,21 @@ def collect_konica_jobs(db_path):
 
 
 def collect_epson_jobs(db_path):
-    """Pull epson weblog job rows (source=weblog only — unique by job_number)."""
+    """
+    Pull epson job rows for Supabase upload.
+
+    Sources:
+      'weblog' — scraped from the Epson Web Config job log CSV (printer's own
+                 view of what happened). Unique by integer job_number.
+      'spec'   — written by print_server.py on successful Epson dispatch
+                 (what we *told* the printer to print, including mono/colour
+                 split, copies, paper size). Unique by Printosky-style
+                 job_number 'OSP-YYYYMMDD-NNNN-itemN-YYYYMMDDHHMMSS'.
+
+    'delta' rows are deliberately excluded — they have NULL job_number and
+    would bypass the (store_id, job_number) UNIQUE conflict key, recreating
+    the duplication bug fixed in SCHEMA_v19.
+    """
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -216,7 +230,7 @@ def collect_epson_jobs(db_path):
                    snmp_total_before, snmp_total_after, delta_pages,
                    attributed_job_id, imported_at
             FROM epson_jobs
-            WHERE source = 'weblog'
+            WHERE source IN ('weblog', 'spec')
             ORDER BY job_date DESC LIMIT 2000
         """)
         rows = []
