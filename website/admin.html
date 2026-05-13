@@ -782,6 +782,14 @@
   .conv-bubble.outbound { align-self:flex-end; background:rgba(0,200,100,.15); border:1px solid rgba(0,200,100,.3); color:var(--fg); }
   .conv-meta { font-size:.62rem; color:var(--muted); margin-top:4px; }
   .conv-empty { color:var(--muted); font-size:.78rem; padding:20px; text-align:center; }
+  /* Needs-human filter chip (TASK-009) */
+  .conv-filter-bar { padding:8px 12px; border-bottom:1px solid #e0e0e0; background:#fff; }
+  .conv-filter-chip { display:inline-flex; align-items:center; gap:6px; padding:5px 12px; border-radius:14px; border:1px solid #d0d0d0; background:#f5f5f5; color:#444; font-size:12px; cursor:pointer; transition:all .15s; }
+  .conv-filter-chip:hover { background:#ececec; border-color:#b0b0b0; }
+  .conv-filter-chip.active { background:#ff7043; border-color:#e64a19; color:#fff; font-weight:600; }
+  .conv-filter-count { display:inline-block; min-width:18px; padding:0 6px; border-radius:9px; background:rgba(0,0,0,.15); font-size:11px; line-height:16px; text-align:center; }
+  .conv-filter-chip.active .conv-filter-count { background:rgba(255,255,255,.25); }
+  .conv-needs-human-pill { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:8px; background:#ff7043; color:#fff; font-size:10px; font-weight:600; vertical-align:middle; }
 /* ── Conversations tab (rebuilt) ──────────────────────────────────────────── */
 .conv-layout {
     display: flex;
@@ -1152,6 +1160,15 @@
       <!-- Sidebar: contact list -->
       <div class="conv-sidebar">
         <div class="conv-header">Conversations</div>
+        <div class="conv-filter-bar">
+          <button id="conv-filter-needs-human" type="button"
+                  class="conv-filter-chip"
+                  onclick="convToggleNeedsHumanFilter()"
+                  title="Show only sessions where the customer typed help / support / human / agent">
+            <span aria-hidden="true">🆘</span> Needs human
+            <span id="conv-needs-human-count" class="conv-filter-count">0</span>
+          </button>
+        </div>
         <div id="conv-contact-list">
           <div style="padding:20px;color:#999;font-size:13px;">Loading...</div>
         </div>
@@ -3368,6 +3385,15 @@ let _convActivePhone = null;
 let _convPollInbox   = null;
 let _convPollThread  = null;
 let _convNotified    = new Set();
+let _convInboxCache  = [];
+let _convNeedsHumanOnly = false;
+
+function convToggleNeedsHumanFilter() {
+  _convNeedsHumanOnly = !_convNeedsHumanOnly;
+  const btn = document.getElementById('conv-filter-needs-human');
+  if (btn) btn.classList.toggle('active', _convNeedsHumanOnly);
+  convRenderInbox(_convInboxCache);
+}
 
 function _convPw() { return sessionStorage.getItem('admin_pw_cache') || ''; }
 
@@ -3418,17 +3444,31 @@ async function convFetchInbox() {
 }
 
 function convRenderInbox(contacts) {
+  _convInboxCache = contacts;
+
+  // Update the "Needs human" filter count badge regardless of active filter
+  const needsHumanCount = contacts.reduce((n, c) => n + (c.needs_human ? 1 : 0), 0);
+  const countEl = document.getElementById('conv-needs-human-count');
+  if (countEl) countEl.textContent = needsHumanCount;
+
+  const visible = _convNeedsHumanOnly
+    ? contacts.filter(c => c.needs_human)
+    : contacts;
+
   const list = document.getElementById('conv-contact-list');
   if (!list) return;
-  if (!contacts.length) {
-    list.innerHTML = '<div style="padding:20px;color:#999;font-size:13px;">No conversations yet.</div>';
+  if (!visible.length) {
+    const empty = _convNeedsHumanOnly
+      ? 'No sessions awaiting a human.'
+      : 'No conversations yet.';
+    list.innerHTML = `<div style="padding:20px;color:#999;font-size:13px;">${empty}</div>`;
     return;
   }
-  list.innerHTML = contacts.map(c => `
+  list.innerHTML = visible.map(c => `
     <div class="conv-contact${c.phone === _convActivePhone ? ' active' : ''}"
          data-phone="${convEscAttr(c.phone)}" data-name="${convEscAttr(c.name || '')}"
          onclick="convOpenContact(this.dataset.phone, this.dataset.name)">
-      <div class="conv-contact-name">${convEsc(c.name)}</div>
+      <div class="conv-contact-name">${convEsc(c.name)}${c.needs_human ? '<span class="conv-needs-human-pill" title="Customer asked for a human">SOS</span>' : ''}</div>
       <div class="conv-contact-preview">${convEsc(c.last_message)}</div>
       <div class="conv-contact-meta">
         <span>${convFmtTs(c.ts)}</span>

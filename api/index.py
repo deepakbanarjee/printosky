@@ -236,10 +236,64 @@ def _send_credits_balance(phone: str) -> None:
             pass
 
 
+HELP_KEYWORDS: frozenset[str] = frozenset({"help", "support", "human", "agent"})
+
+
+def _is_help_keyword(text: str) -> bool:
+    """True if the customer typed a bare help/support/human/agent keyword."""
+    return text.strip().lower() in HELP_KEYWORDS
+
+
+def _mark_session_needs_human(phone: str) -> None:
+    """Flag the bot_session as needing human attention. Best-effort; never raises."""
+    try:
+        from datetime import timezone
+        from db_cloud import _client
+        ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        _client().table("bot_sessions").upsert({
+            "phone": phone,
+            "needs_human": True,
+            "last_help_request_at": ts,
+        }).execute()
+    except Exception as exc:
+        logger.warning(f"_mark_session_needs_human({phone}) failed: {exc}")
+
+
+def _handle_help_request(sender: str, trigger: str) -> None:
+    """Customer asked for a human. Flag the session, alert staff, ack the customer."""
+    from whatsapp_notify import _send, send_staff_alert
+
+    _mark_session_needs_human(sender)
+    try:
+        send_staff_alert(
+            f"Customer {_fmt_phone(sender)} requested human support "
+            f"(typed '{trigger}'). Open the Conversations tab → 'Needs human' filter."
+        )
+    except Exception as exc:
+        logger.warning(f"send_staff_alert in _handle_help_request failed: {exc}")
+    ack = (
+        "Got it — I've alerted the team. "
+        "Someone will message you shortly. You can keep typing in the meantime."
+    )
+    try:
+        _send(sender, ack)
+        from db_cloud import log_message
+        log_message(sender, "outbound", ack, message_type="text")
+    except Exception as exc:
+        logger.warning(f"_handle_help_request ack send failed for {sender}: {exc}")
+
+
 def _handle_text(sender: str, text: str) -> None:
     """Route a customer text through the bot state machine and send replies."""
     from whatsapp_bot import handle_message
     from whatsapp_notify import _send, send_staff_alert
+
+    # Help escape hatch: short-circuit before any state-machine work.
+    # Customer typed `help` / `support` / `human` / `agent` → flag session,
+    # alert staff, ack the customer. TASK-009.
+    if _is_help_keyword(text):
+        _handle_help_request(sender, text.strip().lower())
+        return
 
     # Capture referral code; treat ref_CODE message as a plain greeting
     _capture_referral_code(sender, text)
@@ -411,6 +465,37 @@ def _notify_pickup_completed(job_id: str) -> None:
     send_pickup_completed(sender=sender, pickup_code=code, rating_url=None)
 
 
+def _mark_webhook_processed(event_id: str, handler: str) -> bool:
+    """Record that we've handled this webhook event_id; return True if the
+    caller should proceed with processing, False if it's a duplicate retry.
+
+    Uses processed_webhooks.event_id as a Postgres PRIMARY KEY for race-safe
+    dedupe (any concurrent retry from Meta/Razorpay loses on UNIQUE conflict).
+
+    Failure modes:
+      - empty event_id -> return True (we can't dedupe without a key; better
+        to risk a duplicate than to silently drop a real event)
+      - DB unique-violation (duplicate event) -> return False
+      - any other DB error -> return True (log + let through; missing dedupe
+        is recoverable, dropped payments are not)
+    """
+    if not event_id:
+        return True
+    try:
+        from db_cloud import _client
+        resp = _client().table("processed_webhooks").insert(
+            {"event_id": event_id, "handler": handler}
+        ).execute()
+        return bool(getattr(resp, "data", None))
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "duplicate" in msg or "23505" in msg or "unique" in msg or "conflict" in msg:
+            logger.info(f"Webhook event {event_id} ({handler}) already processed -- skipping")
+            return False
+        logger.warning(f"_mark_webhook_processed({event_id}, {handler}) failed: {exc}")
+        return True  # fail-open: don't drop real events on a DB hiccup
+
+
 def _process_meta_webhook(data: dict) -> None:
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
@@ -419,6 +504,12 @@ def _process_meta_webhook(data: dict) -> None:
             pushname = (contacts[0].get("profile", {}).get("name")
                         if contacts else None)
             for msg in value.get("messages", []):
+                # Idempotency guard (TASK-013): Meta retries on slow handlers.
+                # Each WhatsApp message has a unique wamid (msg.id). Skip
+                # silently if we've already processed this exact message.
+                if not _mark_webhook_processed(msg.get("id", ""), "meta"):
+                    continue
+
                 sender   = msg.get("from", "")
                 msg_type = msg.get("type", "")
                 logger.info(f"Meta message from {sender}: type={msg_type}")
@@ -514,6 +605,11 @@ def _process_razorpay_payment(data: dict) -> None:
     from whatsapp_notify import send_payment_confirmed
     from db_cloud import (get_batch, get_job, update_job_paid,
                           update_batch_paid, update_jobs_payment_link)
+
+    # Idempotency guard (TASK-013): Razorpay can fire the same payment.captured
+    # event twice. data.id is the unique webhook event ID. Skip duplicates.
+    if not _mark_webhook_processed(data.get("id", ""), "razorpay_print"):
+        return
 
     payment = parse_payment_webhook(data)
     if not payment:
@@ -1449,6 +1545,14 @@ def _handle_acad_razorpay_webhook(h, body: bytes) -> None:
     except Exception:
         _json_response(h, 400, {"error": "invalid json"})
         return
+
+    # Idempotency guard (TASK-013): Razorpay retries on slow ACKs. payload.id
+    # is the webhook event ID. Skip duplicates with 200 so Razorpay stops
+    # retrying.
+    if not _mark_webhook_processed(payload.get("id", ""), "razorpay_acad"):
+        _json_response(h, 200, {"status": "already_processed"})
+        return
+
     event = payload.get("event", "")
     notes = (
         payload.get("payload", {})
@@ -1510,6 +1614,21 @@ def _handle_admin_conversations(h) -> None:
         )
         contacts_map = {c["phone"]: c for c in contacts_data}
 
+        # Fetch sessions flagged as needing human attention (TASK-009)
+        # Tolerant of pre-v17 schema: missing column returns empty set, no crash.
+        needs_human_phones: set = set()
+        try:
+            help_rows = (
+                client.table("bot_sessions")
+                .select("phone")
+                .eq("needs_human", True)
+                .execute()
+                .data
+            )
+            needs_human_phones = {r["phone"] for r in (help_rows or [])}
+        except Exception as exc:
+            logger.debug("bot_sessions.needs_human read skipped: %s", exc)
+
         # One entry per phone — first occurrence in log_rows is the newest message
         seen_phones: set = set()
         inbox = []
@@ -1550,6 +1669,7 @@ def _handle_admin_conversations(h) -> None:
                 "last_message_type": mt,
                 "unread_count":      unread,
                 "ts":                row["created_at"],
+                "needs_human":       ph in needs_human_phones,
             })
 
         _json_response(h, 200, sorted(inbox, key=lambda x: x["ts"], reverse=True))
