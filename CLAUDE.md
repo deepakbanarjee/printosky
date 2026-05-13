@@ -15,6 +15,7 @@ Manual start commands + full port map → [docs/ARCHITECTURE.md](docs/ARCHITECTU
 - **Supabase**: cloud DB mirror + academic orders + storage
 
 Full detail → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+Schema reference (28 tables, owners, columns) → [docs/SCHEMA.md](docs/SCHEMA.md)
 
 ## Key REPL Commands (`watcher.py`)
 ```
