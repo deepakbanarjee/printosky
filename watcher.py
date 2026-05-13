@@ -102,29 +102,36 @@ try:
     from whatsapp_bot import handle_message as _bot_handle, setup_bot_db
     from webhook_receiver import start_webhook_server
     from session_timeout import start_timeout_monitor
-    from b2b_manager import (setup_b2b_db, is_b2b, get_b2b_client,
-                              register_b2b_client, set_credit_limit,
-                              record_payment, list_b2b_clients,
-                              print_b2b_jobs, generate_invoice_pdf,
-                              mark_jobs_invoiced)
-    from b2b_bot import handle_b2b_message
     BOT_AVAILABLE = True
 except ImportError as _bot_err:
     BOT_AVAILABLE = False
     def setup_bot_db(*a): pass
     def start_webhook_server(*a): pass
     def start_timeout_monitor(*a): pass
-    def setup_b2b_db(*a): pass
-    def is_b2b(*a): return False
-    def get_b2b_client(*a): return None
-    def register_b2b_client(*a, **kw): return "Bot not available"
-    def set_credit_limit(*a): return "Bot not available"
-    def record_payment(*a): return "Bot not available"
-    def list_b2b_clients(*a): return "Bot not available"
-    def print_b2b_jobs(*a): return "Bot not available"
-    def generate_invoice_pdf(*a): raise RuntimeError("Bot not available")
-    def mark_jobs_invoiced(*a): pass
-    def handle_b2b_message(*a): return []
+
+
+# ── B2B retired 2026-05-12 ────────────────────────────────────────────────────
+# b2b_bot.py and b2b_manager.py moved to retired/2026-05-12-graveyard/ per
+# TASK-014 graveyard triage: 0 b2b_clients rows in production, no clear owner.
+# Live Supabase tables b2b_clients + b2b_payments are frozen (no DROP) so the
+# data can be revived later. Stubs below keep REPL + message-handler call
+# sites resolving without NameError.
+_B2B_RETIRED_MSG = (
+    "B2B retired 2026-05-12 -- see retired/2026-05-12-graveyard/. "
+    "Restore by moving b2b_bot.py + b2b_manager.py back to repo root "
+    "and reverting this commit if a real B2B owner emerges."
+)
+def setup_b2b_db(*a): pass
+def is_b2b(*a): return False
+def get_b2b_client(*a): return None
+def register_b2b_client(*a, **kw): return _B2B_RETIRED_MSG
+def set_credit_limit(*a): return _B2B_RETIRED_MSG
+def record_payment(*a): return _B2B_RETIRED_MSG
+def list_b2b_clients(*a): return _B2B_RETIRED_MSG
+def print_b2b_jobs(*a): return _B2B_RETIRED_MSG
+def generate_invoice_pdf(*a): raise RuntimeError(_B2B_RETIRED_MSG)
+def mark_jobs_invoiced(*a): pass
+def handle_b2b_message(*a): return []
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # CONFIG â€” edit these for your store
@@ -651,8 +658,8 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
                     _cx.commit(); _cx.close()
 
                 # â”€â”€ B2B â€” bypass batch, handle immediately â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                from b2b_manager import is_b2b, get_b2b_client
-                from b2b_bot import handle_b2b_message
+                # B2B retired 2026-05-12 -- inner imports removed; module-level
+                # stubs (is_b2b -> False) make this branch unreachable.
                 from whatsapp_notify import _send
                 if is_b2b(DB_PATH, s):
                     client = get_b2b_client(DB_PATH, s)
@@ -1213,8 +1220,9 @@ def start_bot_relay_server(db_path):
 
                 # Route through bot â€” look up session for job_id + page_count
                 from whatsapp_bot import handle_message, get_session
-                from b2b_manager import is_b2b, get_b2b_client
-                from b2b_bot import handle_b2b_message
+                # B2B retired 2026-05-12 -- module-level stubs handle the
+                # is_b2b/handle_b2b_message names; the True branch is
+                # unreachable (is_b2b always returns False).
 
                 if is_b2b(db_path, phone):
                     client = get_b2b_client(db_path, phone)
@@ -1268,7 +1276,7 @@ def main():
     setup_logging()
     setup_database()
     setup_bot_db(DB_PATH)
-    setup_b2b_db(DB_PATH)
+    # setup_b2b_db retired 2026-05-12 -- stub at module top is a no-op.
     # Reset active session timestamps so old sessions don't immediately time out on restart
     try:
         import sqlite3 as _sq3
