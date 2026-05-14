@@ -843,6 +843,11 @@ def _call_claude_structure(
         })
 
     try:
+        # Note: Anthropic API does not allow combining `thinking` with a
+        # forced tool_choice ({"type":"tool"|"any"}). We use tool_choice="auto"
+        # and rely on the system prompt to ensure the model calls the tool.
+        # If it ever skips the call, the caller sees a "no_tool_use_in_response"
+        # validation error which escalates to Opus / the operator queue.
         message = client.messages.create(
             model=model,
             max_tokens=16_000,
@@ -853,7 +858,7 @@ def _call_claude_structure(
                 "cache_control": {"type": "ephemeral"},
             }],
             tools=[_STRUCTURE_TOOL_SCHEMA],
-            tool_choice={"type": "tool", "name": "submit_structure"},
+            tool_choice={"type": "auto"},
             messages=[{"role": "user", "content": user_blocks}],
         )
     except Exception as exc:
