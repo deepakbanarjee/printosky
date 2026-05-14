@@ -57,6 +57,7 @@ Last updated: 2026-04-09 (Session 9)
 | S9-3 | ~~**Epson ink alerts**~~ ✅ | `_send_ink_alerts()` in printer_poller.py:434. Fires on threshold crossing (EMPTY at 0%, LOW at ≤10%). Called in poll_once() for both printers. |
 | S9-4 | **A3 printing** | Test A3 job end-to-end (bot → quote → print) |
 | S9-5 | ~~**Receipt printer**~~ 🗑️ | RETIRED 2026-05-12 — hardware never purchased, stub returned "not configured" on every call. See `retired/2026-05-12-graveyard/receipt_printer.py` for code + revival path. |
+| S9-6 | **Epson per-job mono/colour tracking** ⏳ | Partial: (a) ✅ delta dedup applied to Supabase (173k → 187 rows, partial unique index added); (b) ✅ new `source='spec'` rows written by print_server.py on Epson dispatch — captures mono/colour/copies/paper from spec, committed 5b50a93. (c) ⏳ store-PC redeploy pending. (d) ⏳ admin-UI report showing spec ↔ weblog reconciliation. |
 
 ---
 

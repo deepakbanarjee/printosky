@@ -392,15 +392,27 @@ def get_system_health() -> dict:
 
 PORT = 3005
 
-# Printer names must match exactly what Windows sees in "Devices and Printers"
+# Printer names must match exactly what Windows sees in "Devices and Printers".
+# Defaults are the canonical OSP store queue names; per-store overrides come
+# from store_config.json via the `printer_queue_names` field (e.g. on a dev
+# office PC, redirect 'epson' to 'Microsoft Print to PDF' so test dispatches
+# don't burn real ink).
 PRINTERS = {
     "konica": "KONICA MINOLTA 1100 PS",
     "epson":  "WF-C21000 Series(Network)",
 }
+try:
+    _store_pq = getattr(get_store_config(), "printer_queue_names", None)
+    if _store_pq:
+        PRINTERS.update({k: v for k, v in _store_pq.items() if v})
+        logging.info("PRINTERS overridden by store_config: %s", _store_pq)
+except Exception as _e:
+    logging.warning("Could not apply store_config.printer_queue_names: %s", _e)
 
 # SumatraPDF path — portable version in project folder or installed
 SUMATRA_PATHS = [
     r"C:\printosky_watcher\SumatraPDF.exe",
+    r"C:\PY\printosky\SumatraPDF.exe",
     r"C:\Users\ABC\AppData\Local\SumatraPDF\SumatraPDF.exe",
     r"C:\Program Files\SumatraPDF\SumatraPDF.exe",
     r"C:\Program Files (x86)\SumatraPDF\SumatraPDF.exe",
@@ -409,11 +421,17 @@ SUMATRA_PATHS = [
 # Shared secret — must match STORE_TOKEN in .env and storeToken in browser localStorage
 STORE_TOKEN = os.environ.get("STORE_TOKEN", "")
 
-# SQLite DB path
-if sys.platform == "win32":
-    DB_PATH = r"C:\Printosky\Data\jobs.db"
-else:
-    DB_PATH = str(Path.home() / "Printosky" / "Data" / "jobs.db")
+# SQLite DB path — driven by store_config when present (e.g. dev/test stores
+# pointing at a sandboxed jobs.db). Falls back to legacy OSP paths otherwise,
+# so the real store PC's behaviour is unchanged (no store_config.json there
+# → legacy fallback inside store_config returns the same hardcoded path).
+try:
+    DB_PATH = get_store_config().db_path
+except Exception:
+    if sys.platform == "win32":
+        DB_PATH = r"C:\Printosky\Data\jobs.db"
+    else:
+        DB_PATH = str(Path.home() / "Printosky" / "Data" / "jobs.db")
 
 logging.basicConfig(
     level=logging.INFO,
