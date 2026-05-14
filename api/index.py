@@ -2339,12 +2339,16 @@ def _handle_pb_create_order(h, body: bytes) -> None:
             })
             return
 
-    # Pricing: format_fix = Rs.49, generate = Rs.99 (<50 pages est.) or Rs.149
+    # Pricing (P0 20x-margin tiers, agreed 2026-05-12):
+    #   format_fix   = Rs.199  (Standard — Sonnet only, no escalation)
+    #   generate <50 = Rs.399  (Standard generate — Sonnet w/ Opus escalation)
+    #   generate ≥50 = Rs.999  (Premium — Opus likely)
+    # See _handle_pb_availability + _premium_paused() for back-pressure.
     if service == "format_fix":
-        amount_inr = 49
+        amount_inr = 199
     else:
         est_pages  = max(1, word_count // 250)
-        amount_inr = 99 if est_pages < 50 else 149
+        amount_inr = 399 if est_pages < 50 else 999
 
     from razorpay_integration import create_project_order
     result = create_project_order(
@@ -2409,26 +2413,21 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
                     if len(text) > 200_000:
                         _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
                         return
-                    # Free preview: Sonnet only. Opus escalation only after payment.
-                    docx_bytes = docx_engine.format_fix(text, university, allow_escalation=False)
-                    try:
-                        structure = docx_engine._parse_structure_with_claude(
-                            text, allow_escalation=False,
-                        )
-                    except Exception:
-                        structure = {}
+                    # Free preview: Sonnet only. Opus escalation only after
+                    # payment. format_fix_with_structure returns both the
+                    # DOCX and the validated structure dict in one Sonnet
+                    # call (was previously two — ~₹2/preview savings).
+                    docx_bytes, structure = docx_engine.format_fix_with_structure(
+                        text, university, allow_escalation=False,
+                    )
             elif content:
                 text = content
                 if len(text) > 200_000:
                     _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
                     return
-                docx_bytes = docx_engine.format_fix(text, university, allow_escalation=False)
-                try:
-                    structure = docx_engine._parse_structure_with_claude(
-                        text, allow_escalation=False,
-                    )
-                except Exception:
-                    structure = {}
+                docx_bytes, structure = docx_engine.format_fix_with_structure(
+                    text, university, allow_escalation=False,
+                )
             else:
                 _json_response(h, 400, {"error": "content or content_b64 required"})
                 return
@@ -2558,9 +2557,10 @@ def _handle_pb_process(h, body: bytes) -> None:
         service_type = data.get("service", "format_fix")
         university   = data.get("university", "")
         try:
-            amount_inr = int(data.get("amount_inr", 49))
+            # Token-mode default = format_fix tier baseline (₹199).
+            amount_inr = int(data.get("amount_inr", 199))
         except (ValueError, TypeError):
-            amount_inr = 49
+            amount_inr = 199
 
         pb_oid = _generate_pb_order_id()
         try:
@@ -2705,9 +2705,11 @@ def _handle_pb_process(h, body: bytes) -> None:
     wa_phone     = _normalize_phone(data.get("whatsapp_phone", ""))
     student_name = str(data.get("student_name", ""))[:100]
     try:
-        amount_inr = int(data.get("amount_inr", 99))
+        # Fallback to ₹399 (Standard generate baseline) if client omits the
+        # field. Aligned with P0 20x-margin tier scheme.
+        amount_inr = int(data.get("amount_inr", 399))
     except (ValueError, TypeError):
-        amount_inr = 99
+        amount_inr = 399
 
     try:
         save_pb_order(

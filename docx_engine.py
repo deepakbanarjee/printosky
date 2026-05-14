@@ -1915,7 +1915,31 @@ def format_fix(
     *,
     allow_escalation: bool = True,
 ) -> bytes:
+    """Back-compat thin wrapper. Returns DOCX bytes only.
+
+    Prefer :func:`format_fix_with_structure` if you also need the validated
+    structure dict — it saves a duplicate Sonnet call (~₹2/preview).
+    """
+    docx_bytes, _structure = format_fix_with_structure(
+        text, university_id, allow_escalation=allow_escalation,
+    )
+    return docx_bytes
+
+
+def format_fix_with_structure(
+    text: str,
+    university_id: str,
+    *,
+    allow_escalation: bool = True,
+) -> tuple[bytes, dict]:
     """Re-format a pasted/extracted text document into a publish-ready DOCX.
+
+    Returns ``(docx_bytes, structure_dict)`` — the structure is the
+    validated parser output (title, chapters, references, model_used, etc.)
+    that was used to build the DOCX. Callers that need to surface preview
+    metadata to the customer should use this and reuse the same dict, NOT
+    call the parser a second time (which is non-deterministic and doubles
+    Anthropic spend).
 
     Parsing strategy is adaptive: Sonnet 4.6 + 8K thinking first; if the
     detected structure fails the deterministic validation gate AND
@@ -1926,8 +1950,6 @@ def format_fix(
 
     Pass ``allow_escalation=False`` from the free-preview endpoint to
     avoid paying for Opus before the customer commits.
-
-    Returns the DOCX bytes on success.
     """
     config = load_university_config(university_id)
     doc = Document()
@@ -1983,7 +2005,7 @@ def format_fix(
 
     buf = io.BytesIO()
     doc.save(buf)
-    return buf.getvalue()
+    return buf.getvalue(), structure
 
 
 def generate_from_form(form_data: dict, university_id: str) -> bytes:

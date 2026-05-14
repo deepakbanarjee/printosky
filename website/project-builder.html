@@ -308,13 +308,13 @@
           <div class="tier-card selected" data-tier="format_fix" onclick="selectTier('format_fix')">
             <div class="tier-popular">Most popular</div>
             <h4>Format Fixer</h4>
-            <div class="price">₹49</div>
+            <div class="price">₹199</div>
             <p>Already written your project? Paste or upload your rough draft — we apply your university's exact format in minutes.</p>
           </div>
 
           <div class="tier-card" data-tier="generate" onclick="selectTier('generate')">
             <h4>Generate from Scratch</h4>
-            <div class="price">₹99 – ₹149</div>
+            <div class="price">₹399 – ₹999</div>
             <p>Fill in your details and content. We build the full report — cover page, certificate, declaration, all chapters.</p>
             <div class="tier-unavailable-msg" id="generate-unavailable">
               ⏸ Briefly paused — our editors are finishing earlier orders.
@@ -359,7 +359,7 @@
       <!-- FORMAT FIX: paste or upload -->
       <div id="panel-format-fix" class="pb-hidden">
         <div class="pb-card">
-          <h2>Format Fixer <span style="color:#aaa;font-weight:400;font-size:.9rem">— ₹49</span></h2>
+          <h2>Format Fixer <span style="color:#aaa;font-weight:400;font-size:.9rem">— ₹199</span></h2>
           <p style="color:#555; margin-bottom:1.25rem">Upload your rough <strong>.docx</strong> or paste your content — we apply your university's exact format. Your images and tables are preserved.</p>
           <p style="color:#e67e22; font-size:.82rem; margin-bottom:1.25rem">📌 Have a PDF? Open it in Word → File → Save As → Word Document (.docx) → upload that file here.</p>
 
@@ -406,7 +406,7 @@
       <!-- GENERATE: full form -->
       <div id="panel-generate" class="pb-hidden">
         <div class="pb-card">
-          <h2>Generate from Scratch <span style="color:#aaa;font-weight:400;font-size:.9rem">— ₹99–₹149</span></h2>
+          <h2>Generate from Scratch <span style="color:#aaa;font-weight:400;font-size:.9rem">— ₹399–₹999</span></h2>
 
           <div class="pb-section-title">Report Details</div>
           <div class="pb-field">
@@ -1052,7 +1052,7 @@
   }
 
   function _showStep3Preview(data, service) {
-    const price = service === 'format_fix' ? 49 : (data.size_bytes > 50 * 1024 ? 149 : 99);
+    const price = service === 'format_fix' ? 199 : (data.size_bytes > 50 * 1024 ? 999 : 399);
     const uni   = data.university || state.university.toUpperCase();
     state._previewPrice = price;
 
@@ -1100,7 +1100,7 @@
   // ── Step 2: Razorpay checkout for download unlock ─────────────────────────────
   async function startDownloadPayment() {
     const service = state.currentService;
-    const price   = state._previewPrice || 49;
+    const price   = state._previewPrice || 199;
     const btn     = $('payDocxBtn');
     btn.disabled = true;
     btn.textContent = 'Setting up payment…';
