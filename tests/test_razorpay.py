@@ -24,14 +24,19 @@ sys.modules["dotenv"].load_dotenv = lambda: None  # type: ignore
 if not hasattr(sys.modules["requests"], "post"):
     sys.modules["requests"].post = None  # type: ignore
 
-# requests.auth needs HTTPBasicAuth
-_auth_mod = types.ModuleType("requests.auth")
-class _BasicAuth:
-    def __init__(self, u, p):
-        self.username = u
-        self.password = p
-_auth_mod.HTTPBasicAuth = _BasicAuth
-sys.modules["requests.auth"] = _auth_mod
+# requests.auth needs HTTPBasicAuth. Only stub if `requests.auth` isn't
+# already in sys.modules (conftest pre-imports the real `requests` package,
+# in which case requests.auth is already real and we must NOT replace it --
+# replacing it desyncs the isinstance check in test_returns_http_basic_auth
+# from what razorpay_integration._auth() actually returns).
+if "requests.auth" not in sys.modules:
+    _auth_mod = types.ModuleType("requests.auth")
+    class _BasicAuth:
+        def __init__(self, u, p):
+            self.username = u
+            self.password = p
+    _auth_mod.HTTPBasicAuth = _BasicAuth
+    sys.modules["requests.auth"] = _auth_mod
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -54,6 +59,14 @@ def _sign(payload: bytes, secret: str = WEBHOOK_SECRET) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestVerifyWebhook:
+    @pytest.fixture(autouse=True)
+    def _use_test_webhook_secret(self, monkeypatch):
+        """razorpay_integration.WEBHOOK_SECRET is loaded from env at module
+        import time. conftest pre-imports razorpay_integration *after*
+        load_dotenv() has populated the real production secret. Override it
+        here so the test's _sign() helper and verify_webhook agree."""
+        monkeypatch.setattr(rz, "WEBHOOK_SECRET", WEBHOOK_SECRET)
+
     def test_valid_signature(self):
         body = b'{"event":"payment.captured"}'
         sig  = _sign(body)

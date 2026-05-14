@@ -10,16 +10,29 @@ for mod in ("pysnmp", "requests"):
     if mod not in sys.modules:
         sys.modules[mod] = types.ModuleType(mod)
 
-# Stub whatsapp_notify so no real HTTP calls happen
-_wn = types.ModuleType("whatsapp_notify")
+# Ensure whatsapp_notify exists (conftest pre-imports the real one in normal
+# runs; if pre-import fails -- e.g. CI without supabase -- fall through to a
+# minimal stub). Do NOT replace the real module if it's already present, or
+# we corrupt it for other tests in the suite (e.g. test_whatsapp_notify_send_file).
+if "whatsapp_notify" not in sys.modules:
+    sys.modules["whatsapp_notify"] = types.ModuleType("whatsapp_notify")
+
 _alerts_sent: list[str] = []
 
-def _fake_send_staff_alert(msg: str) -> bool:
-    _alerts_sent.append(msg)
-    return True
 
-_wn.send_staff_alert = _fake_send_staff_alert
-sys.modules["whatsapp_notify"] = _wn
+@pytest.fixture(autouse=True)
+def _stub_send_staff_alert(monkeypatch):
+    """Replace whatsapp_notify.send_staff_alert with a recording fake for
+    each test. monkeypatch restores the real function on test exit."""
+    def fake(msg: str) -> bool:
+        _alerts_sent.append(msg)
+        return True
+    monkeypatch.setattr(
+        sys.modules["whatsapp_notify"], "send_staff_alert", fake, raising=False
+    )
+    _alerts_sent.clear()
+    yield
+
 
 from printer_poller import _send_ink_alerts, init_printer_tables, INK_ALERT_PCT
 

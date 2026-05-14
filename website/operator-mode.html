@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operator Mode — Printosky</title>
+  <style>
+    :root {
+      --bg:       #0D1117;
+      --panel:    #161B22;
+      --border:   #30363D;
+      --ink:      #E6EDF3;
+      --muted:    #8B949E;
+      --accent:   #1F6FEB;
+      --accent-2: #388BFD;
+      --green:    #238636;
+      --red:      #F85149;
+      --amber:    #D29922;
+      --purple:   #7c3aed;
+      --mono:     'SF Mono', 'Monaco', 'Consolas', monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                 background: var(--bg); color: var(--ink); height: 100%; }
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+
+    header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 14px 20px;
+             display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    header h1 { margin: 0; font-size: 1.05rem; font-weight: 700; }
+    header .meta { font-family: var(--mono); font-size: .78rem; color: var(--muted); }
+    header a { color: var(--accent-2); text-decoration: none; font-size: .85rem; }
+    header a:hover { text-decoration: underline; }
+
+    main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+           padding: 16px 20px; min-height: 0; }
+    .pane { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+            display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+    .pane-head { padding: 10px 14px; border-bottom: 1px solid var(--border);
+                 font-size: .85rem; font-weight: 600; display: flex;
+                 justify-content: space-between; align-items: center; }
+    .pane-head .hint { font-size: .72rem; color: var(--muted); font-weight: 400; }
+    .pane-body { padding: 12px 14px; overflow: auto; flex: 1; }
+
+    textarea.input-view {
+      width: 100%; height: 100%; min-height: 360px;
+      background: var(--bg); color: var(--ink);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 12px; font-family: var(--mono); font-size: .82rem; line-height: 1.55;
+      resize: none; outline: none;
+    }
+    textarea.input-view:focus { border-color: var(--accent-2); }
+
+    .diag-row { padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
+                border-radius: 6px; margin-bottom: 8px; font-size: .82rem; }
+    .diag-row .key { color: var(--muted); font-size: .72rem; text-transform: uppercase;
+                     letter-spacing: .06em; margin-bottom: 4px; }
+    .diag-row .val { color: var(--ink); word-break: break-word; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 10px;
+            font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+            margin-right: 4px; }
+    .pill.error { background: rgba(248,81,73,0.12); color: var(--red); border: 1px solid var(--red); }
+
+    .chapter-list { list-style: none; padding: 0; margin: 0; }
+    .chapter-list li { padding: 8px 10px; border: 1px solid var(--border);
+                       border-radius: 6px; margin-bottom: 6px; background: var(--bg); }
+    .chapter-list .ch-num    { color: var(--accent-2); font-family: var(--mono); font-size: .75rem; }
+    .chapter-list .ch-head   { font-weight: 600; margin-top: 2px; }
+    .chapter-list .ch-snippet{ color: var(--muted); font-size: .76rem; margin-top: 4px;
+                                line-height: 1.5; }
+
+    footer { background: var(--panel); border-top: 1px solid var(--border);
+             padding: 14px 20px; display: flex; gap: 12px; align-items: center;
+             flex-wrap: wrap; }
+    footer .status-pill { font-size: .8rem; padding: 4px 10px; border-radius: 6px;
+                           font-weight: 600; }
+    footer .status-pending  { background: rgba(210,153,34,0.15); color: var(--amber); }
+    footer .status-claimed  { background: rgba(31,111,235,0.15); color: var(--accent-2); }
+    footer .status-delivered{ background: rgba(35,134,54,0.15); color: var(--green); }
+
+    .btn { padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border);
+           background: var(--panel); color: var(--ink); font-size: .9rem; cursor: pointer;
+           font-family: inherit; }
+    .btn:hover { background: #21262D; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-2); }
+    .btn-green   { background: var(--green); border-color: var(--green); color: #fff; }
+    .btn-green:hover { background: #2EA043; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    input[type="file"] { color: var(--muted); font-size: .82rem; }
+    input[type="file"]::file-selector-button {
+      background: var(--panel); color: var(--ink); border: 1px solid var(--border);
+      border-radius: 5px; padding: 5px 10px; cursor: pointer; margin-right: 8px;
+      font-family: inherit;
+    }
+
+    .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 18px;
+             border-radius: 8px; font-size: .9rem; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+             display: none; z-index: 100; }
+    .toast.ok   { background: var(--green); color: #fff; }
+    .toast.err  { background: var(--red);   color: #fff; }
+
+    @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div>
+      <h1>Operator Mode</h1>
+      <div class="meta" id="meta">Loading…</div>
+    </div>
+    <div><a href="/admin">← Back to admin</a></div>
+  </header>
+
+  <main>
+    <section class="pane">
+      <div class="pane-head">
+        <span>📝 Customer Input</span>
+        <span class="hint" id="input-len">—</span>
+      </div>
+      <div class="pane-body" style="padding: 0">
+        <textarea class="input-view" id="input-view" readonly placeholder="Loading…"></textarea>
+      </div>
+    </section>
+
+    <section class="pane">
+      <div class="pane-head">
+        <span>🤖 AI Detection Diagnostic</span>
+        <span class="hint" id="model-used">—</span>
+      </div>
+      <div class="pane-body">
+        <div class="diag-row">
+          <div class="key">Detected title</div>
+          <div class="val" id="d-title">—</div>
+        </div>
+        <div class="diag-row">
+          <div class="key">Validation errors</div>
+          <div class="val" id="d-errors">—</div>
+        </div>
+        <div class="diag-row">
+          <div class="key">Partial chapters detected</div>
+          <ul class="chapter-list" id="d-chapters">
+            <li style="color: var(--muted)">none</li>
+          </ul>
+        </div>
+        <div class="diag-row" style="background: transparent; border: 0; padding: 6px 0">
+          <button class="btn" id="btn-copy-input"     onclick="copyInputToClipboard()">📋 Copy input to clipboard</button>
+          <button class="btn" id="btn-download-json" onclick="downloadDiagnosticJson()">↓ Diagnostic JSON</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span class="status-pill" id="job-status">—</span>
+    <span style="color: var(--muted); font-size: .8rem">Deadline:</span>
+    <span id="job-deadline">—</span>
+    <span style="flex: 1"></span>
+
+    <button class="btn btn-primary" id="btn-claim" style="display:none" onclick="claimJob()">
+      Claim this job
+    </button>
+
+    <span id="deliver-area" style="display:none; gap: 8px; align-items: center">
+      <input type="file" id="finished-docx" accept=".docx">
+      <button class="btn btn-green" id="btn-deliver" onclick="deliverJob()">
+        📤 Deliver to customer
+      </button>
+    </span>
+  </footer>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+  const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:3000'
+    : 'https://printosky.vercel.app';
+
+  function _queueIdFromUrl() {
+    const params = new URLSearchParams(location.search);
+    if (params.get('id')) return params.get('id');
+    const seg = location.pathname.split('/').filter(Boolean).pop();
+    return /^[0-9a-f-]{36}$/.test(seg || '') ? seg : '';
+  }
+  const QUEUE_ID = _queueIdFromUrl();
+
+  function _pw() { return sessionStorage.getItem('admin_pw_cache') || ''; }
+  function _ensurePw() {
+    let pw = _pw();
+    if (!pw) {
+      pw = prompt('Admin password:');
+      if (pw) sessionStorage.setItem('admin_pw_cache', pw);
+    }
+    return pw;
+  }
+
+  function toast(msg, kind) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast ' + (kind === 'err' ? 'err' : 'ok');
+    t.style.display = 'block';
+    setTimeout(() => { t.style.display = 'none'; }, 3500);
+  }
+
+  function esc(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, c => (
+      { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+    ));
+  }
+
+  function fmtDeadline(iso) {
+    if (!iso) return '—';
+    const dl = new Date(iso);
+    const now = new Date();
+    const diffMs = dl.getTime() - now.getTime();
+    const overdue = diffMs < 0;
+    const mins = Math.abs(Math.round(diffMs / 60000));
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
+    return overdue
+      ? `<span style="color:var(--red);font-weight:600">⚠ ${label} overdue</span>`
+      : `<span style="color:${mins < 60 ? 'var(--amber)' : 'inherit'}">${label} left</span>`;
+  }
+
+  let currentJob = null;
+
+  async function loadJob() {
+    if (!QUEUE_ID) { toast('No queue ID in URL', 'err'); return; }
+    const pw = _ensurePw();
+    if (!pw) return;
+    try {
+      const r = await fetch(`${API}/admin/operator-queue/${encodeURIComponent(QUEUE_ID)}`, {
+        headers: { 'X-Admin-Password': pw }
+      });
+      if (r.status === 403) { toast('Unauthorized — wrong password', 'err'); return; }
+      if (r.status === 404) { toast('Job not found', 'err'); return; }
+      if (!r.ok)            { toast(`Load failed (HTTP ${r.status})`, 'err'); return; }
+      currentJob = await r.json();
+      render(currentJob);
+    } catch (e) { toast(`Network error: ${e.message}`, 'err'); }
+  }
+
+  function render(job) {
+    const uni = (job.university || '—').toUpperCase();
+    const tier = (job.tier || '—');
+    document.getElementById('meta').innerHTML =
+      `<strong>${esc(job.student_name || '—')}</strong> · ${esc(job.customer_phone || '—')} · ${esc(uni)} · ` +
+      `<span style="color:${tier === 'luxury' ? 'var(--purple)' : tier === 'premium' ? 'var(--accent-2)' : 'var(--muted)'};text-transform:capitalize">${esc(tier)}</span> · ` +
+      `<span class="meta">${esc(job.id || '')}</span>`;
+
+    const input = job.input_text || '';
+    document.getElementById('input-view').value = input;
+    document.getElementById('input-len').textContent =
+      `${input.split(/\s+/).filter(Boolean).length} words · ${(input.length / 1024).toFixed(1)} KB`;
+
+    const partial = job.opus_partial_structure || job.sonnet_partial_structure || {};
+    document.getElementById('d-title').textContent = partial.title || '— (no title detected)';
+    document.getElementById('model-used').textContent =
+      `last model: ${esc(job.last_model_used || '—')}`;
+
+    const attempts = job.ai_attempts || [];
+    const lastErrs = (() => {
+      for (let i = attempts.length - 1; i >= 0; i--) {
+        if (Array.isArray(attempts[i].errors) && attempts[i].errors.length) {
+          return attempts[i].errors;
+        }
+      }
+      return [];
+    })();
+    document.getElementById('d-errors').innerHTML = lastErrs.length
+      ? lastErrs.map(e => `<span class="pill error">${esc(e)}</span>`).join(' ')
+      : '— (none)';
+
+    const chapters = partial.chapters || [];
+    const chList = document.getElementById('d-chapters');
+    if (!chapters.length) {
+      chList.innerHTML = '<li style="color: var(--muted)">No chapters were detected. Build from scratch using the customer input on the left.</li>';
+    } else {
+      chList.innerHTML = chapters.map(ch => {
+        const num = ch.number || '?';
+        const head = ch.heading || '(no heading)';
+        const content = (ch.content || '').slice(0, 240);
+        return `<li>
+          <div class="ch-num">Ch ${esc(num)}</div>
+          <div class="ch-head">${esc(head)}</div>
+          ${content ? `<div class="ch-snippet">${esc(content)}${content.length >= 240 ? '…' : ''}</div>` : ''}
+        </li>`;
+      }).join('');
+    }
+
+    const status = job.status || 'pending';
+    const sp = document.getElementById('job-status');
+    sp.textContent = status.toUpperCase() + (job.assigned_to ? ` · ${job.assigned_to}` : '');
+    sp.className = 'status-pill status-' + status;
+    document.getElementById('job-deadline').innerHTML = fmtDeadline(job.deadline_ts);
+
+    document.getElementById('btn-claim').style.display    = status === 'pending' ? '' : 'none';
+    document.getElementById('deliver-area').style.display = status === 'claimed' ? 'inline-flex' : 'none';
+  }
+
+  async function copyInputToClipboard() {
+    if (!currentJob) return;
+    try {
+      await navigator.clipboard.writeText(currentJob.input_text || '');
+      toast('Input copied to clipboard', 'ok');
+    } catch (e) { toast(`Copy failed: ${e.message}`, 'err'); }
+  }
+
+  function downloadDiagnosticJson() {
+    if (!currentJob) return;
+    const diag = {
+      id:               currentJob.id,
+      university:       currentJob.university,
+      tier:             currentJob.tier,
+      last_model_used:  currentJob.last_model_used,
+      ai_attempts:      currentJob.ai_attempts,
+      sonnet_partial:   currentJob.sonnet_partial_structure,
+      opus_partial:     currentJob.opus_partial_structure,
+    };
+    const blob = new Blob([JSON.stringify(diag, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `opq_${currentJob.id}_diagnostic.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function claimJob() {
+    const pw = _ensurePw();
+    if (!pw) return;
+    const operator = prompt('Your name or email (operator):');
+    if (!operator) return;
+    try {
+      const r = await fetch(`${API}/admin/operator-queue/${encodeURIComponent(QUEUE_ID)}/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_password: pw, operator }),
+      });
+      if (r.status === 409) { toast('Already claimed by someone else', 'err'); }
+      else if (!r.ok)       { toast(`Claim failed (HTTP ${r.status})`, 'err'); }
+      else                  { toast('Claimed — get to work', 'ok'); }
+      loadJob();
+    } catch (e) { toast(`Claim error: ${e.message}`, 'err'); }
+  }
+
+  async function deliverJob() {
+    const pw = _ensurePw();
+    if (!pw) return;
+    const f = document.getElementById('finished-docx').files[0];
+    if (!f) { toast('Pick a finished DOCX file first', 'err'); return; }
+    if (!/\.docx$/i.test(f.name)) { toast('Must be a .docx file', 'err'); return; }
+
+    const btn = document.getElementById('btn-deliver');
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Uploading…';
+    try {
+      const buf = await f.arrayBuffer();
+      const bin = new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), '');
+      const b64 = btoa(bin);
+
+      const r = await fetch(`${API}/admin/operator-queue/${encodeURIComponent(QUEUE_ID)}/deliver`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_password: pw, docx_b64: b64, notify_customer: true }),
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        toast(`Delivery failed (HTTP ${r.status}): ${txt.slice(0, 120)}`, 'err');
+        return;
+      }
+      const d = await r.json();
+      toast(d.notified
+        ? '✓ Delivered + WhatsApp sent'
+        : '✓ Delivered (share link manually — customer phone missing)',
+        'ok');
+      loadJob();
+    } catch (e) {
+      toast(`Delivery error: ${e.message}`, 'err');
+    } finally {
+      btn.disabled = false; btn.textContent = orig;
+    }
+  }
+
+  loadJob();
+  setInterval(() => {
+    if (currentJob && currentJob.deadline_ts) {
+      document.getElementById('job-deadline').innerHTML = fmtDeadline(currentJob.deadline_ts);
+    }
+  }, 30_000);
+  </script>
+
+</body>
+</html>

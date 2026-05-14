@@ -782,6 +782,14 @@
   .conv-bubble.outbound { align-self:flex-end; background:rgba(0,200,100,.15); border:1px solid rgba(0,200,100,.3); color:var(--fg); }
   .conv-meta { font-size:.62rem; color:var(--muted); margin-top:4px; }
   .conv-empty { color:var(--muted); font-size:.78rem; padding:20px; text-align:center; }
+  /* Needs-human filter chip (TASK-009) */
+  .conv-filter-bar { padding:8px 12px; border-bottom:1px solid #e0e0e0; background:#fff; }
+  .conv-filter-chip { display:inline-flex; align-items:center; gap:6px; padding:5px 12px; border-radius:14px; border:1px solid #d0d0d0; background:#f5f5f5; color:#444; font-size:12px; cursor:pointer; transition:all .15s; }
+  .conv-filter-chip:hover { background:#ececec; border-color:#b0b0b0; }
+  .conv-filter-chip.active { background:#ff7043; border-color:#e64a19; color:#fff; font-weight:600; }
+  .conv-filter-count { display:inline-block; min-width:18px; padding:0 6px; border-radius:9px; background:rgba(0,0,0,.15); font-size:11px; line-height:16px; text-align:center; }
+  .conv-filter-chip.active .conv-filter-count { background:rgba(255,255,255,.25); }
+  .conv-needs-human-pill { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:8px; background:#ff7043; color:#fff; font-size:10px; font-weight:600; vertical-align:middle; }
 /* ── Conversations tab (rebuilt) ──────────────────────────────────────────── */
 .conv-layout {
     display: flex;
@@ -1013,6 +1021,7 @@
     <button class="conv-tab-btn"        id="tab-academic"  onclick="switchTab('academic')">Academic Projects</button>
     <button class="conv-tab-btn"        id="tab-referrals" onclick="switchTab('referrals')">Referrals</button>
     <button class="conv-tab-btn"        id="tab-pb-orders" onclick="switchTab('pb-orders')">Project Orders</button>
+    <button class="conv-tab-btn"        id="tab-opq"       onclick="switchTab('opq')">Operator Queue <span id="opq-depth-badge" style="display:none;background:#dc2626;color:#fff;border-radius:10px;padding:1px 7px;font-size:.7rem;margin-left:4px;font-weight:700"></span></button>
   </div>
 
   <main>
@@ -1152,6 +1161,15 @@
       <!-- Sidebar: contact list -->
       <div class="conv-sidebar">
         <div class="conv-header">Conversations</div>
+        <div class="conv-filter-bar">
+          <button id="conv-filter-needs-human" type="button"
+                  class="conv-filter-chip"
+                  onclick="convToggleNeedsHumanFilter()"
+                  title="Show only sessions where the customer typed help / support / human / agent">
+            <span aria-hidden="true">🆘</span> Needs human
+            <span id="conv-needs-human-count" class="conv-filter-count">0</span>
+          </button>
+        </div>
         <div id="conv-contact-list">
           <div style="padding:20px;color:#999;font-size:13px;">Loading...</div>
         </div>
@@ -1289,6 +1307,60 @@
       </thead>
       <tbody id="pb-orders-tbody">
         <tr><td colspan="9" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── Operator Queue Tab (P0 Day 2.5) ── -->
+  <div id="opq-tab" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:.85rem;color:var(--muted)">AI-failed orders awaiting operator finish · SLA 6h</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="opq-status-filter" onchange="loadOperatorQueue()" style="padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:.85rem">
+          <option value="pending" selected>Pending</option>
+          <option value="claimed">Claimed</option>
+          <option value="delivered">Delivered</option>
+          <option value="all">All</option>
+        </select>
+        <button class="ctrl-btn" onclick="loadOperatorQueue()">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- SLA gauge -->
+    <div style="display:flex;gap:10px;margin-bottom:14px">
+      <div style="flex:1;padding:10px 14px;border:1px solid #e6e6e6;border-radius:8px;background:#fff">
+        <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Pending</div>
+        <div id="opq-sla-pending" style="font-size:1.6rem;font-weight:700">—</div>
+      </div>
+      <div style="flex:1;padding:10px 14px;border:1px solid #e6e6e6;border-radius:8px;background:#fff">
+        <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Claimed</div>
+        <div id="opq-sla-claimed" style="font-size:1.6rem;font-weight:700">—</div>
+      </div>
+      <div style="flex:1;padding:10px 14px;border:1px solid #fca5a5;border-radius:8px;background:#fef2f2">
+        <div style="font-size:.7rem;color:#b91c1c;text-transform:uppercase;letter-spacing:.06em">Over SLA</div>
+        <div id="opq-sla-oversla" style="font-size:1.6rem;font-weight:700;color:#b91c1c">—</div>
+      </div>
+      <div style="flex:1;padding:10px 14px;border:1px solid #c084fc;border-radius:8px;background:#faf5ff">
+        <div style="font-size:.7rem;color:#7c3aed;text-transform:uppercase;letter-spacing:.06em">Premium/Luxury</div>
+        <div id="opq-sla-premium" style="font-size:1.6rem;font-weight:700;color:#7c3aed">—</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Deadline</th>
+          <th>Customer</th>
+          <th>University</th>
+          <th>Tier</th>
+          <th>Failed Model</th>
+          <th>Status</th>
+          <th>Operator</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="opq-tbody">
+        <tr><td colspan="8" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -3368,6 +3440,15 @@ let _convActivePhone = null;
 let _convPollInbox   = null;
 let _convPollThread  = null;
 let _convNotified    = new Set();
+let _convInboxCache  = [];
+let _convNeedsHumanOnly = false;
+
+function convToggleNeedsHumanFilter() {
+  _convNeedsHumanOnly = !_convNeedsHumanOnly;
+  const btn = document.getElementById('conv-filter-needs-human');
+  if (btn) btn.classList.toggle('active', _convNeedsHumanOnly);
+  convRenderInbox(_convInboxCache);
+}
 
 function _convPw() { return sessionStorage.getItem('admin_pw_cache') || ''; }
 
@@ -3418,17 +3499,31 @@ async function convFetchInbox() {
 }
 
 function convRenderInbox(contacts) {
+  _convInboxCache = contacts;
+
+  // Update the "Needs human" filter count badge regardless of active filter
+  const needsHumanCount = contacts.reduce((n, c) => n + (c.needs_human ? 1 : 0), 0);
+  const countEl = document.getElementById('conv-needs-human-count');
+  if (countEl) countEl.textContent = needsHumanCount;
+
+  const visible = _convNeedsHumanOnly
+    ? contacts.filter(c => c.needs_human)
+    : contacts;
+
   const list = document.getElementById('conv-contact-list');
   if (!list) return;
-  if (!contacts.length) {
-    list.innerHTML = '<div style="padding:20px;color:#999;font-size:13px;">No conversations yet.</div>';
+  if (!visible.length) {
+    const empty = _convNeedsHumanOnly
+      ? 'No sessions awaiting a human.'
+      : 'No conversations yet.';
+    list.innerHTML = `<div style="padding:20px;color:#999;font-size:13px;">${empty}</div>`;
     return;
   }
-  list.innerHTML = contacts.map(c => `
+  list.innerHTML = visible.map(c => `
     <div class="conv-contact${c.phone === _convActivePhone ? ' active' : ''}"
          data-phone="${convEscAttr(c.phone)}" data-name="${convEscAttr(c.name || '')}"
          onclick="convOpenContact(this.dataset.phone, this.dataset.name)">
-      <div class="conv-contact-name">${convEsc(c.name)}</div>
+      <div class="conv-contact-name">${convEsc(c.name)}${c.needs_human ? '<span class="conv-needs-human-pill" title="Customer asked for a human">SOS</span>' : ''}</div>
       <div class="conv-contact-preview">${convEsc(c.last_message)}</div>
       <div class="conv-contact-meta">
         <span>${convFmtTs(c.ts)}</span>
@@ -3677,11 +3772,13 @@ async function switchTab(tab) {
   document.getElementById("academic-tab").style.display   = tab === "academic"   ? "block" : "none";
   document.getElementById("referrals-tab").style.display  = tab === "referrals"  ? "block" : "none";
   document.getElementById("pb-orders-tab").style.display  = tab === "pb-orders"  ? "block" : "none";
+  document.getElementById("opq-tab").style.display        = tab === "opq"        ? "block" : "none";
   document.getElementById("tab-jobs").classList.toggle("active",       tab === "jobs");
   document.getElementById("tab-conv").classList.toggle("active",       tab === "conv");
   document.getElementById("tab-academic").classList.toggle("active",   tab === "academic");
   document.getElementById("tab-referrals").classList.toggle("active",  tab === "referrals");
   document.getElementById("tab-pb-orders").classList.toggle("active",  tab === "pb-orders");
+  document.getElementById("tab-opq").classList.toggle("active",        tab === "opq");
 
   // Conversations polling — start when tab is active, stop otherwise
   if (tab === "conv") {
@@ -3698,6 +3795,7 @@ async function switchTab(tab) {
   if (tab === "academic")   { loadAcademicOrders(); }
   if (tab === "referrals")  { loadReferralsLeaderboard(); }
   if (tab === "pb-orders")  { loadPBOrders(); }
+  if (tab === "opq")        { loadOperatorQueue(); }
 }
 
 // ── Referrals leaderboard ───────────────────────────────────────────────────
@@ -3908,6 +4006,164 @@ async function resendPBDoc(orderId, btn) {
   } finally {
     setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 2500);
   }
+}
+
+// ── Operator Queue (P0 Day 2.5) ──────────────────────────────────────────────
+function _fmtDeadline(deadlineIso) {
+  if (!deadlineIso) return '—';
+  const dl = new Date(deadlineIso);
+  const now = new Date();
+  const diffMs = dl.getTime() - now.getTime();
+  const overdue = diffMs < 0;
+  const mins  = Math.abs(Math.round(diffMs / 60000));
+  const hours = Math.floor(mins / 60);
+  const rem   = mins % 60;
+  const label = hours > 0 ? `${hours}h ${rem}m` : `${rem}m`;
+  return overdue
+    ? `<span style="color:#b91c1c;font-weight:600">⚠ ${label} over</span>`
+    : `<span style="color:${mins < 60 ? '#b91c1c' : 'inherit'}">${label} left</span>`;
+}
+
+async function loadOperatorQueue() {
+  let pw = _convPw();
+  if (!pw) {
+    pw = await _adminPwPrompt(false);
+    if (!pw) return;
+    sessionStorage.setItem('admin_pw_cache', pw);
+  }
+  const tbody = document.getElementById("opq-tbody");
+  tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>';
+  const statusFilter = document.getElementById("opq-status-filter").value;
+
+  // Fire list + depth in parallel
+  try {
+    const [listResp, depthResp] = await Promise.all([
+      fetch(`${ACAD_API}/admin/operator-queue?status=${encodeURIComponent(statusFilter)}`,
+            { headers: { 'X-Admin-Password': pw } }),
+      fetch(`${ACAD_API}/admin/operator-queue/depth`,
+            { headers: { 'X-Admin-Password': pw } }),
+    ]);
+
+    // Depth -> SLA gauge + tab badge
+    if (depthResp.ok) {
+      const d = await depthResp.json();
+      document.getElementById("opq-sla-pending").textContent = d.pending ?? '—';
+      document.getElementById("opq-sla-claimed").textContent = d.claimed ?? '—';
+      document.getElementById("opq-sla-oversla").textContent = d.over_sla ?? '—';
+      document.getElementById("opq-sla-premium").textContent = d.premium_in_q ?? '—';
+      const badge = document.getElementById("opq-depth-badge");
+      if (d.total_open > 0) {
+        badge.textContent = d.total_open;
+        badge.style.display = 'inline-block';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+
+    if (!listResp.ok) {
+      const msg = listResp.status === 403 ? "Unauthorized — wrong password" : `Failed to load (HTTP ${listResp.status})`;
+      tbody.innerHTML = `<tr><td colspan="8" style="padding:24px;color:var(--red);text-align:center">${msg}</td></tr>`;
+      return;
+    }
+    const d = await listResp.json();
+    const rows = d.rows || [];
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;color:var(--muted);text-align:center">No jobs in this state</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(_renderOpqRow).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="8" style="padding:24px;color:var(--red);text-align:center">Network error: ${escHtml(e.message)}</td></tr>`;
+  }
+}
+
+function _renderOpqRow(r) {
+  const status = r.status || 'pending';
+  const tier   = r.tier   || '—';
+  const tierColor = tier === 'luxury' ? '#7c3aed' : tier === 'premium' ? '#1f6feb' : '#666';
+  const actions = [];
+  if (status === 'pending') {
+    actions.push(`<button class="ctrl-btn" onclick="claimOpqJob('${escHtml(r.id)}')">Claim</button>`);
+  }
+  if (status === 'claimed') {
+    actions.push(`<button class="ctrl-btn" onclick="deliverOpqJob('${escHtml(r.id)}',this)">Deliver DOCX</button>`);
+  }
+  if (status === 'delivered' && r.delivered_download_url) {
+    actions.push(`<a href="${escHtml(r.delivered_download_url)}" target="_blank" style="color:var(--accent)">↓ DL</a>`);
+  }
+  // Always allow viewing details (P0 Day 2.5c will hook the operator-mode page in)
+  actions.push(`<a href="/admin/operator-mode/${escHtml(r.id)}" target="_blank" style="font-size:.75rem;margin-left:6px">view</a>`);
+  return `<tr>
+    <td>${_fmtDeadline(r.deadline_ts)}</td>
+    <td>
+      <div style="font-weight:600">${escHtml(r.student_name || '—')}</div>
+      <div style="font-family:var(--mono);font-size:.72rem;color:var(--muted)">${escHtml(r.customer_phone || '—')}</div>
+    </td>
+    <td style="font-size:.78rem">${escHtml((r.university || '—').toUpperCase())}</td>
+    <td><span style="color:${tierColor};font-weight:700;text-transform:capitalize">${escHtml(tier)}</span></td>
+    <td style="font-size:.72rem;color:var(--muted)">${escHtml(r.last_model_used || '—')}</td>
+    <td><span class="badge ${status === 'delivered' ? 'badge-delivered' : 'badge-paid'}">${escHtml(status)}</span></td>
+    <td style="font-size:.78rem">${escHtml(r.assigned_to || '—')}</td>
+    <td style="white-space:nowrap">${actions.join(' ')}</td>
+  </tr>`;
+}
+
+async function claimOpqJob(queueId) {
+  let pw = _convPw();
+  if (!pw) { pw = await _adminPwPrompt(false); if (!pw) return; sessionStorage.setItem('admin_pw_cache', pw); }
+  const op = prompt("Claim this job — your name or email:");
+  if (!op) return;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/operator-queue/${encodeURIComponent(queueId)}/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ admin_password: pw, operator: op }),
+    });
+    if (r.status === 409) { alert("This job has already been claimed by someone else."); }
+    else if (!r.ok)       { alert(`Claim failed (HTTP ${r.status})`); }
+    loadOperatorQueue();
+  } catch (e) { alert(`Claim error: ${e.message}`); }
+}
+
+async function deliverOpqJob(queueId, btn) {
+  let pw = _convPw();
+  if (!pw) { pw = await _adminPwPrompt(false); if (!pw) return; sessionStorage.setItem('admin_pw_cache', pw); }
+  // Pick a DOCX
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Uploading…'; }
+    try {
+      // base64 encode (FileReader → arrayBuffer → btoa)
+      const buf  = await file.arrayBuffer();
+      const bin  = new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), '');
+      const b64  = btoa(bin);
+      const r = await fetch(`${ACAD_API}/admin/operator-queue/${encodeURIComponent(queueId)}/deliver`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_password: pw, docx_b64: b64, notify_customer: true }),
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        alert(`Delivery failed (HTTP ${r.status}): ${txt.slice(0, 200)}`);
+        return;
+      }
+      const d = await r.json();
+      alert(d.notified
+        ? `Delivered! Customer WhatsApp'd at the link.`
+        : `Delivered. (No customer phone on file — share the link manually: ${d.download_url})`);
+      loadOperatorQueue();
+    } catch (e) {
+      alert(`Delivery error: ${e.message}`);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
+  };
+  input.click();
 }
 
 async function openReferrerDetail(code) {

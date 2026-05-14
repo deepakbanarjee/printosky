@@ -108,16 +108,9 @@ except ImportError:
 
 # ── Konica Windows username → PC identifier mapping ───────────────────────────
 # PC1 = Priya/Deepak/Anu  |  PC2 = Revana  |  PC3 = rarely used (Nirmal)
-KONICA_USER_PC_MAP = {
-    # Current Windows usernames (as they appear in Konica job log)
-    "ABC":        "PC1",   # Priya / Deepak / Anu
-    "OXYGEN":     "PC2",   # Revana
-    "NIRMAL":     "PC3",   # rarely used
-    # Future — after Windows computer names are renamed
-    "OXYGEN PC1": "PC1",
-    "OXYGEN PC2": "PC2",
-    "OXYGEN PC3": "PC3",
-}
+# KONICA_USER_PC_MAP retired 2026-05-12 (0/4507 attribution rate); see
+# retired/2026-05-12-graveyard/konica_attribution.py for the dict and the
+# four root-cause failures documented in that file's header.
 
 # ── Staff session helpers ──────────────────────────────────────────────────────
 _active_sessions = {}   # pc_id → {staff_id, name, session_id}  (in-memory cache)
@@ -316,33 +309,8 @@ def get_active_staff(db_path: str, pc_id: str):
     return {"staff_id": None}
 
 
-def attribute_konica_jobs(db_path: str):
-    """Attribute unattributed konica_jobs to staff via active session at print time."""
-    conn = sqlite3.connect(db_path)
-    unattr = conn.execute(
-        "SELECT job_number, user_name, job_date FROM konica_jobs WHERE attributed_to IS NULL"
-    ).fetchall()
-    updated = 0
-    for job_number, user_name, job_date in unattr:
-        pc_id = KONICA_USER_PC_MAP.get(user_name)
-        if not pc_id or not job_date:
-            continue
-        row = conn.execute("""
-            SELECT staff_id FROM staff_sessions
-            WHERE pc_id=? AND login_at <= ?
-              AND (logout_at IS NULL OR logout_at >= ?)
-            ORDER BY login_at DESC LIMIT 1
-        """, (pc_id, job_date, job_date)).fetchone()
-        if row:
-            conn.execute(
-                "UPDATE konica_jobs SET attributed_to=? WHERE job_number=?",
-                (row[0], job_number)
-            )
-            updated += 1
-    if updated:
-        conn.commit()
-        logging.info("Attributed %d konica_jobs to staff", updated)
-    conn.close()
+# attribute_konica_jobs() retired 2026-05-12 -- 0/4507 attribution rate.
+# Function extracted to retired/2026-05-12-graveyard/konica_attribution.py.
 
 # ── Internet / network health check ──────────────────────────────────────────
 def check_internet(host="8.8.8.8", port=53, timeout=3) -> bool:
@@ -424,15 +392,27 @@ def get_system_health() -> dict:
 
 PORT = 3005
 
-# Printer names must match exactly what Windows sees in "Devices and Printers"
+# Printer names must match exactly what Windows sees in "Devices and Printers".
+# Defaults are the canonical OSP store queue names; per-store overrides come
+# from store_config.json via the `printer_queue_names` field (e.g. on a dev
+# office PC, redirect 'epson' to 'Microsoft Print to PDF' so test dispatches
+# don't burn real ink).
 PRINTERS = {
     "konica": "KONICA MINOLTA 1100 PS",
     "epson":  "WF-C21000 Series(Network)",
 }
+try:
+    _store_pq = getattr(get_store_config(), "printer_queue_names", None)
+    if _store_pq:
+        PRINTERS.update({k: v for k, v in _store_pq.items() if v})
+        logging.info("PRINTERS overridden by store_config: %s", _store_pq)
+except Exception as _e:
+    logging.warning("Could not apply store_config.printer_queue_names: %s", _e)
 
 # SumatraPDF path — portable version in project folder or installed
 SUMATRA_PATHS = [
     r"C:\printosky_watcher\SumatraPDF.exe",
+    r"C:\PY\printosky\SumatraPDF.exe",
     r"C:\Users\ABC\AppData\Local\SumatraPDF\SumatraPDF.exe",
     r"C:\Program Files\SumatraPDF\SumatraPDF.exe",
     r"C:\Program Files (x86)\SumatraPDF\SumatraPDF.exe",
@@ -441,11 +421,17 @@ SUMATRA_PATHS = [
 # Shared secret — must match STORE_TOKEN in .env and storeToken in browser localStorage
 STORE_TOKEN = os.environ.get("STORE_TOKEN", "")
 
-# SQLite DB path
-if sys.platform == "win32":
-    DB_PATH = r"C:\Printosky\Data\jobs.db"
-else:
-    DB_PATH = str(Path.home() / "Printosky" / "Data" / "jobs.db")
+# SQLite DB path — driven by store_config when present (e.g. dev/test stores
+# pointing at a sandboxed jobs.db). Falls back to legacy OSP paths otherwise,
+# so the real store PC's behaviour is unchanged (no store_config.json there
+# → legacy fallback inside store_config returns the same hardcoded path).
+try:
+    DB_PATH = get_store_config().db_path
+except Exception:
+    if sys.platform == "win32":
+        DB_PATH = r"C:\Printosky\Data\jobs.db"
+    else:
+        DB_PATH = str(Path.home() / "Printosky" / "Data" / "jobs.db")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -635,6 +621,114 @@ def _db():
 
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _count_pages_from_list(page_list: str, total_pages: int) -> int:
+    """
+    Count the number of pages a SumatraPDF-style page-list expression refers to.
+
+    Mirrors _build_page_range_arg() semantics so the spec row we write matches
+    what we actually dispatched to the printer.
+
+    Examples:
+      'all'         + total=10  -> 10
+      '' / None     + total=10  -> 10
+      '1-5'                     -> 5
+      '1,3,5'                   -> 3
+      '1-5,10-15'               -> 5 + 6 = 11
+    Returns 0 if the expression can't be parsed.
+    """
+    total = max(int(total_pages or 0), 0)
+    if not page_list or str(page_list).strip().lower() in ("all", ""):
+        return total
+
+    count = 0
+    for part in str(page_list).strip().split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            try:
+                a, b = part.split("-", 1)
+                a_i, b_i = int(a.strip()), int(b.strip())
+                if b_i >= a_i:
+                    count += (b_i - a_i + 1)
+            except ValueError:
+                continue
+        else:
+            try:
+                int(part)
+                count += 1
+            except ValueError:
+                continue
+    return count
+
+
+def _write_epson_spec_row(
+    job_id: str,
+    item_number: int,
+    file_name: str,
+    pages_per_copy: int,
+    copies: int,
+    colour: str,
+    paper_size: str,
+) -> None:
+    """
+    Write a source='spec' row to local epson_jobs table on successful Epson dispatch.
+
+    Captures what we *told* the printer to do (mono/colour/copies/paper). The
+    weblog scraper later writes a parallel source='weblog' row with what the
+    printer *reports* happened. They join on attributed_job_id = printosky job_id,
+    enabling end-to-end reconciliation.
+
+    Why this exists: Epson's free Web Config CSV and SNMP OIDs do not expose
+    per-job mono/colour split, copies, or paper size. Per-job accounting is only
+    available via paid Epson Print Admin Serverless. This function gives us the
+    same data for free by capturing it at dispatch time, when we already know it.
+
+    Note: local SQLite epson_jobs has no store_id column — supabase_sync.py
+    injects store_id at upload time. Same convention as weblog/delta rows.
+
+    Failures are logged but NEVER block the print flow.
+    """
+    try:
+        pages_printed = max(int(pages_per_copy or 0), 0) * max(int(copies or 0), 0)
+        is_colour = (colour or "").lower() in ("col", "colour", "color")
+        mono_pages  = 0 if is_colour else pages_printed
+        color_pages = pages_printed if is_colour else 0
+
+        now = _now()
+        # Unique per dispatch — timestamp suffix keeps re-prints distinct and
+        # never collides with weblog rows (those use plain integer job_numbers).
+        ts_compact = datetime.now().strftime("%Y%m%d%H%M%S")
+        spec_job_number = f"{job_id}-{int(item_number)}-{ts_compact}"
+
+        conn = _db()
+        conn.execute("""
+            INSERT INTO epson_jobs (
+                source, job_number, file_name,
+                pages_printed, mono_pages, color_pages, copies,
+                paper_size, job_date, print_end_date,
+                attributed_job_id, imported_at, result
+            ) VALUES ('spec', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OK')
+        """, (
+            spec_job_number, file_name,
+            pages_printed, mono_pages, color_pages, int(copies or 1),
+            paper_size or "A4", now, now,
+            job_id, now,
+        ))
+        conn.commit()
+        conn.close()
+        logging.info(
+            "epson_jobs spec row: %s (%s) pages=%d mono=%d color=%d copies=%s paper=%s",
+            spec_job_number, file_name, pages_printed, mono_pages, color_pages,
+            copies, paper_size,
+        )
+    except Exception as e:
+        logging.warning(
+            "Failed to write epson_jobs spec row for %s item %d: %s",
+            job_id, item_number, e,
+        )
 
 
 def _send_whatsapp(phone: str, message: str) -> bool:
@@ -1487,40 +1581,10 @@ def handle_session_end(body: dict) -> dict:
 
 # ── A9: Print receipt (thermal printer stub) ──────────────────────────────────
 
-RECEIPT_PRINTER = None  # Set to {"vendor": 0xXXXX, "product": 0xXXXX} when hardware arrives
-
-def handle_print_receipt(body: dict) -> dict:
-    """
-    POST /print-receipt
-    Fire thermal receipt printer. Currently a stub — returns not-configured if no hardware.
-    """
-    if RECEIPT_PRINTER is None:
-        return {"ok": False, "error": "Receipt printer not configured"}
-
-    job_id = body.get("job_id", "")
-    if not job_id:
-        return {"ok": False, "error": "job_id required"}
-
-    try:
-        conn = _db()
-        row = conn.execute(
-            "SELECT * FROM jobs WHERE job_id=?", (job_id,)
-        ).fetchone()
-        conn.close()
-        if not row:
-            return {"ok": False, "error": "Job not found"}
-
-        # When hardware arrives: format receipt and send via python-escpos
-        # from escpos.printer import Usb
-        # p = Usb(RECEIPT_PRINTER["vendor"], RECEIPT_PRINTER["product"])
-        # p.text(f"PRINTOSKY\n{job_id}\n...")
-        # p.cut()
-
-        logging.info("Receipt printer: job %s (hardware not yet connected)", job_id)
-        return {"ok": True, "note": "Hardware not connected yet"}
-
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+# RECEIPT_PRINTER + handle_print_receipt() retired 2026-05-12 -- no hardware
+# was ever connected; the stub returned {"ok": False, ...} on every call.
+# See retired/2026-05-12-graveyard/receipt_printer.py for the dropped code and
+# revival instructions for when a thermal printer is actually purchased.
 
 
 # ── GET /vendors ──────────────────────────────────────────────────────────────
@@ -1669,6 +1733,25 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None) -> di
         return {"ok": False, "error": "Print command timed out after 90s"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+    # ── Epson per-job accounting hook ─────────────────────────────────────────
+    # On successful Epson dispatch, write a source='spec' row to epson_jobs so
+    # we have the mono/colour/copies/paper data Epson's free APIs do not expose.
+    # Konica dispatches are skipped (Konica has its own per-job log via XML).
+    if printer_key == "epson":
+        pages_per_copy = _count_pages_from_list(page_list, job["page_count"] or 0)
+        paper_size_val = "A4"
+        if "paper_size" in job.keys():
+            paper_size_val = job["paper_size"] or "A4"
+        _write_epson_spec_row(
+            job_id=job_id,
+            item_number=item_number,
+            file_name=file_name2,
+            pages_per_copy=pages_per_copy,
+            copies=copies,
+            colour=colour,
+            paper_size=paper_size_val,
+        )
 
     # Mark this item as Printed
     now = _now()
@@ -1950,10 +2033,7 @@ class PrintHandler(BaseHTTPRequestHandler):
             self._json(200, handle_vendor_return(body))
             return
 
-        if path == "/print-receipt":
-            body = self._read_body()
-            self._json(200, handle_print_receipt(body))
-            return
+        # /print-receipt route retired 2026-05-12; see retired/2026-05-12-graveyard/
 
         if path == "/detect-colour":
             body = self._read_body()

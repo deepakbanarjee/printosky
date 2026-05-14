@@ -1,0 +1,72 @@
+# TASK-018: run the pytest suite on every push + PR to main.
+# Roadmap reference: roadmap-2026-05.md TASK-018.
+#
+# Excluded test files: tests/test_browser_admin.py + tests/test_browser_mis.py.
+# These are Playwright end-to-end tests that require a running browser +
+# real selectors against a deployed admin UI; they belong in a separate
+# E2E workflow (TASK-017) once that infrastructure exists.
+
+name: test
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  # One run per ref; cancel older runs on the same branch when a new push
+  # lands. Saves CI minutes on rapid pushes.
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Synthetic env vars so razorpay_integration.py:25 (which does
+    # os.environ["RAZORPAY_WEBHOOK_SECRET"]) doesn't KeyError at import.
+    # Real production secrets never enter CI.
+    env:
+      RAZORPAY_KEY_ID: ci_key
+      RAZORPAY_KEY_SECRET: ci_secret
+      RAZORPAY_WEBHOOK_SECRET: ci_webhook_secret
+      META_APP_SECRET: ci_meta_app_secret
+      ADMIN_PASSWORD_HASH: ci_admin_password_hash
+      UPTIME_NOTIFY_SECRET: ci_uptime_notify_secret
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # Test-time + scripts-time deps NOT pinned in requirements.txt
+          # (production Vercel function doesn't need them, but tests exercise
+          # store-PC code paths that do):
+          #  - pyyaml      : scripts/check_schema.py manifest read/write
+          #  - pymupdf     : colour_detector.py uses `fitz` for PDF colour-
+          #                  page detection (store-PC only). Tests at
+          #                  tests/test_colour_detector.py monkeypatch
+          #                  `colour_detector.fitz`.
+          #  - reportlab   : b2b_manager.generate_invoice_pdf() builds
+          #                  invoice PDFs on the store PC. Tests at
+          #                  tests/test_b2b_manager.py exercise that path.
+          #                  (Module is retired in PR #9 -- but until that
+          #                  merges, the tests still exist and need this.)
+          pip install pytest pytest-cov python-dotenv pyyaml pymupdf reportlab
+
+      - name: Run pytest
+        run: |
+          python -m pytest tests/ \
+            --ignore=tests/test_browser_admin.py \
+            --ignore=tests/test_browser_mis.py \
+            -q --tb=short

@@ -63,6 +63,11 @@ class StoreConfig:
     db_path: str
     agent_secret: str | None = None
     platform_url: str | None = None
+    # Per-store Windows print-queue names. When set, print_server.py overrides
+    # its hardcoded PRINTERS dict at import time. Use this on dev/test stores
+    # to redirect 'epson' to 'Microsoft Print to PDF' so test dispatches don't
+    # consume real ink. Keys: 'konica', 'epson'. Missing keys keep defaults.
+    printer_queue_names: dict[str, str] | None = None
     source_path: str | None = field(default=None, compare=False)
 
     @property
@@ -96,6 +101,13 @@ def _merge_with_defaults(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _build(raw: dict[str, Any], source: str | None) -> StoreConfig:
     printers_raw = raw.get("printers", {}) or {}
+    pq_raw = raw.get("printer_queue_names")
+    # Normalise to a plain dict[str, str] or None — never trust the input shape.
+    printer_queue_names: dict[str, str] | None = None
+    if isinstance(pq_raw, dict) and pq_raw:
+        printer_queue_names = {
+            str(k): str(v) for k, v in pq_raw.items() if v is not None
+        } or None
     return StoreConfig(
         store_id=str(raw["store_id"]),
         store_name=str(raw["store_name"]),
@@ -107,6 +119,7 @@ def _build(raw: dict[str, Any], source: str | None) -> StoreConfig:
         db_path=str(raw["db_path"]),
         agent_secret=raw.get("agent_secret"),
         platform_url=raw.get("platform_url"),
+        printer_queue_names=printer_queue_names,
         source_path=source,
     )
 

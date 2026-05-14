@@ -43,7 +43,7 @@ Last updated: 2026-04-09 (Session 9)
 | S8-1 | **Tell staff their PINs** | Run `python staff_setup.py list` to view current PINs — do not commit PIN values to this file |
 | S8-2 | **MIS dashboard — live test** | mis.html built but never live-tested. Verify staff sessions syncing to Supabase |
 | S8-3 | **Staff session Supabase sync** | `supabase_sync.py` syncs staff_sessions — verify after SCHEMA_v3 applied |
-| S8-4 | **Konica job attribution** | `KONICA_USER_PC_MAP` in print_server.py — map Konica usernames to staff. Test attribution flow |
+| S8-4 | ~~**Konica job attribution**~~ 🗑️ | RETIRED 2026-05-12 — 0/4507 attribution rate; see `retired/2026-05-12-graveyard/konica_attribution.py` for code + revival path. |
 | S8-5 | **Idle logout timer** | session_timeout.py — verify it logs out idle staff correctly |
 
 ---
@@ -56,7 +56,8 @@ Last updated: 2026-04-09 (Session 9)
 | S9-2 | ~~**Konica job export URL**~~ ✅ | Jobs loading correctly — confirmed 2026-04-20 |
 | S9-3 | ~~**Epson ink alerts**~~ ✅ | `_send_ink_alerts()` in printer_poller.py:434. Fires on threshold crossing (EMPTY at 0%, LOW at ≤10%). Called in poll_once() for both printers. |
 | S9-4 | **A3 printing** | Test A3 job end-to-end (bot → quote → print) |
-| S9-5 | **Receipt printer** | `RECEIPT_PRINTER = None` in print_server.py. Hardware pending. |
+| S9-5 | ~~**Receipt printer**~~ 🗑️ | RETIRED 2026-05-12 — hardware never purchased, stub returned "not configured" on every call. See `retired/2026-05-12-graveyard/receipt_printer.py` for code + revival path. |
+| S9-6 | **Epson per-job mono/colour tracking** ⏳ | Partial: (a) ✅ delta dedup applied to Supabase (173k → 187 rows, partial unique index added); (b) ✅ new `source='spec'` rows written by print_server.py on Epson dispatch — captures mono/colour/copies/paper from spec, committed 5b50a93. (c) ⏳ store-PC redeploy pending. (d) ⏳ admin-UI report showing spec ↔ weblog reconciliation. |
 
 ---
 
@@ -68,7 +69,7 @@ Last updated: 2026-04-09 (Session 9)
 | S10-2 | ~~**Bot conversation flow review**~~ ✅ | Full journey tested: file → 6 steps → payment → notification (2026-04-09) |
 | S10-3 | ~~**WhatsApp group/channel filter**~~ ✅ | Filters @g.us, @newsletter, @broadcast, isGroupMsg in index.js:165-170. Confirmed in code. |
 | S10-4 | ~~**Delivery flow**~~ ✅ | Verified working (2026-04-09) |
-| S10-5 | **B2B bot** | `b2b_bot.py` and `b2b_manager.py` exist. Status unknown. Define scope and test |
+| S10-5 | ~~**B2B bot**~~ 🗑️ | RETIRED 2026-05-12 — 0 b2b_clients rows in production, no owner. See `retired/2026-05-12-graveyard/{b2b_bot.py,b2b_manager.py,test_b2b*.py}` for code + revival path. Live Supabase tables `b2b_clients` + `b2b_payments` left in place. |
 
 ---
 
