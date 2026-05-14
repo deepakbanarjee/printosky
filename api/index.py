@@ -1716,6 +1716,188 @@ def _handle_admin_thread(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_admin_health_models(h) -> None:
+    """GET /admin/health/models — verify configured Claude models are reachable.
+
+    Returns {"_status": "checked", "<model_id>": "ok"|"FAIL: ..."}.
+    Hit this after every deploy. Cost ~₹0.01/call. Admin-auth only.
+    """
+    from urllib.parse import parse_qs, urlparse
+    admin_pw = h.headers.get("X-Admin-Password", "").strip()
+    if not admin_pw:
+        params   = parse_qs(urlparse(h.path).query)
+        admin_pw = params.get("admin_password", [""])[0]
+    if not _auth_admin_pw(admin_pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+
+    try:
+        import docx_engine
+        result = docx_engine.verify_models_available()
+        _json_response(h, 200, result)
+    except Exception as exc:
+        logger.error("GET /admin/health/models error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+# ── Operator queue (P0 Day 2.5) ──────────────────────────────────────────────
+
+def _admin_pw_from_request(h) -> str:
+    """Read admin password from header or ?admin_password= query string."""
+    from urllib.parse import parse_qs, urlparse
+    pw = h.headers.get("X-Admin-Password", "").strip()
+    if not pw:
+        params = parse_qs(urlparse(h.path).query)
+        pw = params.get("admin_password", [""])[0]
+    return pw
+
+
+def _handle_admin_operator_queue_list(h) -> None:
+    """GET /admin/operator-queue[?status=pending|claimed|delivered|all]
+    Returns sorted-by-deadline list of operator queue rows.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    from urllib.parse import parse_qs, urlparse
+    params = parse_qs(urlparse(h.path).query)
+    status = params.get("status", ["pending"])[0]
+    status_filter: str | None = None if status == "all" else status
+    try:
+        from db_cloud import list_operator_queue
+        rows = list_operator_queue(status=status_filter, limit=200)
+        _json_response(h, 200, {"rows": rows, "count": len(rows)})
+    except Exception as exc:
+        logger.error("operator-queue list error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_operator_queue_depth(h) -> None:
+    """GET /admin/operator-queue/depth — counts for the SLA gauge."""
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from db_cloud import get_operator_queue_depth
+        _json_response(h, 200, get_operator_queue_depth())
+    except Exception as exc:
+        logger.error("operator-queue depth error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_operator_queue_get(h, queue_id: str) -> None:
+    """GET /admin/operator-queue/<id> — full row including input_text and partials."""
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from db_cloud import get_operator_job
+        row = get_operator_job(queue_id)
+        if not row:
+            _json_response(h, 404, {"error": "Not found"})
+            return
+        _json_response(h, 200, row)
+    except Exception as exc:
+        logger.error("operator-queue get error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_operator_queue_claim(h, body: bytes, queue_id: str) -> None:
+    """POST /admin/operator-queue/<id>/claim
+    Body: {"admin_password": "...", "operator": "<email or name>"}
+    Marks the row claimed by the operator. Refuses if already claimed.
+    """
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+    pw = data.get("admin_password", "") or _admin_pw_from_request(h)
+    if not _auth_admin_pw(pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    operator = str(data.get("operator", "")).strip()[:120]
+    if not operator:
+        _json_response(h, 400, {"error": "operator field required"})
+        return
+    try:
+        from db_cloud import claim_operator_job
+        ok = claim_operator_job(queue_id, operator)
+        if not ok:
+            _json_response(h, 409, {
+                "error": "already_claimed_or_missing",
+                "message": "Job is no longer pending or does not exist."
+            })
+            return
+        _json_response(h, 200, {"ok": True, "queue_id": queue_id,
+                                  "assigned_to": operator})
+    except Exception as exc:
+        logger.error("operator-queue claim error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_operator_queue_deliver(h, body: bytes, queue_id: str) -> None:
+    """POST /admin/operator-queue/<id>/deliver
+    Body: {
+      "admin_password": "...",
+      "docx_b64":       "<base64 of finished docx bytes>",
+      "notify_customer": true   (optional, default true)
+    }
+    Uploads the finished DOCX, marks delivered, sends WhatsApp link.
+    """
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+    pw = data.get("admin_password", "") or _admin_pw_from_request(h)
+    if not _auth_admin_pw(pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+
+    docx_b64 = data.get("docx_b64", "")
+    if not docx_b64:
+        _json_response(h, 400, {"error": "docx_b64 required"})
+        return
+    try:
+        import base64 as _b64
+        docx_bytes = _b64.b64decode(docx_b64)
+    except Exception as exc:
+        _json_response(h, 400, {"error": f"docx_b64 decode failed: {exc}"})
+        return
+    if len(docx_bytes) < 1000:
+        _json_response(h, 400, {"error": "docx too small (<1KB) — likely invalid"})
+        return
+
+    notify = bool(data.get("notify_customer", True))
+
+    try:
+        from db_cloud import deliver_operator_job, get_operator_job
+        ok, url = deliver_operator_job(queue_id, docx_bytes)
+        if not ok:
+            _json_response(h, 500, {"error": "Storage upload failed"})
+            return
+
+        # Pull row back for the WhatsApp message (need phone)
+        row = get_operator_job(queue_id) or {}
+        wa_phone = row.get("customer_phone", "")
+        if notify and wa_phone and url:
+            try:
+                _send_pb_whatsapp(wa_phone, queue_id[:8], url)
+            except Exception as exc:
+                logger.warning("operator-deliver WhatsApp send failed: %s", exc)
+
+        _json_response(h, 200, {
+            "ok":           True,
+            "queue_id":     queue_id,
+            "download_url": url,
+            "notified":     bool(notify and wa_phone),
+        })
+    except Exception as exc:
+        logger.error("operator-queue deliver error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_admin_contacts_seen(h, body: bytes) -> None:
     """PATCH /admin/contacts/seen — mark contact thread as read."""
     try:
@@ -2073,6 +2255,49 @@ def _handle_pb_analyse(h, body: bytes) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+# ── Back-pressure (P0 Day 2.5d) ──────────────────────────────────────────────
+# When the operator queue grows beyond capacity, refuse new Premium-tier
+# (currently "generate") orders so the queue doesn't compound. Standard-tier
+# (format_fix) orders continue — they rarely escalate.
+_PB_PREMIUM_PAUSE_THRESHOLD = int(os.environ.get("PB_OPERATOR_CAPACITY", "10"))
+
+
+def _premium_paused() -> tuple[bool, dict]:
+    """Return (paused, depth_dict). Paused == True when queue total_open
+    is at or above the threshold. Failure to query the queue is non-blocking
+    (paused=False) so a DB hiccup never freezes paid conversions.
+    """
+    try:
+        from db_cloud import get_operator_queue_depth
+        depth = get_operator_queue_depth()
+        total = int(depth.get("total_open", 0) or 0)
+        return (total >= _PB_PREMIUM_PAUSE_THRESHOLD, depth)
+    except Exception as exc:
+        logger.warning("premium_paused depth check failed: %s", exc)
+        return (False, {"_error": str(exc)})
+
+
+def _handle_pb_availability(h) -> None:
+    """GET /project-builder/availability — public, unauthenticated.
+
+    Tells the customer UI which tiers are accepting new orders right now.
+    Used by project-builder.html to grey out a tier card when paused.
+    """
+    paused, depth = _premium_paused()
+    _json_response(h, 200, {
+        "standard_available": True,
+        "premium_available":  not paused,
+        "queue_depth":        depth.get("total_open", 0),
+        "threshold":          _PB_PREMIUM_PAUSE_THRESHOLD,
+        "message": (
+            "Premium tier temporarily paused — our team is finishing in-flight "
+            "orders. Try again in a couple of hours, or pick Standard."
+            if paused else
+            "All tiers accepting new orders."
+        ),
+    })
+
+
 def _handle_pb_create_order(h, body: bytes) -> None:
     """POST /project-builder/create-order — create Razorpay order for paid tier."""
     try:
@@ -2091,6 +2316,28 @@ def _handle_pb_create_order(h, body: bytes) -> None:
     if not university:
         _json_response(h, 400, {"error": "university is required"})
         return
+
+    # Back-pressure: refuse Premium-tier order creation if operator queue is
+    # at/above capacity. Customer hasn't paid yet — surface a clean upsell
+    # to Standard tier or "check back in 2h" rather than letting them pay
+    # for something we can't deliver in SLA.
+    if service == "generate":
+        paused, depth = _premium_paused()
+        if paused:
+            _json_response(h, 503, {
+                "error": "premium_paused",
+                "message": (
+                    "Premium tier is briefly paused while our editorial team "
+                    "finishes earlier orders. Your project will be back online "
+                    "within ~2 hours, or you can pick the Standard tier "
+                    "(Format-Fix) which is still open."
+                ),
+                "queue_depth":  depth.get("total_open", 0),
+                "threshold":    _PB_PREMIUM_PAUSE_THRESHOLD,
+                "retry_after_minutes": 120,
+                "alternative_tier":    "format_fix",
+            })
+            return
 
     # Pricing: format_fix = Rs.49, generate = Rs.99 (<50 pages est.) or Rs.149
     if service == "format_fix":
@@ -2162,9 +2409,12 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
                     if len(text) > 200_000:
                         _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
                         return
-                    docx_bytes = docx_engine.format_fix(text, university)
+                    # Free preview: Sonnet only. Opus escalation only after payment.
+                    docx_bytes = docx_engine.format_fix(text, university, allow_escalation=False)
                     try:
-                        structure = docx_engine._parse_structure_with_claude(text)
+                        structure = docx_engine._parse_structure_with_claude(
+                            text, allow_escalation=False,
+                        )
                     except Exception:
                         structure = {}
             elif content:
@@ -2172,9 +2422,11 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
                 if len(text) > 200_000:
                     _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
                     return
-                docx_bytes = docx_engine.format_fix(text, university)
+                docx_bytes = docx_engine.format_fix(text, university, allow_escalation=False)
                 try:
-                    structure = docx_engine._parse_structure_with_claude(text)
+                    structure = docx_engine._parse_structure_with_claude(
+                        text, allow_escalation=False,
+                    )
                 except Exception:
                     structure = {}
             else:
@@ -2197,6 +2449,32 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
 
     except ValueError as e:
         _json_response(h, 400, {"error": str(e)})
+        return
+    except docx_engine.StructureDetectionError as e:
+        # Free-preview phase: Sonnet couldn't detect clear structure.
+        # Surface an upsell prompt instead of silently generating garbage.
+        logger.info(
+            "format-preview structure detection failed: errors=%s model=%s",
+            e.errors, e.model_used,
+        )
+        _json_response(h, 422, {
+            "error": "structure_not_detected",
+            "message": (
+                "Your input doesn't have clear chapter structure that our "
+                "Standard AI could detect. Upgrade to the Premium tier for "
+                "our deepest analysis, or refine your input (add chapter "
+                "headings like 'Chapter 1: Introduction') and retry — this "
+                "preview is free."
+            ),
+            "details": {
+                "validation_errors": e.errors,
+                "model_used":        e.model_used,
+            },
+            "upsell": {
+                "tier":   "premium",
+                "reason": "Premium analysis uses our Opus model for ambiguous inputs.",
+            },
+        })
         return
     except Exception as e:
         logger.error(f"project-builder format-preview generation error: {e}")
@@ -2341,7 +2619,8 @@ def _handle_pb_process(h, body: bytes) -> None:
                 _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
                 return
 
-            docx_bytes = docx_engine.format_fix(text, university)
+            # Post-payment: allow Opus escalation. Both passes fail -> exception.
+            docx_bytes = docx_engine.format_fix(text, university, allow_escalation=True)
 
         else:  # generate
             form_data = data.get("form_data", {})
@@ -2352,6 +2631,63 @@ def _handle_pb_process(h, body: bytes) -> None:
 
     except ValueError as e:
         _json_response(h, 400, {"error": str(e)})
+        return
+    except docx_engine.StructureDetectionError as e:
+        # Post-payment: both Sonnet and Opus failed validation. Route the
+        # order to pb_operator_queue and return 202. The operator picks
+        # up from the admin dashboard (P0 Day 2.5b) and delivers via
+        # WhatsApp within 6h.
+        wa_phone     = _normalize_phone(data.get("whatsapp_phone", ""))
+        student_name = str(data.get("student_name", ""))[:100]
+        logger.error(
+            "OPERATOR_QUEUE_HANDOFF | phone=%s university=%s errors=%s model=%s "
+            "input_size=%d partial_title=%r",
+            wa_phone, university, e.errors, e.model_used,
+            len(text) if "text" in locals() else 0,
+            (e.partial_structure or {}).get("title", ""),
+        )
+
+        # Insert into Supabase queue. Both partial structures live on the
+        # exception — the parser packs them under sonnet_structure /
+        # opus_structure when both passes fail.
+        queue_id = None
+        try:
+            from db_cloud import enqueue_operator_job
+            partial = e.partial_structure or {}
+            sonnet_partial = partial if e.model_used == "claude-sonnet-4-6" else None
+            opus_partial   = partial if e.model_used == "claude-opus-4-5"   else None
+            queue_id = enqueue_operator_job(
+                pb_order_id=None,  # pb_orders row will be created at delivery
+                customer_phone=wa_phone,
+                student_name=student_name,
+                university=university,
+                tier=data.get("service", "standard"),
+                input_text=text if "text" in locals() else "",
+                sonnet_partial=sonnet_partial,
+                opus_partial=opus_partial,
+                last_model_used=e.model_used,
+                validation_errors=e.errors,
+            )
+        except Exception as _q_exc:
+            logger.error(
+                "Failed to enqueue operator job after Structure failure: %s",
+                _q_exc,
+            )
+
+        _json_response(h, 202, {
+            "status":   "human_finishing",
+            "queue_id": queue_id,
+            "message": (
+                "Your project needs a personal touch — our editorial team is "
+                "finishing it now. You'll receive the final document on "
+                "WhatsApp within 6 hours."
+            ),
+            "sla_hours": 6,
+            "details": {
+                "validation_errors": e.errors,
+                "model_used":        e.model_used,
+            },
+        })
         return
     except Exception as e:
         logger.error(f"project-builder process error: {e}")
@@ -2525,12 +2861,34 @@ class handler(BaseHTTPRequestHandler):
         if self.path.startswith("/admin/thread"):
             _handle_admin_thread(self)
             return
+        if self.path.startswith("/admin/health/models"):
+            _handle_admin_health_models(self)
+            return
+
+        # ── Operator queue (P0 Day 2.5) ──────────────────────────────────────
+        # Order matters: more-specific paths first.
+        if self.path.startswith("/admin/operator-queue/depth"):
+            _handle_admin_operator_queue_depth(self)
+            return
+        _opq_match = re.match(
+            r"^/admin/operator-queue/([0-9a-f-]{36})(\?.*)?$",
+            self.path,
+        )
+        if _opq_match:
+            _handle_admin_operator_queue_get(self, _opq_match.group(1))
+            return
+        if self.path.startswith("/admin/operator-queue"):
+            _handle_admin_operator_queue_list(self)
+            return
 
         if self.path.startswith("/api/health"):
             _handle_health(self)
             return
 
         # ── Project Builder ──────────────────────────────────────────────────
+        if self.path == "/project-builder/availability":
+            _handle_pb_availability(self)
+            return
         if self.path == "/project-builder/templates":
             _handle_pb_templates_get(self)
             return
@@ -2670,6 +3028,20 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/admin/format-fixer":
             _handle_admin_format_fixer(self, body)
+            return
+
+        # ── Operator queue claim / deliver (P0 Day 2.5) ──────────────────────
+        _opq_claim = re.match(
+            r"^/admin/operator-queue/([0-9a-f-]{36})/claim$", self.path,
+        )
+        if _opq_claim:
+            _handle_admin_operator_queue_claim(self, body, _opq_claim.group(1))
+            return
+        _opq_deliver = re.match(
+            r"^/admin/operator-queue/([0-9a-f-]{36})/deliver$", self.path,
+        )
+        if _opq_deliver:
+            _handle_admin_operator_queue_deliver(self, body, _opq_deliver.group(1))
             return
 
         # ── Referral store-credit redemption (staff) ─────────────────────────

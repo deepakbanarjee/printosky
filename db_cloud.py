@@ -466,6 +466,200 @@ def list_pb_orders(limit: int = 100) -> list:
         return []
 
 
+# ---------------------------------------------------------------------------
+# Project Builder operator queue (P0 Day 2.5)
+# ---------------------------------------------------------------------------
+# Failed-AI orders land here. An operator picks the row up from the admin
+# dashboard, finishes the DOCX manually, uploads, and the customer is
+# WhatsApped the download link. SLA = 6h from created_at.
+# Table schema: api/migrations/SCHEMA_v18_pb_operator_queue.sql
+
+PB_OPERATOR_QUEUE_PREFIX = "project-builder/operator-delivered"
+
+
+def enqueue_operator_job(
+    *,
+    pb_order_id: str | None,
+    customer_phone: str,
+    student_name: str,
+    university: str,
+    tier: str,
+    input_text: str,
+    sonnet_partial: dict | None = None,
+    opus_partial: dict | None = None,
+    last_model_used: str = "",
+    validation_errors: list[str] | None = None,
+) -> str | None:
+    """Insert a failed-AI order into pb_operator_queue. Returns the new
+    queue row's UUID on success, None on failure (logged).
+    """
+    try:
+        ai_attempts: list[dict] = []
+        if sonnet_partial is not None:
+            ai_attempts.append({"model": "sonnet", "structure": sonnet_partial})
+        if opus_partial is not None:
+            ai_attempts.append({"model": "opus",   "structure": opus_partial})
+        if validation_errors:
+            ai_attempts.append({
+                "model":  last_model_used or "unknown",
+                "errors": list(validation_errors),
+            })
+
+        row = {
+            "pb_order_id":              pb_order_id,
+            "customer_phone":           customer_phone,
+            "student_name":             student_name,
+            "university":               university,
+            "tier":                     tier,
+            "input_text":               input_text,
+            "input_size_bytes":         len(input_text.encode("utf-8")) if input_text else 0,
+            "ai_attempts":              ai_attempts,
+            "sonnet_partial_structure": sonnet_partial,
+            "opus_partial_structure":   opus_partial,
+            "last_model_used":          last_model_used,
+            # status, deadline_ts default to 'pending' + now+6h via DEFAULTs
+        }
+        res = _client().table("pb_operator_queue").insert(row).execute()
+        if res.data:
+            return res.data[0].get("id")
+        return None
+    except Exception as e:
+        logger.error(f"enqueue_operator_job error: {e}")
+        return None
+
+
+def list_operator_queue(
+    *,
+    status: str | None = "pending",
+    limit: int = 100,
+) -> list:
+    """List operator queue rows by deadline (most urgent first). Pass
+    status=None to get every row regardless of state.
+    """
+    try:
+        q = (
+            _client().table("pb_operator_queue")
+            .select("id,pb_order_id,customer_phone,student_name,university,tier,"
+                     "input_size_bytes,last_model_used,status,assigned_to,"
+                     "claimed_at,deadline_ts,delivered_at,created_at,"
+                     "delivered_download_url")
+            .order("deadline_ts", desc=False)
+            .limit(limit)
+        )
+        if status is not None:
+            q = q.eq("status", status)
+        res = q.execute()
+        return res.data or []
+    except Exception as e:
+        logger.error(f"list_operator_queue error: {e}")
+        return []
+
+
+def get_operator_job(queue_id: str) -> dict | None:
+    """Fetch a single operator queue row including input_text and partials."""
+    try:
+        res = (
+            _client().table("pb_operator_queue")
+            .select("*")
+            .eq("id", queue_id)
+            .limit(1)
+            .execute()
+        )
+        return res.data[0] if res.data else None
+    except Exception as e:
+        logger.error(f"get_operator_job error: {e}")
+        return None
+
+
+def claim_operator_job(queue_id: str, operator: str) -> bool:
+    """Mark an operator queue row as claimed. Optimistic — only succeeds
+    if the row is currently 'pending'. Refuses to re-claim.
+    """
+    from datetime import datetime, timezone
+    try:
+        res = (
+            _client().table("pb_operator_queue")
+            .update({
+                "status":      "claimed",
+                "assigned_to": operator,
+                "claimed_at":  datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("id", queue_id)
+            .eq("status", "pending")
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as e:
+        logger.error(f"claim_operator_job error: {e}")
+        return False
+
+
+def deliver_operator_job(queue_id: str, docx_bytes: bytes) -> tuple[bool, str]:
+    """Upload the operator-finished DOCX, mark the row delivered, return
+    (success, public_url). The caller handles WhatsApp delivery
+    notification — keeps this layer DB-only.
+    """
+    from datetime import datetime, timezone
+    try:
+        path = f"{PB_OPERATOR_QUEUE_PREFIX}/{queue_id}.docx"
+        _client().storage.from_(INCOMING_BUCKET).upload(
+            path=path,
+            file=docx_bytes,
+            file_options={"content-type": _DOCX_MIME, "upsert": "true"},
+        )
+        url = _client().storage.from_(INCOMING_BUCKET).get_public_url(path)
+
+        _client().table("pb_operator_queue").update({
+            "status":                 "delivered",
+            "delivered_at":           datetime.now(timezone.utc).isoformat(),
+            "delivered_docx_path":    path,
+            "delivered_download_url": url,
+        }).eq("id", queue_id).execute()
+        return True, url
+    except Exception as e:
+        logger.error(f"deliver_operator_job error: {e}")
+        return False, ""
+
+
+def get_operator_queue_depth() -> dict:
+    """Return the current backlog size by status. Used by the admin
+    dashboard SLA gauge and Premium-tier auto-pause logic.
+    """
+    from datetime import datetime, timezone
+    try:
+        res = (
+            _client().table("pb_operator_queue")
+            .select("status,deadline_ts,tier")
+            .in_("status", ["pending", "claimed"])
+            .execute()
+        )
+        rows = res.data or []
+        now = datetime.now(timezone.utc)
+        pending = sum(1 for r in rows if r.get("status") == "pending")
+        claimed = sum(1 for r in rows if r.get("status") == "claimed")
+        over_sla = 0
+        for r in rows:
+            try:
+                dl = r.get("deadline_ts")
+                if dl and datetime.fromisoformat(dl.replace("Z", "+00:00")) < now:
+                    over_sla += 1
+            except Exception:
+                pass
+        premium_in_q = sum(1 for r in rows
+                            if r.get("tier") in ("premium", "luxury"))
+        return {
+            "pending":      pending,
+            "claimed":      claimed,
+            "total_open":   pending + claimed,
+            "over_sla":     over_sla,
+            "premium_in_q": premium_in_q,
+        }
+    except Exception as e:
+        logger.error(f"get_operator_queue_depth error: {e}")
+        return {"pending": 0, "claimed": 0, "total_open": 0,
+                "over_sla": 0, "premium_in_q": 0, "_error": str(e)}
+
+
 def upsert_contact(phone: str, name: str | None = None) -> None:
     """Insert or update a WhatsApp contact. Name only written when provided."""
     data: dict = {"phone": phone}

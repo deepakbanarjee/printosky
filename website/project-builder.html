@@ -41,11 +41,127 @@
     .tier-card { border: 1.5px solid #ddd; border-radius: 10px; padding: 1.25rem 1rem; cursor: pointer; background: #fff; transition: all .15s; position: relative; }
     .tier-card:hover { border-color: var(--blue); }
     .tier-card.selected { border-color: var(--blue); background: #f0f4ff; }
+    .tier-card.unavailable { opacity: .55; cursor: not-allowed; background: #f8f8f6; border-color: #ddd; }
+    .tier-card.unavailable:hover { border-color: #ddd; }
+    .tier-card.unavailable .tier-popular { display: none; }
+    .tier-unavailable-msg {
+      display: none;
+      margin-top: .6rem;
+      padding: .45rem .6rem;
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      border-radius: 6px;
+      color: #92400e;
+      font-size: .72rem;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+    .tier-card.unavailable .tier-unavailable-msg { display: block; }
+    body.theme-admin .tier-card.unavailable { background: #0D1117; opacity: .5; }
+    body.theme-admin .tier-unavailable-msg { background: rgba(210,153,34,0.10); border-color: #D29922; color: #f0d77a; }
     .tier-card .price { font-family: 'Syne', sans-serif; font-size: 1.4rem; font-weight: 800; color: var(--ink); margin: .3rem 0; }
     .tier-card .price.free { color: var(--green); }
     .tier-card p { font-size: .82rem; color: #666; margin: 0; line-height: 1.5; }
     .tier-card h4 { font-weight: 700; font-size: .95rem; margin-bottom: .25rem; }
     .tier-popular { position: absolute; top: -10px; right: 12px; background: var(--accent); color: #fff; font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; }
+
+    /* ── Admin (dark) theme overrides ── */
+    body.theme-admin {
+      background: #0D1117;
+      color: #E6EDF3;
+    }
+    body.theme-admin .navbar,
+    body.theme-admin .footer {
+      background: #161B22 !important;
+      color: #E6EDF3;
+      border-color: #30363D;
+    }
+    body.theme-admin .navbar a,
+    body.theme-admin .nav-links a { color: #E6EDF3; }
+    body.theme-admin .pb-hero h1 { color: #F0F6FC; }
+    body.theme-admin .pb-hero p  { color: #8B949E; }
+    body.theme-admin .pb-card {
+      background: #161B22;
+      border-color: #30363D;
+      color: #E6EDF3;
+    }
+    body.theme-admin .pb-card h2 { color: #F0F6FC; }
+    body.theme-admin .pb-card h3 { color: #8B949E; }
+    body.theme-admin .uni-chip,
+    body.theme-admin .tier-card {
+      background: #0D1117;
+      border-color: #30363D;
+      color: #E6EDF3;
+    }
+    body.theme-admin .uni-chip:hover,
+    body.theme-admin .tier-card:hover { border-color: #58A6FF; }
+    body.theme-admin .uni-chip.selected,
+    body.theme-admin .tier-card.selected {
+      border-color: #58A6FF;
+      background: rgba(56,139,253,0.12);
+      color: #58A6FF;
+    }
+    body.theme-admin .tier-card .price { color: #F0F6FC; }
+    body.theme-admin .tier-card p     { color: #8B949E; }
+    body.theme-admin .pb-step-dot {
+      background: #0D1117;
+      border-color: #30363D;
+      color: #6E7681;
+    }
+    body.theme-admin .pb-step-line { background: #30363D; }
+    body.theme-admin input,
+    body.theme-admin textarea,
+    body.theme-admin select {
+      background: #0D1117 !important;
+      color: #E6EDF3 !important;
+      border-color: #30363D !important;
+    }
+    body.theme-admin .pb-btn-primary { background: #1F6FEB; }
+    body.theme-admin .pb-btn-primary:hover { background: #388BFD; }
+    body.theme-admin .pb-btn-secondary {
+      background: transparent;
+      color: #E6EDF3;
+      border: 1px solid #30363D;
+    }
+    body.theme-admin .pb-btn-secondary:hover { background: #21262D; }
+    body.theme-admin .upload-zone {
+      background: #0D1117;
+      border-color: #30363D;
+      color: #8B949E;
+    }
+    body.theme-admin .upload-zone:hover { border-color: #58A6FF; }
+    body.theme-admin .pb-error {
+      background: rgba(248,81,73,0.10);
+      border-color: #F85149;
+      color: #FFA198;
+    }
+    body.theme-admin .admin-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #1F6FEB;
+      color: #fff;
+      font-size: .68rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      border-radius: 4px;
+      padding: 3px 9px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    /* Admin mode hides payment-only UI and promotes the admin download */
+    body.theme-admin #payDocxBtn { display: none !important; }
+    body.theme-admin .pay-only   { display: none !important; }
+    body.theme-admin #adminDlBtn {
+      display: inline-block !important;
+      background: #238636;
+      color: #fff;
+      border: none;
+      font-size: 1rem;
+      padding: .75rem 1.5rem;
+    }
+    body.theme-admin #adminDlBtn:hover { background: #2EA043; }
 
     /* ── Form elements ── */
     .pb-field { margin-bottom: 1rem; }
@@ -138,7 +254,7 @@
 
     <!-- ── Hero ── -->
     <div class="pb-hero">
-      <h1>Project Report Builder <span class="pb-badge">New</span></h1>
+      <h1>Project Report Builder <span class="pb-badge">New</span><span id="adminBadge" class="admin-badge" style="display:none">⚡ Admin Mode</span></h1>
       <p>Format your university project report correctly — margins, heading styles, page numbering — without fighting Word. Free template or let us do it for you.</p>
     </div>
 
@@ -200,6 +316,10 @@
             <h4>Generate from Scratch</h4>
             <div class="price">₹99 – ₹149</div>
             <p>Fill in your details and content. We build the full report — cover page, certificate, declaration, all chapters.</p>
+            <div class="tier-unavailable-msg" id="generate-unavailable">
+              ⏸ Briefly paused — our editors are finishing earlier orders.
+              Back online within ~2 hours, or pick Format Fixer.
+            </div>
           </div>
 
         </div>
@@ -429,7 +549,7 @@
         <div id="formatBtns" style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
           <button class="pb-btn pb-btn-primary" id="payDocxBtn" style="font-size:1rem;padding:.75rem 1.5rem" onclick="startDownloadPayment()">📄 Pay &amp; Download .docx</button>
         </div>
-        <p style="font-size:.8rem;color:#aaa;margin-top:.75rem">Secure payment via Razorpay · Permanent download link</p>
+        <p class="pay-only" style="font-size:.8rem;color:#aaa;margin-top:.75rem">Secure payment via Razorpay · Permanent download link</p>
         <button id="adminDlBtn" class="pb-btn pb-btn-secondary" style="display:none;margin-top:.5rem;font-size:.85rem" onclick="adminDownload()">🔑 Admin Download (skip payment)</button>
         <div class="pb-error" id="previewPayError" style="display:none;margin-top:.75rem"></div>
       </div>
@@ -475,9 +595,29 @@
     fileToken: null,
     fileType: null,
     currentService: null,
+    adminMode: false,
+    adminPw: null,
+    premiumPaused: false,
   };
 
   const API = 'https://printosky.vercel.app';   // Vercel API
+
+  // ── Admin-mode auto-detection ────────────────────────────────────────────────
+  // If the operator logged into /admin in this tab, sessionStorage carries
+  // 'admin_pw_cache'. We pick that up, switch the UI to dark theme, show the
+  // admin badge, and skip the Razorpay path on the final step.
+  function bootAdminMode() {
+    try {
+      const pw = sessionStorage.getItem('admin_pw_cache');
+      if (!pw) return;
+      state.adminMode = true;
+      state.adminPw   = pw;
+      document.body.classList.add('theme-admin');
+      const b = document.getElementById('adminBadge');
+      if (b) b.style.display = 'inline-flex';
+    } catch (e) { /* sessionStorage may be blocked — silently no-op */ }
+  }
+  bootAdminMode();
 
   // ── Utility ──────────────────────────────────────────────────────────────────
   function $(id) { return document.getElementById(id); }
@@ -501,10 +641,40 @@
 
   // ── Tier selection ────────────────────────────────────────────────────────────
   function selectTier(tier) {
+    if (tier === 'generate' && state.premiumPaused) {
+      alert(
+        "Generate-from-Scratch is briefly paused while our editorial team " +
+        "finishes earlier orders. Try again in a couple of hours, or pick " +
+        "Format Fixer to format your existing draft now."
+      );
+      return;
+    }
     document.querySelectorAll('.tier-card').forEach(c => c.classList.remove('selected'));
     document.querySelector(`.tier-card[data-tier="${tier}"]`).classList.add('selected');
     state.tier = tier;
   }
+
+  // ── Availability check (P0 Day 2.5d back-pressure) ───────────────────────
+  // If operator queue is at/over capacity, the Generate tier is paused.
+  // We grey it out and refuse selection. Public endpoint, no auth.
+  async function checkAvailability() {
+    try {
+      const r = await fetch(`${API}/project-builder/availability`);
+      if (!r.ok) return;
+      const d = await r.json();
+      state.premiumPaused = !d.premium_available;
+      const card = document.querySelector('.tier-card[data-tier="generate"]');
+      if (!card) return;
+      if (state.premiumPaused) {
+        card.classList.add('unavailable');
+        // If user had Generate selected on a stale load, move them back
+        if (state.tier === 'generate') selectTier('format_fix');
+      } else {
+        card.classList.remove('unavailable');
+      }
+    } catch (e) { /* offline / network — leave defaults */ }
+  }
+  checkAvailability();
 
   // ── Step navigation ───────────────────────────────────────────────────────────
   function goStep1() {
@@ -1035,7 +1205,11 @@
   // ── Admin download bypass ─────────────────────────────────────────────────────
   async function adminDownload() {
     const btn = $('adminDlBtn');
-    const pwd = prompt('Admin password:');
+    // Reuse cached admin password if we're in admin mode (set by
+    // bootAdminMode from sessionStorage). Outside admin mode, fall back
+    // to the password prompt so this function still works as a manual
+    // override.
+    const pwd = state.adminPw || prompt('Admin password:');
     if (!pwd) return;
     btn.disabled = true;
     btn.textContent = 'Downloading…';
