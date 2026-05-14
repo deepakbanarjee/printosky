@@ -378,10 +378,10 @@
 
           <div id="tab-upload" class="pb-hidden">
             <div class="upload-zone" id="uploadZone">
-              <input type="file" id="uploadFile" accept=".docx" onchange="handleFileSelect(this)">
+              <input type="file" id="uploadFile" accept=".docx,.pdf,.txt" onchange="handleFileSelect(this)">
               <div class="icon">📝</div>
-              <p>Click to choose or drag and drop your Word file</p>
-              <p style="font-size:.8rem; color:#bbb; margin-top:.25rem">.docx only — max 10 MB</p>
+              <p>Click to choose or drag and drop your Word, PDF or text file</p>
+              <p style="font-size:.8rem; color:#bbb; margin-top:.25rem">.docx · .pdf · .txt — max 10 MB</p>
               <div class="upload-name" id="uploadFileName"></div>
             </div>
             <div id="detectWrap" class="pb-hidden" style="margin-top:.75rem">
@@ -759,8 +759,8 @@
       return;
     }
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['docx'].includes(ext)) {
-      showErr('ffError', 'Only .docx files are supported. If you have a PDF, open it in Word and save as .docx first.');
+    if (!['docx', 'pdf', 'txt'].includes(ext)) {
+      showErr('ffError', 'Supported file types: .docx, .pdf, .txt. Convert your file and try again.');
       return;
     }
     hideErr('ffError');

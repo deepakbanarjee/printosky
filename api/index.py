@@ -2398,28 +2398,36 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
             if content_b64:
                 import base64 as _b64
                 file_bytes = _b64.b64decode(content_b64)
+                # Unified upload path: extract text from any file type, then
+                # route through the Sonnet parser. Customer can upload .docx,
+                # .pdf, or paste text — they all reach the same engine.
+                # Note: this means uploaded DOCX no longer goes through the
+                # in-place restyler (which only worked for docs that already
+                # had Word heading styles applied — most student docs don't).
                 if content_type == "pdf":
-                    _json_response(h, 400, {
-                        "error": "PDF upload is not supported. Open the PDF in Word, "
-                                 "save as .docx, then upload that file."
-                    })
-                    return
-                if content_type == "docx":
-                    # In-place reformat — images and tables preserved
-                    docx_bytes = docx_engine.format_fix_docx_inplace(file_bytes, university)
-                    structure  = docx_engine.detect_structure_from_docx(file_bytes)
+                    text = docx_engine.extract_text_from_pdf(file_bytes)
+                elif content_type == "docx":
+                    text = docx_engine.extract_text_from_docx(file_bytes)
                 else:
                     text = file_bytes.decode("utf-8", errors="replace")
-                    if len(text) > 200_000:
-                        _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
-                        return
-                    # Free preview: Sonnet only. Opus escalation only after
-                    # payment. format_fix_with_structure returns both the
-                    # DOCX and the validated structure dict in one Sonnet
-                    # call (was previously two — ~₹2/preview savings).
-                    docx_bytes, structure = docx_engine.format_fix_with_structure(
-                        text, university, allow_escalation=False,
-                    )
+                if not text or len(text.strip()) < 200:
+                    _json_response(h, 400, {
+                        "error": "extraction_too_short",
+                        "message": "We couldn't extract enough text from your file. "
+                                   "Open it in Word and paste the content directly, "
+                                   "or check that the file isn't password-protected.",
+                    })
+                    return
+                if len(text) > 200_000:
+                    _json_response(h, 400, {"error": "Document too large (max ~200k characters)"})
+                    return
+                # Free preview: Sonnet only. Opus escalation only after
+                # payment. format_fix_with_structure returns both the
+                # DOCX and the validated structure dict in one Sonnet
+                # call (was previously two — ~₹2/preview savings).
+                docx_bytes, structure = docx_engine.format_fix_with_structure(
+                    text, university, allow_escalation=False,
+                )
             elif content:
                 text = content
                 if len(text) > 200_000:
