@@ -4,3 +4,4 @@
 /track    /track.html    200
 /bw-converter    /bw-converter.html    200
 /pb-retrieve     /pb-retrieve.html     200
+/admin/operator-mode/*    /operator-mode.html?id=:splat    200
