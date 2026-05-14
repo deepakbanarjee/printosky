@@ -72,3 +72,10 @@ WIKI/
 data/imports/done/
 docs/superpowers/
 oxygens-website/
+
+# Dev-only SumatraPDF portable binary (drop into project root for local testing)
+SumatraPDF.exe
+SumatraPDF-settings.txt
+
+# Office-PC test-store sandbox (jobs.db, Incoming folder, daemon log)
+.office_test/
