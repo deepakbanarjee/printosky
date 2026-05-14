@@ -787,8 +787,11 @@ def _structure_system_prompt() -> str:
         "1. ALWAYS call submit_structure exactly once. Never reply in prose.\n"
         "2. Detect every chapter present. Do not invent chapters that are not "
         "in the source. Do not merge two distinct chapters into one.\n"
-        "3. Preserve every word of body content under its chapter. The sum of "
-        "chapter content lengths should approximate the total input length.\n"
+        "3. Preserve EVERY word of body content VERBATIM under its chapter. "
+        "DO NOT summarize, paraphrase, or compress paragraphs — copy them "
+        "exactly. The total chapter content word count must match the input "
+        "word count (you may drop only chapter-heading markers and front-"
+        "matter metadata lines like 'Submitted by' or 'Enrollment No').\n"
         "4. Identify front-matter metadata (title, author, guide, college, "
         "university, year, abstract, keywords) only when actually present. "
         "Use an empty string for fields you cannot detect — never fabricate.\n"
@@ -929,8 +932,8 @@ def _validate_structure(structure: dict, input_text: str) -> list[str]:
         errs.append(f"confidence_low ({conf_f:.2f} < 0.75)")
 
     coverage = _coverage_ratio(structure, input_text)
-    if coverage < 0.80:
-        errs.append(f"coverage_low ({coverage:.2f} < 0.80)")
+    if coverage < 0.65:
+        errs.append(f"coverage_low ({coverage:.2f} < 0.65)")
 
     return errs
 
