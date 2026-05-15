@@ -63,7 +63,7 @@ When all the above are done, each new store just needs Part B.
 
 ---
 
-## Part B — Per-store PC setup
+## Part B — Per-store PC setup (one prompt, then automatic)
 
 ### B1. Prerequisites on the store PC
 
@@ -74,9 +74,23 @@ When all the above are done, each new store just needs Part B.
 - **The store's Windows printer queues** must be set up first:
   - Add the Konica with the network IP, note the queue name.
   - Add the Epson with the network IP, note the queue name.
-  - The installer will ask you to enter these queue names.
 
-### B2. Clone the repo
+### B2. Get the HQ secrets file from Printosky HQ
+
+HQ ships **one file** containing all the shared backend secrets:
+
+```
+hq-secrets.env
+```
+
+This file contains: `META_*`, `SUPABASE_*`, `ANTHROPIC_API_KEY`,
+`RAZORPAY_*`, `ADMIN_PBKDF2_*`, `SUPERADMIN/STORE/MIS_SHA256_HASH`.
+It is **never** committed to git and must be transferred securely
+(encrypted email, USB stick, password-protected zip).
+
+Save it to: `C:\printosky_watcher\hq-secrets.env`
+
+### B3. Clone the repo
 
 ```powershell
 mkdir C:\printosky_watcher
@@ -84,7 +98,10 @@ cd C:\printosky_watcher
 git clone https://github.com/deepakbanarjee/printosky.git .
 ```
 
-### B3. Run the installer
+(If `hq-secrets.env` was saved before cloning, move it back into the
+repo folder now.)
+
+### B4. Run the installer — one prompt block, then automatic
 
 From `C:\printosky_watcher`:
 
@@ -92,47 +109,45 @@ From `C:\printosky_watcher`:
 powershell -ExecutionPolicy Bypass -File install\bootstrap.ps1
 ```
 
-You'll be prompted for:
+The installer asks **only physical-location questions**:
 
-| Field | Example | Notes |
+| Prompt | Example | What's used for |
 |---|---|---|
-| `store_id` | `TVM` | short uppercase code, unique per store |
-| `store_name` | `Trivandrum Branch` | shown in admin UI |
-| Konica IP | `192.168.55.110` | LAN IP of the Konica |
-| Epson IP | `192.168.55.202` | LAN IP of the Epson |
-| hot folder | `C:\Printosky\Jobs\Incoming` | default is fine |
-| db_path | `C:\Printosky\Data\jobs.db` | default is fine |
-| Konica queue | `KONICA MINOLTA 1100 PS` | from Windows Devices & Printers |
-| Epson queue | `WF-C21000 Series(Network)` | from Windows Devices & Printers |
-| Seed default staff PINs? | Y | resets to temporary PINs, **reset before going live** |
+| Store name | `Printosky Trivandrum` | shown in admin UI |
+| `store_id` | (auto-suggested `PT` from name) | unique short code |
+| City / location | `Thrissur` | appended to store_name |
+| Konica IP | `192.168.55.110` | LAN IP |
+| Epson IP | `192.168.55.202` | LAN IP |
+| Konica Windows queue | `KONICA MINOLTA 1100 PS` | from Devices & Printers |
+| Epson Windows queue | `WF-C21000 Series(Network)` | from Devices & Printers |
+| WhatsApp # (no `+`) | `919495706405` | inbound webhook routing |
+| Epson admin user | `Oxygen` | LAN-only printer login |
+| Epson admin password | (your value) | LAN-only printer login |
 
-When it finishes, you'll have:
-- `C:\Printosky\Data\jobs.db` — local SQLite, 12 tables ready
+**Everything else is auto-generated**:
+
+- `store_id` derived from the store name (you can override the suggestion)
+- `STORE_TOKEN` (cryptographic 64-hex)
+- HQ secrets (`META_*`, `SUPABASE_*`, hashes, etc.) copied from `hq-secrets.env`
+- 6-digit PINs for the 5 default staff (written to `.staff_pins_first_login.txt`)
+- Windows Startup shortcut for autostart on PC boot
+- `C:\Printosky\Data`, `Jobs\Incoming`, `Jobs\Archive` folders
+- SumatraPDF portable binary
+
+When the installer finishes you have:
+
+- `C:\Printosky\Data\jobs.db` — local SQLite, 12 tables
 - `<repo>\store_config.json` — per-store identity
-- `<repo>\.env` — secrets template with a freshly generated `STORE_TOKEN`
-- `<repo>\SumatraPDF.exe` — for silent PDF dispatch
+- `<repo>\.env` — populated with HQ secrets + per-store values
+- `<repo>\.staff_pins_first_login.txt` — one-time PINs for staff
+- `<repo>\SumatraPDF.exe`
+- Windows Startup shortcut → `START_PRINTOSKY.bat`
 
-### B4. Fill in the `.env` shared secrets
-
-The installer auto-generated `STORE_TOKEN` (unique to this store) but
-you still need to paste in shared values from HQ. Open `.env` and
-replace all `xxxxxxxx...` placeholders with the real values:
-
-| Key | Source |
-|---|---|
-| `META_APP_SECRET` | Meta dev portal → Settings → Basic |
-| `META_WEBHOOK_VERIFY_TOKEN` | matches what's set in Vercel/Meta |
-| `META_SYSTEM_USER_TOKEN` | Meta dev portal → System Users |
-| `META_PHONE_NUMBER_ID` | Meta dev portal → WhatsApp → Phone Numbers |
-| `STORE_WHATSAPP_PHONE` | this store's WhatsApp number (no `+`) |
-| `RAZORPAY_*` | Razorpay dashboard → Settings → API Keys |
-| `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_KEY` | Supabase → Project Settings → API |
-| `SUPABASE_AUTH_EMAIL`, `SUPABASE_AUTH_PASSWORD` | Supabase → Authentication → Users |
-| `ANTHROPIC_API_KEY` | https://console.anthropic.com |
-| `ADMIN_PBKDF2_*`, `*_SHA256_HASH` | same value as the Vercel/Netlify env vars |
-| `EPSON_USER`, `EPSON_PASS` | the Epson's web admin credentials |
+**Nothing else needs to be filled in.**
 
 ### B5. First run
+
+Either reboot the PC (autostart will launch everything) or start now:
 
 ```powershell
 .\START_PRINTOSKY.bat
@@ -145,7 +160,17 @@ This launches:
 
 Three CMD windows open. Leave them running.
 
-### B6. Smoke test — drop a file in the hot folder
+### B6. Distribute staff PINs
+
+The installer auto-generated 6-digit PINs for the 5 default staff
+and wrote them to `.staff_pins_first_login.txt` in the repo root.
+
+1. Open `.staff_pins_first_login.txt`
+2. Hand each PIN to its owner privately (Telegram, in person, sealed envelope)
+3. Each staff member changes their PIN on first login
+4. **Delete** `.staff_pins_first_login.txt` from the PC
+
+### B7. Smoke test — drop a file in the hot folder
 
 ```powershell
 copy C:\Windows\System32\license.rtf C:\Printosky\Jobs\Incoming\
@@ -156,18 +181,12 @@ Within 5 seconds:
 - The file appears in the `jobs` table in `C:\Printosky\Data\jobs.db`
 - Within ~5 minutes (one sync cycle) the row appears in Supabase too
 
-### B7. Autostart on PC boot
+### B8. Autostart on PC boot
 
-Right-click `SETUP_AUTOSTART.bat` → **Run as administrator**.
-
-From now on Printosky services launch when the PC boots — no manual
-intervention needed.
-
-### B8. Reset staff PINs from defaults
-
-Default seeded PINs are documented (and weak). Reset each one via the
-admin API before the store goes live — see `STORE_SETUP_CHECKLIST.md`
-section E for the exact `curl` commands.
+Already done — the installer dropped `Printosky.lnk` into the Windows
+Startup folder. Services launch on next boot. If you want belt-and-
+braces machine-wide autostart instead, right-click
+`SETUP_AUTOSTART.bat` → Run as administrator.
 
 ### B9. Verify in production
 

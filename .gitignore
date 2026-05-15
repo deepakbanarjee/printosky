@@ -79,3 +79,9 @@ SumatraPDF-settings.txt
 
 # Office-PC test-store sandbox (jobs.db, Incoming folder, daemon log)
 .office_test/
+
+# Auto-generated staff PINs file from installer (handed out then deleted)
+.staff_pins_first_login.txt
+
+# HQ-provided secrets file dropped here for the installer to read (never commit)
+hq-secrets.env

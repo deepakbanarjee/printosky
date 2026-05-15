@@ -2,63 +2,102 @@
 # =================================================================
 # Printosky new-store installer (Windows / PowerShell 5.1+).
 #
-# Run from the repo root (e.g. C:\printosky_watcher) as the store
-# operator account (NOT admin — admin elevation is only needed for the
-# optional autostart step at the end):
+# Goal: no manual work after the installer finishes. Operator only
+# answers physical-location questions (printer IPs, queue names,
+# WhatsApp number, Epson admin password). Everything else is
+# auto-generated or copied from an HQ secrets file.
+#
+# Run from the repo root (e.g. C:\printosky_watcher):
 #
 #     powershell -ExecutionPolicy Bypass -File install\bootstrap.ps1
 #
-# Idempotent — safe to re-run on a partially-configured PC. Each
-# section detects existing state and skips work that's already done.
-#
-# This script handles LOCAL store-PC setup only. It assumes Printosky
-# HQ has already configured the shared backend (Supabase, Vercel,
-# Meta WhatsApp Cloud API, Razorpay merchant account, Cloudflare
-# tunnel). See install\INSTALL.md for the full picture.
+# Idempotent - safe to re-run. Existing store_config.json / .env are
+# only overwritten with explicit consent.
 # =================================================================
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = Split-Path -Parent $PSScriptRoot
 
+# Force UTF-8 for any Python subprocesses we spawn — Windows cp1252 default
+# breaks on any non-ASCII byte in stdout/stderr (e.g. arrows in log lines).
+$env:PYTHONIOENCODING = "utf-8"
+$env:PYTHONUTF8       = "1"
+
 function Write-Header($t) {
     Write-Host ""
-    Write-Host ("-" * 60) -ForegroundColor DarkCyan
+    Write-Host ("-" * 62) -ForegroundColor DarkCyan
     Write-Host " $t" -ForegroundColor Cyan
-    Write-Host ("-" * 60) -ForegroundColor DarkCyan
+    Write-Host ("-" * 62) -ForegroundColor DarkCyan
 }
-
-function Write-OK($m)    { Write-Host "  [ok]  $m" -ForegroundColor Green }
-function Write-Skip($m)  { Write-Host "  [--]  $m" -ForegroundColor DarkGray }
-function Write-Warn($m)  { Write-Host "  [!!]  $m" -ForegroundColor Yellow }
-function Write-Fail($m)  { Write-Host "  [XX]  $m" -ForegroundColor Red }
+function Write-OK($m)   { Write-Host "  [ok]  $m" -ForegroundColor Green }
+function Write-Skip($m) { Write-Host "  [--]  $m" -ForegroundColor DarkGray }
+function Write-Warn($m) { Write-Host "  [!!]  $m" -ForegroundColor Yellow }
+function Write-Fail($m) { Write-Host "  [XX]  $m" -ForegroundColor Red }
+function Write-Info($m) { Write-Host "        $m" -ForegroundColor DarkGray }
 
 function Ask($prompt, $default = $null) {
     if ($default) {
-        $answer = Read-Host "$prompt [$default]"
-        if ([string]::IsNullOrWhiteSpace($answer)) { return $default } else { return $answer }
-    } else {
-        return Read-Host $prompt
+        $a = Read-Host "$prompt [$default]"
+        if ([string]::IsNullOrWhiteSpace($a)) { return $default } else { return $a }
     }
+    return Read-Host $prompt
 }
-
 function Ask-YesNo($prompt, $defaultYes = $true) {
     $hint = if ($defaultYes) { "[Y/n]" } else { "[y/N]" }
-    $answer = Read-Host "$prompt $hint"
-    if ([string]::IsNullOrWhiteSpace($answer)) { return $defaultYes }
-    return $answer -match '^[yY]'
+    $a = Read-Host "$prompt $hint"
+    if ([string]::IsNullOrWhiteSpace($a)) { return $defaultYes }
+    return $a -match '^[yY]'
+}
+
+function New-RandomHex([int]$bytes = 32) {
+    $b = New-Object byte[] $bytes
+    (New-Object System.Security.Cryptography.RNGCryptoServiceProvider).GetBytes($b)
+    return ($b | ForEach-Object { '{0:x2}' -f $_ }) -join ''
+}
+function New-RandomPin {
+    # 6-digit numeric PIN (cryptographic randomness)
+    $b = New-Object byte[] 6
+    (New-Object System.Security.Cryptography.RNGCryptoServiceProvider).GetBytes($b)
+    return ($b | ForEach-Object { ($_ % 10).ToString() }) -join ''
+}
+function Suggest-StoreId([string]$name) {
+    $stop = @('and','the','of','a','an','for','&')
+    $words = $name -split '\W+' | Where-Object {
+        $_ -and ($stop -notcontains $_.ToLower())
+    }
+    $initials = ($words | ForEach-Object { $_.Substring(0,1) }) -join ''
+    if ($initials.Length -ge 3) {
+        return $initials.ToUpper().Substring(0, [Math]::Min(4, $initials.Length))
+    }
+    $first = ($name -split '\W+' | Where-Object { $_ })[0]
+    if ($first) {
+        $pad = $first.PadRight(3,'X')
+        return $pad.ToUpper().Substring(0, 3)
+    }
+    return "NEW"
+}
+function Update-EnvLine([string]$path, [string]$key, [string]$value) {
+    $found = $false
+    $lines = Get-Content $path | ForEach-Object {
+        if ($_ -match "^$([regex]::Escape($key))=") {
+            $found = $true
+            "$key=$value"
+        } else { $_ }
+    }
+    if (-not $found) { $lines += "$key=$value" }
+    Set-Content -Path $path -Value $lines -Encoding UTF8
 }
 
 Write-Host ""
-Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "    PRINTOSKY  -  new-store installer" -ForegroundColor Cyan
+Write-Host "==============================================================" -ForegroundColor Cyan
+Write-Host "    PRINTOSKY  -  new-store installer (fully automated)" -ForegroundColor Cyan
 Write-Host "    Repo root: $REPO_ROOT" -ForegroundColor DarkCyan
-Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "==============================================================" -ForegroundColor Cyan
 
 # -----------------------------------------------------------------
 # 1. Prerequisites
 # -----------------------------------------------------------------
 Write-Header "1. Prerequisites"
-
 try {
     $pyVer = & python --version 2>&1
     if ($LASTEXITCODE -ne 0) { throw "python not on PATH" }
@@ -69,23 +108,13 @@ try {
     Write-Host "        IMPORTANT: tick 'Add Python to PATH' during install." -ForegroundColor Yellow
     exit 1
 }
-
 try {
     & python -m pip --version | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "pip not callable" }
+    if ($LASTEXITCODE -ne 0) { throw "pip" }
     Write-OK "pip available"
 } catch {
-    Write-Fail "pip not working. Run: python -m ensurepip --upgrade"
-    exit 1
+    Write-Fail "pip not working. Run: python -m ensurepip --upgrade"; exit 1
 }
-
-try {
-    $nodeVer = & node --version 2>&1
-    if ($LASTEXITCODE -eq 0) { Write-OK "Node.js: $nodeVer" } else { throw "no node" }
-} catch {
-    Write-Warn "Node.js not on PATH (only needed for legacy WhatsApp Web bot - skip if using Meta Cloud API)."
-}
-
 try {
     $null = Invoke-WebRequest -Uri "https://www.google.com" -UseBasicParsing -TimeoutSec 5
     Write-OK "Internet reachable"
@@ -97,97 +126,112 @@ try {
 # 2. Local folders
 # -----------------------------------------------------------------
 Write-Header "2. Local folders"
-
-$folders = @("C:\Printosky\Jobs\Incoming", "C:\Printosky\Jobs\Archive", "C:\Printosky\Data")
-foreach ($d in $folders) {
-    if (Test-Path $d) {
-        Write-Skip "$d already exists"
-    } else {
-        New-Item -ItemType Directory -Force -Path $d | Out-Null
-        Write-OK "created $d"
-    }
+foreach ($d in @("C:\Printosky\Jobs\Incoming", "C:\Printosky\Jobs\Archive", "C:\Printosky\Data")) {
+    if (Test-Path $d) { Write-Skip "$d already exists" }
+    else { New-Item -ItemType Directory -Force -Path $d | Out-Null; Write-OK "created $d" }
 }
 
 # -----------------------------------------------------------------
-# 3. SumatraPDF portable binary
+# 3. SumatraPDF (always install if missing)
 # -----------------------------------------------------------------
 Write-Header "3. SumatraPDF (silent PDF dispatch)"
-
 $sumatraDest = Join-Path $REPO_ROOT "SumatraPDF.exe"
 if (Test-Path $sumatraDest) {
     $sz = [math]::Round((Get-Item $sumatraDest).Length / 1MB, 1)
-    Write-Skip "SumatraPDF already present at $sumatraDest ($sz MB)"
+    Write-Skip "already present ($sz MB)"
 } else {
-    if (Ask-YesNo "Download SumatraPDF 3.6.1 portable (~20 MB) to repo root?") {
-        $url = "https://www.sumatrapdfreader.org/dl/rel/3.6.1/SumatraPDF-3.6.1-64.zip"
-        $zip = Join-Path $env:TEMP "sumatra_install.zip"
-        $tmp = Join-Path $env:TEMP "sumatra_extract"
-        Write-Host "        Downloading from $url ..." -ForegroundColor DarkGray
-        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-        if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
-        Expand-Archive -Path $zip -DestinationPath $tmp -Force
-        $exe = Get-ChildItem -Path $tmp -Filter "*.exe" -Recurse | Select-Object -First 1
-        Copy-Item -Path $exe.FullName -Destination $sumatraDest -Force
-        Remove-Item -Force $zip
-        Remove-Item -Recurse -Force $tmp
-        Write-OK "installed $sumatraDest"
-    } else {
-        Write-Warn "Skipped - SumatraPDF must be at one of these paths for print dispatch to work:"
-        Write-Host "          $sumatraDest"
-        Write-Host "          C:\printosky_watcher\SumatraPDF.exe"
-        Write-Host "          C:\Program Files\SumatraPDF\SumatraPDF.exe"
-    }
+    $url = "https://www.sumatrapdfreader.org/dl/rel/3.6.1/SumatraPDF-3.6.1-64.zip"
+    $zip = Join-Path $env:TEMP "sumatra_install.zip"
+    $tmp = Join-Path $env:TEMP "sumatra_extract"
+    Write-Info "Downloading SumatraPDF 3.6.1 portable from $url ..."
+    Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+    if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+    Expand-Archive -Path $zip -DestinationPath $tmp -Force
+    $exe = Get-ChildItem -Path $tmp -Filter "*.exe" -Recurse | Select-Object -First 1
+    Copy-Item -Path $exe.FullName -Destination $sumatraDest -Force
+    Remove-Item -Force $zip; Remove-Item -Recurse -Force $tmp
+    Write-OK "installed $sumatraDest"
 }
 
 # -----------------------------------------------------------------
 # 4. Python dependencies
 # -----------------------------------------------------------------
 Write-Header "4. Python dependencies"
-
 $reqFile = Join-Path $REPO_ROOT "requirements.txt"
 if (Test-Path $reqFile) {
-    Write-Host "        running: pip install -r requirements.txt" -ForegroundColor DarkGray
+    Write-Info "running: pip install -r requirements.txt"
     & python -m pip install --quiet -r $reqFile
     if ($LASTEXITCODE -eq 0) { Write-OK "requirements installed" } else { Write-Fail "pip install failed" }
 } else {
-    Write-Fail "requirements.txt not found at $reqFile"
+    Write-Fail "requirements.txt not found at $reqFile"; exit 1
+}
+
+# -----------------------------------------------------------------
+# 5. Detect HQ secrets source
+# -----------------------------------------------------------------
+Write-Header "5. HQ secrets source"
+$envPath = Join-Path $REPO_ROOT ".env"
+$hqCandidates = @(
+    (Join-Path $REPO_ROOT "hq-secrets.env"),     # explicit HQ-provided file
+    $envPath,                                     # already populated here
+    "C:\printosky\.env",
+    "C:\printosky_watcher\.env",
+    "C:\PY\printosky\.env"
+)
+$hqSource = $hqCandidates | Where-Object { Test-Path $_ -PathType Leaf } | Select-Object -First 1
+if (-not $hqSource) {
+    Write-Fail "No HQ secrets source found. Checked:"
+    foreach ($p in $hqCandidates) { Write-Host "          $p" -ForegroundColor DarkGray }
+    Write-Host ""
+    Write-Host "        Resolution: get a populated .env file from Printosky HQ" -ForegroundColor Yellow
+    Write-Host "                    (contains META_*, SUPABASE_*, ANTHROPIC_API_KEY, hashes)." -ForegroundColor Yellow
+    Write-Host "                    Save it as $REPO_ROOT\hq-secrets.env then re-run." -ForegroundColor Yellow
     exit 1
 }
-
-# -----------------------------------------------------------------
-# 5. Per-store config (store_config.json)
-# -----------------------------------------------------------------
-Write-Header "5. Per-store config (store_config.json)"
-
-$cfgPath = Join-Path $REPO_ROOT "store_config.json"
-$cfgExamplePath = Join-Path $REPO_ROOT "store_config.example.json"
-
-if (Test-Path $cfgPath) {
-    $existing = Get-Content $cfgPath -Raw
-    Write-Skip "store_config.json exists. Current store_id:"
-    if ($existing -match '"store_id"\s*:\s*"([^"]+)"') { Write-Host "        $($Matches[1])" }
-    if (-not (Ask-YesNo "Overwrite it?" $false)) {
-        Write-Skip "keeping existing config"
-    } else {
-        Remove-Item -Force $cfgPath
-    }
+Write-OK "using $hqSource"
+$sample = Get-Content $hqSource -Raw
+$expected = @('META_APP_SECRET','SUPABASE_URL','SUPABASE_SERVICE_KEY','ANTHROPIC_API_KEY','ADMIN_PBKDF2_HASH')
+$missing = $expected | Where-Object { $sample -notmatch "(?m)^$_=" }
+if ($missing) {
+    Write-Warn "Source is missing keys: $($missing -join ', ')"
+    Write-Warn "Installer will continue but those keys will be blank in the new .env."
 }
 
-if (-not (Test-Path $cfgPath)) {
-    Write-Host ""
-    Write-Host "  Provide values for the new store:" -ForegroundColor DarkCyan
-    $storeId   = (Ask "    store_id (short uppercase, e.g. OSP, TVM, KOC)").ToUpper()
-    $storeName = Ask "    store_name (human readable)"
-    $konicaIp  = Ask "    Konica printer IP" "192.168.55.110"
-    $epsonIp   = Ask "    Epson printer IP"  "192.168.55.202"
-    $hotFolder = Ask "    hot folder for incoming files" "C:\Printosky\Jobs\Incoming"
-    $dbPath    = Ask "    SQLite jobs.db path"             "C:\Printosky\Data\jobs.db"
-    $konicaQ   = Ask "    Windows printer queue name for Konica" "KONICA MINOLTA 1100 PS"
-    $epsonQ    = Ask "    Windows printer queue name for Epson"  "WF-C21000 Series(Network)"
+# -----------------------------------------------------------------
+# 6. Location inputs (the only manual data)
+# -----------------------------------------------------------------
+Write-Header "6. Store location details (the only manual entry)"
+$storeName = Ask "    Store name (e.g. 'Printosky Trivandrum')"
+$suggested = Suggest-StoreId $storeName
+$storeId = (Ask "    store_id (short code)" $suggested).ToUpper()
+$city      = Ask "    City / location"      "Thrissur"
+$konicaIp  = Ask "    Konica printer IP"     "192.168.55.110"
+$epsonIp   = Ask "    Epson printer IP"      "192.168.55.202"
+$konicaQ   = Ask "    Konica Windows print queue name" "KONICA MINOLTA 1100 PS"
+$epsonQ    = Ask "    Epson Windows print queue name"  "WF-C21000 Series(Network)"
+$waPhone   = Ask "    Store WhatsApp number (with country code, no +)" "919495706405"
+$epsonUser = Ask "    Epson web admin username"        "Oxygen"
+$epsonPass = Ask "    Epson web admin password (LAN-only printer)"
+$hotFolder = "C:\Printosky\Jobs\Incoming"
+$dbPath    = "C:\Printosky\Data\jobs.db"
 
+# -----------------------------------------------------------------
+# 7. Write store_config.json
+# -----------------------------------------------------------------
+Write-Header "7. store_config.json"
+$cfgPath = Join-Path $REPO_ROOT "store_config.json"
+$writeCfg = $true
+if (Test-Path $cfgPath) {
+    $existing = Get-Content $cfgPath -Raw
+    if ($existing -match '"store_id"\s*:\s*"([^"]+)"') {
+        Write-Skip "exists with store_id=$($Matches[1])"
+    }
+    $writeCfg = Ask-YesNo "Overwrite store_config.json with new $storeId values?" $false
+}
+if ($writeCfg) {
     $cfg = [ordered]@{
         store_id   = $storeId
-        store_name = $storeName
+        store_name = "$storeName, $city"
         printers   = [ordered]@{ konica_ip = $konicaIp; epson_ip = $epsonIp }
         hot_folder = $hotFolder
         db_path    = $dbPath
@@ -195,69 +239,128 @@ if (-not (Test-Path $cfgPath)) {
     }
     $cfg | ConvertTo-Json -Depth 5 | Set-Content -Path $cfgPath -Encoding UTF8
     Write-OK "wrote $cfgPath"
-}
-
-# -----------------------------------------------------------------
-# 6. Environment secrets (.env)
-# -----------------------------------------------------------------
-Write-Header "6. Environment secrets (.env)"
-
-$envPath = Join-Path $REPO_ROOT ".env"
-$envExamplePath = Join-Path $REPO_ROOT ".env.example"
-
-if (Test-Path $envPath) {
-    Write-Skip ".env already exists - not overwriting."
-    Write-Host "        Verify these per-store keys are set correctly:" -ForegroundColor DarkGray
-    Write-Host "          STORE_TOKEN          (unique per store, random hex)"
-    Write-Host "          STORE_WHATSAPP_PHONE (this store's number)"
-    Write-Host "          EPSON_USER, EPSON_PASS (this Epson's web admin creds)"
-} elseif (Test-Path $envExamplePath) {
-    Copy-Item -Path $envExamplePath -Destination $envPath
-    $newTok = -join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
-    (Get-Content $envPath) -replace '^STORE_TOKEN=.*', "STORE_TOKEN=$newTok" | Set-Content $envPath
-    Write-OK "wrote $envPath from .env.example"
-    Write-OK "auto-generated fresh STORE_TOKEN (64-hex random)"
-    Write-Warn "STILL TO DO: open .env and fill in the shared values from Printosky HQ:"
-    Write-Host "          META_* (4 keys), SUPABASE_* (4 keys), ANTHROPIC_API_KEY,"
-    Write-Host "          ADMIN_PBKDF2_*, SUPERADMIN/STORE/MIS_SHA256_HASH, EPSON_PASS"
 } else {
-    Write-Fail ".env.example not found - can't seed .env. Cannot continue."
-    exit 1
+    Write-Skip "keeping existing store_config.json"
 }
 
 # -----------------------------------------------------------------
-# 7. Bootstrap SQLite schema
+# 8. Build .env (auto-generated; HQ secrets copied as-is)
 # -----------------------------------------------------------------
-Write-Header "7. Bootstrap jobs.db schema"
+Write-Header "8. .env (auto-generated)"
+# Resolve to absolute paths so a self-overwrite check works reliably
+$hqSourceAbs = (Resolve-Path $hqSource).Path
+$envPathAbs  = if (Test-Path $envPath) { (Resolve-Path $envPath).Path } else { $envPath }
+$sourceIsSelf = $hqSourceAbs -eq $envPathAbs
 
+$writeEnv = $true
+if (Test-Path $envPath) {
+    if ($sourceIsSelf) {
+        Write-Skip "$envPath is also the HQ secrets source (in-place update mode)"
+        $writeEnv = Ask-YesNo "Apply per-store overrides (STORE_TOKEN, STORE_WHATSAPP_PHONE, EPSON_*) to existing .env?" $false
+    } else {
+        Write-Skip "$envPath exists"
+        $writeEnv = Ask-YesNo "Overwrite .env with new $storeId values?" $false
+    }
+}
+if ($writeEnv) {
+    if (-not $sourceIsSelf) {
+        Copy-Item -Path $hqSource -Destination $envPath -Force
+    }
+    Update-EnvLine $envPath "STORE_TOKEN"          (New-RandomHex 32)
+    Update-EnvLine $envPath "STORE_WHATSAPP_PHONE" $waPhone
+    Update-EnvLine $envPath "EPSON_USER"           $epsonUser
+    Update-EnvLine $envPath "EPSON_PASS"           $epsonPass
+    if ($sourceIsSelf) {
+        Write-OK "updated $envPath (STORE_TOKEN rotated, per-store keys set)"
+    } else {
+        Write-OK "wrote $envPath (STORE_TOKEN auto-generated, per-store keys set)"
+    }
+} else {
+    Write-Skip "keeping existing .env"
+}
+
+# -----------------------------------------------------------------
+# 9. Bootstrap SQLite schema
+# -----------------------------------------------------------------
+Write-Header "9. Bootstrap jobs.db schema"
 $bootstrapDb = Join-Path $PSScriptRoot "bootstrap_db.py"
 if (-not (Test-Path $bootstrapDb)) {
-    Write-Fail "bootstrap_db.py not found at $bootstrapDb"
-    exit 1
+    Write-Fail "bootstrap_db.py not found at $bootstrapDb"; exit 1
 }
+Push-Location $REPO_ROOT
 & python $bootstrapDb
-if ($LASTEXITCODE -ne 0) { Write-Warn "bootstrap_db.py returned non-zero" } else { Write-OK "schema applied" }
+$dbExit = $LASTEXITCODE
+Pop-Location
+if ($dbExit -eq 0) { Write-OK "schema applied" } else { Write-Warn "bootstrap_db.py returned non-zero" }
 
 # -----------------------------------------------------------------
-# 8. Staff seed (optional)
+# 10. Staff: seed + auto-rotate PINs to random 6-digit values
 # -----------------------------------------------------------------
-Write-Header "8. Staff PINs (optional)"
-
+Write-Header "10. Staff PINs (auto-generated)"
 $staffSetup = Join-Path $REPO_ROOT "staff_setup.py"
-if (Test-Path $staffSetup) {
-    if (Ask-YesNo "Seed default staff (Priya/Revana/Bini/Anu/Deepak)? You can re-PIN later via API.") {
-        Push-Location $REPO_ROOT
-        & python staff_setup.py seed
-        Pop-Location
-        Write-OK "staff seeded (default PINs - reset before going live)"
-    } else { Write-Skip "skipped" }
-} else { Write-Warn "staff_setup.py not found - skip" }
+if (-not (Test-Path $staffSetup)) {
+    Write-Warn "staff_setup.py not found - skip"
+} else {
+    Push-Location $REPO_ROOT
+    & python staff_setup.py 2>&1 | Out-Null   # seed defaults (idempotent)
+    $defaultIds = @("priya","revana","bini","anu","deepak")
+    $pinsFile = Join-Path $REPO_ROOT ".staff_pins_first_login.txt"
+    $now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $banner = @(
+        "# Printosky staff PINs - first login",
+        "# Generated $now for store_id=$storeId",
+        "# Keep this file safe. Hand each PIN to its owner privately.",
+        "# Delete this file once everyone has logged in and changed their PIN.",
+        ""
+    )
+    $banner | Set-Content -Path $pinsFile -Encoding UTF8
+    foreach ($id in $defaultIds) {
+        $pin = New-RandomPin
+        & python staff_setup.py reset-pin $id $pin 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            "$id : $pin" | Add-Content -Path $pinsFile
+        } else {
+            "$id : (reset failed)" | Add-Content -Path $pinsFile
+        }
+    }
+    Pop-Location
+    Write-OK "5 staff PINs auto-generated"
+    Write-Info "PINs saved to $pinsFile (gitignored)"
+    Write-Info "Hand each PIN to its owner privately, then delete the file."
+}
 
 # -----------------------------------------------------------------
-# 9. Verify
+# 11. Autostart on PC boot
 # -----------------------------------------------------------------
-Write-Header "9. Verify"
+Write-Header "11. Autostart on PC boot"
+$startBat = Join-Path $REPO_ROOT "START_PRINTOSKY.bat"
+if (-not (Test-Path $startBat)) {
+    Write-Warn "START_PRINTOSKY.bat not found - skip"
+} else {
+    $startupDir = [Environment]::GetFolderPath('Startup')
+    $shortcut = Join-Path $startupDir "Printosky.lnk"
+    if (Test-Path $shortcut) {
+        Write-Skip "Startup shortcut already in place: $shortcut"
+    } else {
+        try {
+            $wshell = New-Object -ComObject WScript.Shell
+            $sc = $wshell.CreateShortcut($shortcut)
+            $sc.TargetPath = $startBat
+            $sc.WorkingDirectory = $REPO_ROOT
+            $sc.WindowStyle = 7   # minimized
+            $sc.Save()
+            Write-OK "created $shortcut (user-scope autostart; no admin needed)"
+        } catch {
+            Write-Warn "Could not create Startup shortcut: $_"
+            Write-Info "Fallback: right-click SETUP_AUTOSTART.bat -> Run as administrator"
+        }
+    }
+}
 
+# -----------------------------------------------------------------
+# 12. Verify
+# -----------------------------------------------------------------
+Write-Header "12. Verify"
 Push-Location $REPO_ROOT
 & python -c "from store_config import get_store_config; c = get_store_config(); print(f'    store_id={c.store_id}  db_path={c.db_path}')"
 if ($LASTEXITCODE -eq 0) { Write-OK "store_config loads cleanly" } else { Write-Fail "store_config failed to load" }
@@ -270,55 +373,41 @@ $sumatraPaths = @(
     "C:\Program Files (x86)\SumatraPDF\SumatraPDF.exe"
 )
 $sumatraFound = $sumatraPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($sumatraFound) {
-    Write-OK "SumatraPDF resolvable at: $sumatraFound"
-} else {
-    Write-Warn "SumatraPDF NOT findable on any expected path - print dispatch will fail"
-}
+if ($sumatraFound) { Write-OK "SumatraPDF resolvable at: $sumatraFound" } else { Write-Warn "SumatraPDF NOT findable" }
 
 $queues = (Get-Printer -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
 $cfgRaw = Get-Content $cfgPath -Raw | ConvertFrom-Json
 foreach ($p in @("konica", "epson")) {
     $qName = $cfgRaw.printer_queue_names.$p
-    if ($queues -contains $qName) {
-        Write-OK "Windows print queue for $p found: '$qName'"
-    } else {
-        Write-Warn "Print queue for $p NOT found: '$qName' - verify in Windows Devices & Printers"
-    }
+    if ($queues -contains $qName) { Write-OK "Windows print queue for $p found: '$qName'" }
+    else { Write-Warn "Print queue for $p NOT found: '$qName'" }
 }
-
 foreach ($p in @("konica", "epson")) {
     $ip = $cfgRaw.printers."${p}_ip"
-    if ($ip -eq "127.0.0.1") {
-        Write-Skip "$p IP is loopback (test store)"
-        continue
-    }
+    if ($ip -eq "127.0.0.1") { Write-Skip "$p IP is loopback (test store)"; continue }
     $reach = Test-Connection -ComputerName $ip -Count 1 -Quiet -ErrorAction SilentlyContinue
-    if ($reach) { Write-OK "$p printer reachable at $ip" } else { Write-Warn "$p printer NOT reachable at $ip" }
+    if ($reach) { Write-OK "$p reachable at $ip" } else { Write-Warn "$p NOT reachable at $ip" }
 }
 
 # -----------------------------------------------------------------
-# 10. Done - next steps
+# 13. Summary
 # -----------------------------------------------------------------
-Write-Header "10. Done - next steps"
-
+Write-Header "13. Done"
 Write-Host @"
-  -> Open .env and fill in the shared keys from Printosky HQ
-     (META_*, SUPABASE_*, ANTHROPIC_API_KEY, ADMIN_* / *_SHA256_HASH, EPSON_PASS).
 
-  -> Start the services:
-        Double-click  START_PRINTOSKY.bat   (or run from a terminal)
+  Installation complete for store_id = $storeId
 
-  -> Set up autostart on PC boot (one-time, requires admin):
-        Right-click   SETUP_AUTOSTART.bat   ->   Run as administrator
+  Generated files:
+    $cfgPath
+    $envPath
+    $REPO_ROOT\.staff_pins_first_login.txt   (hand PINs out, then delete)
 
-  -> Reset staff PINs from temporary defaults - see STORE_SETUP_CHECKLIST.md
-     section E.
+  Autostart:
+    user Startup folder -> Printosky.lnk (services launch on next PC boot)
 
-  -> If this store also needs the Cloudflare tunnel for inbound webhooks,
-     run SETUP_NAMED_TUNNEL.bat after the WhatsApp/Razorpay accounts are wired.
+  To start the services NOW without rebooting:
+    Double-click  $startBat
+
+  Nothing else to fill in - the installer wrote everything.
+
 "@ -ForegroundColor Gray
-
-Write-Host ""
-Write-Host "Installer finished." -ForegroundColor Cyan
-Write-Host ""

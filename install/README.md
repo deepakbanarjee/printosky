@@ -24,20 +24,40 @@ install/
    secrets from Printosky HQ (Meta keys, Supabase keys, hashes).
 5. Double-click `START_PRINTOSKY.bat` to launch services.
 
-## What the installer does
+## What the installer does — fully automated
 
-| # | Step | Idempotent? |
+The operator only enters **physical-location data**. Everything else is
+generated or copied from an HQ secrets source.
+
+| # | Step | What the operator sees |
 |---|---|---|
-| 1 | Verify Python / pip / Node.js / internet | yes |
-| 2 | Create `C:\Printosky\Data`, `Jobs\Incoming`, `Jobs\Archive` | yes |
-| 3 | Download SumatraPDF portable (~20 MB) to repo root | yes |
-| 4 | `pip install -r requirements.txt` | yes |
-| 5 | Interactively write `store_config.json` (skipped if exists) | yes |
-| 6 | Copy `.env.example` → `.env`, auto-generate fresh `STORE_TOKEN` | yes (never overwrites existing `.env`) |
-| 7 | Bootstrap SQLite schema (12 tables/views) | yes |
-| 8 | Seed default staff PINs (optional) | yes |
-| 9 | Verify config loads, SumatraPDF found, print queues + printer ping | yes |
-| 10 | Print "what's next" reminder | — |
+| 1 | Verify Python / pip / internet | nothing — auto-pass/fail |
+| 2 | Create `C:\Printosky\Data`, `Jobs\Incoming`, `Jobs\Archive` | nothing — auto |
+| 3 | Download SumatraPDF portable (~20 MB) | nothing — auto |
+| 4 | `pip install -r requirements.txt` | nothing — auto |
+| 5 | Detect HQ secrets source | nothing — auto |
+| 6 | **Ask: store_name, city, printer IPs + queue names, WhatsApp #, Epson password** | the ONE prompt block |
+| 7 | Write `store_config.json` (store_id auto-derived from name) | confirms overwrite if exists |
+| 8 | Build `.env` (HQ secrets copied; STORE_TOKEN auto-random; STORE_WHATSAPP_PHONE, EPSON_USER, EPSON_PASS set from inputs) | confirms overwrite if exists |
+| 9 | Bootstrap SQLite schema (12 tables/views) | nothing — auto |
+| 10 | Auto-generate 6-digit PINs for 5 staff, write to `.staff_pins_first_login.txt` | nothing — auto |
+| 11 | Create user-scope Windows Startup shortcut | nothing — auto |
+| 12 | Verify (config / SumatraPDF / print queues / printer ping) | nothing — auto |
+| 13 | Print summary with file paths | — |
+
+### HQ secrets source — auto-detected
+
+The installer looks for HQ shared secrets (META_*, SUPABASE_*,
+ANTHROPIC_API_KEY, ADMIN_PBKDF2_*, etc.) in this order:
+
+1. `<repo>/hq-secrets.env` — explicit, HQ-shipped (gitignored)
+2. `<repo>/.env` — existing repo config
+3. `C:\printosky\.env`
+4. `C:\printosky_watcher\.env`
+5. `C:\PY\printosky\.env`
+
+First match wins. If none found, the installer fails with clear
+instructions to obtain `hq-secrets.env` from HQ.
 
 ## What the installer does NOT do
 
@@ -50,8 +70,10 @@ These are out of scope because they're one-time HQ ops, not per-store:
 - Cloudflare DNS / named tunnel
 - Netlify deploy for the admin UI
 
-See `install/INSTALL.md` for the HQ-side prerequisites and where to
-find each value the installer will ask you to paste in.
+For all of the above, HQ generates one `hq-secrets.env` file and
+ships it to each new store. The installer copies its contents
+verbatim into the new store's `.env`. See `install/INSTALL.md` for
+the HQ-side prerequisites.
 
 ## Testing the installer on the office PC
 
