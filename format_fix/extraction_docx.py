@@ -55,6 +55,8 @@ import re
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.shared import RGBColor
 
 
 # 5-tuple shape:  (text, max_size, dom_size, bold, align)
@@ -151,44 +153,138 @@ def _is_section_boundary(text: str) -> bool:
     return False
 
 
-def parse_docx_to_pages(docx_bytes: bytes) -> tuple[list[list[Block]], int]:
-    """Parse a DOCX byte-string into virtual pages of 5-tuple blocks.
+# A "table_rows" is a list of rows; each row is a list of cell text strings.
+# Stored separately from blocks so handlers don't need to learn a new shape.
+TableRows = list[list[str]]
 
-    Returns (page_blocks, n_pages) where page_blocks[i] is the list of
-    blocks that comprise virtual page i.
 
-    Always returns at least one page. Paragraphs before the first
-    detected boundary form page 0 (the cover/front matter).
+def _extract_table_rows(tbl) -> TableRows:
+    """Convert a python-docx Table to a list-of-rows-of-cell-strings."""
+    rows: TableRows = []
+    for row in tbl.rows:
+        cells: list[str] = []
+        for cell in row.cells:
+            cells.append((cell.text or "").strip())
+        if cells:
+            rows.append(cells)
+    return rows
+
+
+def parse_docx_to_pages(
+    docx_bytes: bytes,
+) -> tuple[list[list[Block]], list[list[TableRows]], int]:
+    """Parse a DOCX byte-string into virtual pages of blocks + tables.
+
+    Walks doc.element.body in document order so paragraphs and tables
+    interleave correctly. Tables are collected per-page in a parallel
+    `page_tables` list rather than embedded in the 5-tuple block stream,
+    so the existing handlers (which expect 5-tuples) need no changes.
+
+    Returns:
+      (page_blocks, page_tables, n_pages)
+        page_blocks[i] is the list of 5-tuple paragraph blocks for page i
+        page_tables[i] is the list of TableRows belonging to page i
+
+    Always returns at least one page. Items before the first detected
+    section boundary form page 0 (cover/front matter).
     """
     doc = Document(io.BytesIO(docx_bytes))
 
-    pages: list[list[Block]] = [[]]
+    pages:       list[list[Block]]      = [[]]
+    page_tables: list[list[TableRows]]  = [[]]
 
-    for para in doc.paragraphs:
-        block = _paragraph_to_block(para)
-        had_explicit_break = _has_page_break(para)
+    # python-docx exposes paragraphs/tables in document order in the
+    # corresponding accessors, so we step through both iterators while
+    # walking the body's XML children.
+    para_iter = iter(doc.paragraphs)
+    tbl_iter  = iter(doc.tables)
 
-        if block is None:
-            if had_explicit_break and pages[-1]:
-                pages.append([])
-            continue
+    P_TAG = qn("w:p")
+    T_TAG = qn("w:tbl")
 
-        text = block[0]
-        # If this paragraph IS a section title, start a new virtual page
-        # BEFORE adding it so the title sits at blocks[:5] of the new page
-        # where handlers scan.
-        if _is_section_boundary(text) and pages[-1]:
-            pages.append([])
+    def _new_page() -> None:
+        pages.append([])
+        page_tables.append([])
 
-        pages[-1].append(block)
+    for elem in doc.element.body.iterchildren():
+        tag = elem.tag
 
-        if had_explicit_break:
-            pages.append([])
+        if tag == P_TAG:
+            try:
+                para = next(para_iter)
+            except StopIteration:
+                continue
+            block = _paragraph_to_block(para)
+            had_explicit_break = _has_page_break(para)
 
-    while len(pages) > 1 and not pages[-1]:
+            if block is None:
+                if had_explicit_break and pages[-1]:
+                    _new_page()
+                continue
+
+            text = block[0]
+            # Section-title boundary -> new virtual page BEFORE adding
+            # so handlers' first-5-blocks scan finds the title.
+            if _is_section_boundary(text) and pages[-1]:
+                _new_page()
+
+            pages[-1].append(block)
+
+            if had_explicit_break:
+                _new_page()
+
+        elif tag == T_TAG:
+            try:
+                tbl = next(tbl_iter)
+            except StopIteration:
+                continue
+            rows = _extract_table_rows(tbl)
+            if rows:
+                page_tables[-1].append(rows)
+
+        # Other tags (sectPr, sdt, etc.) are intentionally ignored.
+
+    # Drop trailing pages that have neither blocks nor tables
+    while len(pages) > 1 and not pages[-1] and not page_tables[-1]:
         pages.pop()
+        page_tables.pop()
 
     if not pages:
         pages = [[]]
+        page_tables = [[]]
 
-    return pages, len(pages)
+    return pages, page_tables, len(pages)
+
+
+def emit_table(doc, rows: TableRows) -> None:
+    """Render a TableRows matrix as a native Word table in `doc`.
+
+    Used by run_from_docx after each per-page handler render. First row
+    is treated as a header (bold). Style is "Table Grid" so borders are
+    visible. Defensively handles ragged rows by padding to the widest
+    row's column count.
+    """
+    if not rows:
+        return
+    n_cols = max(len(r) for r in rows)
+    if n_cols == 0:
+        return
+
+    tbl = doc.add_table(rows=len(rows), cols=n_cols)
+    try:
+        tbl.style = "Table Grid"
+    except KeyError:
+        # Some python-docx setups need the style registered; fall back
+        # quietly so we never lose data over styling.
+        pass
+
+    for i, row in enumerate(rows):
+        for j in range(n_cols):
+            cell_text = row[j] if j < len(row) else ""
+            cell = tbl.rows[i].cells[j]
+            cell.text = cell_text
+            if i == 0:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        run.bold = True
+                        run.font.color.rgb = RGBColor(0, 0, 0)
