@@ -76,6 +76,13 @@ function Suggest-StoreId([string]$name) {
     }
     return "NEW"
 }
+$script:UTF8_NO_BOM = New-Object System.Text.UTF8Encoding($false)
+function Write-Utf8NoBom([string]$path, [string]$content) {
+    # Set-Content -Encoding UTF8 on Windows PowerShell 5.1 writes WITH BOM,
+    # which crashes consumers that read as plain UTF-8 (e.g. Python's
+    # json.loads on store_config.json). This helper writes BOM-less UTF-8.
+    [System.IO.File]::WriteAllText($path, $content, $script:UTF8_NO_BOM)
+}
 function Update-EnvLine([string]$path, [string]$key, [string]$value) {
     $found = $false
     $lines = Get-Content $path | ForEach-Object {
@@ -85,7 +92,7 @@ function Update-EnvLine([string]$path, [string]$key, [string]$value) {
         } else { $_ }
     }
     if (-not $found) { $lines += "$key=$value" }
-    Set-Content -Path $path -Value $lines -Encoding UTF8
+    Write-Utf8NoBom $path ($lines -join "`r`n")
 }
 
 Write-Host ""
@@ -237,8 +244,8 @@ if ($writeCfg) {
         db_path    = $dbPath
         printer_queue_names = [ordered]@{ konica = $konicaQ; epson = $epsonQ }
     }
-    $cfg | ConvertTo-Json -Depth 5 | Set-Content -Path $cfgPath -Encoding UTF8
-    Write-OK "wrote $cfgPath"
+    Write-Utf8NoBom $cfgPath ($cfg | ConvertTo-Json -Depth 5)
+    Write-OK "wrote $cfgPath (BOM-less UTF-8)"
 } else {
     Write-Skip "keeping existing store_config.json"
 }
@@ -393,10 +400,26 @@ foreach ($p in @("konica", "epson")) {
 # 13. Summary
 # -----------------------------------------------------------------
 Write-Header "13. Done"
+# Read store_id back from disk - it may differ from $storeId if the
+# operator chose to keep an existing store_config.json above.
+$liveStoreId = $storeId
+try {
+    if (Test-Path $cfgPath) {
+        $liveCfg = (Get-Content $cfgPath -Raw -Encoding UTF8)
+        if ($liveCfg -match '"store_id"\s*:\s*"([^"]+)"') {
+            $liveStoreId = $Matches[1]
+        }
+    }
+} catch { }
+$mismatch = ""
+if ($liveStoreId -ne $storeId) {
+    $mismatch = "  (you entered '$storeId' but kept existing config)`n"
+}
+
 Write-Host @"
 
-  Installation complete for store_id = $storeId
-
+  Installation complete for store_id = $liveStoreId
+$mismatch
   Generated files:
     $cfgPath
     $envPath
