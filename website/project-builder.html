@@ -8,6 +8,16 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <!-- Client-side text extraction so we never upload the binary file.
+       Avoids Vercel function 413 on real student docs (which are routinely 4 MB+). -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.7.0/mammoth.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
+  <script>
+    if (window['pdfjsLib']) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+    }
+  </script>
   <style>
     /* ── Page-level overrides ── */
     .pb-page { max-width: 860px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
@@ -589,7 +599,9 @@
     uploadTab: 'paste',
     studentCount: 1,
     chapterCount: 8,
-    fileBytes: null,
+    fileBytes: null,         // legacy — kept null; replaced by extractedText
+    extractedText: '',       // client-side text extracted in handleFileSelect
+    extractInProgress: false,
     fileName: null,
     analysed: false,
     fileToken: null,
@@ -733,6 +745,8 @@
     state.fileType = null;
     state.currentService = null;
     state.fileBytes = null;
+    state.extractedText = '';
+    state.extractInProgress = false;
     state.fileName = null;
     hide('step1'); hide('step2'); hide('step3');
     show('step0');
@@ -750,12 +764,15 @@
     else                 { hide('tab-paste'); show('tab-upload'); }
   }
 
-  // ── File selection ────────────────────────────────────────────────────────────
-  function handleFileSelect(input) {
+  // ── File selection (client-side text extraction) ─────────────────────────────
+  // We extract text in the browser via mammoth.js (DOCX) / pdf.js (PDF) so the
+  // huge binary file never crosses the wire. Vercel function payload limit
+  // (4.5 MB) would otherwise 413 on a 4 MB student doc.
+  async function handleFileSelect(input) {
     const file = input.files[0];
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      showErr('ffError', 'File is too large (max 10 MB). Please compress or use paste instead.');
+    if (file.size > 20 * 1024 * 1024) {
+      showErr('ffError', 'File is too large (max 20 MB). Please compress and retry.');
       return;
     }
     const ext = file.name.split('.').pop().toLowerCase();
@@ -764,17 +781,52 @@
       return;
     }
     hideErr('ffError');
-    $('uploadFileName').textContent = '📎 ' + file.name;
+    $('uploadFileName').textContent = '📎 ' + file.name + ' — extracting text…';
     state.fileName = file.name;
     state.fileType = ext;
     state.analysed = false;
+    state.extractedText = '';
+    state.extractInProgress = true;
     hide('detectedStructure');
-    show('detectWrap');
-    const reader = new FileReader();
-    reader.onload = e => {
-      state.fileBytes = e.target.result.split(',')[1];  // base64
-    };
-    reader.readAsDataURL(file);
+    hide('detectWrap');  // "Detect Chapters" is redundant once format-preview runs
+
+    try {
+      let text = '';
+      if (ext === 'docx') {
+        const buf = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer: buf });
+        text = result.value || '';
+      } else if (ext === 'pdf') {
+        const buf = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+        const pages = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          pages.push(content.items.map(it => it.str).join(' '));
+        }
+        text = pages.join('\n\n');
+      } else {
+        text = await file.text();
+      }
+      state.extractedText = text;
+      state.extractInProgress = false;
+      const wc = text.trim().split(/\s+/).filter(Boolean).length;
+      $('uploadFileName').textContent =
+        `📎 ${file.name} — ${wc.toLocaleString()} words extracted (${(text.length / 1024).toFixed(1)} KB text)`;
+      if (wc < 200) {
+        showErr('ffError',
+          'We extracted very little text from your file (under 200 words). ' +
+          'Check that the file is not scanned-image-only or password-protected.');
+      }
+    } catch (err) {
+      state.extractInProgress = false;
+      state.extractedText = '';
+      $('uploadFileName').textContent = '📎 ' + file.name;
+      showErr('ffError',
+        `Could not read your ${ext.toUpperCase()} file: ${err.message || err}. ` +
+        'Try saving the file again or use paste instead.');
+    }
   }
 
   // ── Drag & drop ───────────────────────────────────────────────────────────────
@@ -1005,8 +1057,13 @@
       if (state.uploadTab === 'paste' && !$('pasteContent').value.trim()) {
         showErr('ffError', 'Please paste your project content first.'); return;
       }
-      if (state.uploadTab === 'upload' && !state.fileBytes) {
-        showErr('ffError', 'Please select a .docx file first.'); return;
+      if (state.uploadTab === 'upload') {
+        if (state.extractInProgress) {
+          showErr('ffError', 'Still extracting text from your file — please wait a moment.'); return;
+        }
+        if (!state.extractedText || state.extractedText.trim().length < 200) {
+          showErr('ffError', 'Please select a file first (or use paste). We need at least 200 characters of text.'); return;
+        }
       }
       hideErr('ffError');
     } else {
@@ -1025,8 +1082,10 @@
       if (state.uploadTab === 'paste') {
         payload.content = $('pasteContent').value;
       } else {
-        payload.content_b64 = state.fileBytes;
-        payload.content_type = state.fileType || 'docx';
+        // Client-side text extraction — see handleFileSelect.
+        // We send the extracted text via the same `content` field as paste.
+        // The Vercel function never sees the binary, dodging the 4.5 MB payload cap.
+        payload.content = state.extractedText || '';
       }
     } else {
       payload.form_data = collectFormData();
