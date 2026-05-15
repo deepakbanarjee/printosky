@@ -123,6 +123,87 @@ def run(pdf_path: str | Path,
         pdf.close()
 
 
+def run_from_docx(docx_bytes: bytes,
+                  university_id: str,
+                  output_path: str | Path,
+                  skip_pages: list[int] | None = None,
+                  verbose: bool = False) -> dict:
+    """DOCX entry point — parallel to run() for PDF input.
+
+    Parses the DOCX into virtual pages of 5-tuple blocks (matching the
+    PDF blocks_with_font contract), then dispatches the existing handler
+    pipeline over those pages. A blank fitz.Document with the same page
+    count is created so ctx.pdf remains valid for handlers that touch
+    it — image extraction in chapter/form_page handlers degrades to a
+    no-op on blank pages, which is acceptable since DOCX images aren't
+    re-embedded in this pipeline.
+
+    Returns the same summary dict shape as run() plus source="docx".
+    """
+    from . import extraction_docx
+
+    output_path = Path(output_path)
+
+    pages_blocks, n_pages = extraction_docx.parse_docx_to_pages(docx_bytes)
+    if n_pages == 0:
+        n_pages = 1
+        pages_blocks = [[]]
+
+    # Synthesize a blank fitz.Document with the same page count so the
+    # existing Context.build + handlers continue to function. They will
+    # find no embedded images, which is fine for DOCX input.
+    pdf = fitz.open()
+    try:
+        for _ in range(n_pages):
+            pdf.new_page()  # A4 default
+
+        ctx = Context.build(pdf, university_id, skip_pages=skip_pages)
+        doc = Document()
+        apply_university_styles(doc, ctx.config)
+
+        handlers = _build_handlers()
+        claims: dict[str, int] = {h.name: 0 for h in handlers}
+        claims["__skipped__"]   = 0
+        claims["__nohandler__"] = 0
+
+        for page_no in range(n_pages):
+            if page_no in ctx.skip_set:
+                claims["__skipped__"] += 1
+                if verbose:
+                    print(f"  p{page_no+1}: SKIPPED (user requested)")
+                continue
+
+            blocks = pages_blocks[page_no]
+
+            picked: SectionHandler | None = None
+            for h in handlers:
+                if h.applies_to(blocks, page_no, ctx):
+                    picked = h
+                    break
+
+            if picked is None:
+                claims["__nohandler__"] += 1
+                if verbose:
+                    print(f"  p{page_no+1}: no handler claimed (skipped)")
+                continue
+
+            if verbose:
+                print(f"  p{page_no+1}: -> {picked.name}")
+            picked.render(doc, blocks, page_no, ctx)
+            claims[picked.name] += 1
+
+        enforce_font_discipline(doc, ctx)
+        doc.save(str(output_path))
+        return {
+            "output":  str(output_path),
+            "pages":   n_pages,
+            "claims":  claims,
+            "source":  "docx",
+        }
+    finally:
+        pdf.close()
+
+
 def _main() -> int:
     p = argparse.ArgumentParser(
         prog="python -m format_fix.orchestrator",

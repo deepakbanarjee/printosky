@@ -2545,24 +2545,38 @@ def _handle_pb_format_preview_v2(h, body: bytes) -> None:
         _json_response(h, 400, {"error": f"invalid base64: {exc}"})
         return
 
-    if len(pdf_bytes) < 200 or pdf_bytes[:4] != b"%PDF":
-        _json_response(h, 400, {"error": "input is not a PDF (v2 currently accepts PDF only)"})
+    # Dispatch on magic bytes: %PDF = PDF, PK\x03\x04 = DOCX (ZIP).
+    is_pdf  = len(pdf_bytes) >= 200 and pdf_bytes[:4] == b"%PDF"
+    is_docx = len(pdf_bytes) >= 200 and pdf_bytes[:4] == b"PK\x03\x04"
+    if not (is_pdf or is_docx):
+        _json_response(h, 400, {
+            "error": "input is not a PDF or DOCX",
+            "hint":  "v2 accepts %PDF (PDF) or PK\\x03\\x04 (DOCX/ZIP) magic bytes",
+        })
         return
 
     job_id   = str(_uuid.uuid4())
     tmp_dir  = Path(tempfile.gettempdir()) / f"ff_{job_id}"
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    pdf_in   = tmp_dir / "input.pdf"
     docx_out = tmp_dir / "output.docx"
 
     try:
-        pdf_in.write_bytes(pdf_bytes)
-        from format_fix.orchestrator import run as ff_run
-        result = ff_run(
-            pdf_path      = pdf_in,
-            university_id = university,
-            output_path   = docx_out,
-        )
+        if is_pdf:
+            pdf_in = tmp_dir / "input.pdf"
+            pdf_in.write_bytes(pdf_bytes)
+            from format_fix.orchestrator import run as ff_run
+            result = ff_run(
+                pdf_path      = pdf_in,
+                university_id = university,
+                output_path   = docx_out,
+            )
+        else:  # DOCX
+            from format_fix.orchestrator import run_from_docx
+            result = run_from_docx(
+                docx_bytes    = pdf_bytes,
+                university_id = university,
+                output_path   = docx_out,
+            )
         if not docx_out.exists():
             _json_response(h, 500, {"error": "engine did not produce output"})
             return
