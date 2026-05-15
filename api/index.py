@@ -2508,6 +2508,105 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
     })
 
 
+def _handle_pb_format_preview_v2(h, body: bytes) -> None:
+    """POST /project-builder/format-preview-v2 — vendored osp-academics engine.
+
+    Uses the format_fix orchestrator (font-aware, page-by-page handler
+    dispatch) instead of the docx_engine Sonnet-detect-chapters path. The
+    orchestrator needs a PDF on disk; this handler accepts a base64-encoded
+    PDF, writes it to a tmp path, runs the engine, uploads the result.
+
+    Input  : {content_b64: <pdf base64>, university: <id>}
+    Output : {file_token, size_bytes, pages, claims, engine: "format_fix_v2"}
+
+    Touches no existing module. Storage path lives under
+    project-builder/previews-v2/ so it can't collide with v1 outputs.
+    """
+    import base64 as _b64
+    import tempfile
+    import uuid as _uuid
+    from pathlib import Path
+
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    content_b64 = data.get("content_b64", "")
+    university  = data.get("university", "ktu")
+    if not content_b64:
+        _json_response(h, 400, {"error": "content_b64 required (PDF base64)"})
+        return
+
+    try:
+        pdf_bytes = _b64.b64decode(content_b64)
+    except Exception as exc:
+        _json_response(h, 400, {"error": f"invalid base64: {exc}"})
+        return
+
+    if len(pdf_bytes) < 200 or pdf_bytes[:4] != b"%PDF":
+        _json_response(h, 400, {"error": "input is not a PDF (v2 currently accepts PDF only)"})
+        return
+
+    job_id   = str(_uuid.uuid4())
+    tmp_dir  = Path(tempfile.gettempdir()) / f"ff_{job_id}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    pdf_in   = tmp_dir / "input.pdf"
+    docx_out = tmp_dir / "output.docx"
+
+    try:
+        pdf_in.write_bytes(pdf_bytes)
+        from format_fix.orchestrator import run as ff_run
+        result = ff_run(
+            pdf_path      = pdf_in,
+            university_id = university,
+            output_path   = docx_out,
+        )
+        if not docx_out.exists():
+            _json_response(h, 500, {"error": "engine did not produce output"})
+            return
+        docx_bytes = docx_out.read_bytes()
+    except Exception as exc:
+        logger.error("format-preview-v2 engine error: %s", exc, exc_info=True)
+        _json_response(h, 500, {"error": f"engine failure: {type(exc).__name__}"})
+        return
+    finally:
+        try:
+            for f in tmp_dir.iterdir():
+                f.unlink(missing_ok=True)
+            tmp_dir.rmdir()
+        except Exception:
+            pass
+
+    token     = job_id
+    mime_docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    try:
+        from db_cloud import upload_file
+        url = upload_file(
+            f"project-builder/previews-v2/{token}.docx",
+            docx_bytes,
+            mime_docx,
+        )
+    except Exception as exc:
+        logger.error("format-preview-v2 upload error: %s", exc)
+        _json_response(h, 500, {"error": "upload failed"})
+        return
+
+    if not url:
+        _json_response(h, 500, {"error": "upload failed"})
+        return
+
+    _json_response(h, 200, {
+        "file_token": token,
+        "size_bytes": len(docx_bytes),
+        "engine":     "format_fix_v2",
+        "pages":      result.get("pages"),
+        "claims":     result.get("claims"),
+        "university": university,
+    })
+
+
 def _handle_pb_process(h, body: bytes) -> None:
     """POST /project-builder/process — verify Razorpay payment, generate DOCX."""
     try:
@@ -3066,6 +3165,10 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/project-builder/format-preview":
             _handle_pb_format_preview(self, body)
+            return
+
+        if self.path == "/project-builder/format-preview-v2":
+            _handle_pb_format_preview_v2(self, body)
             return
 
         if self.path == "/project-builder/create-order":
