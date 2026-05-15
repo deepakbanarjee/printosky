@@ -2508,6 +2508,58 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
     })
 
 
+def _handle_pb_upload_sign(h, body: bytes) -> None:
+    """POST /project-builder/upload-sign — issue a Supabase signed PUT URL.
+
+    Lets the browser upload a DOCX or PDF directly to Supabase Storage,
+    bypassing Vercel's 4.5MB function-payload cap entirely.
+
+    Input  : {filename?: str}   (optional, used only for display)
+    Output : {signed_url, storage_path, expires_in}
+
+    The returned storage_path is what the customer's next call to
+    /project-builder/format-preview-v2 should pass as {storage_path: ...}
+    so the engine can read the binary server-side.
+
+    Path layout: project-builder/uploads-v2/<uuid>/<safe_filename>
+    - The uuid prefix prevents filename collisions across customers.
+    - <safe_filename> is the caller-provided name sanitised to
+      alphanumerics + dot + dash + underscore (or "upload.bin" if blank).
+    """
+    import re as _re
+    import uuid as _uuid
+
+    try:
+        data = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    raw_filename = str(data.get("filename") or "").strip()
+    safe = _re.sub(r"[^A-Za-z0-9._-]", "_", raw_filename)[:120] or "upload.bin"
+    storage_path = f"project-builder/uploads-v2/{_uuid.uuid4()}/{safe}"
+
+    try:
+        from db_cloud import _client, INCOMING_BUCKET
+        result = _client().storage.from_(INCOMING_BUCKET).create_signed_upload_url(
+            storage_path
+        )
+    except Exception as exc:
+        logger.error("upload-sign error type=%s msg=%r", type(exc).__name__, str(exc))
+        _json_response(h, 500, {
+            "error":    "signed-url mint failed",
+            "exc_type": type(exc).__name__,
+            "exc_msg":  str(exc)[:300],
+        })
+        return
+
+    _json_response(h, 200, {
+        "signed_url":   result.get("signed_url") or result.get("signedUrl"),
+        "storage_path": storage_path,
+        "expires_in":   7200,
+    })
+
+
 def _handle_pb_format_preview_v2(h, body: bytes) -> None:
     """POST /project-builder/format-preview-v2 — vendored osp-academics engine.
 
@@ -2533,16 +2585,48 @@ def _handle_pb_format_preview_v2(h, body: bytes) -> None:
         _json_response(h, 400, {"error": "invalid JSON"})
         return
 
-    content_b64 = data.get("content_b64", "")
-    university  = data.get("university", "ktu")
-    if not content_b64:
-        _json_response(h, 400, {"error": "content_b64 required (PDF base64)"})
-        return
+    university   = data.get("university", "ktu")
+    content_b64  = data.get("content_b64", "")
+    storage_path = data.get("storage_path", "")
 
-    try:
-        pdf_bytes = _b64.b64decode(content_b64)
-    except Exception as exc:
-        _json_response(h, 400, {"error": f"invalid base64: {exc}"})
+    # Two ways to get the file bytes:
+    #   1. storage_path -> server-side download from Supabase (uncapped size)
+    #   2. content_b64  -> inline base64 in this request (capped by Vercel)
+    pdf_bytes: bytes = b""
+    if storage_path:
+        # Reject any path outside the dedicated uploads-v2/ prefix so this
+        # endpoint can't be used to read arbitrary objects from the bucket.
+        if not storage_path.startswith("project-builder/uploads-v2/"):
+            _json_response(h, 400, {
+                "error": "storage_path must be under project-builder/uploads-v2/",
+            })
+            return
+        try:
+            from db_cloud import _client, INCOMING_BUCKET
+            pdf_bytes = _client().storage.from_(INCOMING_BUCKET).download(storage_path)
+        except Exception as exc:
+            logger.error(
+                "format-preview-v2 storage download error type=%s msg=%r path=%s",
+                type(exc).__name__, str(exc), storage_path,
+            )
+            _json_response(h, 500, {
+                "error":    "storage download failed",
+                "exc_type": type(exc).__name__,
+                "exc_msg":  str(exc)[:300],
+            })
+            return
+    elif content_b64:
+        try:
+            pdf_bytes = _b64.b64decode(content_b64)
+        except Exception as exc:
+            _json_response(h, 400, {"error": f"invalid base64: {exc}"})
+            return
+    else:
+        _json_response(h, 400, {
+            "error": "content_b64 or storage_path required",
+            "hint":  "for files >3MB, POST /project-builder/upload-sign first, "
+                     "PUT the file to signed_url, then send {storage_path} here",
+        })
         return
 
     # Dispatch on magic bytes: %PDF = PDF, PK\x03\x04 = DOCX (ZIP).
@@ -3193,6 +3277,10 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/project-builder/format-preview-v2":
             _handle_pb_format_preview_v2(self, body)
+            return
+
+        if self.path == "/project-builder/upload-sign":
+            _handle_pb_upload_sign(self, body)
             return
 
         if self.path == "/project-builder/create-order":
