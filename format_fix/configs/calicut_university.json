@@ -1,0 +1,38 @@
+{
+  "id": "calicut_university",
+  "name": "University of Calicut",
+  "short_name": "Calicut University",
+  "margins": {
+    "left_cm": 3.5,
+    "right_cm": 2.5,
+    "top_cm": 2.5,
+    "bottom_cm": 2.5
+  },
+  "body_font": "Times New Roman",
+  "body_size_pt": 12,
+  "heading1": { "size_pt": 14, "bold": true, "all_caps": true, "align": "center" },
+  "heading2": { "size_pt": 12, "bold": true, "all_caps": false, "align": "left" },
+  "heading3": { "size_pt": 12, "bold": true, "all_caps": false, "align": "left" },
+  "line_spacing": 1.5,
+  "para_space_before_pt": 0,
+  "para_space_after_pt": 6,
+  "front_matter_numbering": "roman",
+  "chapter_numbering_start": 1,
+  "figure_caption_position": "below",
+  "table_caption_position": "above",
+  "figure_numbering": "chapter_wise",
+  "reference_format": "APA",
+  "cover_color": "Maroon",
+  "cover_text_color": "Gold",
+  "paper": "A4",
+  "paper_gsm": 80,
+  "one_sided": false,
+  "copies_required": 3,
+  "front_matter_order": [
+    "title_page", "certificate", "declaration",
+    "acknowledgement", "abstract", "toc",
+    "list_of_figures", "list_of_tables", "list_of_abbreviations"
+  ],
+  "certificate_text": "This is to certify that the project report entitled [TITLE] submitted by [STUDENT_NAMES] to the University of Calicut in partial fulfillment of the requirements for the award of the Degree of [DEGREE] in [DEPARTMENT] is a bonafide record of original work carried out under my/our guidance and supervision. This report has not been submitted to any other University or Institute for the award of any degree or diploma.",
+  "declaration_text": "I/We hereby declare that the project report entitled [TITLE] submitted to the University of Calicut in partial fulfillment of the requirements for the award of the Degree of [DEGREE] in [DEPARTMENT] is a record of original work done by me/us under the supervision of [GUIDE_NAME] and has not been submitted elsewhere for the award of any degree or diploma."
+}
