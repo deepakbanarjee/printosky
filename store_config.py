@@ -131,7 +131,10 @@ def get_store_config() -> StoreConfig:
         if not path.is_file():
             continue
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            # utf-8-sig tolerates the UTF-8 BOM that Notepad and
+            # PowerShell's Set-Content -Encoding UTF8 emit on Windows;
+            # plain utf-8 files decode identically.
+            raw = json.loads(path.read_text(encoding="utf-8-sig"))
         except (json.JSONDecodeError, OSError) as exc:
             log.warning("store_config: failed to read %s (%s); skipping", path, exc)
             continue
