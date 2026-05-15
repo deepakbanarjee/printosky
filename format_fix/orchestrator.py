@@ -161,7 +161,15 @@ def run_from_docx(docx_bytes: bytes,
         doc = Document()
         apply_university_styles(doc, ctx.config)
 
-        handlers = _build_handlers()
+        # Skip FormPageHandler for DOCX input: it was designed for scanned
+        # PDF survey/evaluation pages and renders the page as a PNG via
+        # ctx.pdf. For DOCX, ctx.pdf is a blank shim — rendering it would
+        # produce blank PNGs and silently drop the text content (e.g. the
+        # "TRAINEE EVALUATION" pages of aswathy_Project.docx, which is
+        # how 62% of body content was being lost). The other handlers
+        # consume the 5-tuple blocks and work identically for DOCX
+        # virtual pages.
+        handlers = [h for h in _build_handlers() if h.name != "form_page"]
         claims: dict[str, int] = {h.name: 0 for h in handlers}
         claims["__skipped__"]   = 0
         claims["__nohandler__"] = 0

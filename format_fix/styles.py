@@ -63,6 +63,14 @@ def apply_university_styles(doc: "Document", config: dict) -> None:
 
     margins = config.get("margins") or {}
     for section in doc.sections:
+        # Enforce A4 (210 x 297 mm) unconditionally — academic standard
+        # for Indian universities. Without this, python-docx defaults to
+        # US Letter (216 x 279 mm), which is wrong for our customers.
+        # PDF inputs that were Letter-sized get re-paginated to A4 here,
+        # which is the intended behaviour.
+        section.page_width  = Cm(21.0)
+        section.page_height = Cm(29.7)
+
         if "left_cm" in margins:
             section.left_margin = Cm(float(margins["left_cm"]))
         if "right_cm" in margins:

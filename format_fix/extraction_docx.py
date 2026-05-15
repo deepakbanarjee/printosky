@@ -33,15 +33,20 @@ python-docx exposes `run.font.size` only when explicitly set on the run.
 For paragraphs that inherit size from the style (most student docs), we
 fall back to bumped sizes based on `paragraph.style.name`:
 
-  - "Title"          -> 18pt bold
-  - "Heading 1"      -> 16pt bold
-  - "Heading 2"      -> 14pt bold
-  - "Heading 3"      -> 13pt bold
+  - "Title"          -> 24pt bold
+  - "Heading 1"      -> 22pt bold   (must exceed body_pt + 8 so the
+                                     chapter handler's _classify()
+                                     returns "h1" -- anything <= 20pt
+                                     falls through to "h2", which in
+                                     turn lets the in_toc_section flag
+                                     suppress entire body pages)
+  - "Heading 2"      -> 16pt bold
+  - "Heading 3"      -> 14pt bold
   - everything else  -> 12pt (the body-size default the orchestrator uses)
 
-The handlers use the resulting max_size only as a sanity check
-("title size >= body size"), so order-of-magnitude correctness is what
-matters here.
+These values are signals to the dispatcher only -- they never reach
+the rendered DOCX. apply_university_styles() rewrites the actual
+"Heading 1/2/3" style fonts before save().
 """
 from __future__ import annotations
 
@@ -113,20 +118,23 @@ def _paragraph_to_block(paragraph) -> Block | None:
 
     style_name = ((paragraph.style.name or "") if paragraph.style else "").lower()
     if "title" in style_name:
-        max_size = max(max_size, 18.0)
-        dom_size = max(dom_size, 18.0)
+        max_size = max(max_size, 24.0)
+        dom_size = max(dom_size, 24.0)
         bold = True
     elif "heading 1" in style_name:
+        # 22pt so the chapter handler's _classify() crosses its
+        # body_pt + 8 threshold and returns "h1". 16pt was misclassified
+        # as "h2" and let in_toc_section suppress body pages.
+        max_size = max(max_size, 22.0)
+        dom_size = max(dom_size, 22.0)
+        bold = True
+    elif "heading 2" in style_name:
         max_size = max(max_size, 16.0)
         dom_size = max(dom_size, 16.0)
         bold = True
-    elif "heading 2" in style_name:
+    elif "heading 3" in style_name:
         max_size = max(max_size, 14.0)
         dom_size = max(dom_size, 14.0)
-        bold = True
-    elif "heading 3" in style_name:
-        max_size = max(max_size, 13.0)
-        dom_size = max(dom_size, 13.0)
         bold = True
 
     align = _ALIGN_MAP.get(paragraph.alignment, "left")
