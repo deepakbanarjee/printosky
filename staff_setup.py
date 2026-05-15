@@ -1,8 +1,8 @@
 """
 staff_setup.py — Printosky Staff Management CLI
 Usage:
-  python staff_setup.py              → seed default staff (first run)
-  python staff_setup.py list         → list all staff
+  python staff_setup.py              -> seed default staff (first run)
+  python staff_setup.py list         -> list all staff
   python staff_setup.py add <name> <pin>
   python staff_setup.py reset-pin <id> <new_pin>
   python staff_setup.py deactivate <id>
@@ -137,7 +137,7 @@ def cmd_reset_pin(sid: str, new_pin: str):
     conn.commit()
     conn.close()
     if rows:
-        print(f"PIN updated for '{sid}' → new PIN: {new_pin}")
+        print(f"PIN updated for '{sid}' -> new PIN: {new_pin}")
     else:
         print(f"Staff ID '{sid}' not found.")
 
