@@ -798,8 +798,83 @@ def _structure_system_prompt() -> str:
         "5. Set confidence_score honestly. Below 0.6 if the input lacks clear "
         "chapter markers and you had to guess. Below 0.4 if the input is "
         "mostly unstructured prose with no chapter boundaries.\n"
-        "6. List every field you could not confidently detect in missing_fields."
+        "6. List every field you could not confidently detect in missing_fields.\n"
+        "7. The input comes from PDF / DOCX text extraction. Expect some "
+        "residual noise: stray line breaks mid-sentence, occasional table-"
+        "of-contents fragments, stray reference-list numbers. Ignore that "
+        "noise and find the real chapter structure underneath.\n"
+        "8. If you see substantial body prose (>500 words) but cannot find "
+        "explicit chapter markers, detect LOGICAL sections by topic shift "
+        "and treat each as a chapter with a descriptive heading. NEVER "
+        "return an empty chapters array on a real document — if there is "
+        "content there are chapters, even if implicit."
     )
+
+
+_PAGE_NUM_LINE_RE   = re.compile(r"^\s*\d{1,4}\s*$")
+_PAGE_LABEL_RE      = re.compile(r"^\s*Page\s*\d", re.IGNORECASE)
+_TOC_LEADER_DOT_RE  = re.compile(r"[\.…]\s*[\.…]\s*[\.…]")  # 3+ dots in any spacing
+_TOC_TRAILER_NUM_RE = re.compile(r"\s*\d{1,4}\s*$")
+_WS_RE              = re.compile(r"\s+")
+
+
+def _clean_extracted_text(text: str) -> str:
+    """Remove PDF/DOCX-extraction noise that confuses the structure parser.
+
+    Strips:
+      * Lines that are just a page number ("12")
+      * Lines starting with "Page N"
+      * TOC leader-dot entries ("Chapter 1 ........ 5")
+      * Lines that repeat 3+ times in the doc (running headers / footers)
+
+    Always returns a string; never raises. If the input is empty or short,
+    returns it unchanged.
+    """
+    if not text or len(text) < 500:
+        return text
+
+    raw_lines = text.split("\n")
+
+    # First pass: identify repeated lines (headers / footers). Normalize each
+    # line by collapsing whitespace + lowercasing so visual duplicates count.
+    counts: dict[str, int] = {}
+    for ln in raw_lines:
+        key = _WS_RE.sub(" ", ln.strip()).lower()
+        if 3 <= len(key) <= 120:  # only consider non-trivial fixed-width lines
+            counts[key] = counts.get(key, 0) + 1
+    repeated = {k for k, c in counts.items() if c >= 3}
+
+    # Second pass: filter lines.
+    out: list[str] = []
+    for ln in raw_lines:
+        s = ln.strip()
+        if not s:
+            out.append("")
+            continue
+        if _PAGE_NUM_LINE_RE.match(s):
+            continue
+        if _PAGE_LABEL_RE.match(s):
+            continue
+        # TOC leader entry: has 3+ consecutive dots followed by a trailing number
+        if _TOC_LEADER_DOT_RE.search(s) and _TOC_TRAILER_NUM_RE.search(s):
+            continue
+        key = _WS_RE.sub(" ", s).lower()
+        if key in repeated and 3 <= len(key) <= 120:
+            continue
+        out.append(ln)
+
+    # Collapse runs of 3+ blank lines to 2 (preserves paragraph boundaries)
+    result: list[str] = []
+    blank_run = 0
+    for ln in out:
+        if ln.strip() == "":
+            blank_run += 1
+            if blank_run <= 2:
+                result.append(ln)
+        else:
+            blank_run = 0
+            result.append(ln)
+    return "\n".join(result)
 
 
 def _call_claude_structure(
@@ -821,12 +896,19 @@ def _call_claude_structure(
 
     client = anthropic.Anthropic(api_key=api_key)
 
-    # Cap input at ~150k chars (~37k tokens) to leave room for thinking +
-    # output within the 200k context window.
-    truncated = user_text[:150_000]
+    # Strip noise that confuses Sonnet on real PDFs / Word exports:
+    #   page numbers, TOC leader-dot lines, repeated headers / footers.
+    # A real 76-page PDF returned 0 chapters at full length because of
+    # this noise; the same PDF's first-15K-char slice returned 3 chapters
+    # cleanly. The cleaner the input, the better the structure detection.
+    cleaned = _clean_extracted_text(user_text)
+
+    # Cap at 60K chars (~15K tokens). Sonnet performs measurably better on
+    # smaller, cleaner inputs than on the full 150K window.
+    truncated = cleaned[:60_000]
     truncated_note = (
-        "\n\n[NOTE: input was truncated to fit context]"
-        if len(user_text) > 150_000 else ""
+        f"\n\n[NOTE: input cleaned + truncated from {len(cleaned)} to 60000 chars]"
+        if len(cleaned) > 60_000 else ""
     )
 
     user_blocks: list[dict] = [
