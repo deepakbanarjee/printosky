@@ -2581,20 +2581,30 @@ def _handle_pb_format_preview_v2(h, body: bytes) -> None:
 
     token     = job_id
     mime_docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    storage_path = f"project-builder/previews-v2/{token}.docx"
     try:
-        from db_cloud import upload_file
-        url = upload_file(
-            f"project-builder/previews-v2/{token}.docx",
-            docx_bytes,
-            mime_docx,
+        # Direct storage call (not via db_cloud.upload_file) so the full
+        # exception repr bubbles up — db_cloud swallows it as "".
+        from db_cloud import _client, INCOMING_BUCKET
+        _client().storage.from_(INCOMING_BUCKET).upload(
+            path=storage_path,
+            file=docx_bytes,
+            file_options={"content-type": mime_docx, "upsert": "true"},
         )
+        url = _client().storage.from_(INCOMING_BUCKET).get_public_url(storage_path)
     except Exception as exc:
-        logger.error("format-preview-v2 upload error: %s", exc)
-        _json_response(h, 500, {"error": "upload failed"})
+        logger.error("format-preview-v2 upload error type=%s msg=%r path=%s",
+                     type(exc).__name__, str(exc), storage_path)
+        _json_response(h, 500, {
+            "error": "upload failed",
+            "exc_type": type(exc).__name__,
+            "exc_msg":  str(exc)[:500],
+            "path":     storage_path,
+        })
         return
 
     if not url:
-        _json_response(h, 500, {"error": "upload failed"})
+        _json_response(h, 500, {"error": "upload returned empty url", "path": storage_path})
         return
 
     _json_response(h, 200, {
