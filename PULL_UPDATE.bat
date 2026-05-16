@@ -1,33 +1,36 @@
 @echo off
-title Printosky — Pull Latest Update
+title Printosky - Pull Latest Update
 color 2F
 
-echo.
-echo  ╔══════════════════════════════════════════╗
-echo  ║      PRINTOSKY  —  Pull Latest Code      ║
-echo  ╚══════════════════════════════════════════╝
-echo.
+:: Use the directory THIS .bat lives in - never hardcode C:\printosky_watcher.
+set REPO_DIR=%~dp0
+if "%REPO_DIR:~-1%"=="\" set REPO_DIR=%REPO_DIR:~0,-1%
+cd /d "%REPO_DIR%"
 
-cd /d C:\printosky_watcher
+echo.
+echo  +==========================================+
+echo  ^|      PRINTOSKY  -  Pull Latest Code      ^|
+echo  +==========================================+
+echo   repo: %REPO_DIR%
+echo.
 
 :: Show current state
 echo  Current branch and status:
-git branch
+git branch --show-current
 git status --short
 echo.
 
-:: Fetch all remote changes
+:: Detect the checked-out branch and reset to its upstream
+for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD') do set BRANCH=%%b
+
 echo  [1/3] Fetching from origin...
 git fetch origin
 echo.
 
-:: Hard reset to remote — no conflicts, no prompts
-echo  [2/3] Resetting to origin/sprint/session-9...
-git checkout sprint/session-9
-git reset --hard origin/sprint/session-9
+echo  [2/3] Resetting %BRANCH% to origin/%BRANCH% (HARD reset, no merge)...
+git reset --hard origin/%BRANCH%
 echo.
 
-:: Show what we're now at
 echo  [3/3] Done. Current version:
 git log --oneline -3
 echo.
