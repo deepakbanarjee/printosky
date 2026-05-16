@@ -28,7 +28,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)  # .env wins over any stale empty shell var (e.g. ANTHROPIC_API_KEY="")
 
 _CONFIG_DIR = Path(__file__).parent / "university_configs"
 
