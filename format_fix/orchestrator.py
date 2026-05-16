@@ -144,13 +144,13 @@ def run_from_docx(docx_bytes: bytes,
 
     output_path = Path(output_path)
 
-    pages_blocks, pages_tables, n_pages = extraction_docx.parse_docx_to_pages(
-        docx_bytes,
-    )
+    pages_blocks, pages_tables, pages_images, n_pages = \
+        extraction_docx.parse_docx_to_pages(docx_bytes)
     if n_pages == 0:
         n_pages = 1
         pages_blocks = [[]]
         pages_tables = [[]]
+        pages_images = [[]]
 
     # Synthesize a blank fitz.Document with the same page count so the
     # existing Context.build + handlers continue to function. They will
@@ -196,10 +196,13 @@ def run_from_docx(docx_bytes: bytes,
                 claims["__nohandler__"] += 1
                 if verbose:
                     print(f"  p{page_no+1}: no handler claimed (skipped)")
-                # Tables on a no-handler page would still be lost; emit
-                # them defensively so customer data isn't silently dropped.
+                # Tables / images on a no-handler page would still be
+                # lost; emit them defensively so customer data isn't
+                # silently dropped.
                 for tbl_rows in pages_tables[page_no]:
                     extraction_docx.emit_table(doc, tbl_rows)
+                for blob, ctype in pages_images[page_no]:
+                    extraction_docx.emit_image(doc, blob, ctype)
                 continue
 
             if verbose:
@@ -207,13 +210,15 @@ def run_from_docx(docx_bytes: bytes,
             picked.render(doc, blocks, page_no, ctx)
             claims[picked.name] += 1
 
-            # Append any source-DOCX tables that landed on this virtual
-            # page. The handlers themselves don't know about tables --
-            # this keeps Rule 1 intact (no handler is modified) while
-            # ensuring the customer's 11 survey tables in aswathy.docx
-            # actually reach the output.
+            # Append any source-DOCX tables and inline images that
+            # landed on this virtual page. The handlers themselves don't
+            # know about either -- this keeps Rule 1 intact (no handler
+            # is modified) while ensuring the customer's source tables
+            # and images actually reach the output.
             for tbl_rows in pages_tables[page_no]:
                 extraction_docx.emit_table(doc, tbl_rows)
+            for blob, ctype in pages_images[page_no]:
+                extraction_docx.emit_image(doc, blob, ctype)
 
         enforce_font_discipline(doc, ctx)
         doc.save(str(output_path))

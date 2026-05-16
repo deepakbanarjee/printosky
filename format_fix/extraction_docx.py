@@ -56,7 +56,7 @@ import re
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.shared import RGBColor
+from docx.shared import Inches, RGBColor
 
 
 # 5-tuple shape:  (text, max_size, dom_size, bold, align)
@@ -157,6 +157,16 @@ def _is_section_boundary(text: str) -> bool:
 # Stored separately from blocks so handlers don't need to learn a new shape.
 TableRows = list[list[str]]
 
+# (image_blob_bytes, content_type)  -- e.g. (b"\xff\xd8\xff...", "image/jpeg")
+ImageBlob = tuple[bytes, str]
+
+
+# Namespace constants for DOCX OOXML drawing elements
+_W_DRAWING = qn("w:drawing")
+_W_PICT    = qn("w:pict")
+_A_BLIP    = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+_R_EMBED   = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
+
 
 def _extract_table_rows(tbl) -> TableRows:
     """Convert a python-docx Table to a list-of-rows-of-cell-strings."""
@@ -170,28 +180,63 @@ def _extract_table_rows(tbl) -> TableRows:
     return rows
 
 
+def _extract_paragraph_images(paragraph, doc_part) -> list[ImageBlob]:
+    """Return (blob, content_type) tuples for every inline image in a paragraph.
+
+    Walks each run for <w:drawing> elements, finds the <a:blip> inside,
+    follows the r:embed relationship id back to the actual image part in
+    the DOCX zip, returns raw blob bytes plus MIME type.
+
+    Quiet on missing relationships: a misformed/orphan drawing is skipped
+    rather than raised, so one bad image never wipes the whole document.
+    """
+    out: list[ImageBlob] = []
+    for run in paragraph.runs:
+        for blip in run.element.findall(".//" + _A_BLIP):
+            rId = blip.get(_R_EMBED)
+            if not rId:
+                continue
+            try:
+                part = doc_part.related_parts.get(rId)
+            except Exception:
+                part = None
+            if part is None:
+                continue
+            try:
+                blob = part.blob
+                ctype = part.content_type
+            except Exception:
+                continue
+            if blob and len(blob) > 200:  # skip 0-byte / corrupt blips
+                out.append((blob, ctype))
+    return out
+
+
 def parse_docx_to_pages(
     docx_bytes: bytes,
-) -> tuple[list[list[Block]], list[list[TableRows]], int]:
-    """Parse a DOCX byte-string into virtual pages of blocks + tables.
+) -> tuple[list[list[Block]], list[list[TableRows]], list[list[ImageBlob]], int]:
+    """Parse a DOCX byte-string into virtual pages of blocks + tables + images.
 
     Walks doc.element.body in document order so paragraphs and tables
-    interleave correctly. Tables are collected per-page in a parallel
-    `page_tables` list rather than embedded in the 5-tuple block stream,
+    interleave correctly. Tables and images are collected per-page in
+    parallel lists rather than embedded in the 5-tuple block stream,
     so the existing handlers (which expect 5-tuples) need no changes.
 
     Returns:
-      (page_blocks, page_tables, n_pages)
+      (page_blocks, page_tables, page_images, n_pages)
         page_blocks[i] is the list of 5-tuple paragraph blocks for page i
         page_tables[i] is the list of TableRows belonging to page i
+        page_images[i] is the list of ImageBlob (bytes, content_type) for page i
 
     Always returns at least one page. Items before the first detected
     section boundary form page 0 (cover/front matter).
     """
     doc = Document(io.BytesIO(docx_bytes))
+    doc_part = doc.part
 
     pages:       list[list[Block]]      = [[]]
     page_tables: list[list[TableRows]]  = [[]]
+    page_images: list[list[ImageBlob]]  = [[]]
 
     # python-docx exposes paragraphs/tables in document order in the
     # corresponding accessors, so we step through both iterators while
@@ -205,6 +250,7 @@ def parse_docx_to_pages(
     def _new_page() -> None:
         pages.append([])
         page_tables.append([])
+        page_images.append([])
 
     for elem in doc.element.body.iterchildren():
         tag = elem.tag
@@ -217,7 +263,18 @@ def parse_docx_to_pages(
             block = _paragraph_to_block(para)
             had_explicit_break = _has_page_break(para)
 
+            # Collect any inline images BEFORE we possibly start a new
+            # page from a section boundary -- images belong to the page
+            # they appear ON, which is the current page before the
+            # boundary fires.
+            imgs = _extract_paragraph_images(para, doc_part)
+
             if block is None:
+                # Empty paragraph that still carries an image (unusual but
+                # observed in some templates) -- attach image to current
+                # page before any break.
+                for img in imgs:
+                    page_images[-1].append(img)
                 if had_explicit_break and pages[-1]:
                     _new_page()
                 continue
@@ -229,6 +286,8 @@ def parse_docx_to_pages(
                 _new_page()
 
             pages[-1].append(block)
+            for img in imgs:
+                page_images[-1].append(img)
 
             if had_explicit_break:
                 _new_page()
@@ -244,16 +303,48 @@ def parse_docx_to_pages(
 
         # Other tags (sectPr, sdt, etc.) are intentionally ignored.
 
-    # Drop trailing pages that have neither blocks nor tables
-    while len(pages) > 1 and not pages[-1] and not page_tables[-1]:
+    # Drop trailing pages that have neither blocks, tables, nor images
+    while (len(pages) > 1
+           and not pages[-1]
+           and not page_tables[-1]
+           and not page_images[-1]):
         pages.pop()
         page_tables.pop()
+        page_images.pop()
 
     if not pages:
         pages = [[]]
         page_tables = [[]]
+        page_images = [[]]
 
-    return pages, page_tables, len(pages)
+    return pages, page_tables, page_images, len(pages)
+
+
+def emit_image(doc, blob: bytes, content_type: str = "") -> None:
+    """Render an image blob into `doc`.
+
+    Width defaults to 5.5 inches (~14cm) -- safe for A4 with default
+    margins. Height auto-scales to preserve aspect ratio.
+
+    Quiet on python-docx errors: if the blob is corrupt or in a format
+    python-docx can't handle (rare WMF/EMF), the image is skipped rather
+    than killing the whole render.
+
+    Decorative-image filtering (logos repeated on every page) is NOT
+    done here -- that's the PDF chapter handler's job for fitz xrefs.
+    For DOCX we err on the side of preserving the customer's image even
+    if it duplicates a header logo a few times.
+    """
+    if not blob or len(blob) < 200:
+        return
+    try:
+        doc.add_picture(io.BytesIO(blob), width=Inches(5.5))
+        # Center the last paragraph (the one add_picture inserted)
+        if doc.paragraphs:
+            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    except Exception:
+        # Format unsupported / corrupt blob -- skip silently.
+        pass
 
 
 def emit_table(doc, rows: TableRows) -> None:
