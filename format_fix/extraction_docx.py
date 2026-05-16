@@ -214,33 +214,43 @@ def _extract_paragraph_images(paragraph, doc_part) -> list[ImageBlob]:
 
 def parse_docx_to_pages(
     docx_bytes: bytes,
-) -> tuple[list[list[Block]], list[list[TableRows]], list[list[ImageBlob]], int]:
+) -> tuple[
+    list[list[Block]],
+    list[list[TableRows]],
+    list[list[ImageBlob]],
+    list[list[tuple]],
+    int,
+]:
     """Parse a DOCX byte-string into virtual pages of blocks + tables + images.
 
-    Walks doc.element.body in document order so paragraphs and tables
-    interleave correctly. Tables and images are collected per-page in
-    parallel lists rather than embedded in the 5-tuple block stream,
-    so the existing handlers (which expect 5-tuples) need no changes.
+    Walks doc.element.body in document order so paragraphs, tables and
+    images interleave correctly. Returns FOUR per-page lists:
 
-    Returns:
-      (page_blocks, page_tables, page_images, n_pages)
-        page_blocks[i] is the list of 5-tuple paragraph blocks for page i
-        page_tables[i] is the list of TableRows belonging to page i
-        page_images[i] is the list of ImageBlob (bytes, content_type) for page i
+      page_blocks[i]   -- 5-tuple paragraph blocks (for handler dispatch
+                          that expects the legacy block contract)
+      page_tables[i]   -- TableRows (legacy "all tables at end" emission)
+      page_images[i]   -- ImageBlob  (legacy "all images at end" emission)
+      page_elements[i] -- INTERLEAVED stream of
+                          ("p", Block) | ("tbl", TableRows) | ("img", ImageBlob)
+                          in source document order. Use this when
+                          rendering needs to preserve "table-in-the-
+                          middle-of-the-text" placement -- chapter pages
+                          in Step 4.6e.
+      n_pages          -- len(page_blocks) (always >= 1)
 
-    Always returns at least one page. Items before the first detected
-    section boundary form page 0 (cover/front matter).
+    The three legacy lists (blocks/tables/images) plus the new
+    page_elements list are returned together so callers that only
+    consume one of the projections don't pay the cost of computing
+    the others themselves.
     """
     doc = Document(io.BytesIO(docx_bytes))
     doc_part = doc.part
 
-    pages:       list[list[Block]]      = [[]]
-    page_tables: list[list[TableRows]]  = [[]]
-    page_images: list[list[ImageBlob]]  = [[]]
+    pages:         list[list[Block]]      = [[]]
+    page_tables:   list[list[TableRows]]  = [[]]
+    page_images:   list[list[ImageBlob]]  = [[]]
+    page_elements: list[list[tuple]]      = [[]]
 
-    # python-docx exposes paragraphs/tables in document order in the
-    # corresponding accessors, so we step through both iterators while
-    # walking the body's XML children.
     para_iter = iter(doc.paragraphs)
     tbl_iter  = iter(doc.tables)
 
@@ -251,6 +261,7 @@ def parse_docx_to_pages(
         pages.append([])
         page_tables.append([])
         page_images.append([])
+        page_elements.append([])
 
     for elem in doc.element.body.iterchildren():
         tag = elem.tag
@@ -263,18 +274,14 @@ def parse_docx_to_pages(
             block = _paragraph_to_block(para)
             had_explicit_break = _has_page_break(para)
 
-            # Collect any inline images BEFORE we possibly start a new
-            # page from a section boundary -- images belong to the page
-            # they appear ON, which is the current page before the
-            # boundary fires.
             imgs = _extract_paragraph_images(para, doc_part)
 
             if block is None:
-                # Empty paragraph that still carries an image (unusual but
-                # observed in some templates) -- attach image to current
-                # page before any break.
+                # Empty paragraph that still carries an image (unusual
+                # but observed in some templates).
                 for img in imgs:
                     page_images[-1].append(img)
+                    page_elements[-1].append(("img", img))
                 if had_explicit_break and pages[-1]:
                     _new_page()
                 continue
@@ -286,8 +293,10 @@ def parse_docx_to_pages(
                 _new_page()
 
             pages[-1].append(block)
+            page_elements[-1].append(("p", block))
             for img in imgs:
                 page_images[-1].append(img)
+                page_elements[-1].append(("img", img))
 
             if had_explicit_break:
                 _new_page()
@@ -300,24 +309,27 @@ def parse_docx_to_pages(
             rows = _extract_table_rows(tbl)
             if rows:
                 page_tables[-1].append(rows)
+                page_elements[-1].append(("tbl", rows))
 
         # Other tags (sectPr, sdt, etc.) are intentionally ignored.
 
-    # Drop trailing pages that have neither blocks, tables, nor images
     while (len(pages) > 1
            and not pages[-1]
            and not page_tables[-1]
-           and not page_images[-1]):
+           and not page_images[-1]
+           and not page_elements[-1]):
         pages.pop()
         page_tables.pop()
         page_images.pop()
+        page_elements.pop()
 
     if not pages:
         pages = [[]]
         page_tables = [[]]
         page_images = [[]]
+        page_elements = [[]]
 
-    return pages, page_tables, page_images, len(pages)
+    return pages, page_tables, page_images, page_elements, len(pages)
 
 
 def emit_image(doc, blob: bytes, content_type: str = "") -> None:

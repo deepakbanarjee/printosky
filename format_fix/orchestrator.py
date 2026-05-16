@@ -62,6 +62,158 @@ def _build_handlers() -> list[SectionHandler]:
     return handlers
 
 
+def _render_chapter_inline(doc, elements, ctx) -> None:
+    """DOCX-specific chapter renderer with interleaved tables/images.
+
+    Replicates the body-paragraph rendering of
+    handlers.chapter.ChapterHandler.render() but processes an
+    interleaved element stream produced by
+    extraction_docx.parse_docx_to_pages():
+
+        elements = [
+            ("p",   block_5tuple),
+            ("p",   block_5tuple),
+            ("tbl", TableRows),         # << source-position preserved
+            ("p",   block_5tuple),
+            ("img", (blob, content_type)),
+            ...
+        ]
+
+    This is the Step 4.6e fix for "tables and charts consolidated
+    together." Calling chapter.render() with just the paragraph blocks
+    and appending tables after dumped all of a page's tables at the
+    end of its text. By walking the source-order stream we emit each
+    table / image at the exact paragraph boundary where it originally
+    appeared.
+
+    The chapter handler module itself is NOT modified (Rule 1). We
+    reuse its private helpers `_classify` and `_flush_kv` as
+    collaborators -- the underscore is a Python convention, not
+    enforcement, and these helpers are intentionally factored out so
+    they can be shared.
+
+    DOCX-specific simplifications vs chapter.py:
+      * Skip extraction.merge_body_blocks / merge_bullet_continuations
+        -- the PDF "Canva visual line break" problem doesn't exist in
+        DOCX; each python-docx paragraph is already one logical block.
+      * Skip post-loop image embedding via ctx.pdf -- DOCX images come
+        in inline as ("img", blob) elements, not as fitz xrefs.
+    """
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from . import extraction
+    from . import extraction_docx
+    from .handlers import chapter as _chapter
+
+    # First-pass scan: does this page contain any "real h1" heading?
+    # Same in_toc_section gating as chapter.render -- a page with no
+    # h1 inside a ToC region is suppressed so the auto-TOC doesn't get
+    # echoed in the body.
+    has_real_h1 = False
+    for kind, payload in elements:
+        if kind != "p":
+            continue
+        text, max_sz, _dom, _bold, _align = payload
+        if _chapter._classify((text or "").strip(), max_sz, ctx.body_pt, 0) == "h1":
+            has_real_h1 = True
+            break
+
+    if has_real_h1:
+        ctx.in_toc_section = False
+    elif ctx.in_toc_section:
+        # Body text is suppressed, but customer data (tables / images)
+        # must still reach the output -- emit those defensively.
+        for kind, payload in elements:
+            if kind == "tbl":
+                extraction_docx.emit_table(doc, payload)
+            elif kind == "img":
+                blob, ctype = payload
+                extraction_docx.emit_image(doc, blob, ctype)
+        return
+
+    kv_buffer: list[tuple[str, str]] = []
+
+    def _flush_kv_if_any() -> None:
+        nonlocal kv_buffer
+        if kv_buffer:
+            _chapter._flush_kv(doc, kv_buffer)
+            kv_buffer = []
+
+    for kind, payload in elements:
+        if kind == "tbl":
+            _flush_kv_if_any()
+            extraction_docx.emit_table(doc, payload)
+            continue
+        if kind == "img":
+            _flush_kv_if_any()
+            blob, ctype = payload
+            extraction_docx.emit_image(doc, blob, ctype)
+            continue
+
+        # kind == "p"
+        text, max_sz, _dom, _bold, _align = payload
+        ln = (text or "").strip()
+        if not ln:
+            continue
+        if extraction.is_stray_line(ln):
+            continue
+        if extraction.TOC_LEADER_RE.search(ln):
+            continue
+
+        # Key-value detection (same logic as chapter.render -- tightened
+        # to avoid prose lines like "Very Satisfied (45.8%): 55 ..." being
+        # mistaken for K:V form fields).
+        kv_m = extraction.KV_RE.match(ln)
+        looks_like_prose_kv = (
+            kv_m is not None
+            and (
+                "%" in kv_m.group(1)
+                or "(" in kv_m.group(1)
+                or len(kv_m.group(2)) > 80
+                or len(ln) > 120
+            )
+        )
+        if (kv_m
+                and not extraction.ALL_CAPS_RE.match(ln)
+                and not looks_like_prose_kv):
+            kv_buffer.append((kv_m.group(1), kv_m.group(2)))
+            continue
+        elif kv_buffer:
+            _flush_kv_if_any()
+
+        cls = _chapter._classify(ln, max_sz, ctx.body_pt, 0)
+        if cls == "skip":
+            continue
+        if cls == "h1":
+            doc.add_page_break()
+            h = doc.add_heading(ln.strip(" ?:"), level=1)
+            h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            continue
+        if cls == "h2":
+            h = doc.add_heading(ln.strip(" ?:"), level=2)
+            h.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            continue
+
+        if extraction.BULLET_RE.match(ln):
+            cleaned = extraction.BULLET_RE.sub("", ln).strip()
+            p = doc.add_paragraph(style="List Bullet")
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            p.add_run(cleaned)
+            continue
+
+        if extraction.NUM_LIST_RE.match(ln):
+            cleaned = extraction.NUM_LIST_RE.sub("", ln).strip()
+            p = doc.add_paragraph(style="List Number")
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            p.add_run(cleaned)
+            continue
+
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        p.add_run(ln)
+
+    _flush_kv_if_any()
+
+
 def run(pdf_path: str | Path,
         university_id: str,
         output_path: str | Path,
@@ -144,13 +296,14 @@ def run_from_docx(docx_bytes: bytes,
 
     output_path = Path(output_path)
 
-    pages_blocks, pages_tables, pages_images, n_pages = \
+    pages_blocks, pages_tables, pages_images, pages_elements, n_pages = \
         extraction_docx.parse_docx_to_pages(docx_bytes)
     if n_pages == 0:
         n_pages = 1
-        pages_blocks = [[]]
-        pages_tables = [[]]
-        pages_images = [[]]
+        pages_blocks   = [[]]
+        pages_tables   = [[]]
+        pages_images   = [[]]
+        pages_elements = [[]]
 
     # Synthesize a blank fitz.Document with the same page count so the
     # existing Context.build + handlers continue to function. They will
@@ -207,18 +360,29 @@ def run_from_docx(docx_bytes: bytes,
 
             if verbose:
                 print(f"  p{page_no+1}: -> {picked.name}")
-            picked.render(doc, blocks, page_no, ctx)
-            claims[picked.name] += 1
 
-            # Append any source-DOCX tables and inline images that
-            # landed on this virtual page. The handlers themselves don't
-            # know about either -- this keeps Rule 1 intact (no handler
-            # is modified) while ensuring the customer's source tables
-            # and images actually reach the output.
-            for tbl_rows in pages_tables[page_no]:
-                extraction_docx.emit_table(doc, tbl_rows)
-            for blob, ctype in pages_images[page_no]:
-                extraction_docx.emit_image(doc, blob, ctype)
+            if picked.name == "chapter":
+                # Step 4.6e: walk the interleaved element stream so
+                # tables and images sit at their original source
+                # positions in the rendered text, not all clumped at
+                # the end of the section. The chapter handler module
+                # is NOT modified; _render_chapter_inline reuses its
+                # _classify and _flush_kv helpers.
+                _render_chapter_inline(doc, pages_elements[page_no], ctx)
+                claims["chapter"] += 1
+            else:
+                # Non-chapter handlers (cover / ack / decl / refs /
+                # annex / toc) keep their existing PDF-style render.
+                # Tables and images in those sections are rare and we
+                # still emit them defensively after the handler so
+                # nothing customer-supplied is lost.
+                picked.render(doc, blocks, page_no, ctx)
+                claims[picked.name] += 1
+
+                for tbl_rows in pages_tables[page_no]:
+                    extraction_docx.emit_table(doc, tbl_rows)
+                for blob, ctype in pages_images[page_no]:
+                    extraction_docx.emit_image(doc, blob, ctype)
 
         enforce_font_discipline(doc, ctx)
         doc.save(str(output_path))
