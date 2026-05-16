@@ -197,11 +197,24 @@ if (-not $hqSource) {
 }
 Write-OK "using $hqSource"
 $sample = Get-Content $hqSource -Raw
-$expected = @('META_APP_SECRET','SUPABASE_URL','SUPABASE_SERVICE_KEY','ANTHROPIC_API_KEY','ADMIN_PBKDF2_HASH')
-$missing = $expected | Where-Object { $sample -notmatch "(?m)^$_=" }
+# Only check keys the store-PC scripts actually read. META_*, RAZORPAY_*,
+# ADMIN_PASSWORD_HASH are Vercel-only and would produce false-alarm warnings.
+$expected = @(
+    'SUPABASE_URL',
+    'SUPABASE_KEY',
+    'SUPABASE_SERVICE_KEY',
+    'SUPABASE_AUTH_EMAIL',
+    'SUPABASE_AUTH_PASSWORD',
+    'ANTHROPIC_API_KEY'
+)
+# A key is "missing" if the line is absent OR the value is empty / quoted-empty.
+$missing = $expected | Where-Object {
+    -not ($sample -match "(?m)^$_=[^\r\n`"']*\S")
+}
 if ($missing) {
-    Write-Warn "Source is missing keys: $($missing -join ', ')"
-    Write-Warn "Installer will continue but those keys will be blank in the new .env."
+    Write-Warn "Source has missing/empty values for: $($missing -join ', ')"
+    Write-Warn "Services that need these will fail at runtime until they're filled in."
+    Write-Info "Get them from: Supabase dashboard (Settings -> API), https://console.anthropic.com"
 }
 
 # -----------------------------------------------------------------
