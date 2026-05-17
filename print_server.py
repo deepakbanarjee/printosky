@@ -1739,7 +1739,25 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None) -> di
     # we have the mono/colour/copies/paper data Epson's free APIs do not expose.
     # Konica dispatches are skipped (Konica has its own per-job log via XML).
     if printer_key == "epson":
-        pages_per_copy = _count_pages_from_list(page_list, job["page_count"] or 0)
+        # Prefer the page count already in the jobs row. If watcher hasn't
+        # gotten around to setting it yet (race window: INSERT happens with
+        # page_count=0, then watcher UPDATEs later via rate_card), fall back
+        # to counting the PDF directly from disk so the spec row is always
+        # accurate.
+        job_page_count = job["page_count"] or 0
+        if job_page_count == 0 and filepath and os.path.exists(filepath):
+            try:
+                from rate_card import get_pdf_page_count
+                job_page_count = get_pdf_page_count(filepath) or 0
+                if job_page_count:
+                    logging.info(
+                        "spec-row fallback: counted %d pages from %s (jobs.page_count was 0)",
+                        job_page_count, filepath,
+                    )
+            except Exception as _e:
+                logging.warning("spec-row page-count fallback failed: %s", _e)
+
+        pages_per_copy = _count_pages_from_list(page_list, job_page_count)
         paper_size_val = "A4"
         if "paper_size" in job.keys():
             paper_size_val = job["paper_size"] or "A4"
