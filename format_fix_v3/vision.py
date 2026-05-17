@@ -39,37 +39,83 @@ this schema:
     {
       "type": "heading" | "body" | "list_item" | "table" | "image"
             | "caption" | "page_number" | "footer" | "skip",
-      "level": 1 | 2 | 3 | null,                // for headings only
-      "text": "verbatim text (copy from hint when possible)",
+      "level": 1 | 2 | 3 | null,
+      "runs": [
+        {"text": "verbatim text segment", "bold": false, "italic": false}
+      ],
       "alignment": "left" | "center" | "right" | "justify",
-      "bold": true | false,
-      "italic": true | false,
-      "list_style": "bullet" | "number" | null, // for list_item only
-      "table_rows": [["cell", "cell"], ...] | null,  // for table only
-      "image_caption": "string" | null,         // for image only
+      "list_style": "bullet" | "number" | null,
+      "table_rows": [
+        [
+          {"runs": [{"text": "cell text", "bold": false, "italic": false}],
+           "alignment": "left"}
+        ]
+      ] | null,
+      "image_caption": "string" | null,
       "image_position": "inline" | "centered" | "full_width" | null
     }
   ],
   "notes": "optional one-line note about anything unusual"
 }
 
-RULES:
-- Walk the page top-to-bottom, left-to-right. Output elements in document order.
-- For headings: level 1 = chapter title (e.g. "CHAPTER 1 INTRODUCTION"),
-  level 2 = section, level 3 = sub-section.
-- Title page elements (college name, project title, student names,
-  guide/HOD blocks) -> use "heading" with appropriate level + alignment.
-  Year/date on title page is usually centered.
-- For tables: extract as 2D array. First row is the header. Preserve
-  empty cells as "".
-- For figures: emit an "image" element AT THE POSITION it appears on the
-  page. If a caption follows ("Fig 3.2 ..."), emit a separate "caption"
-  element right after.
-- Page numbers, headers, footers -> type "page_number" or "footer" (will
-  be auto-managed by Word, not rendered inline).
-- Decorative elements / borders / horizontal rules -> type "skip".
-- Do NOT invent text. If unsure, copy from the text hint verbatim.
-- Output VALID JSON. No trailing commas. No comments inside.
+CRITICAL RULES:
+
+1. Per-RUN bold/italic (most common mistake):
+   - If a paragraph mixes bold and regular text (e.g. "Definition: Water
+     tank cleaners are devices..."), emit MULTIPLE runs:
+       "runs": [
+         {"text": "Definition: ", "bold": true},
+         {"text": "Water tank cleaners are devices..."}
+       ]
+   - DO NOT mark the whole paragraph bold just because part of it is.
+   - DO NOT split a bold-prefixed paragraph into a list_item. If the
+     bold prefix is just a label (Definition:, Note:, Working:, etc.)
+     keep it as a single body element with mixed runs.
+   - Italic runs work the same way.
+
+2. Element ordering: top-to-bottom, left-to-right. Multi-column pages
+   are read column by column (left column fully, then right column).
+
+3. Headings:
+   - level 1 = chapter title ("CHAPTER 1 INTRODUCTION", "1. INTRODUCTION")
+   - level 2 = section ("1.1 Overview")
+   - level 3 = sub-section ("1.1.2 Sub-topic")
+
+4. Title page elements (college name, project title, names, guide/HOD):
+   - Use "heading" with appropriate level + alignment.
+   - Year/date is usually centered.
+   - When a guide name (heading level 3) is followed by their designation
+     (italic body line) AND department / college lines, emit each as
+     separate elements. The renderer will tighten the layout.
+
+5. Tables:
+   - Extract as 2D array of CELL objects (not bare strings).
+   - Each cell has runs[] for mixed formatting, and alignment.
+   - First row is the header.
+   - Preserve empty cells as {"runs": [{"text": ""}], "alignment": "left"}.
+
+6. Figures:
+   - Emit an "image" element AT THE POSITION it appears.
+   - If a caption follows ("Fig 3.2 ..."), emit a separate "caption"
+     element right after.
+
+7. Numbered lists:
+   - For list_item with list_style="number", DO NOT include the leading
+     number in runs[]. Just the actual content.
+     WRONG: "runs": [{"text": "1. Water is essential."}]
+     RIGHT: "runs": [{"text": "Water is essential."}]
+   - Same for bullet lists - don't include the bullet character.
+
+8. Skip these:
+   - Page numbers, headers, footers -> type "page_number" or "footer"
+     (Word will auto-manage these).
+   - Decorative borders, rules, watermarks -> type "skip".
+
+9. Output rules:
+   - VALID JSON. No trailing commas. No markdown fences. No comments.
+   - Do NOT invent text. Copy verbatim from text hint when possible.
+   - Every run MUST have a "text" field. "bold" and "italic" default
+     to false if omitted.
 """
 
 
@@ -105,10 +151,14 @@ def analyze_page(
         total_pages: Total pages in the document.
 
     Returns:
-        Dict matching the schema in SYSTEM_PROMPT. On parse failure,
-        returns {"page_kind": "other", "elements": [], "notes":
-        "parse_failure: <error>", "_raw": "<response text>"}.
+        Dict matching the schema in SYSTEM_PROMPT, plus _usage:
+          {input_tokens, output_tokens, cache_read_tokens,
+           cache_write_tokens, model, elapsed_ms, error?}
+        On parse failure, returns a minimal dict with page_kind="other"
+        and the raw response text in _raw for debugging.
     """
+    import time as _time
+    t0 = _time.time()
     client = _client()
     b64 = base64.standard_b64encode(page_png).decode("ascii")
 
@@ -120,10 +170,21 @@ def analyze_page(
         f"Return the JSON object now."
     )
 
+    # B4: prompt caching on SYSTEM_PROMPT. The system block is identical
+    # for every page call within a document (and across documents within
+    # the 5-min TTL), so we mark it cache_control: ephemeral. First call
+    # of a session writes the cache (+25% cost on those tokens); every
+    # subsequent call within 5 min reads from cache (-90% cost).
     resp = client.messages.create(
         model=VISION_MODEL,
         max_tokens=MAX_TOKENS,
-        system=SYSTEM_PROMPT,
+        system=[
+            {
+                "type": "text",
+                "text": SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
         messages=[{
             "role": "user",
             "content": [
@@ -149,21 +210,29 @@ def analyze_page(
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```\s*$", "", raw)
 
+    # Cache token usage (None on older SDKs / when caching disabled)
+    cache_read = getattr(resp.usage, "cache_read_input_tokens", 0) or 0
+    cache_write = getattr(resp.usage, "cache_creation_input_tokens", 0) or 0
+
+    usage = {
+        "input_tokens":       resp.usage.input_tokens,
+        "output_tokens":      resp.usage.output_tokens,
+        "cache_read_tokens":  cache_read,
+        "cache_write_tokens": cache_write,
+        "model":              VISION_MODEL,
+        "elapsed_ms":         int((_time.time() - t0) * 1000),
+    }
+
     try:
         parsed = json.loads(raw)
-        parsed["_usage"] = {
-            "input_tokens": resp.usage.input_tokens,
-            "output_tokens": resp.usage.output_tokens,
-        }
+        parsed["_usage"] = usage
         return parsed
     except json.JSONDecodeError as e:
+        usage["error"] = f"parse_failure: {e}"
         return {
             "page_kind": "other",
             "elements": [],
             "notes": f"parse_failure: {e}",
             "_raw": raw[:2000],
-            "_usage": {
-                "input_tokens": resp.usage.input_tokens,
-                "output_tokens": resp.usage.output_tokens,
-            },
+            "_usage": usage,
         }

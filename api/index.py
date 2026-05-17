@@ -2500,6 +2500,20 @@ def _handle_pb_format_preview(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "Upload failed. Please try again."})
         return
 
+    # Telemetry: one row per v1 job. docx_engine doesn't expose per-call
+    # usage stats, so cost is recorded as 0 with a note. This still tells
+    # us "v1 was called N times" which is enough for engine-usage analytics.
+    _insert_pb_api_call_rows([{
+        "job_token": token,
+        "engine": "format_fix_v1",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0,
+        "cost_inr": 0,
+        "error": "v1_usage_not_instrumented",
+        "university": university,
+    }])
+
     _json_response(h, 200, {
         "file_token": token,
         "size_bytes": len(docx_bytes),
@@ -2705,6 +2719,18 @@ def _handle_pb_format_preview_v2(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "upload returned empty url", "path": storage_path})
         return
 
+    # Telemetry: one zero-cost row per v2 job (no API calls, but useful
+    # for engine-usage analytics). Best-effort; doesn't block response.
+    _insert_pb_api_call_rows([{
+        "job_token": token,
+        "engine": "format_fix_v2",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0,
+        "cost_inr": 0,
+        "university": university,
+    }])
+
     _json_response(h, 200, {
         "file_token": token,
         "size_bytes": len(docx_bytes),
@@ -2715,17 +2741,35 @@ def _handle_pb_format_preview_v2(h, body: bytes) -> None:
     })
 
 
+def _insert_pb_api_call_rows(rows: list[dict]) -> None:
+    """Batch-insert telemetry rows into pb_api_calls.
+
+    Best-effort: failures are logged but don't break the response. The
+    customer should never get a 500 because telemetry write failed.
+    """
+    if not rows:
+        return
+    try:
+        from db_cloud import _client
+        _client().table("pb_api_calls").insert(rows).execute()
+    except Exception as exc:
+        logger.error(
+            "pb_api_calls insert failed (best-effort): %s: %s",
+            type(exc).__name__, str(exc)[:300],
+        )
+
+
 def _handle_pb_format_preview_v3(h, body: bytes) -> None:
     """POST /project-builder/format-preview-v3 - Claude Vision hybrid engine.
 
-    Same input shape as v2 ({content_b64} or {storage_path}). Renders
-    every page to PNG, sends each to Claude Sonnet for structured-JSON
-    page analysis, then builds a styled DOCX from the JSON. Captures
-    college logos, italics, alignment, multi-column guide/HOD blocks,
-    tables, and figure captions that v2 misses.
-
-    Output adds cost diagnostics so we can monitor per-job spend in
-    production.
+    Input  : {content_b64} or {storage_path}
+             plus optional UI controls:
+               original_filename (str)
+               page_numbers (bool, default true)
+               page_number_style (str: "roman_then_arabic" | "decimal" | "off")
+               header_text (str)
+               footer_text (str)
+    Output : DOCX preview link + per-call cost diagnostics + download_filename
 
     Cost: ~Rs 2-3 per page (Sonnet 4.5). A 30-page project = ~Rs 60-90.
     Latency: ~80-150s for a 30-page doc (parallel, 5 workers).
@@ -2739,9 +2783,17 @@ def _handle_pb_format_preview_v3(h, body: bytes) -> None:
         _json_response(h, 400, {"error": "invalid JSON"})
         return
 
-    university   = data.get("university", "ktu")
-    content_b64  = data.get("content_b64", "")
-    storage_path = data.get("storage_path", "")
+    university        = data.get("university", "ktu")
+    content_b64       = data.get("content_b64", "")
+    storage_path      = data.get("storage_path", "")
+    original_filename = data.get("original_filename") or ""
+    render_kwargs = {
+        "page_numbers":         bool(data.get("page_numbers", True)),
+        "page_number_style":    data.get("page_number_style", "roman_then_arabic"),
+        "page_number_position": data.get("page_number_position", "center"),
+        "header_text":          data.get("header_text", "") or "",
+        "footer_text":          data.get("footer_text", "") or "",
+    }
 
     src_bytes: bytes = b""
     if storage_path:
@@ -2786,22 +2838,47 @@ def _handle_pb_format_preview_v3(h, body: bytes) -> None:
 
     job_id = str(_uuid.uuid4())
     try:
-        from format_fix_v3 import orchestrator_v3
+        from format_fix_v3 import orchestrator_v3, renderer as _v3renderer
         if is_pdf:
-            result = orchestrator_v3.run_v3_from_pdf(src_bytes)
+            result = orchestrator_v3.run_v3_from_pdf(
+                src_bytes,
+                render_kwargs=render_kwargs,
+                job_token=job_id,
+                university=university,
+            )
         else:
-            result = orchestrator_v3.run_v3_from_docx(src_bytes)
+            result = orchestrator_v3.run_v3_from_docx(
+                src_bytes,
+                render_kwargs=render_kwargs,
+                job_token=job_id,
+                university=university,
+            )
         docx_bytes = result["docx_bytes"]
         if not docx_bytes:
             _json_response(h, 500, {"error": "v3 engine returned empty docx"})
             return
     except Exception as exc:
         logger.error("format-preview-v3 engine error: %s", exc, exc_info=True)
+        _insert_pb_api_call_rows([{
+            "job_token": job_id,
+            "engine": "format_fix_v3",
+            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+            "university": university,
+        }])
         _json_response(h, 500, {
             "error":    f"v3 engine failure: {type(exc).__name__}",
             "exc_msg":  str(exc)[:500],
         })
         return
+
+    # Persist per-call telemetry (best-effort, non-blocking on failure)
+    _insert_pb_api_call_rows(result.get("per_call_telemetry", []))
+
+    # Smart download filename
+    download_filename = _v3renderer.smart_download_filename(
+        original_filename,
+        result.get("project_title"),
+    )
 
     token        = job_id
     mime_docx    = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -2837,9 +2914,13 @@ def _handle_pb_format_preview_v3(h, body: bytes) -> None:
         "page_kinds":          result.get("page_kinds"),
         "input_tokens":        result.get("total_input_tokens"),
         "output_tokens":       result.get("total_output_tokens"),
+        "cache_read_tokens":   result.get("total_cache_read_tokens"),
+        "cache_write_tokens":  result.get("total_cache_write_tokens"),
         "estimated_cost_usd":  result.get("estimated_cost_usd"),
         "estimated_cost_inr":  result.get("estimated_cost_inr"),
         "elapsed_seconds":     result.get("elapsed_seconds"),
+        "project_title":       result.get("project_title"),
+        "download_filename":   download_filename,
         "university":          university,
     })
 

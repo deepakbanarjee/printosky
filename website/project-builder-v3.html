@@ -407,6 +407,53 @@
           <div class="pb-error" id="ffError"></div>
         </div>
 
+        <!-- v3 page-element toggles -->
+        <div class="pb-card" style="margin-top:1rem">
+          <details style="cursor:pointer">
+            <summary style="font-weight:600;font-size:.95rem;color:var(--ink);outline:none">
+              ⚙ Page options (page numbers, header, footer) — click to customize
+            </summary>
+            <div style="margin-top:.85rem;padding-top:.5rem;border-top:1px solid #1e293b;font-size:.88rem">
+
+              <div style="margin-bottom:.85rem">
+                <label style="display:flex;align-items:center;gap:.5rem;font-weight:600">
+                  <input type="checkbox" id="optPageNumbers" checked>
+                  Page numbers
+                </label>
+                <div style="margin-left:1.8rem;margin-top:.35rem;color:#888;font-size:.82rem">
+                  <label style="display:inline-flex;align-items:center;gap:.4rem;margin-right:1rem">
+                    Style:
+                    <select id="optPageNumberStyle" style="background:#161b22;color:#e6edf3;border:1px solid #333;border-radius:4px;padding:.2rem .4rem">
+                      <option value="roman_then_arabic" selected>Roman (i, ii) for front matter → Arabic (1, 2) from Ch 1</option>
+                      <option value="decimal">Arabic (1, 2, 3) throughout</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <div style="margin-bottom:.85rem">
+                <label style="display:flex;align-items:center;gap:.5rem;font-weight:600;margin-bottom:.3rem">
+                  Header (top of every page)
+                </label>
+                <input type="text" id="optHeaderText" maxlength="100" placeholder="Leave empty for no header"
+                  style="width:100%;padding:.5rem .75rem;border:1px solid #333;border-radius:6px;background:#161b22;color:#e6edf3;font-size:.9rem;box-sizing:border-box">
+              </div>
+
+              <div style="margin-bottom:.5rem">
+                <label style="display:flex;align-items:center;gap:.5rem;font-weight:600;margin-bottom:.3rem">
+                  Footer text (above page number)
+                </label>
+                <input type="text" id="optFooterText" maxlength="100" placeholder="Leave empty for no footer text"
+                  style="width:100%;padding:.5rem .75rem;border:1px solid #333;border-radius:6px;background:#161b22;color:#e6edf3;font-size:.9rem;box-sizing:border-box">
+              </div>
+
+              <p style="font-size:.75rem;color:#666;margin:.5rem 0 0">
+                Page borders coming in a follow-up release.
+              </p>
+            </div>
+          </details>
+        </div>
+
         <div class="pb-btn-row">
           <button class="pb-btn pb-btn-secondary" onclick="goBack()">← Back</button>
           <button class="pb-btn pb-btn-primary" onclick="formatPreview('format_fix')">Format My Report → <small style="font-weight:400;opacity:.8">(free preview)</small></button>
@@ -534,7 +581,24 @@
       <div class="pb-card pb-spinner">
         <div class="spinner-ring"></div>
         <h3 id="spinnerTitle">Formatting your report…</h3>
-        <p id="spinnerSub">This usually takes 20–40 seconds. Please don't close this tab.</p>
+        <p id="spinnerSub">Typical time: <strong>~90 seconds</strong>. Please don't close this tab.</p>
+        <div id="v3stages" style="display:none;text-align:left;max-width:380px;margin:1rem auto 0;font-size:.9rem">
+          <div class="v3-stage" id="v3stage1"><span class="v3-icon">◌</span> <span class="v3-text">Uploading file</span></div>
+          <div class="v3-stage" id="v3stage2"><span class="v3-icon">◌</span> <span class="v3-text">Reading pages</span></div>
+          <div class="v3-stage" id="v3stage3"><span class="v3-icon">◌</span> <span class="v3-text">Analyzing layout (the longest step)</span></div>
+          <div class="v3-stage" id="v3stage4"><span class="v3-icon">◌</span> <span class="v3-text">Building Word document</span></div>
+          <div id="v3elapsed" style="margin-top:.75rem;font-size:.8rem;color:#888;text-align:center">Elapsed: <span id="v3sec">0</span>s</div>
+        </div>
+        <style>
+          .v3-stage{padding:.3rem 0;color:#888;transition:color .3s}
+          .v3-stage.v3-done{color:#22c55e}
+          .v3-stage.v3-active{color:#e6edf3;font-weight:600}
+          .v3-stage .v3-icon{display:inline-block;width:1.2em;text-align:center}
+          .v3-stage.v3-done .v3-icon::before{content:'✓'}
+          .v3-stage.v3-active .v3-icon{animation:v3spin 1s linear infinite;display:inline-block}
+          .v3-stage.v3-active .v3-icon::before{content:'◐'}
+          @keyframes v3spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+        </style>
       </div>
     </div>
 
@@ -1024,6 +1088,53 @@
   }
 
   // ── Payment flow ──────────────────────────────────────────────────────────────
+  // A1 spinner: stage cycle for the long v3 Vision wait.
+  // Stages cycle based on elapsed wall-clock time. We don't have real
+  // server-side progress, but the timing here matches the engine's
+  // actual phases closely enough to feel honest.
+  let _v3StageTimer = null;
+  let _v3SecTimer = null;
+  function _v3SetStage(activeIdx) {
+    // 1=upload, 2=read, 3=analyze, 4=build
+    for (let i = 1; i <= 4; i++) {
+      const el = document.getElementById('v3stage' + i);
+      if (!el) continue;
+      el.classList.remove('v3-active', 'v3-done');
+      if (i < activeIdx) el.classList.add('v3-done');
+      else if (i === activeIdx) el.classList.add('v3-active');
+    }
+  }
+  function _v3StartStages() {
+    const stages = document.getElementById('v3stages');
+    if (stages) stages.style.display = 'block';
+    const sec = document.getElementById('v3sec');
+    const t0 = Date.now();
+    _v3SetStage(2);  // upload is already done by the time we call this
+    if (_v3SecTimer) clearInterval(_v3SecTimer);
+    _v3SecTimer = setInterval(() => {
+      const s = Math.round((Date.now() - t0) / 1000);
+      if (sec) sec.textContent = s;
+      // Stage transitions (approximate based on typical timing):
+      //   0-8s   = stage 2 (reading)
+      //   8-130s = stage 3 (analyzing, the bulk)
+      //   130s+  = stage 4 (building) - or whatever the elapsed shows
+      if (s < 8)  _v3SetStage(2);
+      else if (s < 130) _v3SetStage(3);
+      else _v3SetStage(4);
+    }, 500);
+  }
+  function _v3StopStages(success) {
+    if (_v3SecTimer) clearInterval(_v3SecTimer);
+    if (_v3StageTimer) clearTimeout(_v3StageTimer);
+    if (success) {
+      // Mark all 4 done
+      for (let i = 1; i <= 4; i++) {
+        const el = document.getElementById('v3stage' + i);
+        if (el) { el.classList.remove('v3-active'); el.classList.add('v3-done'); }
+      }
+    }
+  }
+
   // ── Step 1: Free generation → show preview ───────────────────────────────────
   // v2 Beta: file-upload format_fix goes via the signed-URL pipeline
   // (mint -> PUT to Supabase -> POST /format-preview-v2). Paste mode
@@ -1085,16 +1196,31 @@
           throw new Error(`Upload to storage failed (${putRes.status}): ${t.slice(0, 120)}`);
         }
 
-        // 3. Tell the v2 engine to process it
+        // 3. Tell the v3 engine to process it.
+        // A1 spinner: start staged progress UI now that upload finished.
+        _v3StartStages();
+
+        const _pageNumbers = $('optPageNumbers') ? $('optPageNumbers').checked : true;
+        const _pageNumberStyle = $('optPageNumberStyle') ? $('optPageNumberStyle').value : 'roman_then_arabic';
+        const _headerText = $('optHeaderText') ? $('optHeaderText').value.trim() : '';
+        const _footerText = $('optFooterText') ? $('optFooterText').value.trim() : '';
+        const _origName = (state.fileName || file.name || '').trim();
+
         const engineRes = await fetch(`${API}/project-builder/format-preview-v3`, {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
           body: JSON.stringify({
             storage_path: signData.storage_path,
             university: uni,
+            original_filename: _origName,
+            page_numbers: _pageNumbers,
+            page_number_style: _pageNumberStyle,
+            header_text: _headerText,
+            footer_text: _footerText,
           }),
         });
         data = await engineRes.json();
+        _v3StopStages(engineRes.ok);
         if (!engineRes.ok) throw new Error(data.error || `Engine failed (${engineRes.status})`);
 
       } else {
@@ -1118,6 +1244,7 @@
       state.currentService = service;
       _showStep3Preview(data, service);
     } catch(e) {
+      _v3StopStages(false);
       hide('step2'); show('step1'); goStep1();
       const errId = service === 'format_fix' ? 'ffError' : 'genError';
       showErr(errId, 'Generation failed: ' + e.message);
@@ -1167,11 +1294,24 @@
       // Free direct download — v2 Beta has no payment integration.
       const SUPABASE_PUBLIC = 'https://mlhuwlnwwwxdnqafelko.supabase.co/storage/v1/object/public/incoming-files';
       const downloadUrl = `${SUPABASE_PUBLIC}/project-builder/${isV3 ? 'previews-v3' : 'previews-v2'}/${data.file_token}.docx`;
+      // Smart filename: server tells us the nice name (e.g. Water_Tank_Cleaner_v5_formatted.docx)
+      const downloadName = (data.download_filename || `Printosky_${(data.file_token||'').slice(0,8)}.docx`)
+        .replace(/"/g,'');
       html += `<p style="margin-top:.5rem">` +
-              `<a href="${downloadUrl}" target="_blank" rel="noopener" ` +
+              `<a href="${downloadUrl}" download="${downloadName}" target="_blank" rel="noopener" ` +
               `style="display:inline-block;background:#16a34a;color:white;padding:.7rem 1.3rem;border-radius:6px;text-decoration:none;font-weight:600;font-size:.95rem">` +
-              `⬇ Download preview .docx` +
+              `⬇ Download ${downloadName}` +
               `</a></p>`;
+      if (isV3 && typeof data.estimated_cost_inr === 'number') {
+        const cacheBits = (data.cache_read_tokens || data.cache_write_tokens)
+          ? ` · cache: ${data.cache_read_tokens||0}r / ${data.cache_write_tokens||0}w`
+          : '';
+        html += `<p style="font-size:.72rem;color:#666;margin-top:.5rem">` +
+                `Processed in ${data.elapsed_seconds || '?'}s · ` +
+                `${data.input_tokens || 0} input / ${data.output_tokens || 0} output tokens${cacheBits} · ` +
+                `~₹${data.estimated_cost_inr}` +
+                `</p>`;
+      }
       html += `<p style="font-size:.72rem;color:#888;margin-top:.5rem">` +
               `${isV3 ? 'v3 AI' : 'v2 Beta'} is free during testing. WhatsApp +91 94957 06405 if anything looks off.` +
               `</p>`;
