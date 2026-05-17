@@ -768,7 +768,13 @@
   // We extract text in the browser via mammoth.js (DOCX) / pdf.js (PDF) so the
   // huge binary file never crosses the wire. Vercel function payload limit
   // (4.5 MB) would otherwise 413 on a 4 MB student doc.
-  async function handleFileSelect(input) {
+  // v2 Beta: file selection records the file for the signed-URL upload
+  // pipeline in formatPreview(). The v1 client-side text extraction
+  // (mammoth.js + pdf.js) is intentionally NOT used here -- v2 sends
+  // the binary directly to Supabase, so extracting text on the client
+  // is dead weight + a failure surface (pdfjsLib load errors blocked
+  // the customer from even reaching the upload step).
+  function handleFileSelect(input) {
     const file = input.files[0];
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) {
@@ -781,52 +787,19 @@
       return;
     }
     hideErr('ffError');
-    $('uploadFileName').textContent = '📎 ' + file.name + ' — extracting text…';
     state.fileName = file.name;
     state.fileType = ext;
     state.analysed = false;
+    // Legacy fields kept so the rest of the v1-derived page doesn't
+    // trip on "undefined" checks; v2's formatPreview reads
+    // $('uploadFile').files[0] directly, not state.extractedText.
     state.extractedText = '';
-    state.extractInProgress = true;
+    state.extractInProgress = false;
     hide('detectedStructure');
-    hide('detectWrap');  // "Detect Chapters" is redundant once format-preview runs
-
-    try {
-      let text = '';
-      if (ext === 'docx') {
-        const buf = await file.arrayBuffer();
-        const result = await mammoth.extractRawText({ arrayBuffer: buf });
-        text = result.value || '';
-      } else if (ext === 'pdf') {
-        const buf = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-        const pages = [];
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          pages.push(content.items.map(it => it.str).join(' '));
-        }
-        text = pages.join('\n\n');
-      } else {
-        text = await file.text();
-      }
-      state.extractedText = text;
-      state.extractInProgress = false;
-      const wc = text.trim().split(/\s+/).filter(Boolean).length;
-      $('uploadFileName').textContent =
-        `📎 ${file.name} — ${wc.toLocaleString()} words extracted (${(text.length / 1024).toFixed(1)} KB text)`;
-      if (wc < 200) {
-        showErr('ffError',
-          'We extracted very little text from your file (under 200 words). ' +
-          'Check that the file is not scanned-image-only or password-protected.');
-      }
-    } catch (err) {
-      state.extractInProgress = false;
-      state.extractedText = '';
-      $('uploadFileName').textContent = '📎 ' + file.name;
-      showErr('ffError',
-        `Could not read your ${ext.toUpperCase()} file: ${err.message || err}. ` +
-        'Try saving the file again or use paste instead.');
-    }
+    hide('detectWrap');
+    const sizeKb = (file.size / 1024).toFixed(1);
+    $('uploadFileName').textContent =
+      `📎 ${file.name} — ${sizeKb} KB ready to format`;
   }
 
   // ── Drag & drop ───────────────────────────────────────────────────────────────
