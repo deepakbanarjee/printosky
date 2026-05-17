@@ -2715,6 +2715,135 @@ def _handle_pb_format_preview_v2(h, body: bytes) -> None:
     })
 
 
+def _handle_pb_format_preview_v3(h, body: bytes) -> None:
+    """POST /project-builder/format-preview-v3 - Claude Vision hybrid engine.
+
+    Same input shape as v2 ({content_b64} or {storage_path}). Renders
+    every page to PNG, sends each to Claude Sonnet for structured-JSON
+    page analysis, then builds a styled DOCX from the JSON. Captures
+    college logos, italics, alignment, multi-column guide/HOD blocks,
+    tables, and figure captions that v2 misses.
+
+    Output adds cost diagnostics so we can monitor per-job spend in
+    production.
+
+    Cost: ~Rs 2-3 per page (Sonnet 4.5). A 30-page project = ~Rs 60-90.
+    Latency: ~80-150s for a 30-page doc (parallel, 5 workers).
+    """
+    import base64 as _b64
+    import uuid as _uuid
+
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    university   = data.get("university", "ktu")
+    content_b64  = data.get("content_b64", "")
+    storage_path = data.get("storage_path", "")
+
+    src_bytes: bytes = b""
+    if storage_path:
+        if not storage_path.startswith("project-builder/uploads-v2/"):
+            _json_response(h, 400, {
+                "error": "storage_path must be under project-builder/uploads-v2/",
+            })
+            return
+        try:
+            from db_cloud import _client, INCOMING_BUCKET
+            src_bytes = _client().storage.from_(INCOMING_BUCKET).download(storage_path)
+        except Exception as exc:
+            logger.error(
+                "format-preview-v3 storage download error type=%s msg=%r path=%s",
+                type(exc).__name__, str(exc), storage_path,
+            )
+            _json_response(h, 500, {
+                "error":    "storage download failed",
+                "exc_type": type(exc).__name__,
+                "exc_msg":  str(exc)[:300],
+            })
+            return
+    elif content_b64:
+        try:
+            src_bytes = _b64.b64decode(content_b64)
+        except Exception as exc:
+            _json_response(h, 400, {"error": f"invalid base64: {exc}"})
+            return
+    else:
+        _json_response(h, 400, {
+            "error": "content_b64 or storage_path required",
+        })
+        return
+
+    is_pdf  = len(src_bytes) >= 200 and src_bytes[:4] == b"%PDF"
+    is_docx = len(src_bytes) >= 200 and src_bytes[:4] == b"PK\x03\x04"
+    if not (is_pdf or is_docx):
+        _json_response(h, 400, {
+            "error": "input is not a PDF or DOCX",
+        })
+        return
+
+    job_id = str(_uuid.uuid4())
+    try:
+        from format_fix_v3 import orchestrator_v3
+        if is_pdf:
+            result = orchestrator_v3.run_v3_from_pdf(src_bytes)
+        else:
+            result = orchestrator_v3.run_v3_from_docx(src_bytes)
+        docx_bytes = result["docx_bytes"]
+        if not docx_bytes:
+            _json_response(h, 500, {"error": "v3 engine returned empty docx"})
+            return
+    except Exception as exc:
+        logger.error("format-preview-v3 engine error: %s", exc, exc_info=True)
+        _json_response(h, 500, {
+            "error":    f"v3 engine failure: {type(exc).__name__}",
+            "exc_msg":  str(exc)[:500],
+        })
+        return
+
+    token        = job_id
+    mime_docx    = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    storage_dst  = f"project-builder/previews-v3/{token}.docx"
+    try:
+        from db_cloud import _client, INCOMING_BUCKET
+        _client().storage.from_(INCOMING_BUCKET).upload(
+            path=storage_dst,
+            file=docx_bytes,
+            file_options={"content-type": mime_docx, "upsert": "true"},
+        )
+        url = _client().storage.from_(INCOMING_BUCKET).get_public_url(storage_dst)
+    except Exception as exc:
+        logger.error("format-preview-v3 upload error type=%s msg=%r path=%s",
+                     type(exc).__name__, str(exc), storage_dst)
+        _json_response(h, 500, {
+            "error":    "upload failed",
+            "exc_type": type(exc).__name__,
+            "exc_msg":  str(exc)[:500],
+            "path":     storage_dst,
+        })
+        return
+
+    if not url:
+        _json_response(h, 500, {"error": "upload returned empty url", "path": storage_dst})
+        return
+
+    _json_response(h, 200, {
+        "file_token":          token,
+        "size_bytes":          len(docx_bytes),
+        "engine":              "format_fix_v3",
+        "pages":               result.get("page_count"),
+        "page_kinds":          result.get("page_kinds"),
+        "input_tokens":        result.get("total_input_tokens"),
+        "output_tokens":       result.get("total_output_tokens"),
+        "estimated_cost_usd":  result.get("estimated_cost_usd"),
+        "estimated_cost_inr":  result.get("estimated_cost_inr"),
+        "elapsed_seconds":     result.get("elapsed_seconds"),
+        "university":          university,
+    })
+
+
 def _handle_pb_process(h, body: bytes) -> None:
     """POST /project-builder/process — verify Razorpay payment, generate DOCX."""
     try:
@@ -3277,6 +3406,10 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/project-builder/format-preview-v2":
             _handle_pb_format_preview_v2(self, body)
+            return
+
+        if self.path == "/project-builder/format-preview-v3":
+            _handle_pb_format_preview_v3(self, body)
             return
 
         if self.path == "/project-builder/upload-sign":
