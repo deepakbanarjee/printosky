@@ -1,4 +1,10 @@
 {
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 300,
+      "memory": 1024
+    }
+  },
   "routes": [
     { "src": "/whatsapp-webhook", "dest": "/api/index.py" },
     { "src": "/webhook/razorpay",  "dest": "/api/index.py" },
@@ -12,7 +18,10 @@
     { "src": "/project-builder/templates",          "dest": "/api/index.py" },
     { "src": "/project-builder/templates/(.*)",     "dest": "/api/index.py" },
     { "src": "/project-builder/analyse",             "dest": "/api/index.py" },
-    { "src": "/project-builder/format-preview",     "dest": "/api/index.py" },
+    { "src": "/project-builder/format-preview",      "dest": "/api/index.py" },
+    { "src": "/project-builder/format-preview-v2",   "dest": "/api/index.py" },
+    { "src": "/project-builder/format-preview-v3",   "dest": "/api/index.py" },
+    { "src": "/project-builder/upload-sign",         "dest": "/api/index.py" },
     { "src": "/project-builder/create-order",       "dest": "/api/index.py" },
     { "src": "/project-builder/process",            "dest": "/api/index.py" },
     { "src": "/",                                   "dest": "/api/index.py" }
