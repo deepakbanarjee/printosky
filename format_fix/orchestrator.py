@@ -183,6 +183,27 @@ def _render_chapter_inline(doc, elements, ctx) -> None:
         cls = _chapter._classify(ln, max_sz, ctx.body_pt, 0)
         if cls == "skip":
             continue
+
+        # DOCX-style heading override (Step 4.6d).
+        # _chapter._classify gates h2 on ALL_CAPS_RE which fails on
+        # numbered sub-headings like "3.1 Sampling Design" or
+        # "4.1 Data Analysis and Interpretation" -- they fall through
+        # to plain body and lose bold + the Heading 2 paragraph style.
+        # extraction_docx bumps Heading 1 -> 22pt, Heading 2 -> 16pt,
+        # Heading 3 -> 14pt, so the source paragraph's max_size is a
+        # reliable signal of its intended heading level. Use those
+        # thresholds directly when the underlying paragraph was bold
+        # (genuine headings nearly always are) so we don't accidentally
+        # promote a body paragraph that happens to have an explicit
+        # 14pt run.
+        if _bold:
+            if max_sz >= 20:
+                cls = "h1"
+            elif max_sz >= 16:
+                cls = "h2"
+            elif max_sz >= 14 and cls == "body":
+                cls = "h3"
+
         if cls == "h1":
             doc.add_page_break()
             h = doc.add_heading(ln.strip(" ?:"), level=1)
@@ -190,6 +211,10 @@ def _render_chapter_inline(doc, elements, ctx) -> None:
             continue
         if cls == "h2":
             h = doc.add_heading(ln.strip(" ?:"), level=2)
+            h.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            continue
+        if cls == "h3":
+            h = doc.add_heading(ln.strip(" ?:"), level=3)
             h.alignment = WD_ALIGN_PARAGRAPH.LEFT
             continue
 

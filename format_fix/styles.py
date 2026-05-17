@@ -61,6 +61,18 @@ def apply_university_styles(doc: "Document", config: dict) -> None:
         hstyle.font.bold = bold
         hstyle.font.color.rgb = RGBColor(0, 0, 0)
 
+        # Orphan-heading protection (Step 4.6d):
+        # keep_with_next prevents a heading sitting at the bottom of a
+        # page with its content on the next page.
+        # keep_together prevents a heading itself being split across
+        # pages (rare for one-line headings but cheap to enforce).
+        # widow_control = True is the python-docx default but we set
+        # it explicitly so the heading style is self-documenting.
+        pf = hstyle.paragraph_format
+        pf.keep_with_next = True
+        pf.keep_together  = True
+        pf.widow_control  = True
+
     margins = config.get("margins") or {}
     for section in doc.sections:
         # Enforce A4 (210 x 297 mm) unconditionally — academic standard
