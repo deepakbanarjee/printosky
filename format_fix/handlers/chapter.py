@@ -24,8 +24,17 @@ if TYPE_CHECKING:
 
 
 def _classify(text: str, max_size: float, body_size: float,
-                page_no: int) -> str:
-    """Return 'h1' | 'h2' | 'body' | 'skip'."""
+                page_no: int, bold: bool = False) -> str:
+    """Return 'h1' | 'h2' | 'body' | 'skip'.
+
+    `bold` is optional (default False) for back-compat with any caller
+    that doesn't pass it. When `bold` IS supplied, the ALL-CAPS h2
+    detection widens to also accept bold ALL-CAPS short lines that
+    aren't size-larger than body. This catches PDFs whose authors
+    bolded section titles at body font size (Step 4.6f --
+    Water_Tank_Cleaner_v5.pdf had 20 such headings the size-only
+    rule missed).
+    """
     s = text.strip()
     if not s or extraction.PAGE_NUM_RE.match(s):
         return "skip"
@@ -46,8 +55,22 @@ def _classify(text: str, max_size: float, body_size: float,
             and 4 <= len(s) <= 80
             and not looks_like_form_label):
         return "h1"
+    # Step 4.6f: numbered chapter prefix like "1.  INTRODUCTION",
+    # "14.  WORKING PRINCIPLE" (common in engineering / vocational
+    # project reports). The leading digit breaks ALL_CAPS_RE, so the
+    # existing h2 ALL-CAPS rule misses these. Require BOTH the
+    # numbered-ALL-CAPS pattern AND a heading-strength signal
+    # (size larger than body OR bold) so a numbered list item like
+    # "1. Item description" doesn't get promoted.
+    if (re.match(r"^\d{1,2}\.\s+[A-Z][A-Z\s\d\.,&\-/()]{2,60}$", s)
+            and 4 <= len(s) <= 80
+            and (max_size >= body_size + 2 or bold)):
+        return "h1"
+    # h2: ALL-CAPS short line that is EITHER size-larger-than-body OR
+    # bold. The bold widening (Step 4.6f) catches PDFs where the
+    # author used same-size bolded ALL-CAPS for section titles.
     if (extraction.ALL_CAPS_RE.match(s) and 4 <= len(s) <= 60
-            and max_size >= body_size + 2):
+            and (max_size >= body_size + 2 or bold)):
         return "h2"
     if (extraction.NUM_HEADING_RE.match(s)
             and max_size >= body_size + 1
@@ -96,7 +119,7 @@ class ChapterHandler(SectionHandler):
         # a ToC region, suppress the whole page (Word's auto ToC re-creates
         # the listing from Heading styles).
         has_real_h1 = any(
-            _classify((t or "").strip(), m, ctx.body_pt, page_no) == "h1"
+            _classify((t or "").strip(), m, ctx.body_pt, page_no, _b) == "h1"
             for t, m, _d, _b, _a in blocks
         )
         if has_real_h1:
@@ -142,7 +165,7 @@ class ChapterHandler(SectionHandler):
                 _flush_kv(doc, kv_buffer)
                 kv_buffer = []
 
-            cls = _classify(ln, max_sz, ctx.body_pt, page_no)
+            cls = _classify(ln, max_sz, ctx.body_pt, page_no, _bold)
             if cls == "skip":
                 continue
             if cls == "h1":

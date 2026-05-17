@@ -334,10 +334,23 @@ def merge_bullet_continuations(blocks: list[tuple],
         s = (text or "").strip()
         if not s:
             continue
+        # Don't treat a bold + larger-than-body numbered line as a list
+        # start -- it's a chapter title like "1. INTRODUCTION" and the
+        # following body paragraph would otherwise be glued onto it,
+        # breaking the heading classifier's length + ALL_CAPS checks
+        # (Step 4.6f -- Water_Tank_Cleaner_v5.pdf had 20 chapter
+        # starts that this merge was eating).
+        prev_is_heading_disguised_as_list = bool(
+            out
+            and out[-1][3]                          # prev is bold
+            and out[-1][1] > body_size + 1          # prev is heading-sized
+            and NUM_LIST_RE.match(out[-1][0])       # prev starts with "N."
+        )
         prev_is_list = bool(
             out
             and (BULLET_RE.match(out[-1][0]) or NUM_LIST_RE.match(out[-1][0]))
             and not out[-1][0].rstrip().endswith((".", "?", "!", ":", ";"))
+            and not prev_is_heading_disguised_as_list
         )
         current_is_break = (
             max_sz > body_size + 1

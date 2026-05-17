@@ -113,7 +113,7 @@ def _render_chapter_inline(doc, elements, ctx) -> None:
         if kind != "p":
             continue
         text, max_sz, _dom, _bold, _align = payload
-        if _chapter._classify((text or "").strip(), max_sz, ctx.body_pt, 0) == "h1":
+        if _chapter._classify((text or "").strip(), max_sz, ctx.body_pt, 0, _bold) == "h1":
             has_real_h1 = True
             break
 
@@ -180,7 +180,7 @@ def _render_chapter_inline(doc, elements, ctx) -> None:
         elif kv_buffer:
             _flush_kv_if_any()
 
-        cls = _chapter._classify(ln, max_sz, ctx.body_pt, 0)
+        cls = _chapter._classify(ln, max_sz, ctx.body_pt, 0, _bold)
         if cls == "skip":
             continue
 
