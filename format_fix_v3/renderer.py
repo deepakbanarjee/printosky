@@ -47,7 +47,32 @@ PAGE_BREAK_BEFORE_KINDS = {
     "references", "appendix",
 }
 
+# Single-unit pages where NO page-break should fire between H1s (because
+# a multi-line title gets emitted as several consecutive H1 elements).
+NO_INTRA_H1_BREAK_KINDS = {
+    "title", "certificate", "acknowledgement", "declaration",
+    "abstract",
+}
+
 SKIP_TYPES = {"page_number", "footer", "skip"}
+
+# H1 must look like a real chapter to keep its level. Otherwise demote.
+_REAL_CHAPTER_RE = re.compile(
+    r"^\s*("
+    r"CHAPTER\s+[\divxIVX]+|"
+    r"\d+\.\s+[A-Z]|"
+    r"PART\s+[\divxIVX]+|"
+    r"APPENDIX\s+[A-Z\d]|"
+    r"REFERENCES\s*$|"
+    r"BIBLIOGRAPHY\s*$|"
+    r"INTRODUCTION\s*$|"
+    r"CONCLUSION\s*$|"
+    r"ACKNOWLEDGEMENT|"
+    r"ABSTRACT\s*$|"
+    r"CONTENTS\s*$"
+    r")",
+    re.IGNORECASE,
+)
 
 # Printable width inside a 1-inch-margin A4 page: 21cm - 2.54cm = ~6.5"
 PRINTABLE_WIDTH_INCHES = 6.5
@@ -584,6 +609,45 @@ def render_pages(
             for j in range(run_start, len(elements)):
                 name_run_flags[j] = True
 
+        # Pre-pass: H1 dedup + downgrade.
+        # 1. Drop H1 if it duplicates the previous-emitted H1 text (case-
+        #    insensitive, ignoring whitespace) within the last 3 elements.
+        #    Catches the Claude "REVIEW OF LITERATURE on page-end + page-
+        #    start" pattern.
+        # 2. Downgrade H1 to H2 if the text doesn't look like a real
+        #    chapter heading (CHAPTER N, N. TITLE, REFERENCES, etc.).
+        #    Stops random sub-sections (PILOT STUDY, TOPIC, PREFACE) from
+        #    triggering chapter-level page breaks.
+        deduped: list[dict[str, Any]] = []
+        for el in elements:
+            if el.get("type") == "heading":
+                cur_text = _flat_text(el.get("runs", [])).strip().lower()
+                # Look back at the last 3 elements for an identical heading
+                # text (regardless of level - catches the case where the
+                # first occurrence already got downgraded to H2 but the
+                # source repeats it again).
+                tail = deduped[-3:] if deduped else []
+                is_dup = any(
+                    (p.get("type") == "heading"
+                     and _flat_text(p.get("runs", [])).strip().lower()
+                         == cur_text)
+                    for p in tail
+                )
+                if is_dup and cur_text:
+                    continue
+                # H1 downgrade: only keep H1 if it looks like a real chapter
+                if ((el.get("level") or 0) == 1
+                        and not _REAL_CHAPTER_RE.match(cur_text)):
+                    el = {**el, "level": 2}
+            deduped.append(el)
+        elements = deduped
+
+        # Title-page H1 grouping: on pages like "title" / "certificate" /
+        # "acknowledgement" we treat the WHOLE page as one unit. Even if
+        # Claude returned multiple H1s (because it split a multi-line
+        # title), we don't page-break between them.
+        no_intra_h1_break = kind in NO_INTRA_H1_BREAK_KINDS
+
         first_h1_on_page = True
 
         for idx, el in enumerate(elements):
@@ -592,9 +656,13 @@ def render_pages(
                 continue
             if etype == "heading":
                 level = el.get("level") or 1
+                # Force a page break for H1 EXCEPT:
+                #  - First H1 on a fresh-section page (kind-change already broke)
+                #  - Any H1 on a single-unit page (title/cert/ack/etc)
                 force_break = (
                     level == 1
                     and not (first_h1_on_page and kind_change_break)
+                    and not no_intra_h1_break
                 )
                 _emit_heading(doc, el, force_page_break=force_break)
                 if level == 1:
@@ -614,6 +682,18 @@ def render_pages(
                              kind, title_logo_seen)
             else:
                 _emit_body(doc, el)
+
+        # Leftover-image emission: for DOCX inputs, fitz strips images
+        # during DOCX->PDF conversion, so Claude never sees them and
+        # never emits "image" elements. The orchestrator extracts the
+        # actual image bytes directly from the DOCX and hands them in
+        # via page_images. If we've consumed fewer image elements than
+        # extracted images for this page, emit the leftovers now (at
+        # end of page) so they aren't lost.
+        while img_cursor < len(imgs):
+            _emit_image(doc, imgs[img_cursor], "centered",
+                         kind, title_logo_seen)
+            img_cursor += 1
 
         prev_kind = kind
 

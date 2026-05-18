@@ -60,18 +60,50 @@ this schema:
 
 CRITICAL RULES:
 
-1. Per-RUN bold/italic (most common mistake):
-   - If a paragraph mixes bold and regular text (e.g. "Definition: Water
-     tank cleaners are devices..."), emit MULTIPLE runs:
+1. Bold and italic detection (CRITICAL - get this right):
+
+   STEP A - look at every paragraph and identify bold/italic visually.
+   Bold text has THICKER strokes than the surrounding text. Italic text
+   has SLANTED letters. Don't be conservative - if something looks bold
+   or italic on the page, mark it.
+
+   STEP B - decide if the paragraph is uniformly bold or mixed:
+
+   (a) ENTIRE paragraph is bold (e.g. a project title, section heading,
+       sub-heading, or a bold-only line):
+       "runs": [{"text": "WATER TANK CLEANER", "bold": true}]
+
+   (b) ENTIRE paragraph is italic (e.g. a designation line like
+       "Lecturer in Mechanical Engineering"):
+       "runs": [{"text": "Lecturer in Mechanical Engineering", "italic": true}]
+
+   (c) MIXED bold + regular (e.g. "Definition: Water tank cleaners are
+       mechanical devices..."), emit MULTIPLE runs:
        "runs": [
          {"text": "Definition: ", "bold": true},
-         {"text": "Water tank cleaners are devices..."}
+         {"text": "Water tank cleaners are mechanical devices..."}
        ]
-   - DO NOT mark the whole paragraph bold just because part of it is.
-   - DO NOT split a bold-prefixed paragraph into a list_item. If the
-     bold prefix is just a label (Definition:, Note:, Working:, etc.)
-     keep it as a single body element with mixed runs.
-   - Italic runs work the same way.
+
+   (d) Plain (no bold or italic):
+       "runs": [{"text": "the regular text here"}]
+
+   IMPORTANT RULES:
+   - Title pages have LOTS of bold + italic. Project title is usually
+     bold. Student names are sometimes bold. Year is often bold.
+     Designations ("Lecturer in X", "Head of Department") are often
+     italic. Mark all of these.
+   - DO NOT split a bold-prefixed paragraph into a list_item just
+     because the bold prefix exists. Keep as body with mixed runs.
+   - Headings (type="heading") ALSO need bold:true on their runs - even
+     though Word's heading style is bold by default, mark it explicitly
+     so we don't lose the signal if the style fails.
+
+   ADDITIONAL: multi-line project titles
+   - A long title that wraps to 2-3 lines (e.g. "INCLUSIVE EDUCATION
+     FOR CHILDREN / WITH SPECIAL NEEDS: / A COMMUNITY AWARENESS
+     APPROACH") should be emitted as ONE heading element with the lines
+     joined into a single text run, not three separate H1 elements.
+     Use a space between joined lines.
 
 2. Element ordering: top-to-bottom, left-to-right. Multi-column pages
    are read column by column (left column fully, then right column).
