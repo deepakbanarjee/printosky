@@ -22,6 +22,8 @@
     { "src": "/project-builder/format-preview",       "dest": "/api/index.py" },
     { "src": "/project-builder/format-preview-v2",    "dest": "/api/index.py" },
     { "src": "/project-builder/format-preview-v3",    "dest": "/api/index.py" },
+    { "src": "/project-builder/format-job-create",    "dest": "/api/index.py" },
+    { "src": "/project-builder/format-job-status",    "dest": "/api/index.py" },
     { "src": "/project-builder/upload-sign",          "dest": "/api/index.py" },
     { "src": "/project-builder/create-order",         "dest": "/api/index.py" },
     { "src": "/project-builder/process",              "dest": "/api/index.py" },

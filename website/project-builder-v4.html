@@ -1,0 +1,1668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Report Builder (v4 Async) — Printosky</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <!-- Client-side text extraction so we never upload the binary file.
+       Avoids Vercel function 413 on real student docs (which are routinely 4 MB+). -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.7.0/mammoth.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
+  <script>
+    if (window['pdfjsLib']) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+    }
+  </script>
+  <style>
+    /* ── Page-level overrides ── */
+    .pb-page { max-width: 860px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    .pb-hero { text-align: center; padding: 3rem 0 2rem; }
+    .pb-hero h1 { font-family: 'Syne', sans-serif; font-size: clamp(1.8rem, 5vw, 2.6rem); font-weight: 800; color: var(--ink); line-height: 1.2; margin-bottom: .75rem; }
+    .pb-hero p { color: #555; font-size: 1.05rem; max-width: 600px; margin: 0 auto; }
+    .pb-badge { display: inline-block; background: var(--green); color: #fff; font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; border-radius: 4px; padding: 2px 8px; margin-left: 6px; vertical-align: middle; }
+
+    /* ── Step indicator ── */
+    .pb-steps { display: flex; align-items: center; justify-content: center; gap: 0; margin-bottom: 2.5rem; }
+    .pb-step-dot { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #ddd; background: #fff; display: flex; align-items: center; justify-content: center; font-size: .75rem; font-weight: 700; color: #aaa; transition: all .2s; }
+    .pb-step-dot.active { border-color: var(--blue); background: var(--blue); color: #fff; }
+    .pb-step-dot.done { border-color: var(--green); background: var(--green); color: #fff; }
+    .pb-step-line { flex: 1; max-width: 60px; height: 2px; background: #ddd; }
+    .pb-step-line.done { background: var(--green); }
+
+    /* ── Cards ── */
+    .pb-card { background: #fff; border: 1.5px solid #e8e2d8; border-radius: 12px; padding: 1.75rem; margin-bottom: 1.5rem; }
+    .pb-card h2 { font-family: 'Syne', sans-serif; font-size: 1.15rem; font-weight: 700; color: var(--ink); margin-bottom: 1.25rem; }
+    .pb-card h3 { font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: #777; margin-bottom: .75rem; }
+
+    /* ── University chips ── */
+    .uni-chips { display: flex; flex-wrap: wrap; gap: .6rem; }
+    .uni-chip { display: flex; align-items: center; gap: .4rem; border: 1.5px solid #ddd; border-radius: 8px; padding: .5rem .9rem; cursor: pointer; background: #fff; transition: all .15s; font-size: .9rem; font-weight: 500; color: var(--ink); }
+    .uni-chip:hover { border-color: var(--blue); }
+    .uni-chip.selected { border-color: var(--blue); background: #f0f4ff; color: var(--blue); }
+    .uni-chip .dot { width: 10px; height: 10px; border-radius: 50%; }
+
+    /* ── Tier cards ── */
+    .tier-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .9rem; }
+    .tier-card { border: 1.5px solid #ddd; border-radius: 10px; padding: 1.25rem 1rem; cursor: pointer; background: #fff; transition: all .15s; position: relative; }
+    .tier-card:hover { border-color: var(--blue); }
+    .tier-card.selected { border-color: var(--blue); background: #f0f4ff; }
+    .tier-card.unavailable { opacity: .55; cursor: not-allowed; background: #f8f8f6; border-color: #ddd; }
+    .tier-card.unavailable:hover { border-color: #ddd; }
+    .tier-card.unavailable .tier-popular { display: none; }
+    .tier-unavailable-msg {
+      display: none;
+      margin-top: .6rem;
+      padding: .45rem .6rem;
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      border-radius: 6px;
+      color: #92400e;
+      font-size: .72rem;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+    .tier-card.unavailable .tier-unavailable-msg { display: block; }
+    body.theme-admin .tier-card.unavailable { background: #0D1117; opacity: .5; }
+    body.theme-admin .tier-unavailable-msg { background: rgba(210,153,34,0.10); border-color: #D29922; color: #f0d77a; }
+    .tier-card .price { font-family: 'Syne', sans-serif; font-size: 1.4rem; font-weight: 800; color: var(--ink); margin: .3rem 0; }
+    .tier-card .price.free { color: var(--green); }
+    .tier-card p { font-size: .82rem; color: #666; margin: 0; line-height: 1.5; }
+    .tier-card h4 { font-weight: 700; font-size: .95rem; margin-bottom: .25rem; }
+    .tier-popular { position: absolute; top: -10px; right: 12px; background: var(--accent); color: #fff; font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; }
+
+    /* ── Admin (dark) theme overrides ── */
+    body.theme-admin {
+      background: #0D1117;
+      color: #E6EDF3;
+    }
+    body.theme-admin .navbar,
+    body.theme-admin .footer {
+      background: #161B22 !important;
+      color: #E6EDF3;
+      border-color: #30363D;
+    }
+    body.theme-admin .navbar a,
+    body.theme-admin .nav-links a { color: #E6EDF3; }
+    body.theme-admin .pb-hero h1 { color: #F0F6FC; }
+    body.theme-admin .pb-hero p  { color: #8B949E; }
+    body.theme-admin .pb-card {
+      background: #161B22;
+      border-color: #30363D;
+      color: #E6EDF3;
+    }
+    body.theme-admin .pb-card h2 { color: #F0F6FC; }
+    body.theme-admin .pb-card h3 { color: #8B949E; }
+    body.theme-admin .uni-chip,
+    body.theme-admin .tier-card {
+      background: #0D1117;
+      border-color: #30363D;
+      color: #E6EDF3;
+    }
+    body.theme-admin .uni-chip:hover,
+    body.theme-admin .tier-card:hover { border-color: #58A6FF; }
+    body.theme-admin .uni-chip.selected,
+    body.theme-admin .tier-card.selected {
+      border-color: #58A6FF;
+      background: rgba(56,139,253,0.12);
+      color: #58A6FF;
+    }
+    body.theme-admin .tier-card .price { color: #F0F6FC; }
+    body.theme-admin .tier-card p     { color: #8B949E; }
+    body.theme-admin .pb-step-dot {
+      background: #0D1117;
+      border-color: #30363D;
+      color: #6E7681;
+    }
+    body.theme-admin .pb-step-line { background: #30363D; }
+    body.theme-admin input,
+    body.theme-admin textarea,
+    body.theme-admin select {
+      background: #0D1117 !important;
+      color: #E6EDF3 !important;
+      border-color: #30363D !important;
+    }
+    body.theme-admin .pb-btn-primary { background: #1F6FEB; }
+    body.theme-admin .pb-btn-primary:hover { background: #388BFD; }
+    body.theme-admin .pb-btn-secondary {
+      background: transparent;
+      color: #E6EDF3;
+      border: 1px solid #30363D;
+    }
+    body.theme-admin .pb-btn-secondary:hover { background: #21262D; }
+    body.theme-admin .upload-zone {
+      background: #0D1117;
+      border-color: #30363D;
+      color: #8B949E;
+    }
+    body.theme-admin .upload-zone:hover { border-color: #58A6FF; }
+    body.theme-admin .pb-error {
+      background: rgba(248,81,73,0.10);
+      border-color: #F85149;
+      color: #FFA198;
+    }
+    body.theme-admin .admin-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #1F6FEB;
+      color: #fff;
+      font-size: .68rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      border-radius: 4px;
+      padding: 3px 9px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    /* Admin mode hides payment-only UI and promotes the admin download */
+    body.theme-admin #payDocxBtn { display: none !important; }
+    body.theme-admin .pay-only   { display: none !important; }
+    body.theme-admin #adminDlBtn {
+      display: inline-block !important;
+      background: #238636;
+      color: #fff;
+      border: none;
+      font-size: 1rem;
+      padding: .75rem 1.5rem;
+    }
+    body.theme-admin #adminDlBtn:hover { background: #2EA043; }
+
+    /* ── Form elements ── */
+    .pb-field { margin-bottom: 1rem; }
+    .pb-field label { display: block; font-size: .82rem; font-weight: 600; color: #555; margin-bottom: .35rem; }
+    .pb-field input, .pb-field select, .pb-field textarea { width: 100%; border: 1.5px solid #ddd; border-radius: 7px; padding: .55rem .75rem; font-size: .9rem; font-family: 'DM Sans', sans-serif; background: #fafafa; color: var(--ink); outline: none; box-sizing: border-box; transition: border-color .15s; }
+    .pb-field input:focus, .pb-field select:focus, .pb-field textarea:focus { border-color: var(--blue); background: #fff; }
+    .pb-field textarea { resize: vertical; min-height: 120px; }
+    .pb-field .hint { font-size: .75rem; color: #999; margin-top: .25rem; }
+    .pb-row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+    @media (max-width: 500px) { .pb-row { grid-template-columns: 1fr; } }
+
+    /* ── Upload zone ── */
+    .upload-zone { border: 2px dashed #ddd; border-radius: 10px; padding: 2rem; text-align: center; cursor: pointer; transition: border-color .15s; position: relative; }
+    .upload-zone:hover, .upload-zone.dragover { border-color: var(--blue); background: #f8faff; }
+    .upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .upload-zone p { color: #777; font-size: .9rem; margin: .5rem 0 0; }
+    .upload-zone .icon { font-size: 2rem; }
+    .upload-name { font-size: .85rem; color: var(--green); font-weight: 600; margin-top: .5rem; }
+
+    /* ── Tabs (paste/upload) ── */
+    .pb-tabs { display: flex; gap: 0; border: 1.5px solid #ddd; border-radius: 8px; overflow: hidden; margin-bottom: 1rem; }
+    .pb-tab { flex: 1; padding: .55rem; text-align: center; font-size: .85rem; font-weight: 600; cursor: pointer; background: #fafafa; color: #777; transition: all .15s; border: none; }
+    .pb-tab.active { background: var(--blue); color: #fff; }
+
+    /* ── Chapter block ── */
+    .chapter-block { border: 1.5px solid #eee; border-radius: 8px; padding: 1rem; margin-bottom: .75rem; background: #fafafa; }
+    .chapter-block h4 { font-size: .85rem; font-weight: 700; color: var(--ink); margin-bottom: .75rem; }
+
+    /* ── Student row ── */
+    .student-row { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin-bottom: .6rem; }
+    @media (max-width: 500px) { .student-row { grid-template-columns: 1fr; } }
+
+    /* ── Word counter ── */
+    .word-counter { font-size: .75rem; color: #999; text-align: right; margin-top: .2rem; }
+    .word-counter.warn { color: var(--accent); }
+    .word-counter.ok { color: var(--green); }
+
+    /* ── Buttons ── */
+    .pb-btn { display: inline-flex; align-items: center; gap: .5rem; border: none; border-radius: 8px; padding: .7rem 1.5rem; font-size: .95rem; font-weight: 700; font-family: 'DM Sans', sans-serif; cursor: pointer; transition: all .15s; }
+    .pb-btn-primary { background: var(--blue); color: #fff; }
+    .pb-btn-primary:hover { background: #152f6a; }
+    .pb-btn-primary:disabled { background: #aaa; cursor: not-allowed; }
+    .pb-btn-secondary { background: #fff; color: var(--ink); border: 1.5px solid #ddd; }
+    .pb-btn-secondary:hover { border-color: var(--blue); color: var(--blue); }
+    .pb-btn-green { background: var(--green); color: #fff; font-size: 1rem; padding: .8rem 2rem; }
+    .pb-btn-green:hover { background: #1aad54; }
+    .pb-btn-download { background: var(--blue); color: #fff; font-size: 1.05rem; padding: .85rem 2rem; }
+    .pb-btn-row { display: flex; gap: .75rem; justify-content: flex-end; margin-top: 1.25rem; flex-wrap: wrap; }
+
+    /* ── Spinner ── */
+    .pb-spinner { text-align: center; padding: 3rem 1rem; }
+    .spinner-ring { width: 56px; height: 56px; border: 4px solid #eee; border-top-color: var(--blue); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 1.5rem; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .pb-spinner h3 { font-family: 'Syne', sans-serif; font-size: 1.2rem; font-weight: 700; color: var(--ink); margin-bottom: .5rem; }
+    .pb-spinner p { color: #777; font-size: .9rem; }
+
+    /* ── Download card ── */
+    .pb-download-card { text-align: center; padding: 2.5rem 1rem; }
+    .pb-download-card .check { font-size: 3rem; margin-bottom: 1rem; }
+    .pb-download-card h2 { font-family: 'Syne', sans-serif; font-size: 1.5rem; font-weight: 800; color: var(--ink); margin-bottom: .5rem; }
+    .pb-download-card p { color: #666; margin-bottom: 1.5rem; }
+
+    /* ── CTA strip ── */
+    .pb-cta-strip { background: var(--green); border-radius: 12px; padding: 1.5rem 2rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-top: 1.5rem; }
+    .pb-cta-strip h3 { font-family: 'Syne', sans-serif; font-size: 1.05rem; font-weight: 700; color: #fff; margin: 0; }
+    .pb-cta-strip p { color: rgba(255,255,255,.85); font-size: .85rem; margin: .2rem 0 0; }
+
+    /* ── Error ── */
+    .pb-error { background: #fff0f0; border: 1.5px solid #ffbcbc; border-radius: 8px; padding: .85rem 1rem; color: #c0392b; font-size: .88rem; margin-top: 1rem; display: none; }
+
+    /* ── Hidden utility ── */
+    .pb-hidden { display: none !important; }
+
+    /* ── Section dividers ── */
+    .pb-section-title { font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; color: var(--ink); margin: 1.5rem 0 .75rem; padding-bottom: .4rem; border-bottom: 2px solid #f0ebe2; }
+  </style>
+</head>
+<body>
+  <!-- ── Navigation (matches site) ── -->
+  <nav class="navbar">
+    <a href="/" class="logo">Printosky</a>
+    <div class="nav-links">
+      <a href="/academic">Academic Orders</a>
+      <a href="/project-builder" class="active">Project Builder</a>
+      <a href="/#contact">Contact</a>
+    </div>
+  </nav>
+
+  <div class="pb-page">
+
+    <!-- ── Hero ── -->
+    <div class="pb-hero">
+      <h1>Project Report Builder <span class="pb-badge" style="background:#0ea5e9">v4 Async</span><span id="adminBadge" class="admin-badge" style="display:none">⚡ Admin Mode</span></h1>
+      <p>Format your university project report correctly — margins, heading styles, page numbering — without fighting Word. Free template or let us do it for you.</p>
+    </div>
+
+    <!-- ── Step indicator ── -->
+    <div class="pb-steps" id="stepIndicator">
+      <div class="pb-step-dot active" id="sdot0">1</div>
+      <div class="pb-step-line" id="sline01"></div>
+      <div class="pb-step-dot" id="sdot1">2</div>
+      <div class="pb-step-line" id="sline12"></div>
+      <div class="pb-step-dot" id="sdot2">3</div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         STEP 0 — University + Tier selection
+    ════════════════════════════════════════════════════════════════ -->
+    <div id="step0">
+
+      <!-- University selector -->
+      <div class="pb-card">
+        <h2>Your University</h2>
+        <div class="uni-chips">
+          <div class="uni-chip selected" data-uni="ktu">
+            <div class="dot" style="background:#1B3F8B"></div> KTU
+          </div>
+          <div class="uni-chip" data-uni="mg_university">
+            <div class="dot" style="background:#155724"></div> MG University
+          </div>
+          <div class="uni-chip" data-uni="calicut_university">
+            <div class="dot" style="background:#6d1d1d"></div> Calicut University
+          </div>
+          <div class="uni-chip" data-uni="cusat">
+            <div class="dot" style="background:#0a3055"></div> CUSAT
+          </div>
+          <div class="uni-chip" data-uni="other">
+            <div class="dot" style="background:#555"></div> Other / Generic
+          </div>
+        </div>
+      </div>
+
+      <!-- Tier selector -->
+      <div class="pb-card">
+        <h2>What do you need?</h2>
+        <div class="tier-grid">
+
+          <div class="tier-card" data-tier="free" onclick="selectTier('free')">
+            <h4>Free Template</h4>
+            <div class="price free">Free</div>
+            <p>Download a pre-built .docx with your university's exact margins, fonts, heading styles, and page numbering. Fill in your content.</p>
+          </div>
+
+          <div class="tier-card selected" data-tier="format_fix" onclick="selectTier('format_fix')">
+            <div class="tier-popular">Most popular</div>
+            <h4>Format Fixer</h4>
+            <div class="price">₹199</div>
+            <p>Already written your project? Paste or upload your rough draft — we apply your university's exact format in minutes.</p>
+          </div>
+
+          <div class="tier-card" data-tier="generate" onclick="selectTier('generate')">
+            <h4>Generate from Scratch</h4>
+            <div class="price">₹399 – ₹999</div>
+            <p>Fill in your details and content. We build the full report — cover page, certificate, declaration, all chapters.</p>
+            <div class="tier-unavailable-msg" id="generate-unavailable">
+              ⏸ Briefly paused — our editors are finishing earlier orders.
+              Back online within ~2 hours, or pick Format Fixer.
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div style="text-align:right">
+        <button class="pb-btn pb-btn-primary" onclick="goStep1()">Continue →</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         STEP 1 — Content input
+    ════════════════════════════════════════════════════════════════ -->
+    <div id="step1" class="pb-hidden">
+
+      <!-- FREE: just download -->
+      <div id="panel-free">
+        <div class="pb-card">
+          <h2>Download Free Template</h2>
+          <p style="color:#555; margin-bottom:1.25rem">Your university's project report template — margins, fonts, page numbering all set up. Open in Microsoft Word and fill in your content.</p>
+          <p style="color:#999; font-size:.82rem; margin-bottom:1.5rem">⚠️ You'll still need to fill in your Certificate, Declaration, and student details manually.</p>
+          <button class="pb-btn pb-btn-download" id="downloadBtn" onclick="downloadFreeTemplate()">⬇ Download .docx Template</button>
+          <div class="pb-error" id="freeError"></div>
+        </div>
+        <div class="pb-cta-strip">
+          <div>
+            <h3>Ready to print and bind?</h3>
+            <p>Once your report is ready — bring it to us or share on WhatsApp</p>
+          </div>
+          <a href="https://wa.me/919495706405?text=Hi%2C%20I%20need%20to%20print%20and%20bind%20my%20project%20report" target="_blank" class="pb-btn pb-btn-green" style="text-decoration:none">💬 WhatsApp 9495706405</a>
+        </div>
+        <div style="margin-top:1rem; text-align:left">
+          <button class="pb-btn pb-btn-secondary" onclick="goBack()">← Back</button>
+        </div>
+      </div>
+
+      <!-- FORMAT FIX: paste or upload -->
+      <div id="panel-format-fix" class="pb-hidden">
+        <div class="pb-card">
+          <h2>Format Fixer <span style="color:#aaa;font-weight:400;font-size:.9rem">— ₹199</span></h2>
+          <p style="color:#555; margin-bottom:1.25rem">Upload your rough <strong>.docx</strong> or paste your content — we apply your university's exact format. Your images and tables are preserved.</p>
+          <p style="color:#e67e22; font-size:.82rem; margin-bottom:1.25rem">📌 Have a PDF? Open it in Word → File → Save As → Word Document (.docx) → upload that file here.</p>
+
+          <div class="pb-tabs">
+            <button class="pb-tab active" onclick="switchTab('paste')">Paste text</button>
+            <button class="pb-tab" onclick="switchTab('upload')">Upload file</button>
+          </div>
+
+          <div id="tab-paste">
+            <div class="pb-field">
+              <label>Paste your project content here</label>
+              <textarea id="pasteContent" rows="12" placeholder="Paste your project report text here — chapters, sections, references. Structure will be identified automatically."></textarea>
+              <div class="hint">Minimum 200 words recommended for best results.</div>
+            </div>
+          </div>
+
+          <div id="tab-upload" class="pb-hidden">
+            <div class="upload-zone" id="uploadZone">
+              <input type="file" id="uploadFile" accept=".docx,.pdf,.txt" onchange="handleFileSelect(this)">
+              <div class="icon">📝</div>
+              <p>Click to choose or drag and drop your Word, PDF or text file</p>
+              <p style="font-size:.8rem; color:#bbb; margin-top:.25rem">.docx · .pdf · .txt — max 10 MB</p>
+              <div class="upload-name" id="uploadFileName"></div>
+            </div>
+            <div id="detectWrap" class="pb-hidden" style="margin-top:.75rem">
+              <button class="pb-btn pb-btn-secondary" id="detectBtn" onclick="analyseDocument()" style="width:100%;font-size:.95rem">🔍 Detect Chapters →</button>
+            </div>
+            <div id="detectedStructure" class="pb-hidden" style="margin-top:1rem;background:#f6f8f2;border:1px solid #d4e0c8;border-radius:8px;padding:1rem 1.25rem">
+              <div style="font-weight:600;margin-bottom:.6rem;color:#2a2a2a" id="detectedTitle"></div>
+              <div id="detectedChapters"></div>
+              <div id="detectedNote" style="margin-top:.6rem;font-size:.82rem"></div>
+            </div>
+          </div>
+
+          <div class="pb-error" id="ffError"></div>
+        </div>
+
+        <!-- v3 page-element toggles -->
+        <div class="pb-card" style="margin-top:1rem">
+          <details style="cursor:pointer">
+            <summary style="font-weight:600;font-size:.95rem;color:var(--ink);outline:none">
+              ⚙ Page options (page numbers, header, footer) — click to customize
+            </summary>
+            <div style="margin-top:.85rem;padding-top:.5rem;border-top:1px solid #1e293b;font-size:.88rem">
+
+              <div style="margin-bottom:.85rem">
+                <label style="display:flex;align-items:center;gap:.5rem;font-weight:600">
+                  <input type="checkbox" id="optPageNumbers" checked>
+                  Page numbers
+                </label>
+                <div style="margin-left:1.8rem;margin-top:.35rem;color:#888;font-size:.82rem">
+                  <label style="display:inline-flex;align-items:center;gap:.4rem;margin-right:1rem">
+                    Style:
+                    <select id="optPageNumberStyle" style="background:#161b22;color:#e6edf3;border:1px solid #333;border-radius:4px;padding:.2rem .4rem">
+                      <option value="roman_then_arabic" selected>Roman (i, ii) for front matter → Arabic (1, 2) from Ch 1</option>
+                      <option value="decimal">Arabic (1, 2, 3) throughout</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <div style="margin-bottom:.85rem">
+                <label style="display:flex;align-items:center;gap:.5rem;font-weight:600;margin-bottom:.3rem">
+                  Header (top of every page)
+                </label>
+                <input type="text" id="optHeaderText" maxlength="100" placeholder="Leave empty for no header"
+                  style="width:100%;padding:.5rem .75rem;border:1px solid #333;border-radius:6px;background:#161b22;color:#e6edf3;font-size:.9rem;box-sizing:border-box">
+              </div>
+
+              <div style="margin-bottom:.5rem">
+                <label style="display:flex;align-items:center;gap:.5rem;font-weight:600;margin-bottom:.3rem">
+                  Footer text (above page number)
+                </label>
+                <input type="text" id="optFooterText" maxlength="100" placeholder="Leave empty for no footer text"
+                  style="width:100%;padding:.5rem .75rem;border:1px solid #333;border-radius:6px;background:#161b22;color:#e6edf3;font-size:.9rem;box-sizing:border-box">
+              </div>
+
+              <p style="font-size:.75rem;color:#666;margin:.5rem 0 0">
+                Page borders coming in a follow-up release.
+              </p>
+            </div>
+          </details>
+        </div>
+
+        <div class="pb-btn-row">
+          <button class="pb-btn pb-btn-secondary" onclick="goBack()">← Back</button>
+          <button class="pb-btn pb-btn-primary" onclick="formatPreview('format_fix')">Format My Report → <small style="font-weight:400;opacity:.8">(free preview)</small></button>
+        </div>
+      </div>
+
+      <!-- GENERATE: full form -->
+      <div id="panel-generate" class="pb-hidden">
+        <div class="pb-card">
+          <h2>Generate from Scratch <span style="color:#aaa;font-weight:400;font-size:.9rem">— ₹399–₹999</span></h2>
+
+          <div class="pb-section-title">Report Details</div>
+          <div class="pb-field">
+            <label>Project Title *</label>
+            <input type="text" id="g_title" maxlength="200" placeholder="e.g. Smart Traffic Control System Using IoT">
+          </div>
+          <div class="pb-row">
+            <div class="pb-field">
+              <label>College Name *</label>
+              <input type="text" id="g_college" placeholder="e.g. MES College of Engineering">
+            </div>
+            <div class="pb-field">
+              <label>Academic Year *</label>
+              <input type="text" id="g_year" placeholder="e.g. 2025–26">
+            </div>
+          </div>
+          <div class="pb-row">
+            <div class="pb-field">
+              <label>Department *</label>
+              <input type="text" id="g_dept" placeholder="e.g. Computer Science and Engineering">
+            </div>
+            <div class="pb-field">
+              <label>Report Type *</label>
+              <select id="g_type">
+                <option value="">Select type</option>
+                <option>B.Tech Final Year Project</option>
+                <option>B.Tech Mini Project</option>
+                <option>Seminar Report</option>
+                <option>MCA Project</option>
+                <option>BCA Project</option>
+                <option>BSc Project</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="pb-section-title">Students</div>
+          <div id="studentRows"></div>
+          <button class="pb-btn pb-btn-secondary" style="margin-top:.25rem;font-size:.9rem" onclick="addStudent()">＋ Add Student</button>
+
+          <div class="pb-section-title">Faculty</div>
+          <div class="pb-row">
+            <div class="pb-field">
+              <label>Guide Name *</label>
+              <input type="text" id="g_guide_name" placeholder="e.g. Dr. Rajesh Kumar">
+            </div>
+            <div class="pb-field">
+              <label>Guide Designation *</label>
+              <input type="text" id="g_guide_desig" placeholder="e.g. Assistant Professor">
+            </div>
+          </div>
+          <div style="margin-bottom:.75rem">
+            <button class="pb-btn pb-btn-secondary" id="coGuideToggle" onclick="toggleCoGuide()" style="font-size:.85rem;padding:.35rem .9rem">＋ Add Co-Guide (optional)</button>
+          </div>
+          <div id="coGuideRow" class="pb-row pb-hidden">
+            <div class="pb-field">
+              <label>Co-Guide Name</label>
+              <input type="text" id="g_coguide_name" placeholder="e.g. Ms. Anitha Thomas">
+            </div>
+            <div class="pb-field">
+              <label>Co-Guide Designation</label>
+              <input type="text" id="g_coguide_desig" placeholder="e.g. Assistant Professor">
+            </div>
+          </div>
+          <div class="pb-row">
+            <div class="pb-field">
+              <label>HOD Name *</label>
+              <input type="text" id="g_hod_name" placeholder="e.g. Prof. Suresh Menon">
+            </div>
+            <div class="pb-field">
+              <label>HOD Designation *</label>
+              <input type="text" id="g_hod_desig" placeholder="e.g. Professor & HOD">
+            </div>
+          </div>
+
+          <div class="pb-section-title">Content</div>
+          <div class="pb-field">
+            <label>Abstract * <span style="color:#aaa;font-weight:400">(100–300 words)</span></label>
+            <textarea id="g_abstract" rows="6" placeholder="Write your abstract here..." oninput="updateWordCount(this, 'wc_abstract', 100, 300)"></textarea>
+            <div class="word-counter" id="wc_abstract">0 words</div>
+          </div>
+          <div class="pb-field">
+            <label>Keywords <span style="color:#aaa;font-weight:400">(optional — comma-separated)</span></label>
+            <input type="text" id="g_keywords" placeholder="e.g. IoT, Smart Traffic, Arduino, Machine Learning, Embedded Systems">
+          </div>
+
+          <div id="chapterBlocks"></div>
+          <button class="pb-btn pb-btn-secondary" style="margin-top:.25rem;font-size:.9rem" onclick="addChapter()">＋ Add Chapter</button>
+
+          <div class="pb-field">
+            <label>References * <span style="color:#aaa;font-weight:400">(one reference per line)</span></label>
+            <textarea id="g_references" rows="6" placeholder="[1] R. Smith, &quot;Title of paper,&quot; Journal Name, vol. 1, no. 1, pp. 1-10, 2024.&#10;[2] ..."></textarea>
+            <div class="hint">Type your references in IEEE or APA format — we'll apply the correct style.</div>
+          </div>
+          <div class="pb-field">
+            <label>Appendices <span style="color:#aaa">(optional)</span></label>
+            <textarea id="g_appendices" rows="4" placeholder="Appendix A: Code listing, Appendix B: Circuit diagrams, etc."></textarea>
+          </div>
+
+          <div class="pb-error" id="genError"></div>
+        </div>
+
+        <div id="genPriceNote" style="text-align:right;color:#777;font-size:.88rem;margin-bottom:.5rem"></div>
+        <div class="pb-btn-row">
+          <button class="pb-btn pb-btn-secondary" onclick="goBack()">← Back</button>
+          <button class="pb-btn pb-btn-primary" id="genPayBtn" onclick="formatPreview('generate')">Generate My Report → <small style="font-weight:400;opacity:.8">(free preview)</small></button>
+        </div>
+      </div>
+
+    </div><!-- /step1 -->
+
+    <!-- ═══════════════════════════════════════════════════════════
+         STEP 2 — Processing spinner
+    ════════════════════════════════════════════════════════════════ -->
+    <div id="step2" class="pb-hidden">
+      <div class="pb-card pb-spinner">
+        <div class="spinner-ring"></div>
+        <h3 id="spinnerTitle">Formatting your report…</h3>
+        <p id="spinnerSub">Typical time: <strong>~90 seconds</strong>. Please don't close this tab.</p>
+        <div id="v3stages" style="display:none;text-align:left;max-width:380px;margin:1rem auto 0;font-size:.9rem">
+          <div class="v3-stage" id="v3stage1"><span class="v3-icon">◌</span> <span class="v3-text">Uploading file</span></div>
+          <div class="v3-stage" id="v3stage2"><span class="v3-icon">◌</span> <span class="v3-text">Reading pages</span></div>
+          <div class="v3-stage" id="v3stage3"><span class="v3-icon">◌</span> <span class="v3-text">Analyzing layout (the longest step)</span></div>
+          <div class="v3-stage" id="v3stage4"><span class="v3-icon">◌</span> <span class="v3-text">Building Word document</span></div>
+          <div id="v3elapsed" style="margin-top:.75rem;font-size:.8rem;color:#888;text-align:center">Elapsed: <span id="v3sec">0</span>s</div>
+        </div>
+        <style>
+          .v3-stage{padding:.3rem 0;color:#888;transition:color .3s}
+          .v3-stage.v3-done{color:#22c55e}
+          .v3-stage.v3-active{color:#e6edf3;font-weight:600}
+          .v3-stage .v3-icon{display:inline-block;width:1.2em;text-align:center}
+          .v3-stage.v3-done .v3-icon::before{content:'✓'}
+          .v3-stage.v3-active .v3-icon{animation:v3spin 1s linear infinite;display:inline-block}
+          .v3-stage.v3-active .v3-icon::before{content:'◐'}
+          @keyframes v3spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+        </style>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         STEP 3 — Download
+    ════════════════════════════════════════════════════════════════ -->
+    <div id="step3" class="pb-hidden">
+      <!-- State A: Preview before payment -->
+      <div id="step3preview" class="pb-card pb-download-card">
+        <div class="check">🔍</div>
+        <h2>Your report is formatted!</h2>
+        <p id="previewSubtext">University formatting applied. Pay to download the .docx file.</p>
+        <div id="previewChapters" style="text-align:left;margin-bottom:1.5rem;max-height:260px;overflow-y:auto"></div>
+        <!-- WhatsApp delivery (optional) -->
+        <div style="margin-bottom:1.25rem;text-align:left;background:#0d1117;border:1px solid #1e3a5f;border-radius:8px;padding:.85rem 1rem">
+          <label style="font-size:.82rem;color:#7eb8f7;display:block;margin-bottom:.4rem;font-weight:600">📱 Also send to WhatsApp <span style="color:#555;font-weight:400">(optional)</span></label>
+          <input type="tel" id="waPhoneInput" placeholder="10-digit mobile number" maxlength="10"
+            style="width:100%;padding:.5rem .75rem;border:1px solid #333;border-radius:6px;background:#161b22;color:#e6edf3;font-size:.95rem;box-sizing:border-box;outline:none"
+            oninput="this.value=this.value.replace(/\D/g,'')">
+          <p style="font-size:.75rem;color:#555;margin:.35rem 0 0">We'll send your document link here so you can re-download anytime.</p>
+        </div>
+        <div id="formatBtns" style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
+          <button class="pb-btn pb-btn-primary" id="payDocxBtn" style="font-size:1rem;padding:.75rem 1.5rem" onclick="startDownloadPayment()">📄 Pay &amp; Download .docx</button>
+        </div>
+        <p class="pay-only" style="font-size:.8rem;color:#aaa;margin-top:.75rem">Secure payment via Razorpay · Permanent download link</p>
+        <button id="adminDlBtn" class="pb-btn pb-btn-secondary" style="display:none;margin-top:.5rem;font-size:.85rem" onclick="adminDownload()">🔑 Admin Download (skip payment)</button>
+        <div class="pb-error" id="previewPayError" style="display:none;margin-top:.75rem"></div>
+      </div>
+      <!-- State B: Download after payment confirmed -->
+      <div id="step3download" class="pb-card pb-download-card pb-hidden">
+        <div class="check">✅</div>
+        <h2>Payment confirmed!</h2>
+        <p>Open in Microsoft Word — headings and TOC will update automatically.</p>
+        <a id="dlFinalLink" class="pb-btn pb-btn-download" style="display:inline-block;text-decoration:none" href="#" target="_blank">⬇ Download Report.docx</a>
+        <p id="waDeliveryMsg" style="display:none;font-size:.88rem;color:#22c55e;margin-top:.75rem">📱 Document also sent to your WhatsApp!</p>
+        <p style="font-size:.8rem;color:#aaa;margin-top:.75rem">Remember to fill in any <span style="color:var(--accent)">highlighted placeholder text</span> with your specific details.</p>
+        <p id="orderIdDisplay" style="display:none;font-size:.8rem;color:#666;margin-top:.5rem">
+          Order ID: <strong id="orderIdValue" style="color:#7eb8f7;letter-spacing:.03em"></strong>
+          &nbsp;·&nbsp;<a href="/pb-retrieve" style="color:#7eb8f7;text-decoration:none">Re-download anytime →</a>
+        </p>
+        <div class="pb-error" id="dlError" style="display:none"></div>
+      </div>
+      <div class="pb-cta-strip">
+        <div>
+          <h3>Ready to print and bind?</h3>
+          <p>We print, hard-bind and can deliver — same day in Thrissur</p>
+        </div>
+        <a href="https://wa.me/919495706405?text=Hi%2C%20my%20project%20report%20is%20ready.%20I%20need%20printing%20and%20hard%20binding." target="_blank" class="pb-btn pb-btn-green" style="text-decoration:none">💬 WhatsApp 9495706405</a>
+      </div>
+      <div style="margin-top:1rem;text-align:center">
+        <button class="pb-btn pb-btn-secondary" onclick="resetAll()">← Start Over</button>
+      </div>
+    </div>
+
+  </div><!-- /pb-page -->
+
+  <script>
+  // ── State ────────────────────────────────────────────────────────────────────
+  const state = {
+    university: 'ktu',
+    tier: 'format_fix',
+    uploadTab: 'paste',
+    studentCount: 1,
+    chapterCount: 8,
+    fileBytes: null,         // legacy — kept null; replaced by extractedText
+    extractedText: '',       // client-side text extracted in handleFileSelect
+    extractInProgress: false,
+    fileName: null,
+    analysed: false,
+    fileToken: null,
+    fileType: null,
+    currentService: null,
+    adminMode: false,
+    adminPw: null,
+    premiumPaused: false,
+  };
+
+  const API = 'https://printosky.vercel.app';   // Vercel API
+
+  // ── Admin-mode auto-detection ────────────────────────────────────────────────
+  // If the operator logged into /admin in this tab, sessionStorage carries
+  // 'admin_pw_cache'. We pick that up, switch the UI to dark theme, show the
+  // admin badge, and skip the Razorpay path on the final step.
+  function bootAdminMode() {
+    try {
+      const pw = sessionStorage.getItem('admin_pw_cache');
+      if (!pw) return;
+      state.adminMode = true;
+      state.adminPw   = pw;
+      document.body.classList.add('theme-admin');
+      const b = document.getElementById('adminBadge');
+      if (b) b.style.display = 'inline-flex';
+    } catch (e) { /* sessionStorage may be blocked — silently no-op */ }
+  }
+  bootAdminMode();
+
+  // ── Utility ──────────────────────────────────────────────────────────────────
+  function $(id) { return document.getElementById(id); }
+  function showErr(id, msg) {
+    const el = $(id);
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+  function hideErr(id) { $(id).style.display = 'none'; }
+  function show(id) { $(id).classList.remove('pb-hidden'); }
+  function hide(id) { $(id).classList.add('pb-hidden'); }
+
+  // ── University selection ──────────────────────────────────────────────────────
+  document.querySelectorAll('.uni-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.uni-chip').forEach(c => c.classList.remove('selected'));
+      chip.classList.add('selected');
+      state.university = chip.dataset.uni;
+    });
+  });
+
+  // ── Tier selection ────────────────────────────────────────────────────────────
+  function selectTier(tier) {
+    if (tier === 'generate' && state.premiumPaused) {
+      alert(
+        "Generate-from-Scratch is briefly paused while our editorial team " +
+        "finishes earlier orders. Try again in a couple of hours, or pick " +
+        "Format Fixer to format your existing draft now."
+      );
+      return;
+    }
+    document.querySelectorAll('.tier-card').forEach(c => c.classList.remove('selected'));
+    document.querySelector(`.tier-card[data-tier="${tier}"]`).classList.add('selected');
+    state.tier = tier;
+  }
+
+  // ── Availability check (P0 Day 2.5d back-pressure) ───────────────────────
+  // If operator queue is at/over capacity, the Generate tier is paused.
+  // We grey it out and refuse selection. Public endpoint, no auth.
+  async function checkAvailability() {
+    try {
+      const r = await fetch(`${API}/project-builder/availability`);
+      if (!r.ok) return;
+      const d = await r.json();
+      state.premiumPaused = !d.premium_available;
+      const card = document.querySelector('.tier-card[data-tier="generate"]');
+      if (!card) return;
+      if (state.premiumPaused) {
+        card.classList.add('unavailable');
+        // If user had Generate selected on a stale load, move them back
+        if (state.tier === 'generate') selectTier('format_fix');
+      } else {
+        card.classList.remove('unavailable');
+      }
+    } catch (e) { /* offline / network — leave defaults */ }
+  }
+  checkAvailability();
+
+  // ── Step navigation ───────────────────────────────────────────────────────────
+  function goStep1() {
+    hide('step0');
+    show('step1');
+    // Show the right panel
+    hide('panel-free');
+    hide('panel-format-fix');
+    hide('panel-generate');
+    if (state.tier === 'free')        show('panel-free');
+    else if (state.tier === 'format_fix') show('panel-format-fix');
+    else                              show('panel-generate');
+    setStepUI(1);
+    window.scrollTo(0,0);
+  }
+
+  function goBack() {
+    hide('step1');
+    hide('step2');
+    show('step0');
+    setStepUI(0);
+    window.scrollTo(0,0);
+  }
+
+  function goStep2() {
+    hide('step1');
+    show('step2');
+    setStepUI(2);
+    window.scrollTo(0,0);
+  }
+
+  function goStep3() {
+    hide('step2');
+    show('step3');
+    setStepUI(3);
+    window.scrollTo(0,0);
+  }
+
+  function setStepUI(step) {
+    for (let i=0; i<3; i++) {
+      const dot = $('sdot'+i);
+      dot.classList.remove('active','done');
+      if (i < step) dot.classList.add('done');
+      else if (i === step) dot.classList.add('active');
+    }
+    for (let i=0; i<2; i++) {
+      const line = $('sline0'+(i+1) in {} ? 'sline0'+(i+1) : 'sline'+(i)+(i+1));
+      // update lines
+    }
+    $('sline01').className = 'pb-step-line' + (step > 0 ? ' done' : '');
+    $('sline12').className = 'pb-step-line' + (step > 1 ? ' done' : '');
+  }
+
+  function resetAll() {
+    state.fileToken = null;
+    state.fileType = null;
+    state.currentService = null;
+    state.fileBytes = null;
+    state.extractedText = '';
+    state.extractInProgress = false;
+    state.fileName = null;
+    hide('step1'); hide('step2'); hide('step3');
+    show('step0');
+    setStepUI(0);
+    window.scrollTo(0,0);
+  }
+
+  // ── Tab switching (paste/upload) ──────────────────────────────────────────────
+  function switchTab(tab) {
+    state.uploadTab = tab;
+    document.querySelectorAll('.pb-tab').forEach((t,i) => {
+      t.classList.toggle('active', (i===0 && tab==='paste')||(i===1 && tab==='upload'));
+    });
+    if (tab === 'paste') { show('tab-paste'); hide('tab-upload'); }
+    else                 { hide('tab-paste'); show('tab-upload'); }
+  }
+
+  // ── File selection (client-side text extraction) ─────────────────────────────
+  // We extract text in the browser via mammoth.js (DOCX) / pdf.js (PDF) so the
+  // huge binary file never crosses the wire. Vercel function payload limit
+  // (4.5 MB) would otherwise 413 on a 4 MB student doc.
+  // v2 Beta: file selection records the file for the signed-URL upload
+  // pipeline in formatPreview(). The v1 client-side text extraction
+  // (mammoth.js + pdf.js) is intentionally NOT used here -- v2 sends
+  // the binary directly to Supabase, so extracting text on the client
+  // is dead weight + a failure surface (pdfjsLib load errors blocked
+  // the customer from even reaching the upload step).
+  function handleFileSelect(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) {
+      showErr('ffError', 'File is too large (max 20 MB). Please compress and retry.');
+      return;
+    }
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['docx', 'pdf', 'txt'].includes(ext)) {
+      showErr('ffError', 'Supported file types: .docx, .pdf, .txt. Convert your file and try again.');
+      return;
+    }
+    hideErr('ffError');
+    state.fileName = file.name;
+    state.fileType = ext;
+    state.analysed = false;
+    // Legacy fields kept so the rest of the v1-derived page doesn't
+    // trip on "undefined" checks; v2's formatPreview reads
+    // $('uploadFile').files[0] directly, not state.extractedText.
+    state.extractedText = '';
+    state.extractInProgress = false;
+    hide('detectedStructure');
+    hide('detectWrap');
+    const sizeKb = (file.size / 1024).toFixed(1);
+    $('uploadFileName').textContent =
+      `📎 ${file.name} — ${sizeKb} KB ready to format`;
+  }
+
+  // ── Drag & drop ───────────────────────────────────────────────────────────────
+  const uploadZone = $('uploadZone');
+  uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      $('uploadFile').files = e.dataTransfer.files;
+      handleFileSelect($('uploadFile'));
+    }
+  });
+
+  // ── Chapter detection (free pre-payment step) ────────────────────────────────
+  async function analyseDocument() {
+    if (!state.fileBytes) { showErr('ffError', 'Please select a file first.'); return; }
+    const btn = $('detectBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Detecting…';
+    hideErr('ffError');
+    hide('detectedStructure');
+    try {
+      const res = await fetch(`${API}/project-builder/analyse`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({content_b64: state.fileBytes, filename: state.fileName})
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Detection failed');
+
+      $('detectedTitle').textContent = '📄 ' + (data.title || state.fileName);
+
+      if (data.structured && data.chapters.length > 0) {
+        $('detectedChapters').innerHTML = data.chapters.map(ch =>
+          `<div style="display:flex;justify-content:space-between;padding:.3rem 0;border-bottom:1px solid #e4edda;font-size:.88rem">
+             <span>Ch ${ch.number}: ${ch.heading}</span>
+             <span style="color:#888">${ch.word_count ? ch.word_count.toLocaleString() + ' words' : ''}</span>
+           </div>`
+        ).join('');
+        const note = $('detectedNote');
+        note.style.color = '#2d6e2d';
+        note.textContent = `✓ ${data.chapters.length} chapters detected · ${data.word_count.toLocaleString()} words total`;
+      } else {
+        $('detectedChapters').innerHTML = '<div style="color:#888;font-size:.88rem">No clear chapter structure detected — will be formatted as continuous text with all body styles applied.</div>';
+        const note = $('detectedNote');
+        note.style.color = '#777';
+        note.textContent = `${data.word_count.toLocaleString()} words extracted.`;
+      }
+
+      show('detectedStructure');
+      state.analysed = true;
+    } catch(e) {
+      showErr('ffError', 'Detection failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔍 Detect Chapters →';
+    }
+  }
+
+  // ── Students ──────────────────────────────────────────────────────────────────
+  function getStudentData() {
+    const data = [];
+    for (let i=1; i<=state.studentCount; i++) {
+      data.push({ name: ($('g_sname'+i)||{}).value||'', roll: ($('g_sroll'+i)||{}).value||'' });
+    }
+    return data;
+  }
+
+  function addStudent() {
+    if (state.studentCount >= 4) return;
+    const data = getStudentData();
+    data.push({name:'', roll:''});
+    state.studentCount++;
+    renderStudentRows(data);
+  }
+
+  function removeStudent(idx) {
+    if (state.studentCount <= 1) return;
+    const data = getStudentData();
+    data.splice(idx, 1);
+    state.studentCount--;
+    renderStudentRows(data);
+  }
+
+  function renderStudentRows(savedData) {
+    const container = $('studentRows');
+    if (!savedData) savedData = Array.from({length: state.studentCount}, () => ({name:'', roll:''}));
+    container.innerHTML = '';
+    for (let i=1; i<=state.studentCount; i++) {
+      const {name, roll} = savedData[i-1] || {name:'', roll:''};
+      const div = document.createElement('div');
+      div.style.cssText = 'display:flex;gap:1rem;align-items:flex-end;margin-bottom:.75rem';
+      div.innerHTML = `
+        <div class="pb-field" style="flex:1"><label>Student ${i} Name</label><input type="text" id="g_sname${i}" placeholder="Full name" value="${name.replace(/"/g,'&quot;')}"></div>
+        <div class="pb-field" style="flex:1"><label>Roll Number</label><input type="text" id="g_sroll${i}" placeholder="e.g. KTU/IT/2024/001" value="${roll.replace(/"/g,'&quot;')}"></div>
+        ${state.studentCount > 1 ? `<button onclick="removeStudent(${i-1})" style="background:none;border:none;color:#c00;font-size:1.1rem;cursor:pointer;padding:.4rem;flex-shrink:0;margin-bottom:.15rem" title="Remove student">✕</button>` : ''}
+      `;
+      container.appendChild(div);
+    }
+  }
+
+  // ── Chapters ──────────────────────────────────────────────────────────────────
+  const DEFAULT_CHAPTERS = [
+    'Introduction','Literature Survey','Problem Statement','System Design',
+    'Implementation','Testing','Results and Discussion','Conclusion and Future Work'
+  ];
+
+  function getChapterData() {
+    const data = [];
+    for (let i=1; i<=state.chapterCount; i++) {
+      data.push({ title: ($('g_ctitle'+i)||{}).value||'', content: ($('g_ccontent'+i)||{}).value||'' });
+    }
+    return data;
+  }
+
+  function addChapter() {
+    const data = getChapterData();
+    data.push({title: DEFAULT_CHAPTERS[state.chapterCount]||'', content:''});
+    state.chapterCount++;
+    renderChapterBlocks(data);
+    updateGenPrice();
+  }
+
+  function removeChapter(idx) {
+    if (state.chapterCount <= 1) return;
+    const data = getChapterData();
+    data.splice(idx, 1);
+    state.chapterCount--;
+    renderChapterBlocks(data);
+    updateGenPrice();
+  }
+
+  function renderChapterBlocks(savedData) {
+    const container = $('chapterBlocks');
+    if (!savedData) {
+      savedData = Array.from({length: state.chapterCount}, (_, i) => ({title: DEFAULT_CHAPTERS[i]||'', content:''}));
+    }
+    container.innerHTML = '';
+    for (let i=1; i<=state.chapterCount; i++) {
+      const {title, content} = savedData[i-1] || {title: DEFAULT_CHAPTERS[i-1]||'', content:''};
+      const div = document.createElement('div');
+      div.className = 'chapter-block';
+      div.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+          <h4 style="margin:0">Chapter ${i}</h4>
+          ${state.chapterCount > 1 ? `<button onclick="removeChapter(${i-1})" style="background:none;border:none;color:#c00;font-size:.85rem;cursor:pointer;padding:.2rem .6rem">✕ Remove</button>` : ''}
+        </div>
+        <div class="pb-field"><label>Chapter Title</label><input type="text" id="g_ctitle${i}" value="${title.replace(/"/g,'&quot;')}"></div>
+        <div class="pb-field"><label>Chapter Content</label><textarea id="g_ccontent${i}" rows="5" placeholder="Write the content for Chapter ${i} here…">${content.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
+      `;
+      container.appendChild(div);
+    }
+  }
+
+  function updateGenPrice() {
+    const price = state.chapterCount > 5 ? 149 : 99;
+    $('genPriceNote').textContent = `Price after preview: ₹${price} (based on ${state.chapterCount} chapters)`;
+    $('genPayBtn').innerHTML = `Generate My Report → <small style="font-weight:400;opacity:.8">(free preview)</small>`;
+    state._genPrice = price;
+  }
+
+  // ── Co-guide toggle ───────────────────────────────────────────────────────────
+  function toggleCoGuide() {
+    const row = $('coGuideRow');
+    const btn = $('coGuideToggle');
+    const hidden = row.classList.contains('pb-hidden');
+    if (hidden) {
+      row.classList.remove('pb-hidden');
+      btn.textContent = '− Remove Co-Guide';
+    } else {
+      row.classList.add('pb-hidden');
+      btn.textContent = '＋ Add Co-Guide (optional)';
+      $('g_coguide_name').value = '';
+      $('g_coguide_desig').value = '';
+    }
+  }
+
+  // ── Word counter ──────────────────────────────────────────────────────────────
+  function updateWordCount(el, counterId, min, max) {
+    const words = el.value.trim() ? el.value.trim().split(/\s+/).length : 0;
+    const el2 = $(counterId);
+    el2.textContent = `${words} words`;
+    el2.className = 'word-counter' + (words < min ? ' warn' : words <= max ? ' ok' : ' warn');
+  }
+
+  // ── Free template download ────────────────────────────────────────────────────
+  async function downloadFreeTemplate() {
+    const btn = $('downloadBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating…';
+    hideErr('freeError');
+    try {
+      const uni = state.university === 'other' ? 'ktu' : state.university;
+      const res = await fetch(`${API}/project-builder/templates/${uni}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `Server error ${res.status}`);
+      }
+      const blob = await res.blob();
+      triggerDownload(blob, `${uni}_project_template.docx`);
+    } catch(e) {
+      showErr('freeError', e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '⬇ Download .docx Template';
+    }
+  }
+
+  // ── Trigger browser download ──────────────────────────────────────────────────
+  function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  // ── Payment flow ──────────────────────────────────────────────────────────────
+  // A1 spinner: stage cycle for the long v3 Vision wait.
+  // Stages cycle based on elapsed wall-clock time. We don't have real
+  // server-side progress, but the timing here matches the engine's
+  // actual phases closely enough to feel honest.
+  let _v3StageTimer = null;
+  let _v3SecTimer = null;
+  function _v3SetStage(activeIdx) {
+    // 1=upload, 2=read, 3=analyze, 4=build
+    for (let i = 1; i <= 4; i++) {
+      const el = document.getElementById('v3stage' + i);
+      if (!el) continue;
+      el.classList.remove('v3-active', 'v3-done');
+      if (i < activeIdx) el.classList.add('v3-done');
+      else if (i === activeIdx) el.classList.add('v3-active');
+    }
+  }
+  function _v3StartStages() {
+    const stages = document.getElementById('v3stages');
+    if (stages) stages.style.display = 'block';
+    const sec = document.getElementById('v3sec');
+    const t0 = Date.now();
+    _v3SetStage(2);  // upload is already done by the time we call this
+    if (_v3SecTimer) clearInterval(_v3SecTimer);
+    _v3SecTimer = setInterval(() => {
+      const s = Math.round((Date.now() - t0) / 1000);
+      if (sec) sec.textContent = s;
+      // Stage transitions (approximate based on typical timing):
+      //   0-8s   = stage 2 (reading)
+      //   8-130s = stage 3 (analyzing, the bulk)
+      //   130s+  = stage 4 (building) - or whatever the elapsed shows
+      if (s < 8)  _v3SetStage(2);
+      else if (s < 130) _v3SetStage(3);
+      else _v3SetStage(4);
+    }, 500);
+  }
+  function _v3StopStages(success) {
+    if (_v3SecTimer) clearInterval(_v3SecTimer);
+    if (_v3StageTimer) clearTimeout(_v3StageTimer);
+    if (success) {
+      // Mark all 4 done
+      for (let i = 1; i <= 4; i++) {
+        const el = document.getElementById('v3stage' + i);
+        if (el) { el.classList.remove('v3-active'); el.classList.add('v3-done'); }
+      }
+    }
+  }
+
+  // v4 async helpers --------------------------------------------------------
+
+  // Map the v4 job-create / job-status response into the shape the
+  // existing v3 _showStep3Preview expects, so we don't have to fork
+  // that function. v3 expects: {engine, file_token, pages, page_kinds,
+  // input_tokens, output_tokens, cache_*, estimated_cost_inr,
+  // elapsed_seconds, download_filename, university, size_bytes}.
+  function _v4SubmitToV3Shape(submitData) {
+    const meta = submitData.result_meta || {};
+    return {
+      engine: 'format_fix_v4',
+      file_token: submitData.job_id,
+      download_filename: submitData.download_filename,
+      pages: meta.pages,
+      page_kinds: meta.page_kinds,
+      input_tokens: meta.input_tokens,
+      output_tokens: meta.output_tokens,
+      cache_read_tokens: meta.cache_read_tokens,
+      cache_write_tokens: meta.cache_write_tokens,
+      estimated_cost_inr: meta.estimated_cost_inr,
+      elapsed_seconds: meta.elapsed_seconds,
+      university: '',  // not in v4 response, will fall back
+      size_bytes: 0,
+      _v4_download_url: submitData.result_download_url,
+    };
+  }
+
+  // Poll until the job hits a terminal state. Returns the v3-shaped data.
+  async function _v4PollUntilDone(jobId, maxSeconds) {
+    maxSeconds = maxSeconds || 1800;  // 30 min ceiling on the poll loop
+    const t0 = Date.now();
+    while (true) {
+      if ((Date.now() - t0) / 1000 > maxSeconds) {
+        throw new Error('Job took longer than ' + maxSeconds + 's. '
+                        + 'Check back later at /project-builder-v4 with '
+                        + 'this job id: ' + jobId);
+      }
+      // Wait 5 seconds between polls (skip on first iteration)
+      await new Promise(r => setTimeout(r, 5000));
+      const r = await fetch(`${API}/project-builder/format-job-status?id=${encodeURIComponent(jobId)}`);
+      if (!r.ok) {
+        // 404 means the job was deleted somehow. 5xx means transient -
+        // keep polling for a while before giving up.
+        if (r.status === 404) {
+          throw new Error('Job ' + jobId + ' not found');
+        }
+        continue;
+      }
+      const s = await r.json();
+      if (s.status === 'done') {
+        return _v4SubmitToV3Shape({
+          job_id: s.job_id,
+          download_filename: s.download_filename,
+          result_meta: s.result_meta,
+          result_download_url: s.result_download_url,
+        });
+      }
+      if (s.status === 'error') {
+        throw new Error(s.error_message || ('Engine errored: ' + (s.error_type || 'unknown')));
+      }
+      // status is pending/processing - keep going
+    }
+  }
+
+  // ── Step 1: Free generation → show preview ───────────────────────────────────
+  // v2 Beta: file-upload format_fix goes via the signed-URL pipeline
+  // (mint -> PUT to Supabase -> POST /format-preview-v2). Paste mode
+  // and the generate service still use v1 because v2 only handles
+  // PDF/DOCX binaries. Original v1 flow at /project-builder.
+  async function formatPreview(service) {
+    const useV2Upload = (service === 'format_fix' && state.uploadTab === 'upload');
+
+    if (service === 'format_fix') {
+      if (state.uploadTab === 'paste' && !$('pasteContent').value.trim()) {
+        showErr('ffError', 'Please paste your project content first.'); return;
+      }
+      if (state.uploadTab === 'upload') {
+        const file = $('uploadFile').files[0];
+        if (!file) {
+          showErr('ffError', 'Please select a file first (or use paste).'); return;
+        }
+        if (file.size > 20 * 1024 * 1024) {
+          showErr('ffError', 'File is too large (max 20 MB).'); return;
+        }
+      }
+      hideErr('ffError');
+    } else {
+      if (!validateGenerateForm()) return;
+      hideErr('genError');
+    }
+
+    goStep2();
+    $('spinnerTitle').textContent = service === 'format_fix' ? 'Formatting your report…' : 'Building your report…';
+    $('spinnerSub').textContent = useV2Upload
+      ? 'Beta v2 engine — uploading, then ~10–20 seconds to process.'
+      : 'This is free — we\'ll show you the result before you pay. ~20–40 seconds.';
+
+    const uni = state.university === 'other' ? 'ktu' : state.university;
+
+    try {
+      let data;
+      if (useV2Upload) {
+        // -- v2 signed-URL flow --
+        const file = $('uploadFile').files[0];
+
+        // 1. Mint a one-time signed PUT URL
+        const signRes = await fetch(`${API}/project-builder/upload-sign`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ filename: file.name }),
+        });
+        const signData = await signRes.json();
+        if (!signRes.ok) throw new Error(signData.error || `Sign failed (${signRes.status})`);
+
+        // 2. PUT the binary directly to Supabase Storage (bypasses Vercel)
+        const putRes = await fetch(signData.signed_url, {
+          method: 'PUT',
+          headers: {'Content-Type': file.type || 'application/octet-stream'},
+          body: file,
+        });
+        if (!putRes.ok) {
+          const t = await putRes.text();
+          throw new Error(`Upload to storage failed (${putRes.status}): ${t.slice(0, 120)}`);
+        }
+
+        // 3. Tell the v4 engine to submit a job (async pattern).
+        _v3StartStages();
+
+        const _pageNumbers = $('optPageNumbers') ? $('optPageNumbers').checked : true;
+        const _pageNumberStyle = $('optPageNumberStyle') ? $('optPageNumberStyle').value : 'roman_then_arabic';
+        const _headerText = $('optHeaderText') ? $('optHeaderText').value.trim() : '';
+        const _footerText = $('optFooterText') ? $('optFooterText').value.trim() : '';
+        const _origName = (state.fileName || file.name || '').trim();
+        const _phone = ($('waPhoneInput') ? $('waPhoneInput').value.replace(/\D/g,'') : '').slice(0,10);
+
+        // Submit the job. Deploy 1: this still runs inline so the
+        // response comes back with status=done immediately. Deploy 2:
+        // this returns immediately with status=processing and we poll.
+        const submitRes = await fetch(`${API}/project-builder/format-job-create`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            storage_path: signData.storage_path,
+            university: uni,
+            original_filename: _origName,
+            page_numbers: _pageNumbers,
+            page_number_style: _pageNumberStyle,
+            header_text: _headerText,
+            footer_text: _footerText,
+            contact_phone: _phone || null,
+          }),
+        });
+        const submitData = await submitRes.json();
+        if (!submitRes.ok) {
+          _v3StopStages(false);
+          throw new Error(submitData.error_message || submitData.error
+                          || `Submit failed (${submitRes.status})`);
+        }
+
+        // If the server already returned done (Deploy 1 inline path),
+        // skip polling. Otherwise enter the poll loop.
+        if (submitData.status === 'done') {
+          data = _v4SubmitToV3Shape(submitData);
+        } else if (submitData.status === 'error') {
+          _v3StopStages(false);
+          throw new Error(submitData.error_message || 'Job errored');
+        } else {
+          // POLL
+          data = await _v4PollUntilDone(submitData.job_id);
+        }
+        _v3StopStages(true);
+
+      } else {
+        // -- v1 flow (paste mode for format_fix, or generate service) --
+        const payload = { service, university: uni };
+        if (service === 'format_fix') {
+          payload.content = $('pasteContent').value;
+        } else {
+          payload.form_data = collectFormData();
+        }
+        const res = await fetch(`${API}/project-builder/format-preview`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(payload),
+        });
+        data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+      }
+
+      state.fileToken = data.file_token;
+      state.currentService = service;
+      _showStep3Preview(data, service);
+    } catch(e) {
+      _v3StopStages(false);
+      hide('step2'); show('step1'); goStep1();
+      const errId = service === 'format_fix' ? 'ffError' : 'genError';
+      showErr(errId, 'Generation failed: ' + e.message);
+    }
+  }
+
+  // Renders the post-generate preview. v2 Beta engine returns
+  // {engine:"format_fix_v2", file_token, pages, claims, size_bytes};
+  // v1 returns {file_token, size_bytes, university, preview:{chapters,title}}.
+  function _showStep3Preview(data, service) {
+    const isV2 = (data.engine === 'format_fix_v2' || data.engine === 'format_fix_v3' || data.engine === 'format_fix_v4');
+    const isV3 = (data.engine === 'format_fix_v3');
+    const isV4 = (data.engine === 'format_fix_v4');
+    const uni  = data.university || state.university.toUpperCase();
+
+    let html = '';
+
+    if (isV2) {
+      // v2 Beta: preview-only flow (no payment integration yet).
+      // Subtext + direct Supabase download link.
+      $('previewSubtext').textContent =
+        `Beta v2 engine · formatted to A4 · ${uni} style. Download to verify.`;
+
+      const c = data.claims || {};
+      const sectionLabels = [];
+      if (c.cover)           sectionLabels.push('Cover');
+      if (c.acknowledgement) sectionLabels.push('Acknowledgement');
+      if (c.declaration)     sectionLabels.push('Declaration');
+      if (c.abstract)        sectionLabels.push('Abstract');
+      if (c.toc)             sectionLabels.push('Table of Contents');
+      if (c.chapter)         sectionLabels.push(`${c.chapter} chapter page(s)`);
+      if (c.references)      sectionLabels.push('References');
+      if (c.annexures)       sectionLabels.push('Annexures');
+
+      const sizeMb = ((data.size_bytes || 0) / (1024 * 1024)).toFixed(2);
+      html += `<p style="font-weight:700;font-size:.95rem;margin-bottom:.25rem;color:var(--ink)">Document processed</p>`;
+      html += `<p style="font-size:.8rem;color:#999;margin-bottom:.75rem">${data.pages || '?'} virtual pages · ${sizeMb} MB output · A4 · ${uni}</p>`;
+
+      if (sectionLabels.length) {
+        html += `<p style="font-weight:600;margin-bottom:.4rem;font-size:.85rem;color:#555">Sections detected:</p>`;
+        html += `<ul style="list-style:none;padding-left:1rem;margin:0 0 1rem;font-size:.85rem">`;
+        sectionLabels.forEach(s => { html += `<li style="padding:.15rem 0">• ${s}</li>`; });
+        html += `</ul>`;
+      } else {
+        html += `<p style="color:#888;font-size:.85rem">No section markers detected. Open in Word to review.</p>`;
+      }
+
+      // Free direct download — v2 Beta has no payment integration.
+      const SUPABASE_PUBLIC = 'https://mlhuwlnwwwxdnqafelko.supabase.co/storage/v1/object/public/incoming-files';
+      // v4 already gave us the full URL in _v4_download_url; fall back to
+      // the constructed path for v2/v3 compatibility.
+      const downloadUrl = data._v4_download_url
+        || `${SUPABASE_PUBLIC}/project-builder/${isV4 ? 'previews-v4' : (isV3 ? 'previews-v3' : 'previews-v2')}/${data.file_token}.docx`;
+      // Smart filename: server tells us the nice name (e.g. Water_Tank_Cleaner_v5_formatted.docx)
+      const downloadName = (data.download_filename || `Printosky_${(data.file_token||'').slice(0,8)}.docx`)
+        .replace(/"/g,'');
+      html += `<p style="margin-top:.5rem">` +
+              `<a href="${downloadUrl}" download="${downloadName}" target="_blank" rel="noopener" ` +
+              `style="display:inline-block;background:#16a34a;color:white;padding:.7rem 1.3rem;border-radius:6px;text-decoration:none;font-weight:600;font-size:.95rem">` +
+              `⬇ Download ${downloadName}` +
+              `</a></p>`;
+      if (isV3 && typeof data.estimated_cost_inr === 'number') {
+        const cacheBits = (data.cache_read_tokens || data.cache_write_tokens)
+          ? ` · cache: ${data.cache_read_tokens||0}r / ${data.cache_write_tokens||0}w`
+          : '';
+        html += `<p style="font-size:.72rem;color:#666;margin-top:.5rem">` +
+                `Processed in ${data.elapsed_seconds || '?'}s · ` +
+                `${data.input_tokens || 0} input / ${data.output_tokens || 0} output tokens${cacheBits} · ` +
+                `~₹${data.estimated_cost_inr}` +
+                `</p>`;
+      }
+      html += `<p style="font-size:.72rem;color:#888;margin-top:.5rem">` +
+              `${isV4 ? 'v4 Async' : (isV3 ? 'v3 AI' : 'v2 Beta')} is free during testing. WhatsApp +91 94957 06405 if anything looks off.` +
+              `</p>`;
+      $('previewChapters').innerHTML = html;
+
+      // Hide the v1 payment button — v2 download is free.
+      $('payDocxBtn').style.display = 'none';
+      $('adminDlBtn').style.display = 'none';
+    } else {
+      // -- v1 path: original chapter-list + Pay button --
+      const price = service === 'format_fix' ? 199 : (data.size_bytes > 50 * 1024 ? 999 : 399);
+      state._previewPrice = price;
+
+      $('previewSubtext').textContent =
+        `Formatted per ${uni} guidelines. Pay ₹${price} to download.`;
+
+      const chapters = (data.preview && data.preview.chapters) || [];
+      const title    = (data.preview && data.preview.title) || '';
+      const pageEst  = Math.max(10, Math.round((data.size_bytes || 0) / 2200));
+
+      if (title) {
+        html += `<p style="font-weight:700;font-size:.95rem;margin-bottom:.25rem;color:var(--ink)">${title}</p>`;
+      }
+      html += `<p style="font-size:.8rem;color:#999;margin-bottom:.75rem">~${pageEst} pages · ${uni} format</p>`;
+
+      if (chapters.length) {
+        html += `<p style="font-weight:600;margin-bottom:.4rem;font-size:.85rem;color:#555">Contents (${chapters.length} chapters)</p>`;
+        html += `<ul style="list-style:none;padding:0;margin:0;font-size:.85rem">`;
+        chapters.forEach(ch => {
+          const excerpt = ch.sections && ch.sections[0] && ch.sections[0].content
+            ? ' — <em style="color:#aaa">' + ch.sections[0].content.slice(0, 80).replace(/</g,'&lt;') + '…</em>'
+            : '';
+          html += `<li style="padding:.3rem 0;border-bottom:1px solid #f5f5f5;display:flex;justify-content:space-between;align-items:baseline">` +
+            `<span><span style="color:#ccc;margin-right:.3rem">${ch.number}.</span><b>${ch.heading}</b>${excerpt}</span>` +
+            (ch.word_count ? `<span style="color:#ccc;flex-shrink:0;margin-left:.5rem;font-size:.75rem">${ch.word_count}w</span>` : '') +
+            `</li>`;
+        });
+        html += `</ul>`;
+      } else {
+        html += `<p style="color:#888;font-size:.85rem">Formatting applied. Open in Word to review structure.</p>`;
+      }
+      $('previewChapters').innerHTML = html;
+
+      $('payDocxBtn').disabled = false;
+      $('payDocxBtn').style.display = '';
+      $('adminDlBtn').style.display = 'inline-block';
+    }
+
+    hideErr('previewPayError');
+    show('step3preview');
+    hide('step3download');
+    goStep3();
+  }
+
+  // ── Step 2: Razorpay checkout for download unlock ─────────────────────────────
+  async function startDownloadPayment() {
+    const service = state.currentService;
+    const price   = state._previewPrice || 199;
+    const btn     = $('payDocxBtn');
+    btn.disabled = true;
+    btn.textContent = 'Setting up payment…';
+    hideErr('previewPayError');
+
+    const wordCount = service === 'format_fix' ? 5000 : state.chapterCount * 1500;
+    let orderData;
+    try {
+      const res = await fetch(`${API}/project-builder/create-order`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ service, university: state.university, word_count: wordCount }),
+      });
+      orderData = await res.json();
+      if (!res.ok) throw new Error(orderData.error || 'Failed to create payment order');
+    } catch(e) {
+      btn.disabled = false;
+      btn.textContent = '📄 Pay & Download .docx';
+      showErr('previewPayError', 'Payment setup failed: ' + e.message);
+      return;
+    }
+
+    btn.disabled = false;
+    btn.textContent = '📄 Pay & Download .docx';
+
+    const options = {
+      key:      orderData.key_id,
+      amount:   orderData.amount,
+      currency: orderData.currency,
+      order_id: orderData.razorpay_order_id,
+      name:     'Printosky',
+      description: service === 'format_fix' ? 'Project Report Format Fixer' : 'Project Report Generation',
+      theme: { color: '#1B3F8B' },
+      handler: async function(response) {
+        await processAfterPayment(service, price, response);
+      },
+      modal: { ondismiss: function() {} },
+    };
+    new Razorpay(options).open();
+  }
+
+  // ── Step 3: Payment confirmed → unlock download URL ───────────────────────────
+  async function processAfterPayment(service, price, paymentResponse) {
+    const btn = $('payDocxBtn');
+    btn.disabled = true;
+    btn.textContent = 'Confirming payment…';
+
+    try {
+      const waPhone      = ($('waPhoneInput') || {value:''}).value.trim();
+      const studentName  = (state.formData && state.formData.students && state.formData.students[0])
+                           ? state.formData.students[0].name || '' : '';
+
+      const res = await fetch(`${API}/project-builder/process`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          razorpay_payment_id: paymentResponse.razorpay_payment_id,
+          razorpay_order_id:   paymentResponse.razorpay_order_id,
+          razorpay_signature:  paymentResponse.razorpay_signature,
+          service,
+          university:    state.university === 'other' ? 'ktu' : state.university,
+          file_token:    state.fileToken,
+          whatsapp_phone: waPhone,
+          student_name:   studentName,
+          amount_inr:     price,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+
+      const uni = state.university === 'other' ? 'generic' : state.university;
+      const filename = service === 'format_fix'
+        ? `${uni}_formatted_report.docx`
+        : `${uni}_project_report.docx`;
+
+      const link = $('dlFinalLink');
+      link.href = data.download_url;
+      link.download = filename;
+      link.textContent = '⬇ Download Report.docx';
+
+      // Show order ID and WhatsApp confirmation
+      if (data.order_id) {
+        $('orderIdValue').textContent = data.order_id;
+        $('orderIdDisplay').style.display = 'block';
+      }
+      if (waPhone && data.order_id) {
+        $('waDeliveryMsg').style.display = 'block';
+      }
+
+      hide('step3preview');
+      show('step3download');
+      window.scrollTo(0, 0);
+    } catch(e) {
+      btn.disabled = false;
+      btn.textContent = '📄 Pay & Download .docx';
+      showErr('previewPayError',
+        'Payment captured but download setup failed. WhatsApp 9495706405 with payment ID: ' +
+        paymentResponse.razorpay_payment_id);
+    }
+  }
+
+  // ── Admin download bypass ─────────────────────────────────────────────────────
+  async function adminDownload() {
+    const btn = $('adminDlBtn');
+    // Reuse cached admin password if we're in admin mode (set by
+    // bootAdminMode from sessionStorage). Outside admin mode, fall back
+    // to the password prompt so this function still works as a manual
+    // override.
+    const pwd = state.adminPw || prompt('Admin password:');
+    if (!pwd) return;
+    btn.disabled = true;
+    btn.textContent = 'Downloading…';
+    try {
+      const res = await fetch(`${API}/project-builder/process`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          admin_key:  pwd,
+          file_token: state.fileToken,
+          service:    state.currentService,
+          university: state.university === 'other' ? 'ktu' : state.university,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+      const uni = state.university === 'other' ? 'generic' : state.university;
+      const filename = state.currentService === 'format_fix'
+        ? `${uni}_formatted_report.docx`
+        : `${uni}_project_report.docx`;
+      const link = $('dlFinalLink');
+      link.href = data.download_url;
+      link.download = filename;
+      link.textContent = '⬇ Download Report.docx';
+      hide('step3preview');
+      show('step3download');
+      window.scrollTo(0, 0);
+    } catch(e) {
+      showErr('previewPayError', 'Admin download failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔑 Admin Download (skip payment)';
+    }
+  }
+
+  // ── Validate generate form ────────────────────────────────────────────────────
+  function validateGenerateForm() {
+    const required = [
+      ['g_title','Project title'],['g_college','College name'],
+      ['g_year','Academic year'],['g_dept','Department'],
+      ['g_type','Report type'],['g_guide_name','Guide name'],
+      ['g_guide_desig','Guide designation'],['g_hod_name','HOD name'],
+      ['g_hod_desig','HOD designation'],['g_abstract','Abstract'],
+      ['g_references','References'],
+    ];
+    for (const [id, label] of required) {
+      if (!$(id) || !$(id).value.trim()) {
+        showErr('genError', `${label} is required.`);
+        $(id) && $(id).focus();
+        return false;
+      }
+    }
+    // Check at least one student
+    if (!$('g_sname1') || !$('g_sname1').value.trim()) {
+      showErr('genError', 'At least one student name is required.');
+      return false;
+    }
+    return true;
+  }
+
+  // ── Collect generate form data ────────────────────────────────────────────────
+  function collectFormData() {
+    const students = [];
+    for (let i=1; i<=state.studentCount; i++) {
+      students.push({ name: $('g_sname'+i)?.value.trim()||'', roll: $('g_sroll'+i)?.value.trim()||'' });
+    }
+    const chapters = [];
+    for (let i=1; i<=state.chapterCount; i++) {
+      chapters.push({ number: i, heading: $('g_ctitle'+i)?.value.trim()||`Chapter ${i}`, content: $('g_ccontent'+i)?.value.trim()||'' });
+    }
+    return {
+      title:      $('g_title').value.trim(),
+      college:    $('g_college').value.trim(),
+      year:       $('g_year').value.trim(),
+      department: $('g_dept').value,
+      report_type:$('g_type').value,
+      students,
+      guide_name:     $('g_guide_name').value.trim(),
+      guide_desig:    $('g_guide_desig').value.trim(),
+      coguide_name:   $('g_coguide_name').value.trim(),
+      coguide_desig:  $('g_coguide_desig').value.trim(),
+      hod_name:       $('g_hod_name').value.trim(),
+      hod_desig:      $('g_hod_desig').value.trim(),
+      abstract:   $('g_abstract').value.trim(),
+      keywords:   $('g_keywords').value.trim(),
+      chapters,
+      references: $('g_references').value.trim(),
+      appendices: $('g_appendices').value.trim(),
+    };
+  }
+
+  // ── Initialise defaults ───────────────────────────────────────────────────────
+  renderStudentRows();
+  renderChapterBlocks();
+  updateGenPrice();
+
+  </script>
+</body>
+</html>

@@ -2925,6 +2925,296 @@ def _handle_pb_format_preview_v3(h, body: bytes) -> None:
     })
 
 
+# =============================================================================
+# v4 ASYNC JOB QUEUE (project-builder/format-job-*)
+# =============================================================================
+#
+# v4 splits the v3 sync endpoint into two halves:
+#   POST /project-builder/format-job-create  -> insert pb_jobs row, return id
+#   GET  /project-builder/format-job-status  -> poll-friendly read of row
+#
+# In Deploy 1, format-job-create runs the engine INLINE (still 300s cap)
+# but with the async-shaped UX (browser submits then polls). Deploy 2 will
+# swap inline execution for an Inngest event so the engine runs without
+# time limit on Inngest's runtime, unblocking aswathy and larger docs.
+#
+# The v3 endpoint stays alive untouched -- v4 is a parallel track.
+
+
+def _v4_engine_inline(job_id: str, src_bytes: bytes, is_pdf: bool,
+                       university: str, render_kwargs: dict,
+                       original_filename: str) -> dict:
+    """Run the v3 engine inline and persist the result + telemetry.
+
+    Returns dict with download_url/download_filename/result_meta on
+    success. Raises on failure.
+    """
+    from format_fix_v3 import orchestrator_v3, renderer as _v3renderer
+
+    if is_pdf:
+        result = orchestrator_v3.run_v3_from_pdf(
+            src_bytes,
+            render_kwargs=render_kwargs,
+            job_token=job_id,
+            university=university,
+        )
+    else:
+        result = orchestrator_v3.run_v3_from_docx(
+            src_bytes,
+            render_kwargs=render_kwargs,
+            job_token=job_id,
+            university=university,
+        )
+
+    docx_bytes = result["docx_bytes"]
+    if not docx_bytes:
+        raise RuntimeError("v4 engine returned empty docx")
+
+    _insert_pb_api_call_rows(result.get("per_call_telemetry", []))
+
+    mime_docx = ("application/vnd.openxmlformats-officedocument."
+                 "wordprocessingml.document")
+    storage_dst = f"project-builder/previews-v4/{job_id}.docx"
+    from db_cloud import _client, INCOMING_BUCKET
+    _client().storage.from_(INCOMING_BUCKET).upload(
+        path=storage_dst,
+        file=docx_bytes,
+        file_options={"content-type": mime_docx, "upsert": "true"},
+    )
+    url = _client().storage.from_(INCOMING_BUCKET).get_public_url(storage_dst)
+
+    download_filename = _v3renderer.smart_download_filename(
+        original_filename, result.get("project_title"),
+    )
+
+    return {
+        "engine": "format_fix_v4",
+        "download_url": url,
+        "download_filename": download_filename,
+        "result_meta": {
+            "pages":              result.get("page_count"),
+            "page_kinds":         result.get("page_kinds"),
+            "input_tokens":       result.get("total_input_tokens"),
+            "output_tokens":      result.get("total_output_tokens"),
+            "cache_read_tokens":  result.get("total_cache_read_tokens"),
+            "cache_write_tokens": result.get("total_cache_write_tokens"),
+            "estimated_cost_usd": result.get("estimated_cost_usd"),
+            "estimated_cost_inr": result.get("estimated_cost_inr"),
+            "elapsed_seconds":    result.get("elapsed_seconds"),
+            "project_title":      result.get("project_title"),
+        },
+    }
+
+
+def _v4_mark_processing(job_id: str) -> None:
+    try:
+        from db_cloud import _client
+        from datetime import datetime, timezone
+        _client().table("pb_jobs").update({
+            "status": "processing",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", job_id).execute()
+    except Exception as exc:
+        logger.warning("pb_jobs mark processing failed: %s", exc)
+
+
+def _v4_mark_done(job_id: str, engine_result: dict) -> None:
+    try:
+        from db_cloud import _client
+        from datetime import datetime, timezone
+        _client().table("pb_jobs").update({
+            "status": "done",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "result_file_token": job_id,
+            "result_download_url": engine_result["download_url"],
+            "result_meta": engine_result["result_meta"],
+        }).eq("id", job_id).execute()
+    except Exception as exc:
+        logger.warning("pb_jobs mark done failed: %s", exc)
+
+
+def _v4_mark_error(job_id: str, error_type: str, error_message: str) -> None:
+    try:
+        from db_cloud import _client
+        from datetime import datetime, timezone
+        _client().table("pb_jobs").update({
+            "status": "error",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "error_type": error_type,
+            "error_message": error_message[:500],
+        }).eq("id", job_id).execute()
+    except Exception as exc:
+        logger.warning("pb_jobs mark error failed: %s", exc)
+
+
+def _handle_pb_format_job_create(h, body: bytes) -> None:
+    """POST /project-builder/format-job-create - submit a v4 job.
+
+    Deploy 1: runs the engine INLINE (300s cap, same as v3) and returns
+    the result immediately. The response shape is async-job-friendly so
+    the frontend's submit-then-poll pattern works today and continues
+    to work in Deploy 2 when execution moves to Inngest (no 300s limit).
+    """
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    storage_path      = data.get("storage_path", "")
+    university        = data.get("university", "ktu")
+    original_filename = data.get("original_filename") or ""
+    contact_phone     = data.get("contact_phone") or None
+    render_kwargs = {
+        "page_numbers":         bool(data.get("page_numbers", True)),
+        "page_number_style":    data.get("page_number_style", "roman_then_arabic"),
+        "page_number_position": data.get("page_number_position", "center"),
+        "header_text":          data.get("header_text", "") or "",
+        "footer_text":          data.get("footer_text", "") or "",
+    }
+
+    if not storage_path:
+        _json_response(h, 400, {"error": "storage_path required"})
+        return
+    if not storage_path.startswith("project-builder/uploads-v2/"):
+        _json_response(h, 400, {
+            "error": "storage_path must be under project-builder/uploads-v2/",
+        })
+        return
+
+    try:
+        from db_cloud import _client, INCOMING_BUCKET
+        row = {
+            "engine": "format_fix_v4",
+            "status": "pending",
+            "university": university,
+            "original_filename": original_filename,
+            "storage_path": storage_path,
+            "render_kwargs": render_kwargs,
+            "contact_phone": contact_phone,
+        }
+        ins = _client().table("pb_jobs").insert(row).execute()
+        if not ins.data:
+            _json_response(h, 500, {"error": "failed to create job row"})
+            return
+        job_id = ins.data[0]["id"]
+    except Exception as exc:
+        logger.error("format-job-create insert error: %s", exc, exc_info=True)
+        _json_response(h, 500, {
+            "error":   "job create failed",
+            "exc_type": type(exc).__name__,
+            "exc_msg":  str(exc)[:300],
+        })
+        return
+
+    try:
+        src_bytes = _client().storage.from_(INCOMING_BUCKET).download(storage_path)
+    except Exception as exc:
+        _v4_mark_error(job_id, "download_failed", str(exc))
+        _json_response(h, 500, {
+            "job_id": job_id,
+            "status": "error",
+            "error_message": f"source download failed: {str(exc)[:200]}",
+        })
+        return
+
+    is_pdf  = len(src_bytes) >= 200 and src_bytes[:4] == b"%PDF"
+    is_docx = len(src_bytes) >= 200 and src_bytes[:4] == b"PK\x03\x04"
+    if not (is_pdf or is_docx):
+        _v4_mark_error(job_id, "bad_input", "not a PDF or DOCX")
+        _json_response(h, 400, {
+            "job_id": job_id,
+            "status": "error",
+            "error_message": "input is not a PDF or DOCX",
+        })
+        return
+
+    _v4_mark_processing(job_id)
+    try:
+        engine_result = _v4_engine_inline(
+            job_id, src_bytes, is_pdf, university,
+            render_kwargs, original_filename,
+        )
+    except Exception as exc:
+        logger.error("v4 engine error (job %s): %s", job_id, exc, exc_info=True)
+        _v4_mark_error(job_id, type(exc).__name__, str(exc)[:500])
+        _json_response(h, 500, {
+            "job_id": job_id,
+            "status": "error",
+            "error_message": f"engine failure: {type(exc).__name__}: {str(exc)[:200]}",
+        })
+        return
+
+    _v4_mark_done(job_id, engine_result)
+
+    _json_response(h, 200, {
+        "job_id":              job_id,
+        "status":              "done",
+        "engine":              "format_fix_v4",
+        "result_download_url": engine_result["download_url"],
+        "download_filename":   engine_result["download_filename"],
+        "result_meta":         engine_result["result_meta"],
+        "poll_url":            f"/project-builder/format-job-status?id={job_id}",
+    })
+
+
+def _handle_pb_format_job_status(h, qs: dict) -> None:
+    """GET /project-builder/format-job-status?id=<uuid>"""
+    raw = qs.get("id", "")
+    job_id = raw[0] if isinstance(raw, list) and raw else (raw if isinstance(raw, str) else "")
+    if not job_id:
+        _json_response(h, 400, {"error": "id query param required"})
+        return
+    try:
+        from db_cloud import _client
+        res = (_client().table("pb_jobs")
+                .select("id, status, progress_pages_done, progress_pages_total, "
+                        "progress_stage, result_download_url, result_meta, "
+                        "error_message, error_type, original_filename, "
+                        "created_at, started_at, completed_at")
+                .eq("id", job_id).limit(1).execute())
+    except Exception as exc:
+        logger.error("format-job-status query error: %s", exc, exc_info=True)
+        _json_response(h, 500, {
+            "error":   "status query failed",
+            "exc_msg": str(exc)[:300],
+        })
+        return
+
+    if not res.data:
+        _json_response(h, 404, {"error": "job not found"})
+        return
+
+    row = res.data[0]
+    download_filename = None
+    if row.get("result_meta"):
+        meta = row["result_meta"]
+        try:
+            from format_fix_v3 import renderer as _v3renderer
+            download_filename = _v3renderer.smart_download_filename(
+                row.get("original_filename"),
+                meta.get("project_title") if isinstance(meta, dict) else None,
+            )
+        except Exception:
+            download_filename = None
+
+    _json_response(h, 200, {
+        "job_id":               row["id"],
+        "status":               row["status"],
+        "progress_pages_done":  row.get("progress_pages_done") or 0,
+        "progress_pages_total": row.get("progress_pages_total") or 0,
+        "progress_stage":       row.get("progress_stage") or "",
+        "result_download_url":  row.get("result_download_url"),
+        "download_filename":    download_filename,
+        "result_meta":          row.get("result_meta"),
+        "error_message":        row.get("error_message"),
+        "error_type":           row.get("error_type"),
+        "created_at":           row.get("created_at"),
+        "started_at":           row.get("started_at"),
+        "completed_at":         row.get("completed_at"),
+    })
+
+
 def _handle_pb_process(h, body: bytes) -> None:
     """POST /project-builder/process — verify Razorpay payment, generate DOCX."""
     try:
@@ -3248,6 +3538,12 @@ class handler(BaseHTTPRequestHandler):
                 logger.warning("Meta webhook verify failed — token mismatch")
             return
 
+        # ── v4 job status poll ──────────────────────────────────────────────
+        if self.path.startswith("/project-builder/format-job-status"):
+            qs = parse_qs(urlparse(self.path).query)
+            _handle_pb_format_job_status(self, qs)
+            return
+
         # ── Public order tracker (no auth) ───────────────────────────────────
         if self.path.startswith("/api/track/"):
             m = re.match(r"^/api/track/([^/?]+)$", self.path.split("?")[0])
@@ -3491,6 +3787,10 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/project-builder/format-preview-v3":
             _handle_pb_format_preview_v3(self, body)
+            return
+
+        if self.path == "/project-builder/format-job-create":
+            _handle_pb_format_job_create(self, body)
             return
 
         if self.path == "/project-builder/upload-sign":
