@@ -1,3 +1,12 @@
 requests==2.33.1
 supabase==2.15.0
 python-dotenv==1.2.2
+# v3 engine deps (Claude Vision hybrid PDF/DOCX -> DOCX). These were
+# previously pulled from root requirements.txt under modern config, but
+# the legacy 'builds' array installs ONLY from api/requirements.txt, so
+# they MUST be declared here. Keep in sync with root requirements.txt.
+Pillow>=10.0.0
+python-docx==1.1.2
+pdfplumber==0.11.4
+PyMuPDF==1.26.7
+anthropic>=0.51.0
