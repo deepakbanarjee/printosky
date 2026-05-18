@@ -10,3 +10,11 @@ python-docx==1.1.2
 pdfplumber==0.11.4
 PyMuPDF==1.26.7
 anthropic>=0.51.0
+# Inngest: durable background job runner for v4 (api/inngest.py).
+# Used as a separate Vercel serverless function exposing /api/inngest.
+# Without this, the format-job-create endpoint would have no async worker
+# and v4 documents would stay in pending state forever.
+inngest>=0.4
+# Flask is required only by api/inngest.py for the Inngest framework
+# adapter (inngest.flask.serve). api/index.py keeps using BaseHTTPRequestHandler.
+flask>=3.0

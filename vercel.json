@@ -4,9 +4,16 @@
       "src": "api/index.py",
       "use": "@vercel/python",
       "config": { "maxLambdaSize": "50mb", "memory": 1024, "maxDuration": 300 }
+    },
+    {
+      "src": "api/inngest.py",
+      "use": "@vercel/python",
+      "config": { "maxLambdaSize": "50mb", "memory": 1024, "maxDuration": 300 }
     }
   ],
   "routes": [
+    { "src": "/api/inngest",                          "dest": "/api/inngest.py" },
+    { "src": "/api/inngest\\?(.*)",                   "dest": "/api/inngest.py" },
     { "src": "/whatsapp-webhook",                     "dest": "/api/index.py" },
     { "src": "/webhook/razorpay",                     "dest": "/api/index.py" },
     { "src": "/staff/set-pin",                        "dest": "/api/index.py" },
