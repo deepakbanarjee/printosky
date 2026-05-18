@@ -1,28 +1,30 @@
 {
-  "functions": {
-    "api/index.py": {
-      "maxDuration": 300,
-      "memory": 1024
+  "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python",
+      "config": { "maxLambdaSize": "50mb", "memory": 1024, "maxDuration": 300 }
     }
-  },
-  "rewrites": [
-    { "source": "/whatsapp-webhook",                  "destination": "/api/index" },
-    { "source": "/webhook/razorpay",                  "destination": "/api/index" },
-    { "source": "/staff/set-pin",                     "destination": "/api/index" },
-    { "source": "/staff/resume",                      "destination": "/api/index" },
-    { "source": "/admin/reset-pin",                   "destination": "/api/index" },
-    { "source": "/admin/send",                        "destination": "/api/index" },
-    { "source": "/academic/orders",                   "destination": "/api/index" },
-    { "source": "/academic/orders/:path*",            "destination": "/api/index" },
-    { "source": "/academic/razorpay-webhook",         "destination": "/api/index" },
-    { "source": "/project-builder/templates",         "destination": "/api/index" },
-    { "source": "/project-builder/templates/:path*",  "destination": "/api/index" },
-    { "source": "/project-builder/analyse",           "destination": "/api/index" },
-    { "source": "/project-builder/format-preview",    "destination": "/api/index" },
-    { "source": "/project-builder/format-preview-v2", "destination": "/api/index" },
-    { "source": "/project-builder/format-preview-v3", "destination": "/api/index" },
-    { "source": "/project-builder/upload-sign",       "destination": "/api/index" },
-    { "source": "/project-builder/create-order",      "destination": "/api/index" },
-    { "source": "/project-builder/process",           "destination": "/api/index" }
+  ],
+  "routes": [
+    { "src": "/whatsapp-webhook",                     "dest": "/api/index.py" },
+    { "src": "/webhook/razorpay",                     "dest": "/api/index.py" },
+    { "src": "/staff/set-pin",                        "dest": "/api/index.py" },
+    { "src": "/staff/resume",                         "dest": "/api/index.py" },
+    { "src": "/admin/reset-pin",                      "dest": "/api/index.py" },
+    { "src": "/admin/send",                           "dest": "/api/index.py" },
+    { "src": "/academic/orders",                      "dest": "/api/index.py" },
+    { "src": "/academic/orders/(.*)",                 "dest": "/api/index.py" },
+    { "src": "/academic/razorpay-webhook",            "dest": "/api/index.py" },
+    { "src": "/project-builder/templates",            "dest": "/api/index.py" },
+    { "src": "/project-builder/templates/(.*)",       "dest": "/api/index.py" },
+    { "src": "/project-builder/analyse",              "dest": "/api/index.py" },
+    { "src": "/project-builder/format-preview",       "dest": "/api/index.py" },
+    { "src": "/project-builder/format-preview-v2",    "dest": "/api/index.py" },
+    { "src": "/project-builder/format-preview-v3",    "dest": "/api/index.py" },
+    { "src": "/project-builder/upload-sign",          "dest": "/api/index.py" },
+    { "src": "/project-builder/create-order",         "dest": "/api/index.py" },
+    { "src": "/project-builder/process",              "dest": "/api/index.py" },
+    { "src": "/",                                     "dest": "/api/index.py" }
   ]
 }
