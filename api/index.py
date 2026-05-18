@@ -3129,32 +3129,39 @@ def _handle_pb_format_job_create(h, body: bytes) -> None:
         })
         return
 
-    _v4_mark_processing(job_id)
+    # Deploy 2B: send the job to Inngest for background processing instead
+    # of running inline. The browser sees status="processing" right away
+    # and starts polling /format-job-status. The Inngest function
+    # (process_v4_job in api/inngest.py) picks up the event, runs the
+    # engine on its own runtime, and writes back to pb_jobs when done.
     try:
-        engine_result = _v4_engine_inline(
-            job_id, src_bytes, is_pdf, university,
-            render_kwargs, original_filename,
+        import inngest as _inngest
+        import os as _os
+        _client = _inngest.Inngest(
+            app_id="printosky",
+            is_production=_os.getenv("INNGEST_DEV") is None,
         )
+        _client.send_sync(_inngest.Event(
+            name="pb/job.created",
+            data={"job_id": job_id},
+        ))
     except Exception as exc:
-        logger.error("v4 engine error (job %s): %s", job_id, exc, exc_info=True)
-        _v4_mark_error(job_id, type(exc).__name__, str(exc)[:500])
+        logger.error("inngest send failed (job %s): %s",
+                     job_id, exc, exc_info=True)
+        _v4_mark_error(job_id, "inngest_send_failed", str(exc)[:300])
         _json_response(h, 500, {
             "job_id": job_id,
             "status": "error",
-            "error_message": f"engine failure: {type(exc).__name__}: {str(exc)[:200]}",
+            "error_message": f"failed to dispatch job: {type(exc).__name__}: "
+                             f"{str(exc)[:200]}",
         })
         return
 
-    _v4_mark_done(job_id, engine_result)
-
     _json_response(h, 200, {
-        "job_id":              job_id,
-        "status":              "done",
-        "engine":              "format_fix_v4",
-        "result_download_url": engine_result["download_url"],
-        "download_filename":   engine_result["download_filename"],
-        "result_meta":         engine_result["result_meta"],
-        "poll_url":            f"/project-builder/format-job-status?id={job_id}",
+        "job_id":   job_id,
+        "status":   "processing",
+        "engine":   "format_fix_v4",
+        "poll_url": f"/project-builder/format-job-status?id={job_id}",
     })
 
 
