@@ -51,6 +51,190 @@ def ping(ctx: inngest.ContextSync) -> dict:
     return {"ok": True, "echo": ctx.event.data}
 
 
+# Chunked pipeline tuning (Deploy 2C):
+# - CHUNK_SIZE small enough that 10 pages x ~5 workers x ~10s/page fits well
+#   under Vercel's 300s per-invocation budget with headroom for retries.
+# - Each chunk runs in its own Vercel invocation orchestrated by Inngest.
+V4_CHUNK_SIZE = 10
+
+
+def _prep_step(job_id: str) -> dict:
+    """First step: read job, download source, convert+stage, return manifest.
+
+    Runs in one Vercel invocation. Output is JSON-serialisable metadata
+    (no PDF bytes in the return value -- those are staged to Supabase).
+    """
+    from format_fix_v3 import v4_persistence as P
+    from format_fix_v3 import orchestrator_v3
+
+    job = P.fetch_job(job_id)
+    if job is None:
+        return {"ok": False, "reason": "job_not_found", "job_id": job_id}
+
+    if job.get("status") == "done":
+        return {"ok": True, "reason": "already_done", "job_id": job_id,
+                "skip": True}
+
+    storage_path      = job.get("storage_path", "")
+    university        = job.get("university") or "ktu"
+    original_filename = job.get("original_filename") or ""
+    render_kwargs     = job.get("render_kwargs") or {}
+
+    P.mark_processing(job_id, stage="downloading_source")
+    src_bytes = P.download_source(storage_path)
+
+    P.update_progress(job_id, stage="preparing_pdf")
+    prep = orchestrator_v3.prepare_chunked(src_bytes)
+
+    pdf_temp_path = P.stage_temp_pdf(job_id, prep["pdf_bytes"])
+
+    docx_images_temp_path = None
+    if prep.get("docx_page_images"):
+        docx_images_temp_path = P.stage_docx_images(
+            job_id, prep["docx_page_images"],
+        )
+
+    page_count = prep["page_count"]
+    n_chunks = (page_count + V4_CHUNK_SIZE - 1) // V4_CHUNK_SIZE
+
+    P.update_progress(
+        job_id, stage="vision_pipeline",
+        pages_total=page_count, pages_done=0,
+    )
+
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "page_count": page_count,
+        "n_chunks": n_chunks,
+        "chunk_size": V4_CHUNK_SIZE,
+        "pdf_temp_path": pdf_temp_path,
+        "docx_images_temp_path": docx_images_temp_path,
+        "is_docx": prep.get("is_docx", False),
+        "university": university,
+        "original_filename": original_filename,
+        "render_kwargs": render_kwargs,
+    }
+
+
+def _chunk_step(job_id: str, chunk_idx: int, prep: dict) -> dict:
+    """One Inngest step = one chunk = pages [start, end). Stages result JSON."""
+    from format_fix_v3 import v4_persistence as P
+    from format_fix_v3 import orchestrator_v3
+
+    page_count = prep["page_count"]
+    chunk_size = prep["chunk_size"]
+    start = chunk_idx * chunk_size
+    end = min(start + chunk_size, page_count)
+
+    pdf_bytes = P.fetch_temp_pdf(prep["pdf_temp_path"])
+
+    chunk_result = orchestrator_v3.process_chunk(
+        pdf_bytes,
+        start_idx=start,
+        end_idx=end,
+        total_pages=page_count,
+        max_workers=5,
+        job_token=job_id,
+        university=prep.get("university") or "ktu",
+    )
+
+    P.stage_chunk_json(job_id, chunk_idx, chunk_result)
+    P.insert_telemetry_rows(chunk_result.get("telemetry_rows") or [])
+    P.update_progress(job_id, pages_done=end)
+
+    return {
+        "ok": True,
+        "chunk_idx": chunk_idx,
+        "pages_processed": end - start,
+        "pages_done_total": end,
+        "tokens": chunk_result.get("tokens"),
+    }
+
+
+def _assemble_step(job_id: str, prep: dict) -> dict:
+    """Final step: read all chunks, render DOCX, upload, mark done."""
+    from format_fix_v3 import v4_persistence as P
+    from format_fix_v3 import orchestrator_v3, renderer as _v3renderer
+
+    n_chunks = prep["n_chunks"]
+    page_count = prep["page_count"]
+    original_filename = prep.get("original_filename") or ""
+    render_kwargs = prep.get("render_kwargs") or {}
+
+    P.update_progress(job_id, stage="assembling")
+
+    chunks = P.fetch_all_chunk_jsons(job_id, n_chunks)
+    all_pages = []
+    total_in = total_out = total_cr = total_cw = 0
+    for chunk in chunks:
+        all_pages.extend(chunk.get("pages") or [])
+        tok = chunk.get("tokens") or {}
+        total_in += tok.get("input", 0)
+        total_out += tok.get("output", 0)
+        total_cr += tok.get("cache_read", 0)
+        total_cw += tok.get("cache_write", 0)
+
+    docx_page_images_extracted = P.fetch_docx_images(
+        prep.get("docx_images_temp_path"),
+    )
+
+    assembled = orchestrator_v3.assemble_chunked(
+        all_pages,
+        page_images=None,
+        render_kwargs=render_kwargs,
+        docx_page_images_extracted=docx_page_images_extracted,
+    )
+
+    docx_bytes = assembled.get("docx_bytes") or b""
+    if not docx_bytes:
+        raise RuntimeError("assemble produced empty DOCX")
+
+    P.update_progress(job_id, stage="uploading_result")
+    download_url = P.upload_result_docx(job_id, docx_bytes)
+
+    try:
+        download_filename = _v3renderer.smart_download_filename(
+            original_filename, assembled.get("project_title"),
+        )
+    except Exception:
+        download_filename = f"Printosky_{job_id[:8]}.docx"
+
+    cost_usd = (
+        (total_in * orchestrator_v3.SONNET_INPUT_USD_PER_1M
+         + total_out * orchestrator_v3.SONNET_OUTPUT_USD_PER_1M
+         + total_cr * orchestrator_v3.SONNET_CACHE_READ_USD_PER_1M
+         + total_cw * orchestrator_v3.SONNET_CACHE_WRITE_USD_PER_1M)
+        / 1_000_000
+    )
+
+    result_meta = {
+        "pages":              assembled.get("page_count"),
+        "page_kinds":         assembled.get("page_kinds"),
+        "input_tokens":       total_in,
+        "output_tokens":      total_out,
+        "cache_read_tokens":  total_cr,
+        "cache_write_tokens": total_cw,
+        "estimated_cost_usd": round(cost_usd, 6),
+        "estimated_cost_inr": round(cost_usd * orchestrator_v3.USD_INR, 4),
+        "project_title":      assembled.get("project_title"),
+        "download_filename":  download_filename,
+        "engine_variant":     "chunked",
+        "n_chunks":           n_chunks,
+    }
+
+    P.mark_done(job_id, download_url=download_url, result_meta=result_meta)
+    P.cleanup_temp(job_id)
+
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "download_url": download_url,
+        "pages": page_count,
+        "rs_cost": result_meta["estimated_cost_inr"],
+    }
+
+
 @inngest_client.create_function(
     fn_id="process-v4-job",
     trigger=inngest.TriggerEvent(event="pb/job.created"),
@@ -59,104 +243,58 @@ def ping(ctx: inngest.ContextSync) -> dict:
 def process_v4_job(ctx: inngest.ContextSync) -> dict:
     """Process a v4 format job. Triggered by pb/job.created event.
 
-    Single-step in Deploy 2B - the whole engine runs inside one Vercel
-    invocation (300s cap). Deploy 2C will split into multiple steps if
-    documents larger than the per-invocation budget need to ship.
+    Deploy 2C: MULTI-STEP execution. Each step is one Vercel invocation
+    (300s budget) so aswathy-class documents (~50 pages) work end-to-end.
+
+    Steps (per ctx.step.run id):
+      prepare       -> download source, convert+stage PDF, plan chunks
+      chunk-0000..N -> Vision pass on pages [N*10, N*10+10)
+      assemble      -> concatenate chunk JSONs, render DOCX, upload, done
+
+    The Python orchestration code re-runs on every Inngest invocation,
+    but step.run() returns cached results for already-completed steps
+    so only the next pending step actually executes per invocation.
 
     Event data: {job_id: str}
     """
     from format_fix_v3 import v4_persistence as P
-    from format_fix_v3 import orchestrator_v3, renderer as _v3renderer
 
     job_id = ctx.event.data["job_id"]
     logger.info("process_v4_job start job_id=%s", job_id)
 
-    job = P.fetch_job(job_id)
-    if job is None:
-        logger.warning("process_v4_job: job %s not found, skipping", job_id)
-        return {"ok": False, "reason": "job_not_found", "job_id": job_id}
-
-    if job.get("status") == "done":
-        # Idempotency: Inngest may re-fire after success on retry. Skip.
-        logger.info("process_v4_job: job %s already done, skipping", job_id)
-        return {"ok": True, "reason": "already_done", "job_id": job_id}
-
-    storage_path      = job.get("storage_path", "")
-    university        = job.get("university") or "ktu"
-    original_filename = job.get("original_filename") or ""
-    render_kwargs     = job.get("render_kwargs") or {}
-
-    P.mark_processing(job_id, stage="downloading_source")
-
     try:
-        src_bytes = P.download_source(storage_path)
+        prep = ctx.step.run("prepare", lambda: _prep_step(job_id))
+        if not prep.get("ok"):
+            return prep
+        if prep.get("skip"):
+            return prep
 
-        is_pdf  = len(src_bytes) >= 200 and src_bytes[:4] == b"%PDF"
-        is_docx = len(src_bytes) >= 200 and src_bytes[:4] == b"PK\x03\x04"
-        if not (is_pdf or is_docx):
-            raise ValueError(f"source is not PDF or DOCX (got {src_bytes[:4]!r})")
+        n_chunks = prep["n_chunks"]
 
-        P.update_progress(job_id, stage="vision_pipeline")
-        if is_pdf:
-            result = orchestrator_v3.run_v3_from_pdf(
-                src_bytes,
-                render_kwargs=render_kwargs,
-                job_token=job_id,
-                university=university,
-            )
-        else:
-            result = orchestrator_v3.run_v3_from_docx(
-                src_bytes,
-                render_kwargs=render_kwargs,
-                job_token=job_id,
-                university=university,
+        for i in range(n_chunks):
+            step_id = f"chunk-{i:04d}"
+            ctx.step.run(
+                step_id,
+                lambda i=i: _chunk_step(job_id, i, prep),
             )
 
-        docx_bytes = result.get("docx_bytes") or b""
-        if not docx_bytes:
-            raise RuntimeError("engine returned empty DOCX")
-
-        P.insert_telemetry_rows(result.get("per_call_telemetry") or [])
-
-        P.update_progress(job_id, stage="uploading_result")
-        download_url = P.upload_result_docx(job_id, docx_bytes)
-
-        try:
-            download_filename = _v3renderer.smart_download_filename(
-                original_filename, result.get("project_title"),
-            )
-        except Exception:
-            download_filename = f"Printosky_{job_id[:8]}.docx"
-
-        result_meta = {
-            "pages":              result.get("page_count"),
-            "page_kinds":         result.get("page_kinds"),
-            "input_tokens":       result.get("total_input_tokens"),
-            "output_tokens":      result.get("total_output_tokens"),
-            "cache_read_tokens":  result.get("total_cache_read_tokens"),
-            "cache_write_tokens": result.get("total_cache_write_tokens"),
-            "estimated_cost_usd": result.get("estimated_cost_usd"),
-            "estimated_cost_inr": result.get("estimated_cost_inr"),
-            "elapsed_seconds":    result.get("elapsed_seconds"),
-            "project_title":      result.get("project_title"),
-            "download_filename":  download_filename,
-        }
-
-        P.mark_done(job_id, download_url=download_url, result_meta=result_meta)
-        logger.info("process_v4_job done job_id=%s pages=%s rs=%s",
-                    job_id, result.get("page_count"),
-                    result.get("estimated_cost_inr"))
-        return {
-            "ok": True,
-            "job_id": job_id,
-            "download_url": download_url,
-            "pages": result.get("page_count"),
-        }
+        result = ctx.step.run(
+            "assemble",
+            lambda: _assemble_step(job_id, prep),
+        )
+        logger.info(
+            "process_v4_job done job_id=%s pages=%s rs=%s",
+            job_id, result.get("pages"), result.get("rs_cost"),
+        )
+        return result
 
     except Exception as exc:
         logger.error("process_v4_job error job_id=%s: %s",
                      job_id, exc, exc_info=True)
-        P.mark_error(job_id, type(exc).__name__, str(exc))
+        try:
+            P.mark_error(job_id, type(exc).__name__, str(exc))
+        except Exception:
+            pass
         raise
 
 

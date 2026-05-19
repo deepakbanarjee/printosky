@@ -130,3 +130,139 @@ def insert_telemetry_rows(rows: list[dict]) -> None:
         _client().table("pb_api_calls").insert(rows).execute()
     except Exception as exc:
         logger.warning("insert_telemetry_rows failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Temp storage helpers (Deploy 2C - chunked Inngest steps)
+#
+# Multi-step Inngest functions can't pass large blobs between steps via
+# the step output (Inngest persists step results in their DB; outputs
+# above ~1MB get slow or rejected). So large intermediate state (PDF
+# bytes, DOCX-extracted images, per-chunk Vision JSON) goes to Supabase
+# storage under project-builder/temp/<job_id>/, and step outputs only
+# carry small metadata (paths, page counts).
+#
+# All temp files MUST be cleaned up at the end of a successful run via
+# cleanup_temp(). For failed jobs, a separate Vercel Cron will sweep
+# stale temp/ directories nightly (not in this commit).
+
+import json as _json
+
+_TEMP_PREFIX = "project-builder/temp"
+_PDF_MIME = "application/pdf"
+_JSON_MIME = "application/json"
+
+
+def stage_temp_pdf(job_id: str, pdf_bytes: bytes) -> str:
+    """Upload PDF bytes to temp/<job_id>/source.pdf, return storage path."""
+    from db_cloud import _client, INCOMING_BUCKET
+    path = f"{_TEMP_PREFIX}/{job_id}/source.pdf"
+    _client().storage.from_(INCOMING_BUCKET).upload(
+        path=path,
+        file=pdf_bytes,
+        file_options={"content-type": _PDF_MIME, "upsert": "true"},
+    )
+    return path
+
+
+def fetch_temp_pdf(path: str) -> bytes:
+    """Download bytes from a previously-staged temp path."""
+    from db_cloud import _client, INCOMING_BUCKET
+    return _client().storage.from_(INCOMING_BUCKET).download(path)
+
+
+def stage_docx_images(job_id: str,
+                       docx_page_images: list[list[bytes]]) -> str | None:
+    """Upload DOCX-extracted images as a single packed manifest JSON.
+
+    Encodes images as base64 so the manifest is JSON-serializable.
+    Returns path or None if there are no images.
+    """
+    if not docx_page_images or not any(docx_page_images):
+        return None
+    import base64
+    manifest = {
+        "pages": [
+            [base64.b64encode(b).decode("ascii") for b in page]
+            for page in docx_page_images
+        ],
+    }
+    from db_cloud import _client, INCOMING_BUCKET
+    path = f"{_TEMP_PREFIX}/{job_id}/docx_images.json"
+    _client().storage.from_(INCOMING_BUCKET).upload(
+        path=path,
+        file=_json.dumps(manifest).encode("utf-8"),
+        file_options={"content-type": _JSON_MIME, "upsert": "true"},
+    )
+    return path
+
+
+def fetch_docx_images(path: str | None) -> list[list[bytes]] | None:
+    """Reverse of stage_docx_images. None if path empty."""
+    if not path:
+        return None
+    import base64
+    raw = fetch_temp_pdf(path)  # generic download
+    manifest = _json.loads(raw)
+    return [
+        [base64.b64decode(b) for b in page]
+        for page in manifest.get("pages", [])
+    ]
+
+
+def stage_chunk_json(job_id: str, chunk_idx: int,
+                      chunk_data: dict) -> str:
+    """Upload one chunk's Vision JSON (pages + telemetry) to temp/."""
+    from db_cloud import _client, INCOMING_BUCKET
+    path = f"{_TEMP_PREFIX}/{job_id}/chunks/{chunk_idx:04d}.json"
+    _client().storage.from_(INCOMING_BUCKET).upload(
+        path=path,
+        file=_json.dumps(chunk_data).encode("utf-8"),
+        file_options={"content-type": _JSON_MIME, "upsert": "true"},
+    )
+    return path
+
+
+def fetch_all_chunk_jsons(job_id: str, chunk_count: int) -> list[dict]:
+    """Fetch every chunk JSON for a job, in chunk-index order."""
+    out = []
+    for c_idx in range(chunk_count):
+        path = f"{_TEMP_PREFIX}/{job_id}/chunks/{c_idx:04d}.json"
+        try:
+            raw = fetch_temp_pdf(path)
+            out.append(_json.loads(raw))
+        except Exception as exc:
+            logger.warning("fetch_all_chunk_jsons: missing chunk %d: %s",
+                           c_idx, exc)
+            out.append({
+                "pages": [],
+                "telemetry_rows": [],
+                "tokens": {"input": 0, "output": 0,
+                            "cache_read": 0, "cache_write": 0},
+            })
+    return out
+
+
+def cleanup_temp(job_id: str) -> None:
+    """Best-effort cleanup of temp/<job_id>/. Failures logged, not raised."""
+    try:
+        from db_cloud import _client, INCOMING_BUCKET
+        client = _client()
+        prefix = f"{_TEMP_PREFIX}/{job_id}"
+        listed = client.storage.from_(INCOMING_BUCKET).list(prefix)
+        paths = []
+        for item in (listed or []):
+            name = item.get("name") if isinstance(item, dict) else None
+            if name:
+                paths.append(f"{prefix}/{name}")
+        chunks_listed = client.storage.from_(INCOMING_BUCKET).list(
+            f"{prefix}/chunks"
+        )
+        for item in (chunks_listed or []):
+            name = item.get("name") if isinstance(item, dict) else None
+            if name:
+                paths.append(f"{prefix}/chunks/{name}")
+        if paths:
+            client.storage.from_(INCOMING_BUCKET).remove(paths)
+    except Exception as exc:
+        logger.warning("cleanup_temp(%s) failed: %s", job_id, exc)

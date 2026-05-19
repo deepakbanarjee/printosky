@@ -406,3 +406,248 @@ def run_v3_from_docx(
         job_token=job_token,
         university=university,
     )
+
+
+# =============================================================================
+# CHUNKED API for Inngest multi-step orchestration (Deploy 2C)
+# =============================================================================
+#
+# Splits the engine across multiple Vercel invocations so individual
+# functions don't hit the 300s ceiling. Each chunk handles N pages, the
+# Inngest orchestrator stitches results at the end.
+#
+# Flow:
+#   prepare_chunked(src_bytes) -> {pdf_bytes, page_count, docx_page_images}
+#         caller stages pdf_bytes + images to Supabase, keeps page_count
+#   process_chunk(pdf_bytes, start, end, total) -> {pages, telemetry, totals}
+#         called once per chunk; pages contains per-page Vision JSON
+#   assemble_chunked(all_pages, page_images, render_kwargs) -> {docx_bytes, ...}
+#         called once after all chunks done
+
+
+def prepare_chunked(src_bytes: bytes) -> dict[str, Any]:
+    """Phase 1 of chunked processing.
+
+    Accepts PDF or DOCX bytes. For DOCX, extracts images directly + converts
+    to PDF via fitz (same as run_v3_from_docx does). For PDF, returns
+    the bytes unchanged.
+
+    Returns:
+        {
+            "pdf_bytes":         bytes,
+            "page_count":        int,
+            "docx_page_images":  list[list[bytes]] | None,
+            "is_docx":           bool,
+        }
+    """
+    is_pdf = len(src_bytes) >= 200 and src_bytes[:4] == b"%PDF"
+    is_docx = len(src_bytes) >= 200 and src_bytes[:4] == b"PK\x03\x04"
+    if not (is_pdf or is_docx):
+        raise ValueError(f"source is not PDF or DOCX (got {src_bytes[:4]!r})")
+
+    if is_pdf:
+        pdf = fitz.open(stream=src_bytes, filetype="pdf")
+        page_count = pdf.page_count
+        pdf.close()
+        return {
+            "pdf_bytes":        src_bytes,
+            "page_count":       page_count,
+            "docx_page_images": None,
+            "is_docx":          False,
+        }
+
+    docx_page_images = _extract_docx_images_per_page(src_bytes)
+    try:
+        doc = fitz.open(stream=src_bytes, filetype="docx")
+    except Exception as e:
+        raise RuntimeError(
+            f"DOCX rendering not supported by this PyMuPDF build: {e}"
+        )
+    pdf_bytes = doc.convert_to_pdf()
+    doc.close()
+
+    pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
+    page_count = pdf.page_count
+    pdf.close()
+
+    return {
+        "pdf_bytes":        pdf_bytes,
+        "page_count":       page_count,
+        "docx_page_images": docx_page_images,
+        "is_docx":          True,
+    }
+
+
+def process_chunk(
+    pdf_bytes: bytes,
+    start_idx: int,
+    end_idx: int,
+    total_pages: int,
+    *,
+    max_workers: int = 5,
+    job_token: str | None = None,
+    university: str | None = None,
+) -> dict[str, Any]:
+    """Phase 2 of chunked processing. Runs Vision on pages [start_idx, end_idx).
+
+    Args:
+        pdf_bytes: Full PDF (caller fetches from staged Supabase path).
+        start_idx: First page index (0-based, inclusive).
+        end_idx: Last page index (0-based, exclusive).
+        total_pages: Total pages in the document (for context in prompts).
+        max_workers: Parallel Claude calls within this chunk. Default 5.
+        job_token: For telemetry rows.
+        university: For telemetry rows.
+
+    Returns:
+        {
+            "pages": [
+                {"page_idx": int, "page_kind": str, "elements": [...]},
+                ...
+            ],
+            "telemetry_rows": list[dict],
+            "tokens": {input, output, cache_read, cache_write},
+        }
+    """
+    pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
+    if start_idx < 0 or end_idx > pdf.page_count or start_idx >= end_idx:
+        pdf.close()
+        raise ValueError(
+            f"invalid chunk range {start_idx}:{end_idx} for "
+            f"{pdf.page_count}-page PDF"
+        )
+
+    work_items = []
+    for p_idx in range(start_idx, end_idx):
+        png, text = _render_page_png_and_text(pdf, p_idx, DPI)
+        work_items.append((p_idx, png, text, total_pages))
+    pdf.close()
+
+    page_results: dict[int, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for p_idx, result in ex.map(_analyze_one, work_items):
+            page_results[p_idx] = result
+
+    rows = []
+    total_in = 0
+    total_out = 0
+    total_cache_read = 0
+    total_cache_write = 0
+
+    pages_out = []
+    for p_idx in range(start_idx, end_idx):
+        r = page_results.get(p_idx)
+        if r is None:
+            pages_out.append({
+                "page_idx": p_idx,
+                "page_kind": "other",
+                "elements": [],
+                "notes": "missing_page_result",
+            })
+            continue
+
+        u = r.get("_usage", {}) or {}
+        total_in += u.get("input_tokens", 0)
+        total_out += u.get("output_tokens", 0)
+        total_cache_read += u.get("cache_read_tokens", 0)
+        total_cache_write += u.get("cache_write_tokens", 0)
+
+        if job_token:
+            cost_usd = _compute_call_cost_usd(u)
+            rows.append({
+                "job_token":          job_token,
+                "engine":             "format_fix_v4",
+                "page_no":            p_idx + 1,
+                "model":              u.get("model"),
+                "input_tokens":       u.get("input_tokens", 0),
+                "output_tokens":      u.get("output_tokens", 0),
+                "cache_read_tokens":  u.get("cache_read_tokens", 0),
+                "cache_write_tokens": u.get("cache_write_tokens", 0),
+                "cost_usd":           round(cost_usd, 6),
+                "cost_inr":           round(cost_usd * USD_INR, 4),
+                "elapsed_ms":         u.get("elapsed_ms"),
+                "error":              u.get("error"),
+                "university":         university,
+            })
+
+        clean = {k: v for k, v in r.items() if not k.startswith("_")}
+        clean["page_idx"] = p_idx
+        pages_out.append(clean)
+
+    return {
+        "pages": pages_out,
+        "telemetry_rows": rows,
+        "tokens": {
+            "input":       total_in,
+            "output":      total_out,
+            "cache_read":  total_cache_read,
+            "cache_write": total_cache_write,
+        },
+    }
+
+
+def assemble_chunked(
+    all_pages: list[dict[str, Any]],
+    page_images: list[list[bytes]] | None,
+    *,
+    render_kwargs: dict[str, Any] | None = None,
+    docx_page_images_extracted: list[list[bytes]] | None = None,
+) -> dict[str, Any]:
+    """Phase 3 of chunked processing. Stitches per-page results into a DOCX.
+
+    Args:
+        all_pages: Per-page Vision JSON dicts in source order (concatenated
+            from all chunks). Each dict has at minimum {page_idx,
+            page_kind, elements}.
+        page_images: Per-PDF-page image bytes from get_images(). May be None
+            if caller pre-flattened DOCX images.
+        render_kwargs: Forwarded to renderer.render_pages.
+        docx_page_images_extracted: If source was DOCX, the directly-extracted
+            images. The renderer uses these when Claude didn't emit image
+            elements (because fitz strips images during DOCX->PDF).
+
+    Returns:
+        {
+            "docx_bytes":    bytes,
+            "page_count":    int,
+            "project_title": str | None,
+            "page_kinds":    list[str],
+        }
+    """
+    pages_sorted = sorted(all_pages, key=lambda p: p.get("page_idx", 0))
+
+    n_pages = len(pages_sorted)
+    page_kinds = [p.get("page_kind", "other") for p in pages_sorted]
+
+    if docx_page_images_extracted is not None:
+        final_page_images = _flatten_images_to_pdf_pages(
+            docx_page_images_extracted, n_pages,
+        )
+    else:
+        final_page_images = page_images or [[] for _ in range(n_pages)]
+
+    rk = dict(render_kwargs or {})
+    docx_bytes = renderer.render_pages(pages_sorted, final_page_images, **rk)
+
+    project_title = renderer.extract_project_title(pages_sorted)
+
+    return {
+        "docx_bytes":    docx_bytes,
+        "page_count":    n_pages,
+        "project_title": project_title,
+        "page_kinds":    page_kinds,
+    }
+
+
+def extract_pdf_page_images(pdf_bytes: bytes) -> list[list[bytes]]:
+    """Helper: extract embedded images from each PDF page.
+
+    Used by the Inngest 'prepare' step for PDF inputs (since DOCX inputs
+    extract images via _extract_docx_images_per_page before conversion).
+    """
+    pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
+    out = []
+    for p_idx in range(pdf.page_count):
+        out.append(_extract_page_images(pdf, p_idx))
+    pdf.close()
+    return out
