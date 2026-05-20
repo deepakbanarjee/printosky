@@ -80,10 +80,9 @@ def _prep_step(job_id: str) -> dict:
     original_filename = job.get("original_filename") or ""
     render_kwargs     = job.get("render_kwargs") or {}
 
-    P.mark_processing(job_id, stage="downloading_source")
+    # DB-load optimization (free tier): no intermediate progress writes
+    # during prep. Just download + convert + stage to Supabase storage.
     src_bytes = P.download_source(storage_path)
-
-    P.update_progress(job_id, stage="preparing_pdf")
     prep = orchestrator_v3.prepare_chunked(src_bytes)
 
     pdf_temp_path = P.stage_temp_pdf(job_id, prep["pdf_bytes"])
@@ -97,7 +96,9 @@ def _prep_step(job_id: str) -> dict:
     page_count = prep["page_count"]
     n_chunks = (page_count + V4_CHUNK_SIZE - 1) // V4_CHUNK_SIZE
 
-    P.update_progress(
+    # SINGLE write for the whole job-start state (status + started_at +
+    # stage + page totals) instead of 3 separate UPDATEs.
+    P.mark_processing(
         job_id, stage="vision_pipeline",
         pages_total=page_count, pages_done=0,
     )
@@ -139,9 +140,13 @@ def _chunk_step(job_id: str, chunk_idx: int, prep: dict) -> dict:
         university=prep.get("university") or "ktu",
     )
 
+    # DB-load optimization: chunk step does ZERO DB writes. Result +
+    # telemetry rows are staged to Supabase STORAGE (object store, not
+    # Postgres). The assemble step batch-inserts all telemetry in one
+    # round-trip and computes final progress. Per-chunk progress in the
+    # DB is dropped (the Inngest dashboard shows per-step progress for
+    # debugging; the frontend shows elapsed time).
     P.stage_chunk_json(job_id, chunk_idx, chunk_result)
-    P.insert_telemetry_rows(chunk_result.get("telemetry_rows") or [])
-    P.update_progress(job_id, pages_done=end)
 
     return {
         "ok": True,
@@ -162,13 +167,15 @@ def _assemble_step(job_id: str, prep: dict) -> dict:
     original_filename = prep.get("original_filename") or ""
     render_kwargs = prep.get("render_kwargs") or {}
 
-    P.update_progress(job_id, stage="assembling")
-
+    # DB-load optimization: no intermediate stage writes. Read chunk
+    # JSONs from STORAGE, collect pages + telemetry + tokens.
     chunks = P.fetch_all_chunk_jsons(job_id, n_chunks)
     all_pages = []
+    all_telemetry = []
     total_in = total_out = total_cr = total_cw = 0
     for chunk in chunks:
         all_pages.extend(chunk.get("pages") or [])
+        all_telemetry.extend(chunk.get("telemetry_rows") or [])
         tok = chunk.get("tokens") or {}
         total_in += tok.get("input", 0)
         total_out += tok.get("output", 0)
@@ -190,7 +197,9 @@ def _assemble_step(job_id: str, prep: dict) -> dict:
     if not docx_bytes:
         raise RuntimeError("assemble produced empty DOCX")
 
-    P.update_progress(job_id, stage="uploading_result")
+    # ONE batch insert of all per-page telemetry (was 1 insert per chunk)
+    P.insert_telemetry_rows(all_telemetry)
+
     download_url = P.upload_result_docx(job_id, docx_bytes)
 
     try:

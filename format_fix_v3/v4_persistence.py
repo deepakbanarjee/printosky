@@ -34,8 +34,15 @@ def fetch_job(job_id: str) -> dict[str, Any] | None:
         return None
 
 
-def mark_processing(job_id: str, stage: str | None = None) -> None:
-    """Set status=processing + started_at (idempotent)."""
+def mark_processing(job_id: str, stage: str | None = None,
+                     pages_total: int | None = None,
+                     pages_done: int | None = None) -> None:
+    """Set status=processing + started_at, plus optional progress fields.
+
+    Deploy 2C-opt: accepts pages_total/pages_done so the whole job-start
+    state can be written in ONE round-trip instead of separate
+    mark_processing + update_progress calls. Reduces free-tier DB load.
+    """
     try:
         from db_cloud import _client
         update: dict[str, Any] = {
@@ -44,6 +51,10 @@ def mark_processing(job_id: str, stage: str | None = None) -> None:
         }
         if stage:
             update["progress_stage"] = stage
+        if pages_total is not None:
+            update["progress_pages_total"] = pages_total
+        if pages_done is not None:
+            update["progress_pages_done"] = pages_done
         _client().table("pb_jobs").update(update).eq("id", job_id).execute()
     except Exception as exc:
         logger.warning("mark_processing failed for %s: %s", job_id, exc)
