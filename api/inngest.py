@@ -244,6 +244,97 @@ def _assemble_step(job_id: str, prep: dict) -> dict:
     }
 
 
+def _route_step(job_id: str) -> dict:
+    """Read the job's route once (cached as an Inngest step output).
+
+    Returns:
+        {ok: False, reason}             -- job not found
+        {ok: True, skip: True, reason}  -- already done (idempotent re-fire)
+        {ok: True, route: str}          -- proceed; route is v2_structured|v4_vision
+    """
+    from format_fix_v3 import v4_persistence as P
+    job = P.fetch_job(job_id)
+    if job is None:
+        return {"ok": False, "reason": "job_not_found", "job_id": job_id}
+    if job.get("status") == "done":
+        return {"ok": True, "skip": True, "reason": "already_done",
+                "job_id": job_id}
+    return {"ok": True, "route": job.get("route") or "v4_vision"}
+
+
+def _v2_structured_step(job_id: str) -> dict:
+    """Single-step path for DOCX-with-heading-styles (route v2_structured).
+
+    Runs the v2 engine (format_fix.run_from_docx) which reads the
+    student's existing Word heading styles directly -> accurate chapter
+    hierarchy, zero API cost. No chunking needed: v2 is not API-bound, so
+    it comfortably fits in one Vercel invocation.
+    """
+    import tempfile
+    from pathlib import Path
+    from format_fix_v3 import v4_persistence as P
+    from format_fix_v3 import renderer as _v3renderer
+
+    job = P.fetch_job(job_id)
+    if job is None:
+        return {"ok": False, "reason": "job_not_found", "job_id": job_id}
+
+    storage_path      = job.get("storage_path", "")
+    university        = job.get("university") or "ktu"
+    original_filename = job.get("original_filename") or ""
+
+    P.mark_processing(job_id, stage="v2_structured")
+    src_bytes = P.download_source(storage_path)
+
+    from format_fix.orchestrator import run_from_docx
+    tmp_dir = Path(tempfile.gettempdir()) / f"v2_{job_id}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    out_path = tmp_dir / "output.docx"
+    try:
+        summary = run_from_docx(
+            docx_bytes=src_bytes,
+            university_id=university,
+            output_path=out_path,
+        )
+        docx_bytes = out_path.read_bytes() if out_path.exists() else b""
+    finally:
+        try:
+            out_path.unlink(missing_ok=True)
+            tmp_dir.rmdir()
+        except Exception:
+            pass
+
+    if not docx_bytes:
+        raise RuntimeError("v2 engine produced empty DOCX")
+
+    download_url = P.upload_result_docx(job_id, docx_bytes)
+    try:
+        download_filename = _v3renderer.smart_download_filename(
+            original_filename, None,
+        )
+    except Exception:
+        download_filename = f"Printosky_{job_id[:8]}.docx"
+
+    pages = summary.get("pages") or summary.get("pages_processed")
+    result_meta = {
+        "pages":              pages,
+        "claims":             summary.get("claims"),
+        "estimated_cost_usd": 0,
+        "estimated_cost_inr": 0,   # v2 reads styles; no Claude API calls
+        "download_filename":  download_filename,
+        "engine_variant":     "v2_structured",
+    }
+    P.mark_done(job_id, download_url=download_url, result_meta=result_meta)
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "download_url": download_url,
+        "pages": pages,
+        "rs_cost": 0,
+        "engine_variant": "v2_structured",
+    }
+
+
 @inngest_client.create_function(
     fn_id="process-v4-job",
     trigger=inngest.TriggerEvent(event="pb/job.created"),
@@ -272,6 +363,25 @@ def process_v4_job(ctx: inngest.ContextSync) -> dict:
     logger.info("process_v4_job start job_id=%s", job_id)
 
     try:
+        # Route decision (cached step -> read once regardless of how many
+        # invocations the chunked path spans).
+        route_info = ctx.step.run("route", lambda: _route_step(job_id))
+        if not route_info.get("ok"):
+            return route_info          # job not found
+        if route_info.get("skip"):
+            return route_info          # already done
+        route = route_info.get("route", "v4_vision")
+
+        # v2_structured: DOCX with heading styles -> one fast step, no Vision.
+        if route == "v2_structured":
+            result = ctx.step.run(
+                "v2-engine", lambda: _v2_structured_step(job_id),
+            )
+            logger.info("process_v4_job done (v2) job_id=%s pages=%s",
+                        job_id, result.get("pages"))
+            return result
+
+        # v4_vision: multi-step chunked Claude Vision pipeline.
         prep = ctx.step.run("prepare", lambda: _prep_step(job_id))
         if not prep.get("ok"):
             return prep

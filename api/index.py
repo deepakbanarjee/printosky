@@ -3129,19 +3129,51 @@ def _handle_pb_format_job_create(h, body: bytes) -> None:
         })
         return
 
+    # Engine routing: analyze the document (no API/DB cost) and pick the
+    # engine. DOCX-with-heading-styles -> v2_structured (read structure
+    # directly, accurate + cheap). Everything else -> v4_vision (Claude
+    # Vision chunked pipeline). The chosen route is persisted on the job
+    # row; the Inngest function reads it to dispatch.
+    route = "v4_vision"
+    route_reason = ""
+    try:
+        from format_fix_v3 import analyzer
+        analysis = analyzer.analyze(src_bytes)
+        route = analysis.get("route", "v4_vision")
+        route_reason = analysis.get("reason", "")
+        if route == "reject":
+            _v4_mark_error(job_id, "bad_input",
+                           analysis.get("reason", "unsupported input"))
+            _json_response(h, 400, {
+                "job_id": job_id,
+                "status": "error",
+                "error_message": analysis.get("reason", "unsupported input"),
+            })
+            return
+    except Exception as exc:
+        # Analyzer failure must not block a job; default to Vision.
+        logger.warning("analyzer failed for job %s: %s", job_id, exc)
+        route = "v4_vision"
+        route_reason = f"analyzer_error: {type(exc).__name__}"
+
+    try:
+        _client().table("pb_jobs").update({"route": route}).eq("id", job_id).execute()
+    except Exception as exc:
+        logger.warning("failed to store route for job %s: %s", job_id, exc)
+
     # Deploy 2B: send the job to Inngest for background processing instead
     # of running inline. The browser sees status="processing" right away
     # and starts polling /format-job-status. The Inngest function
-    # (process_v4_job in api/inngest.py) picks up the event, runs the
-    # engine on its own runtime, and writes back to pb_jobs when done.
+    # (process_v4_job in api/inngest.py) picks up the event, reads the
+    # route off the job row, and dispatches to v2_structured or v4_vision.
     try:
         import inngest as _inngest
         import os as _os
-        _client = _inngest.Inngest(
+        _inngest_client = _inngest.Inngest(
             app_id="printosky",
             is_production=_os.getenv("INNGEST_DEV") is None,
         )
-        _client.send_sync(_inngest.Event(
+        _inngest_client.send_sync(_inngest.Event(
             name="pb/job.created",
             data={"job_id": job_id},
         ))
@@ -3158,10 +3190,12 @@ def _handle_pb_format_job_create(h, body: bytes) -> None:
         return
 
     _json_response(h, 200, {
-        "job_id":   job_id,
-        "status":   "processing",
-        "engine":   "format_fix_v4",
-        "poll_url": f"/project-builder/format-job-status?id={job_id}",
+        "job_id":       job_id,
+        "status":       "processing",
+        "engine":       "format_fix_v4",
+        "route":        route,
+        "route_reason": route_reason,
+        "poll_url":     f"/project-builder/format-job-status?id={job_id}",
     })
 
 
