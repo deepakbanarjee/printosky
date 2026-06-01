@@ -79,3 +79,6 @@ SumatraPDF-settings.txt
 
 # Office-PC test-store sandbox (jobs.db, Incoming folder, daemon log)
 .office_test/
+
+# Python virtualenv (Claude Code web session hook)
+.venv/
