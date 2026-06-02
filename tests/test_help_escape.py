@@ -260,23 +260,35 @@ class TestCustomerWelcome:
             api_mod._handle_text("91999000111", text)
         return send_mock, bot_calls
 
-    def test_returning_contact_greeting_gets_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="hi")
+    def test_new_contact_first_message_gets_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # First-time customer → full welcome, regardless of message wording.
+        send_mock, bot_calls = self._run(monkeypatch, is_new=True, text="hi")
         assert send_mock.called
-        assert "Welcome" in send_mock.call_args[0][1]
+        assert "Welcome to Printosky" in send_mock.call_args[0][1]
         assert bot_calls["n"] == 0
 
     def test_new_contact_non_greeting_gets_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
         send_mock, bot_calls = self._run(monkeypatch, is_new=True, text="anyone there")
         assert send_mock.called
-        assert "Welcome" in send_mock.call_args[0][1]
+        assert "Welcome to Printosky" in send_mock.call_args[0][1]
         assert bot_calls["n"] == 0
 
-    def test_returning_contact_non_greeting_no_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returning_contact_greeting_gets_greeting_not_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Returning customer says hi → shorter "how can we help", NOT the
+        # first-time welcome.
+        send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="hi")
+        assert send_mock.called
+        msg = send_mock.call_args[0][1]
+        assert "How can we help" in msg
+        assert "Welcome to Printosky" not in msg
+        assert bot_calls["n"] == 0
+
+    def test_returning_contact_non_greeting_no_reply(self, monkeypatch: pytest.MonkeyPatch) -> None:
         send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="how much for printing")
         assert bot_calls["n"] == 1          # falls through to the state machine
         if send_mock.called:
-            assert "Welcome" not in send_mock.call_args[0][1]
+            assert "How can we help" not in send_mock.call_args[0][1]
+            assert "Welcome to Printosky" not in send_mock.call_args[0][1]
 
 
 # ═════════════════════════════════════════════════════════════════════════════

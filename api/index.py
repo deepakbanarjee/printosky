@@ -294,6 +294,17 @@ WELCOME_MESSAGE = (
     "Send your file or reply with one of the options above. 🙏"
 )
 
+# Shorter reply for a *returning* customer who greets — prompts them to say
+# what they need rather than re-introducing the shop.
+GREETING_MESSAGE = (
+    "🙏 *Hi! How can we help you today?*\n\n"
+    "📄 *Printouts / photocopies* — send your PDF or document here and we'll "
+    "quote you instantly.\n"
+    "📚 *Xtraa books* — reply *BOOKS*.\n"
+    "🧑‍💼 *Talk to staff* — reply *AGENT*.\n\n"
+    "Send your file, or tell us what you need. 🙏"
+)
+
 _GREETING_WORDS = {
     "hi", "hii", "hiii", "hello", "helo", "hey", "heyy", "hai", "hlo", "hloo",
     "yo", "start", "menu", "namaskaram", "namaste", "vanakkam", "hru",
@@ -351,19 +362,25 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
         _send_credits_balance(sender)
         return
 
-    # ── Customer welcome ──────────────────────────────────────────────────────
-    # Greet any idle customer who sends a greeting ("hi"/"hello"/…), or a
-    # brand-new contact's first message of any kind. Never fires mid print/book
-    # flow (guarded by the no-active-session check); stray non-greeting text from
-    # a returning customer still stays silent.
+    # ── Customer welcome / greeting ───────────────────────────────────────────
+    # First-time contacts get the full welcome menu (any first message).
+    # Returning customers who greet ("hi"/"hello"/…) get a shorter "how can we
+    # help" that prompts them to say what they need. Never fires mid print/book
+    # flow (no-active-session check); stray non-greeting text from a returning
+    # customer stays silent.
     try:
         from db_cloud import get_session as _get_session, is_new_contact
         if not (_get_session("supabase", sender) or {}).get("step"):
-            if _is_greeting(text) or is_new_contact(sender):
-                _send(sender, WELCOME_MESSAGE)
+            reply_msg = None
+            if is_new_contact(sender):
+                reply_msg = WELCOME_MESSAGE      # first-time customer
+            elif _is_greeting(text):
+                reply_msg = GREETING_MESSAGE     # returning customer says hi
+            if reply_msg:
+                _send(sender, reply_msg)
                 try:
                     from db_cloud import log_message
-                    log_message(sender, "outbound", WELCOME_MESSAGE, message_type="text")
+                    log_message(sender, "outbound", reply_msg, message_type="text")
                 except Exception:
                     pass
                 return
