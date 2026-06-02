@@ -34,6 +34,10 @@
     { "src": "/project-builder/create-order",         "dest": "/api/index.py" },
     { "src": "/project-builder/process",              "dest": "/api/index.py" },
     { "src": "/referrals/(.*)",                       "dest": "/api/index.py" },
+    { "src": "/cron/(.*)",                             "dest": "/api/index.py" },
     { "src": "/",                                     "dest": "/api/index.py" }
+  ],
+  "crons": [
+    { "path": "/cron/sla-check", "schedule": "*/30 * * * *" }
   ]
 }

@@ -324,8 +324,15 @@ def _is_greeting(text: str) -> bool:
 
 # A bot session older than this is treated as abandoned — a greeting resets it
 # rather than being silently ignored (prevents a forgotten staff_hold or a
-# half-finished print flow from black-holing the customer forever).
-STALE_SESSION_HOURS = 6
+# half-finished print flow from black-holing the customer forever). Matches the
+# 1-hour SLA so a single help-trigger never holds a reply longer than that.
+STALE_SESSION_HOURS = 1
+
+# Owner phone for SLA escalations. Must be in international format, no '+'.
+# IMPORTANT: Meta Cloud API only sends free-form text to a number that has
+# messaged us in the past 24h. The owner must keep an open conversation with
+# the Printosky WhatsApp (919495706405) or a utility template must be approved.
+OWNER_ALERT_PHONE = os.environ.get("OWNER_ALERT_PHONE", "918089699436")
 
 
 def _session_is_stale(session: dict) -> bool:
@@ -1912,6 +1919,54 @@ def _handle_admin_operator_queue_list(h) -> None:
         _json_response(h, 200, {"rows": rows, "count": len(rows)})
     except Exception as exc:
         logger.error("operator-queue list error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_cron_sla_check(h) -> None:
+    """GET /cron/sla-check — Vercel cron entry point.
+
+    Finds customers whose latest inbound is > 1h old without a reply, and pings
+    OWNER_ALERT_PHONE so the owner knows to check the admin Conversations tab.
+    Each customer is alerted at most once per 6h (cooldown).
+
+    Auth: Vercel sends `Authorization: Bearer ${CRON_SECRET}` on cron requests
+    when CRON_SECRET is set. If unset, the endpoint is reachable but harmless
+    (it only reads + alerts).
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected:
+        if h.headers.get("Authorization", "") != f"Bearer {expected}":
+            _json_response(h, 401, {"error": "Unauthorized"})
+            return
+    try:
+        from db_cloud import find_sla_breaches, mark_sla_alerted
+        from whatsapp_notify import _send
+
+        breaches = find_sla_breaches(threshold_hours=1, alert_cooldown_hours=6)
+        sent = False
+        if breaches:
+            count = len(breaches)
+            sample = ", ".join("…" + (b["phone"] or "")[-4:] for b in breaches[:5])
+            msg = (
+                "⏰ *Printosky SLA alert*\n\n"
+                f"{count} customer{'s' if count != 1 else ''} waiting > 1 hour for a reply.\n"
+                f"Numbers (last 4): {sample}\n\n"
+                "Please check oxygen admin → *Conversations* tab and reply, "
+                "or visit printosky.com/admin."
+            )
+            sent = _send(OWNER_ALERT_PHONE, msg)
+            if sent:
+                for b in breaches:
+                    mark_sla_alerted(b["phone"])
+            else:
+                logger.warning("SLA alert send failed (Meta 24h window? template needed?)")
+        _json_response(h, 200, {
+            "ok": True,
+            "breaches": len(breaches),
+            "alerted": bool(sent and breaches),
+        })
+    except Exception as exc:
+        logger.error("SLA cron error: %s", exc)
         _json_response(h, 500, {"error": str(exc)})
 
 
@@ -3813,6 +3868,11 @@ class handler(BaseHTTPRequestHandler):
         # /admin/book-orders/<code>/confirm is not swallowed by the list handler.
         if self.path == "/admin/book-orders" or self.path.startswith("/admin/book-orders?"):
             _handle_admin_book_orders_list(self)
+            return
+
+        # ── SLA watchdog (Vercel cron, fires every 30 min) ────────────────────
+        if self.path == "/cron/sla-check" or self.path.startswith("/cron/sla-check?"):
+            _handle_cron_sla_check(self)
             return
 
         # ── Operator queue (P0 Day 2.5) ──────────────────────────────────────

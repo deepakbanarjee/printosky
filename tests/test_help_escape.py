@@ -293,6 +293,35 @@ class TestCustomerWelcome:
             assert "How can we help" not in send_mock.call_args[0][1]
             assert "Welcome to Printosky" not in send_mock.call_args[0][1]
 
+    def test_one_customer_staff_hold_does_not_affect_others(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Customer B sends a greeting while customer A is in staff_hold.
+        # Customer B must still get the normal greeting reply — A's hold is
+        # per-phone and must NEVER hold replies to other customers.
+        sessions = {
+            "918943232033": {"step": "staff_hold", "updated_at": "2026-05-11 01:03:58"},
+            "918111222333": {},
+        }
+        bb = sys.modules.get("book_bot") or types.ModuleType("book_bot")
+        sys.modules["book_bot"] = bb
+        monkeypatch.setattr(bb, "maybe_handle_book", lambda *a, **kw: None, raising=False)
+        monkeypatch.setattr(sys.modules["db_cloud"], "get_session",
+                            lambda db, phone, *a, **kw: dict(sessions.get(phone, {})),
+                            raising=False)
+        monkeypatch.setattr(sys.modules["db_cloud"], "is_new_contact",
+                            lambda *a, **kw: False, raising=False)
+        monkeypatch.setattr(sys.modules["db_cloud"], "log_message",
+                            lambda *a, **kw: None, raising=False)
+        monkeypatch.setattr(sys.modules["db_cloud"], "clear_session",
+                            lambda *a, **kw: None, raising=False)
+        monkeypatch.setattr(api_mod, "_capture_referral_code", lambda *a, **kw: None)
+
+        with patch.object(sys.modules["whatsapp_notify"], "_send") as send_mock:
+            api_mod._handle_text("918111222333", "hi")          # customer B
+        assert send_mock.called
+        assert "How can we help" in send_mock.call_args[0][1]
+        # And A is still on hold (we did NOT message phone A here):
+        assert send_mock.call_args[0][0] == "918111222333"
+
     def test_recent_active_session_not_interrupted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Customer mid-flow (recent session) says hi → NOT interrupted.
         from datetime import datetime, timezone

@@ -373,6 +373,94 @@ def log_message(phone: str, direction: str, body: str,
         logger.warning(f"log_message error ({direction} {phone}): {e}")
 
 
+def find_sla_breaches(threshold_hours: int = 1,
+                      alert_cooldown_hours: int = 6,
+                      lookback_hours: int = 48) -> list[dict]:
+    """Return customers whose newest inbound > threshold_hours has no later reply.
+
+    Returns a list of {"phone", "last_inbound_at"} dicts, excluding any phone
+    that was already alerted within `alert_cooldown_hours` (cooldown to avoid
+    repeating the same nag).
+    """
+    from datetime import datetime, timezone, timedelta
+    try:
+        client = _client()
+        cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
+        rows = (
+            client.table("conversation_log")
+            .select("phone,direction,created_at")
+            .gte("created_at", cutoff_iso)
+            .order("created_at", desc=True)
+            .limit(2000)
+            .execute()
+            .data
+            or []
+        )
+
+        latest: dict[str, dict] = {}
+        for r in rows:
+            ph = r.get("phone")
+            if not ph:
+                continue
+            d = r["direction"]
+            slot = latest.setdefault(ph, {})
+            if d == "inbound" and "in" not in slot:
+                slot["in"] = r["created_at"]
+            elif d == "outbound" and "out" not in slot:
+                slot["out"] = r["created_at"]
+
+        threshold = datetime.now(timezone.utc) - timedelta(hours=threshold_hours)
+        breaches: list[dict] = []
+        for ph, slot in latest.items():
+            last_in = slot.get("in")
+            if not last_in:
+                continue
+            last_out = slot.get("out")
+            if last_out and last_out > last_in:
+                continue                       # already replied after the inbound
+            try:
+                in_dt = datetime.fromisoformat(str(last_in).replace("Z", "+00:00"))
+            except Exception:
+                continue
+            if in_dt > threshold:
+                continue                       # not yet > threshold_hours
+            breaches.append({"phone": ph, "last_inbound_at": last_in})
+
+        if not breaches or alert_cooldown_hours <= 0:
+            return breaches
+
+        cooldown_iso = (datetime.now(timezone.utc)
+                        - timedelta(hours=alert_cooldown_hours)).isoformat()
+        contacts = (
+            client.table("whatsapp_contacts")
+            .select("phone,last_sla_alert_at")
+            .in_("phone", [b["phone"] for b in breaches])
+            .execute()
+            .data
+            or []
+        )
+        recently_alerted = {
+            c["phone"] for c in contacts
+            if c.get("last_sla_alert_at") and c["last_sla_alert_at"] > cooldown_iso
+        }
+        return [b for b in breaches if b["phone"] not in recently_alerted]
+    except Exception as exc:
+        logger.error("find_sla_breaches error: %s", exc)
+        return []
+
+
+def mark_sla_alerted(phone: str) -> None:
+    """Stamp last_sla_alert_at=now on a contact; silent on error."""
+    try:
+        _client().table("whatsapp_contacts").upsert(
+            {"phone": phone,
+             "last_sla_alert_at": datetime.now(timezone.utc).isoformat()},
+            on_conflict="phone",
+        ).execute()
+    except Exception as exc:
+        logger.warning("mark_sla_alerted error for %s: %s", phone, exc)
+
+
 def is_new_contact(phone: str) -> bool:
     """True if there is no prior conversation history for this phone.
 
