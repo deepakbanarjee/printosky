@@ -100,11 +100,11 @@ def _catalog_message() -> str:
     b = bc.BOOKS
     return (
         "📚 *Xtraa — Adithara Balappeduthu*\n"
-        "_The foundation book for early readers._\n\n"
-        f"1️⃣ *Malayalam* — ₹{b['malayalam']['price']} "
+        "_Foundation books for early readers._\n\n"
+        f"1️⃣ *Aksharamrutham* (Malayalam) — ₹{b['malayalam']['price']} "
         f"(MRP ₹{b['malayalam']['mrp']})\n"
-        f"2️⃣ *Hindi* — ₹{b['hindi']['price']} (MRP ₹{b['hindi']['mrp']})\n"
-        f"3️⃣ *English* — ₹{b['english']['price']} (MRP ₹{b['english']['mrp']})\n"
+        f"2️⃣ *Vidyamrut* (Hindi) — ₹{b['hindi']['price']} (MRP ₹{b['hindi']['mrp']})\n"
+        f"3️⃣ *Easy English* — ₹{b['english']['price']} (MRP ₹{b['english']['mrp']})\n"
         f"4️⃣ *All three (Set)* — ₹{bc.SET_PRICE}\n\n"
         "Reply with your choice:\n"
         "• one number → _1_\n"

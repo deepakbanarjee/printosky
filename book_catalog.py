@@ -13,9 +13,9 @@ import re
 # Prices locked from the campaign poster (offer price vs MRP).
 # Labels are editable — correct the titles here if needed.
 BOOKS: dict[str, dict] = {
-    "malayalam": {"label": "Adithara Balappeduthu — Malayalam", "mrp": 250, "price": 200},
-    "hindi":     {"label": "Adithara Balappeduthu — Hindi",     "mrp": 200, "price": 150},
-    "english":   {"label": "Adithara Balappeduthu — English",   "mrp": 250, "price": 200},
+    "malayalam": {"label": "Aksharamrutham (Malayalam)", "mrp": 250, "price": 200},
+    "hindi":     {"label": "Vidyamrut (Hindi)",          "mrp": 200, "price": 150},
+    "english":   {"label": "Easy English",               "mrp": 250, "price": 200},
 }
 
 # Stable display / selection order.
