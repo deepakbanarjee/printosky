@@ -1,5 +1,5 @@
 # Printosky Sprint Backlog
-Last updated: 2026-04-09 (Session 9)
+Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin conversations fix all shipped (S10-6/7/8)
 
 ---
 
@@ -70,6 +70,9 @@ Last updated: 2026-04-09 (Session 9)
 | S10-3 | ~~**WhatsApp group/channel filter**~~ ✅ | Filters @g.us, @newsletter, @broadcast, isGroupMsg in index.js:165-170. Confirmed in code. |
 | S10-4 | ~~**Delivery flow**~~ ✅ | Verified working (2026-04-09) |
 | S10-5 | ~~**B2B bot**~~ 🗑️ | RETIRED 2026-05-12 — 0 b2b_clients rows in production, no owner. See `retired/2026-05-12-graveyard/{b2b_bot.py,b2b_manager.py,test_b2b*.py}` for code + revival path. Live Supabase tables `b2b_clients` + `b2b_payments` left in place. |
+| S10-6 | ~~**Xtraa book-order flow**~~ ✅ | Live 2026-06-02 (commit c0cbb74). WhatsApp flow: enquiry → catalog (ML ₹200 / HI ₹150 / EN ₹200 / set ₹549 + ₹75 courier) → qty per book → address → phone confirm → summary → branded UPI QR → payment screenshot → owner 1-tap confirm. Separate `book_orders` table (RLS service_role); `book_bot.py` + `book_catalog.py`; admin **Book Orders** tab + `/admin/book-orders` & `/confirm` endpoints. Owner-verified payment (no auto-confirm) to block screenshot fraud. 62 tests. **Open:** confirm real book titles (placeholders) + live WhatsApp smoke-test. |
+| S10-7 | ~~**New-customer welcome auto-reply**~~ ✅ | Live 2026-06-02 (commit ae95ba5). A brand-new contact (no prior `conversation_log` rows) whose first message isn't a file/book/help/command gets a welcome + menu (printouts / Xtraa books / staff). `db_cloud.is_new_contact()`; fires once, returning customers unaffected. 2 tests. |
+| S10-8 | ~~**Admin conversations 404 fix**~~ ✅ | Fixed 2026-06-02 (commit 6126b6a/1ccd3f1). `/admin/conversations` + `/admin/thread` were 404ing — `vercel.json` only registered `/admin/reset-pin` + `/admin/send`; replaced with `/admin/(.*)` wildcard + `/referrals/(.*)`. Conversations panel now shows visible error messages instead of silent failure. |
 
 ---
 
