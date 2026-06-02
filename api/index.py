@@ -294,6 +294,22 @@ WELCOME_MESSAGE = (
     "Send your file or reply with one of the options above. 🙏"
 )
 
+_GREETING_WORDS = {
+    "hi", "hii", "hiii", "hello", "helo", "hey", "heyy", "hai", "hlo", "hloo",
+    "yo", "start", "menu", "namaskaram", "namaste", "vanakkam", "hru",
+}
+
+
+def _is_greeting(text: str) -> bool:
+    """True if the message is a greeting / conversation-opener (hi, hello, …)."""
+    t = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (text or "").lower())).strip()
+    if not t:
+        return False
+    if t.startswith(("good morning", "good afternoon", "good evening", "good day")):
+        return True
+    words = t.split()
+    return bool(words) and words[0] in _GREETING_WORDS
+
 
 def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     """Route a customer text through the bot state machine and send replies."""
@@ -335,20 +351,22 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
         _send_credits_balance(sender)
         return
 
-    # ── New-customer welcome ──────────────────────────────────────────────────
-    # A brand-new contact (no prior conversation history) whose message wasn't a
-    # file, book enquiry, help request, or known command gets a friendly welcome
-    # + menu instead of silence. Returning customers fall through unchanged.
+    # ── Customer welcome ──────────────────────────────────────────────────────
+    # Greet any idle customer who sends a greeting ("hi"/"hello"/…), or a
+    # brand-new contact's first message of any kind. Never fires mid print/book
+    # flow (guarded by the no-active-session check); stray non-greeting text from
+    # a returning customer still stays silent.
     try:
         from db_cloud import get_session as _get_session, is_new_contact
-        if not (_get_session("supabase", sender) or {}).get("step") and is_new_contact(sender):
-            _send(sender, WELCOME_MESSAGE)
-            try:
-                from db_cloud import log_message
-                log_message(sender, "outbound", WELCOME_MESSAGE, message_type="text")
-            except Exception:
-                pass
-            return
+        if not (_get_session("supabase", sender) or {}).get("step"):
+            if _is_greeting(text) or is_new_contact(sender):
+                _send(sender, WELCOME_MESSAGE)
+                try:
+                    from db_cloud import log_message
+                    log_message(sender, "outbound", WELCOME_MESSAGE, message_type="text")
+                except Exception:
+                    pass
+                return
     except Exception as e:
         logger.error(f"Welcome handler error for {sender}: {e}")
 

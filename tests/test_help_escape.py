@@ -214,9 +214,27 @@ class TestHandleTextShortCircuit:
         assert called["help"] == 0
 
 
-class TestNewCustomerWelcome:
-    """A brand-new contact's plain message gets the welcome menu; returning
-    customers fall through to the state machine unchanged."""
+class TestIsGreeting:
+    """Pure greeting matcher — no I/O."""
+
+    @pytest.mark.parametrize("text", [
+        "hi", "Hi", "HI!", "hii", "hello", "Hello sir", "hey", "hey there",
+        "hai", "  hi  ", "good morning", "Good Evening!", "namaskaram", "start", "menu",
+    ])
+    def test_greetings(self, text: str) -> None:
+        assert api_mod._is_greeting(text) is True
+
+    @pytest.mark.parametrize("text", [
+        "", "hindi", "i need a print", "how much", "books", "2 copies", "history",
+    ])
+    def test_non_greetings(self, text: str) -> None:
+        assert api_mod._is_greeting(text) is False
+
+
+class TestCustomerWelcome:
+    """Welcome fires on a greeting from any idle customer, or on a brand-new
+    contact's first message. Stray non-greeting text from a returning customer
+    stays silent."""
 
     def _patch_common(self, monkeypatch, *, is_new):
         bb = sys.modules.get("book_bot")
@@ -232,26 +250,30 @@ class TestNewCustomerWelcome:
                             lambda *a, **kw: None, raising=False)
         monkeypatch.setattr(api_mod, "_capture_referral_code", lambda *a, **kw: None)
 
-    def test_new_contact_gets_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._patch_common(monkeypatch, is_new=True)
+    def _run(self, monkeypatch, *, is_new, text):
+        self._patch_common(monkeypatch, is_new=is_new)
         bot_calls = {"n": 0}
         monkeypatch.setattr(sys.modules["whatsapp_bot"], "handle_message",
                             lambda **kw: bot_calls.__setitem__("n", bot_calls["n"] + 1) or [],
                             raising=False)
         with patch.object(sys.modules["whatsapp_notify"], "_send") as send_mock:
-            api_mod._handle_text("91999000111", "hi")
+            api_mod._handle_text("91999000111", text)
+        return send_mock, bot_calls
+
+    def test_returning_contact_greeting_gets_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="hi")
         assert send_mock.called
         assert "Welcome" in send_mock.call_args[0][1]
-        assert bot_calls["n"] == 0          # short-circuits before the state machine
+        assert bot_calls["n"] == 0
 
-    def test_returning_contact_no_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._patch_common(monkeypatch, is_new=False)
-        bot_calls = {"n": 0}
-        monkeypatch.setattr(sys.modules["whatsapp_bot"], "handle_message",
-                            lambda **kw: bot_calls.__setitem__("n", bot_calls["n"] + 1) or [],
-                            raising=False)
-        with patch.object(sys.modules["whatsapp_notify"], "_send") as send_mock:
-            api_mod._handle_text("91999000222", "hi")
+    def test_new_contact_non_greeting_gets_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        send_mock, bot_calls = self._run(monkeypatch, is_new=True, text="anyone there")
+        assert send_mock.called
+        assert "Welcome" in send_mock.call_args[0][1]
+        assert bot_calls["n"] == 0
+
+    def test_returning_contact_non_greeting_no_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="how much for printing")
         assert bot_calls["n"] == 1          # falls through to the state machine
         if send_mock.called:
             assert "Welcome" not in send_mock.call_args[0][1]
