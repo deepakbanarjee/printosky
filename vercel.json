@@ -18,8 +18,7 @@
     { "src": "/webhook/razorpay",                     "dest": "/api/index.py" },
     { "src": "/staff/set-pin",                        "dest": "/api/index.py" },
     { "src": "/staff/resume",                         "dest": "/api/index.py" },
-    { "src": "/admin/reset-pin",                      "dest": "/api/index.py" },
-    { "src": "/admin/send",                           "dest": "/api/index.py" },
+    { "src": "/admin/(.*)",                           "dest": "/api/index.py" },
     { "src": "/academic/orders",                      "dest": "/api/index.py" },
     { "src": "/academic/orders/(.*)",                 "dest": "/api/index.py" },
     { "src": "/academic/razorpay-webhook",            "dest": "/api/index.py" },
@@ -34,6 +33,7 @@
     { "src": "/project-builder/upload-sign",          "dest": "/api/index.py" },
     { "src": "/project-builder/create-order",         "dest": "/api/index.py" },
     { "src": "/project-builder/process",              "dest": "/api/index.py" },
+    { "src": "/referrals/(.*)",                       "dest": "/api/index.py" },
     { "src": "/",                                     "dest": "/api/index.py" }
   ]
 }
