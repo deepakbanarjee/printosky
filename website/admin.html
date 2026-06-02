@@ -3488,13 +3488,18 @@ async function convFetchInbox() {
       if (pw) { sessionStorage.setItem('admin_pw_cache', pw); convFetchInbox(); }
       return;
     }
-    if (!r.ok) return;
+    if (!r.ok) {
+      const list = document.getElementById('conv-contact-list');
+      if (list) list.innerHTML = `<div style="padding:20px;color:#dc2626;font-size:13px;">Error ${r.status} — failed to load conversations.</div>`;
+      return;
+    }
     const contacts = await r.json();
     convRenderInbox(contacts);
     convUpdateTabTitle(contacts);
     convFireNotifications(contacts);
   } catch (e) {
-    console.error('[conv] inbox fetch failed', e);
+    const list = document.getElementById('conv-contact-list');
+    if (list) list.innerHTML = `<div style="padding:20px;color:#dc2626;font-size:13px;">Network error — ${e.message}</div>`;
   }
 }
 
@@ -3561,11 +3566,16 @@ async function convFetchThread(phone) {
       `${ACAD_API}/admin/thread?phone=${encodeURIComponent(phone)}&limit=100`,
       { headers: { 'X-Admin-Password': _convPw() } }
     );
-    if (!r.ok) return;
+    if (!r.ok) {
+      const area = document.getElementById('conv-message-area');
+      if (area) area.innerHTML = `<div style="padding:20px;color:#dc2626;font-size:13px;">Error ${r.status} — failed to load messages.</div>`;
+      return;
+    }
     const messages = await r.json();
     convRenderThread(messages);
   } catch (e) {
-    console.error('[conv] thread fetch failed', e);
+    const area = document.getElementById('conv-message-area');
+    if (area) area.innerHTML = `<div style="padding:20px;color:#dc2626;font-size:13px;">Network error — ${e.message}</div>`;
   }
 }
 
