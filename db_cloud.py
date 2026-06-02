@@ -686,3 +686,107 @@ def mark_contact_seen(phone: str) -> None:
         ).execute()
     except Exception as exc:
         logger.warning("mark_contact_seen failed: %s", exc)
+
+
+# ── book_orders (Xtraa book campaign) ─────────────────────────────────────────
+
+# Statuses considered "in progress" — a new enquiry resumes/uses these rather
+# than starting a fresh order. confirmed/cancelled are terminal.
+BOOK_ACTIVE_STATUSES = ("collecting", "awaiting_payment", "payment_review")
+BOOK_PROOF_PREFIX = "book-payments"
+
+
+def get_active_book_order(phone: str) -> dict:
+    """Return the most recent in-progress book order for this phone, or {}."""
+    try:
+        result = (
+            _client().table("book_orders")
+            .select("*")
+            .eq("phone", phone)
+            .in_("status", list(BOOK_ACTIVE_STATUSES))
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("get_active_book_order error for %s: %s", phone, exc)
+        return {}
+
+
+def create_book_order(order_code: str, phone: str, name: str | None = None) -> dict:
+    """Insert a new 'collecting' book order. Returns the created row, or {}."""
+    try:
+        result = (
+            _client().table("book_orders")
+            .insert({
+                "order_code": order_code,
+                "phone":      phone,
+                "name":       name,
+                "status":     "collecting",
+            })
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("create_book_order error for %s: %s", phone, exc)
+        return {}
+
+
+def update_book_order(order_code: str, **fields) -> None:
+    """Update fields on a book order by order_code. Silent on error."""
+    if not fields:
+        return
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        _client().table("book_orders").update(fields).eq("order_code", order_code).execute()
+    except Exception as exc:
+        logger.error("update_book_order error for %s: %s", order_code, exc)
+
+
+def get_book_order(order_code: str) -> dict:
+    """Fetch a single book order by code, or {}."""
+    try:
+        result = (
+            _client().table("book_orders")
+            .select("*")
+            .eq("order_code", order_code)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("get_book_order error for %s: %s", order_code, exc)
+        return {}
+
+
+def list_book_orders(status: str | None = None, limit: int = 100) -> list:
+    """List book orders, newest first. Optionally filter by status."""
+    try:
+        q = _client().table("book_orders").select("*")
+        if status:
+            q = q.eq("status", status)
+        result = q.order("created_at", desc=True).limit(limit).execute()
+        return result.data or []
+    except Exception as exc:
+        logger.error("list_book_orders error: %s", exc)
+        return []
+
+
+def upload_book_payment_proof(order_code: str, content: bytes, mime_type: str) -> str:
+    """Upload a payment screenshot to storage. Returns its public URL, or ''."""
+    ext = ".jpg"
+    if "png" in (mime_type or ""):
+        ext = ".png"
+    ts   = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    path = f"{BOOK_PROOF_PREFIX}/{order_code}_{ts}{ext}"
+    try:
+        _client().storage.from_(INCOMING_BUCKET).upload(
+            path=path,
+            file=content,
+            file_options={"content-type": mime_type or "image/jpeg", "upsert": "true"},
+        )
+        return _client().storage.from_(INCOMING_BUCKET).get_public_url(path)
+    except Exception as exc:
+        logger.error("upload_book_payment_proof error for %s: %s", order_code, exc)
+        return ""

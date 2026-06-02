@@ -283,7 +283,7 @@ def _handle_help_request(sender: str, trigger: str) -> None:
         logger.warning(f"_handle_help_request ack send failed for {sender}: {exc}")
 
 
-def _handle_text(sender: str, text: str) -> None:
+def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     """Route a customer text through the bot state machine and send replies."""
     from whatsapp_bot import handle_message
     from whatsapp_notify import _send, send_staff_alert
@@ -293,6 +293,25 @@ def _handle_text(sender: str, text: str) -> None:
     # alert staff, ack the customer. TASK-009.
     if _is_help_keyword(text):
         _handle_help_request(sender, text.strip().lower())
+        return
+
+    # ── Xtraa book campaign: separate flow + book_orders table ────────────────
+    # Runs before the print state machine. Only takes over when the customer is
+    # mid book-order or explicitly enquires about books (never mid print-job).
+    try:
+        from book_bot import maybe_handle_book
+        book_replies = maybe_handle_book(sender, text, name=name)
+    except Exception as e:
+        logger.error(f"Book flow error for {sender}: {e}")
+        book_replies = None
+    if book_replies is not None:
+        for reply in book_replies:
+            _send(sender, reply)
+            try:
+                from db_cloud import log_message
+                log_message(sender, "outbound", reply, message_type="text")
+            except Exception:
+                pass
         return
 
     # Capture referral code; treat ref_CODE message as a plain greeting
@@ -333,6 +352,34 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
     """Download a WhatsApp attachment, upload to Supabase Storage, create job row."""
     from db_cloud import upload_file, insert_job_from_webhook, clear_session, save_session
     from whatsapp_notify import send_file_received_with_quote_start
+
+    # ── Book campaign: an image sent during book_pay is a payment screenshot, ──
+    # NOT a print job. Intercept before any print-job side effects.
+    if msg_type == "image":
+        try:
+            from db_cloud import get_session, log_message
+            from book_bot import handle_payment_proof
+            if (get_session("supabase", sender) or {}).get("step") == "book_pay":
+                from whatsapp_notify import _send
+                content = _download_meta_media(media_id)
+                replies = None
+                if content is not None:
+                    replies = handle_payment_proof(sender, content, mime_type or "image/jpeg")
+                if replies is None:
+                    # Download failed or proof not accepted. Ask the customer to
+                    # resend — but do NOT fall through to print-job creation,
+                    # which would create a spurious job and send wrong prompts.
+                    replies = ["We couldn't read that image. Please resend a clear "
+                               "screenshot of your payment confirmation. 🙏"]
+                for reply in replies:
+                    _send(sender, reply)
+                    try:
+                        log_message(sender, "outbound", reply, message_type="text")
+                    except Exception:
+                        pass
+                return None
+        except Exception as e:
+            logger.error(f"Book payment-proof handling failed for {sender}: {e}")
 
     ext = FILE_MIME_TYPES.get(mime_type, "")
     ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -558,7 +605,7 @@ def _process_meta_webhook(data: dict) -> None:
                             logger.error("store_dispatch routing failed: %s", e)
 
                         if not handled_as_store:
-                            _handle_text(sender, text)
+                            _handle_text(sender, text, name=pushname)
                         try:
                             from db_cloud import log_message, upsert_contact
                             log_message(sender, "inbound", text, message_type="text")
@@ -1769,6 +1816,42 @@ def _handle_admin_operator_queue_list(h) -> None:
         _json_response(h, 200, {"rows": rows, "count": len(rows)})
     except Exception as exc:
         logger.error("operator-queue list error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_book_orders_list(h) -> None:
+    """GET /admin/book-orders[?status=collecting|awaiting_payment|payment_review|confirmed]
+    Returns book orders newest-first. Omit status (or 'all') for everything.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    from urllib.parse import parse_qs, urlparse
+    params = parse_qs(urlparse(h.path).query)
+    status = params.get("status", [None])[0]
+    status_filter = None if status in (None, "", "all") else status
+    try:
+        from db_cloud import list_book_orders
+        rows = list_book_orders(status=status_filter, limit=200)
+        _json_response(h, 200, {"rows": rows, "count": len(rows)})
+    except Exception as exc:
+        logger.error("book-orders list error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_book_order_confirm(h, order_code: str) -> None:
+    """POST /admin/book-orders/<code>/confirm — owner confirms payment received.
+    Marks the order confirmed and messages the customer 'order confirmed'.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from book_bot import confirm_book_order
+        result = confirm_book_order(order_code)
+        _json_response(h, 200 if result.get("ok") else 404, result)
+    except Exception as exc:
+        logger.error("book-order confirm error: %s", exc)
         _json_response(h, 500, {"error": str(exc)})
 
 
@@ -3629,6 +3712,13 @@ class handler(BaseHTTPRequestHandler):
             _handle_admin_health_models(self)
             return
 
+        # ── Xtraa book orders ────────────────────────────────────────────────
+        # Exact path (+ optional query) only, so a GET to a sub-route like
+        # /admin/book-orders/<code>/confirm is not swallowed by the list handler.
+        if self.path == "/admin/book-orders" or self.path.startswith("/admin/book-orders?"):
+            _handle_admin_book_orders_list(self)
+            return
+
         # ── Operator queue (P0 Day 2.5) ──────────────────────────────────────
         # Order matters: more-specific paths first.
         if self.path.startswith("/admin/operator-queue/depth"):
@@ -3806,6 +3896,14 @@ class handler(BaseHTTPRequestHandler):
         )
         if _opq_deliver:
             _handle_admin_operator_queue_deliver(self, body, _opq_deliver.group(1))
+            return
+
+        # ── Xtraa book order: owner confirms payment ─────────────────────────
+        _book_confirm = re.match(
+            r"^/admin/book-orders/([A-Za-z0-9\-]+)/confirm$", self.path,
+        )
+        if _book_confirm:
+            _handle_admin_book_order_confirm(self, _book_confirm.group(1))
             return
 
         # ── Referral store-credit redemption (staff) ─────────────────────────

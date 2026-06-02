@@ -1021,6 +1021,7 @@
     <button class="conv-tab-btn"        id="tab-academic"  onclick="switchTab('academic')">Academic Projects</button>
     <button class="conv-tab-btn"        id="tab-referrals" onclick="switchTab('referrals')">Referrals</button>
     <button class="conv-tab-btn"        id="tab-pb-orders" onclick="switchTab('pb-orders')">Project Orders</button>
+    <button class="conv-tab-btn"        id="tab-book-orders" onclick="switchTab('book-orders')">Book Orders</button>
     <button class="conv-tab-btn"        id="tab-opq"       onclick="switchTab('opq')">Operator Queue <span id="opq-depth-badge" style="display:none;background:#dc2626;color:#fff;border-radius:10px;padding:1px 7px;font-size:.7rem;margin-left:4px;font-weight:700"></span></button>
   </div>
 
@@ -1312,6 +1313,23 @@
   </div>
 
   <!-- ── Operator Queue Tab (P0 Day 2.5) ── -->
+  <div id="book-orders-tab" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:.85rem;color:var(--muted)">Xtraa book orders · confirm payment after checking your UPI app</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="book-status-filter" onchange="loadBookOrders()" style="padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:.85rem">
+          <option value="payment_review" selected>Awaiting confirmation</option>
+          <option value="awaiting_payment">Awaiting payment</option>
+          <option value="collecting">In progress</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="all">All</option>
+        </select>
+        <button class="ctrl-btn" onclick="loadBookOrders()">↻ Refresh</button>
+      </div>
+    </div>
+    <div id="book-orders-list"></div>
+  </div>
+
   <div id="opq-tab" style="display:none">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div style="font-size:.85rem;color:var(--muted)">AI-failed orders awaiting operator finish · SLA 6h</div>
@@ -3783,12 +3801,14 @@ async function switchTab(tab) {
   document.getElementById("referrals-tab").style.display  = tab === "referrals"  ? "block" : "none";
   document.getElementById("pb-orders-tab").style.display  = tab === "pb-orders"  ? "block" : "none";
   document.getElementById("opq-tab").style.display        = tab === "opq"        ? "block" : "none";
+  document.getElementById("book-orders-tab").style.display = tab === "book-orders" ? "block" : "none";
   document.getElementById("tab-jobs").classList.toggle("active",       tab === "jobs");
   document.getElementById("tab-conv").classList.toggle("active",       tab === "conv");
   document.getElementById("tab-academic").classList.toggle("active",   tab === "academic");
   document.getElementById("tab-referrals").classList.toggle("active",  tab === "referrals");
   document.getElementById("tab-pb-orders").classList.toggle("active",  tab === "pb-orders");
   document.getElementById("tab-opq").classList.toggle("active",        tab === "opq");
+  document.getElementById("tab-book-orders").classList.toggle("active", tab === "book-orders");
 
   // Conversations polling — start when tab is active, stop otherwise
   if (tab === "conv") {
@@ -3806,6 +3826,7 @@ async function switchTab(tab) {
   if (tab === "referrals")  { loadReferralsLeaderboard(); }
   if (tab === "pb-orders")  { loadPBOrders(); }
   if (tab === "opq")        { loadOperatorQueue(); }
+  if (tab === "book-orders"){ loadBookOrders(); }
 }
 
 // ── Referrals leaderboard ───────────────────────────────────────────────────
@@ -4032,6 +4053,96 @@ function _fmtDeadline(deadlineIso) {
   return overdue
     ? `<span style="color:#b91c1c;font-weight:600">⚠ ${label} over</span>`
     : `<span style="color:${mins < 60 ? '#b91c1c' : 'inherit'}">${label} left</span>`;
+}
+
+// ── Book Orders (Xtraa campaign) ─────────────────────────────────────────────
+let _bookOrdersCache = [];
+
+async function loadBookOrders() {
+  if (!_convPw()) {
+    const pw = await _adminPwPrompt(false);
+    if (pw) sessionStorage.setItem('admin_pw_cache', pw); else return;
+  }
+  const status = document.getElementById('book-status-filter')?.value || '';
+  const list = document.getElementById('book-orders-list');
+  try {
+    const qs = (status && status !== 'all') ? `?status=${encodeURIComponent(status)}` : '';
+    const r = await fetch(`${ACAD_API}/admin/book-orders${qs}`, {
+      headers: { 'X-Admin-Password': _convPw() }
+    });
+    if (r.status === 403) {
+      sessionStorage.removeItem('admin_pw_cache');
+      if (list) list.innerHTML = `<div style="padding:20px;color:#dc2626;font-size:13px;">Unauthorized — wrong admin password. Reopen this tab to retry.</div>`;
+      return;
+    }
+    if (!r.ok) {
+      if (list) list.innerHTML = `<div style="padding:20px;color:#dc2626;font-size:13px;">Error ${r.status} — failed to load book orders.</div>`;
+      return;
+    }
+    const data = await r.json();
+    _bookOrdersCache = data.rows || [];
+    renderBookOrders(_bookOrdersCache);
+  } catch (e) {
+    if (list) list.innerHTML = `<div style="padding:20px;color:#dc2626;font-size:13px;">Network error — ${e.message}</div>`;
+  }
+}
+
+function _bookItemsSummary(items) {
+  if (!items) return '—';
+  const names = { malayalam: 'Malayalam', hindi: 'Hindi', english: 'English' };
+  const parts = Object.entries(items)
+    .filter(([, q]) => q > 0)
+    .map(([k, q]) => `${names[k] || k} × ${q}`);
+  return parts.length ? parts.join(', ') : '—';
+}
+
+function renderBookOrders(rows) {
+  const list = document.getElementById('book-orders-list');
+  if (!list) return;
+  if (!rows.length) {
+    list.innerHTML = `<div style="padding:20px;color:#999;font-size:13px;">No book orders for this filter.</div>`;
+    return;
+  }
+  const badgeColor = {
+    collecting: '#999', awaiting_payment: '#d97706', payment_review: '#dc2626',
+    confirmed: '#16a34a', cancelled: '#666',
+  };
+  list.innerHTML = rows.map(o => {
+    const color = badgeColor[o.status] || '#666';
+    const proof = o.payment_proof_url
+      ? `<a href="${o.payment_proof_url}" target="_blank" style="font-size:.8rem">📎 view payment screenshot</a>` : '';
+    const confirmBtn = (o.status === 'payment_review')
+      ? `<button class="ctrl-btn" onclick="confirmBookOrder('${o.order_code}')">✅ Confirm payment</button>` : '';
+    const addr = (o.address || '').replace(/</g, '&lt;');
+    return `<div style="border:1px solid #e6e6e6;border-radius:8px;padding:12px;margin-bottom:10px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>${o.order_code}</strong>
+        <span style="color:${color};font-weight:700;text-transform:uppercase;font-size:.7rem;letter-spacing:.05em">${(o.status || '').replace('_', ' ')}</span>
+      </div>
+      <div style="font-size:.85rem;margin-top:5px">${_bookItemsSummary(o.items)} &nbsp;·&nbsp; <strong>₹${o.grand_total || 0}</strong></div>
+      <div style="font-size:.8rem;color:#555;margin-top:4px">📞 ${o.contact_phone || o.phone || ''}${o.name ? ' · ' + o.name : ''}</div>
+      <div style="font-size:.8rem;color:#555;margin-top:2px">📍 ${addr}</div>
+      <div style="margin-top:8px;display:flex;gap:12px;align-items:center">${confirmBtn}${proof}</div>
+    </div>`;
+  }).join('');
+}
+
+async function confirmBookOrder(code) {
+  if (!confirm(`Confirm payment received for ${code}?\n\nThe customer will be messaged "order confirmed".`)) return;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/${encodeURIComponent(code)}/confirm`, {
+      method: 'POST',
+      headers: { 'X-Admin-Password': _convPw() }
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) {
+      alert(`Failed to confirm: ${data.error || ('HTTP ' + r.status)}`);
+      return;
+    }
+    loadBookOrders();
+  } catch (e) {
+    alert(`Network error: ${e.message}`);
+  }
 }
 
 async function loadOperatorQueue() {

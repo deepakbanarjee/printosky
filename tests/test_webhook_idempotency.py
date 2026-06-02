@@ -175,7 +175,7 @@ class TestMetaIdempotency:
         with patch.object(api_mod, "_mark_webhook_processed",
                           side_effect=lambda eid, h: eid == "wamid.NEW"), \
              patch.object(api_mod, "_handle_text",
-                          side_effect=lambda sender, text: senders.append(sender)):
+                          side_effect=lambda sender, text, **kw: senders.append(sender)):
             api_mod._process_meta_webhook(payload)
         assert senders == ["919000002"]
 
