@@ -662,6 +662,13 @@ def handle_message(phone: str, text: str, job_id: str, page_count: int,
     if session and session.get("step") == "staff_hold":
         return []
 
+    # ── Book flow has its own state machine (book_bot.py). If we end up here
+    # with a book_* step, book_bot already handled it (or errored). Returning
+    # [] is correct — the print-bot fallthrough message would confuse the
+    # customer mid book order.
+    if session and (session.get("step") or "").startswith("book_"):
+        return []
+
     # ── Review reply (1-5) — checked before session flow ─────────────────────
     # If no active conversation and message is a digit 1-5, treat as review rating.
     if not session and text in ("1", "2", "3", "4", "5"):

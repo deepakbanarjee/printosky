@@ -76,12 +76,10 @@ def _new_order_code() -> str:
 
 
 def _send_text(phone: str, message: str) -> None:
+    # whatsapp_notify._send_meta logs to conversation_log on success; don't
+    # double-log here.
     from whatsapp_notify import _send
     _send(phone, message)
-    try:
-        _dbc.log_message(phone, "outbound", message, message_type="text")
-    except Exception:
-        pass
 
 
 def _format_phone(phone: str) -> str:

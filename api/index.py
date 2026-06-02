@@ -276,9 +276,9 @@ def _handle_help_request(sender: str, trigger: str) -> None:
         "Someone will message you shortly. You can keep typing in the meantime."
     )
     try:
+        # _send_meta logs the outbound to conversation_log on success; don't
+        # double-log here.
         _send(sender, ack)
-        from db_cloud import log_message
-        log_message(sender, "outbound", ack, message_type="text")
     except Exception as exc:
         logger.warning(f"_handle_help_request ack send failed for {sender}: {exc}")
 
@@ -361,6 +361,19 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
         _handle_help_request(sender, text.strip().lower())
         return
 
+    # ── Pre-clear stale sessions ──────────────────────────────────────────────
+    # If the customer has an old session (e.g. forgotten staff_hold from days
+    # ago, or a half-finished print flow), wipe it BEFORE the book / print bot
+    # state machine sees it. Otherwise a stale staff_hold black-holes every new
+    # message (book triggers, file uploads, everything).
+    try:
+        from db_cloud import get_session as _get_session, clear_session as _clear_session
+        _stale_check = _get_session("supabase", sender) or {}
+        if _stale_check.get("step") and _session_is_stale(_stale_check):
+            _clear_session("supabase", sender)
+    except Exception as e:
+        logger.error(f"Stale-session pre-clear error for {sender}: {e}")
+
     # ── Xtraa book campaign: separate flow + book_orders table ────────────────
     # Runs before the print state machine. Only takes over when the customer is
     # mid book-order or explicitly enquires about books (never mid print-job).
@@ -371,13 +384,10 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
         logger.error(f"Book flow error for {sender}: {e}")
         book_replies = None
     if book_replies is not None:
+        # _send_meta logs the outbound to conversation_log on success; don't
+        # double-log here.
         for reply in book_replies:
             _send(sender, reply)
-            try:
-                from db_cloud import log_message
-                log_message(sender, "outbound", reply, message_type="text")
-            except Exception:
-                pass
         return
 
     # Capture referral code; treat ref_CODE message as a plain greeting
@@ -416,12 +426,8 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
                         clear_session("supabase", sender)
                     except Exception:
                         pass
+                # _send_meta logs the outbound; don't double-log here.
                 _send(sender, reply_msg)
-                try:
-                    from db_cloud import log_message
-                    log_message(sender, "outbound", reply_msg, message_type="text")
-                except Exception:
-                    pass
                 return
     except Exception as e:
         logger.error(f"Welcome handler error for {sender}: {e}")
@@ -437,12 +443,9 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     )
     for reply in replies:
         if isinstance(reply, str):
+            # _send_meta logs the outbound to conversation_log on success;
+            # don't double-log here.
             _send(sender, reply)
-            try:
-                from db_cloud import log_message
-                log_message(sender, "outbound", reply, message_type="text")
-            except Exception:
-                pass
         elif isinstance(reply, tuple) and reply:
             tag = reply[0]
             if tag in ("STAFF_QUOTE", "STAFF_MIXED_TIMEOUT"):
@@ -474,12 +477,9 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
                     # which would create a spurious job and send wrong prompts.
                     replies = ["We couldn't read that image. Please resend a clear "
                                "screenshot of your payment confirmation. 🙏"]
+                # _send_meta logs the outbound; don't double-log here.
                 for reply in replies:
                     _send(sender, reply)
-                    try:
-                        log_message(sender, "outbound", reply, message_type="text")
-                    except Exception:
-                        pass
                 return None
         except Exception as e:
             logger.error(f"Book payment-proof handling failed for {sender}: {e}")
