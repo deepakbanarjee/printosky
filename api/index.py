@@ -322,6 +322,26 @@ def _is_greeting(text: str) -> bool:
     return bool(words) and words[0] in _GREETING_WORDS
 
 
+# A bot session older than this is treated as abandoned — a greeting resets it
+# rather than being silently ignored (prevents a forgotten staff_hold or a
+# half-finished print flow from black-holing the customer forever).
+STALE_SESSION_HOURS = 6
+
+
+def _session_is_stale(session: dict) -> bool:
+    """True if the session's last update is older than STALE_SESSION_HOURS."""
+    ts = session.get("updated_at")
+    if not ts:
+        return True
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.strptime(str(ts)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        age_hours = (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0
+        return age_hours >= STALE_SESSION_HOURS
+    except Exception:
+        return False
+
+
 def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     """Route a customer text through the bot state machine and send replies."""
     from whatsapp_bot import handle_message
@@ -370,13 +390,25 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     # customer stays silent.
     try:
         from db_cloud import get_session as _get_session, is_new_contact
-        if not (_get_session("supabase", sender) or {}).get("step"):
+        _session = _get_session("supabase", sender) or {}
+        _step = _session.get("step")
+        # Idle customer (no session) or a stale/abandoned session → eligible for
+        # a welcome/greeting. A recent active flow is protected (not interrupted).
+        if (not _step) or _session_is_stale(_session):
             reply_msg = None
             if is_new_contact(sender):
                 reply_msg = WELCOME_MESSAGE      # first-time customer
             elif _is_greeting(text):
                 reply_msg = GREETING_MESSAGE     # returning customer says hi
             if reply_msg:
+                if _step:
+                    # Abandoned session (e.g. forgotten staff_hold) — reset it
+                    # so the customer isn't stuck being ignored.
+                    try:
+                        from db_cloud import clear_session
+                        clear_session("supabase", sender)
+                    except Exception:
+                        pass
                 _send(sender, reply_msg)
                 try:
                     from db_cloud import log_message

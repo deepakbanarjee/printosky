@@ -236,22 +236,25 @@ class TestCustomerWelcome:
     contact's first message. Stray non-greeting text from a returning customer
     stays silent."""
 
-    def _patch_common(self, monkeypatch, *, is_new):
+    def _patch_common(self, monkeypatch, *, is_new, session=None):
         bb = sys.modules.get("book_bot")
         if bb is None:
             bb = types.ModuleType("book_bot")
             sys.modules["book_bot"] = bb
         monkeypatch.setattr(bb, "maybe_handle_book", lambda *a, **kw: None, raising=False)
         monkeypatch.setattr(sys.modules["db_cloud"], "get_session",
-                            lambda *a, **kw: {}, raising=False)
+                            lambda *a, **kw: dict(session or {}), raising=False)
         monkeypatch.setattr(sys.modules["db_cloud"], "is_new_contact",
                             lambda *a, **kw: is_new, raising=False)
         monkeypatch.setattr(sys.modules["db_cloud"], "log_message",
                             lambda *a, **kw: None, raising=False)
+        self.cleared = []
+        monkeypatch.setattr(sys.modules["db_cloud"], "clear_session",
+                            lambda db, phone, *a, **kw: self.cleared.append(phone), raising=False)
         monkeypatch.setattr(api_mod, "_capture_referral_code", lambda *a, **kw: None)
 
-    def _run(self, monkeypatch, *, is_new, text):
-        self._patch_common(monkeypatch, is_new=is_new)
+    def _run(self, monkeypatch, *, is_new, text, session=None):
+        self._patch_common(monkeypatch, is_new=is_new, session=session)
         bot_calls = {"n": 0}
         monkeypatch.setattr(sys.modules["whatsapp_bot"], "handle_message",
                             lambda **kw: bot_calls.__setitem__("n", bot_calls["n"] + 1) or [],
@@ -289,6 +292,43 @@ class TestCustomerWelcome:
         if send_mock.called:
             assert "How can we help" not in send_mock.call_args[0][1]
             assert "Welcome to Printosky" not in send_mock.call_args[0][1]
+
+    def test_recent_active_session_not_interrupted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Customer mid-flow (recent session) says hi → NOT interrupted.
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="hi",
+                                         session={"step": "size", "updated_at": now})
+        assert bot_calls["n"] == 1          # handed to the print state machine
+        assert self.cleared == []           # session preserved
+        if send_mock.called:
+            assert "How can we help" not in send_mock.call_args[0][1]
+
+    def test_stale_staff_hold_greeting_resets_and_greets(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A forgotten staff_hold (old) must not black-hole the customer: a
+        # greeting clears it and replies.
+        send_mock, bot_calls = self._run(
+            monkeypatch, is_new=False, text="hi",
+            session={"step": "staff_hold", "updated_at": "2026-05-11 01:03:58"})
+        assert send_mock.called
+        assert "How can we help" in send_mock.call_args[0][1]
+        assert "91999000111" in self.cleared   # stale session was reset
+        assert bot_calls["n"] == 0
+
+
+class TestSessionStale:
+    """_session_is_stale — pure timestamp logic."""
+
+    def test_no_timestamp_is_stale(self) -> None:
+        assert api_mod._session_is_stale({}) is True
+
+    def test_old_timestamp_is_stale(self) -> None:
+        assert api_mod._session_is_stale({"updated_at": "2026-05-11 01:03:58"}) is True
+
+    def test_recent_timestamp_not_stale(self) -> None:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        assert api_mod._session_is_stale({"updated_at": now}) is False
 
 
 # ═════════════════════════════════════════════════════════════════════════════
