@@ -283,6 +283,18 @@ def _handle_help_request(sender: str, trigger: str) -> None:
         logger.warning(f"_handle_help_request ack send failed for {sender}: {exc}")
 
 
+WELCOME_MESSAGE = (
+    "👋 *Welcome to Printosky!*\n"
+    "_Oxygen Students Paradise, Thrissur_\n\n"
+    "Happy to help — what do you need today?\n\n"
+    "📄 *Printouts / photocopies* — just send your PDF or document here and "
+    "we'll quote you instantly.\n"
+    "📚 *Xtraa books* — reply *BOOKS* to order the Adithara Balappeduthu set.\n"
+    "🧑‍💼 *Talk to our staff* — reply *AGENT* anytime.\n\n"
+    "Send your file or reply with one of the options above. 🙏"
+)
+
+
 def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     """Route a customer text through the bot state machine and send replies."""
     from whatsapp_bot import handle_message
@@ -322,6 +334,23 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     if norm in ("MY CREDITS", "MYCREDITS", "MY CREDIT", "BALANCE", "CREDITS"):
         _send_credits_balance(sender)
         return
+
+    # ── New-customer welcome ──────────────────────────────────────────────────
+    # A brand-new contact (no prior conversation history) whose message wasn't a
+    # file, book enquiry, help request, or known command gets a friendly welcome
+    # + menu instead of silence. Returning customers fall through unchanged.
+    try:
+        from db_cloud import get_session as _get_session, is_new_contact
+        if not (_get_session("supabase", sender) or {}).get("step") and is_new_contact(sender):
+            _send(sender, WELCOME_MESSAGE)
+            try:
+                from db_cloud import log_message
+                log_message(sender, "outbound", WELCOME_MESSAGE, message_type="text")
+            except Exception:
+                pass
+            return
+    except Exception as e:
+        logger.error(f"Welcome handler error for {sender}: {e}")
 
     bot_text = "hi" if re.match(r'^ref_\w', text.strip(), re.IGNORECASE) else text
 

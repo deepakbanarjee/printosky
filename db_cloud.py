@@ -373,6 +373,30 @@ def log_message(phone: str, direction: str, body: str,
         logger.warning(f"log_message error ({direction} {phone}): {e}")
 
 
+def is_new_contact(phone: str) -> bool:
+    """True if there is no prior conversation history for this phone.
+
+    Used to greet genuinely new customers exactly once. The webhook logs the
+    current inbound message *after* routing, so a first-ever message sees zero
+    rows here. On any error we return False — better silent than spamming.
+    """
+    try:
+        result = (
+            _client().table("conversation_log")
+            .select("phone", count="exact")
+            .eq("phone", phone)
+            .limit(1)
+            .execute()
+        )
+        count = getattr(result, "count", None)
+        if count is not None:
+            return count == 0
+        return not (result.data or [])
+    except Exception as e:
+        logger.error(f"is_new_contact error for {phone}: {e}")
+        return False
+
+
 # ── WhatsApp contacts ─────────────────────────────────────────────────────────
 
 def get_media_url(path: str) -> str:
