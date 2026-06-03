@@ -75,6 +75,105 @@ def _send(phone: str, message: str) -> bool:
     return _send_meta(phone, message)
 
 
+def _normalise_phone(phone: str) -> str:
+    digits = phone.replace("@c.us", "").replace("+", "").strip()
+    if len(digits) == 10:
+        digits = "91" + digits
+    return digits
+
+
+def _post_interactive(phone: str, interactive: dict, log_text: str) -> bool:
+    """POST a type=interactive message (buttons or list) via Meta Cloud API."""
+    if not phone or not META_PHONE_ID or not META_TOKEN:
+        if not META_PHONE_ID or not META_TOKEN:
+            logger.warning("Meta interactive send skipped: token/phone-id not set")
+        return False
+    digits  = _normalise_phone(phone)
+    url     = f"{GRAPH_URL}/{META_PHONE_ID}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "to":   digits,
+        "type": "interactive",
+        "interactive": interactive,
+    }
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {META_TOKEN}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            if r.status == 200:
+                try:
+                    from db_cloud import log_message
+                    log_message(digits, "outbound", log_text[:500], message_type="text")
+                except Exception:
+                    pass
+                return True
+            body = r.read().decode()
+            logger.warning(f"Meta interactive send failed: {r.status} {body[:300]}")
+            return False
+    except Exception as e:
+        # urllib raises HTTPError for 4xx — capture Meta's error body for debugging.
+        try:
+            err_body = e.read().decode()[:300]  # type: ignore[attr-defined]
+        except Exception:
+            err_body = ""
+        logger.warning(f"Meta interactive error: {e} {err_body}")
+        return False
+
+
+def send_buttons(phone: str, body: str, buttons: list,
+                 header: str | None = None, footer: str | None = None) -> bool:
+    """Send up to 3 reply buttons.
+
+    buttons: list of (id, title) tuples. Title is truncated to 20 chars (Meta limit).
+    """
+    action_buttons = []
+    for bid, title in buttons[:3]:
+        action_buttons.append({
+            "type": "reply",
+            "reply": {"id": str(bid)[:256], "title": str(title)[:20]},
+        })
+    interactive: dict = {
+        "type":   "button",
+        "body":   {"text": body[:1024]},
+        "action": {"buttons": action_buttons},
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": header[:60]}
+    if footer:
+        interactive["footer"] = {"text": footer[:60]}
+    log_text = body + "\n[" + " | ".join(t for _, t in buttons[:3]) + "]"
+    return _post_interactive(phone, interactive, log_text)
+
+
+def send_list(phone: str, body: str, button_text: str, rows: list,
+              header: str | None = None, section_title: str = "Options") -> bool:
+    """Send a list (tap-to-open menu) with up to 10 rows.
+
+    rows: list of dicts {"id", "title", "description"(optional)}.
+    """
+    list_rows = []
+    for r in rows[:10]:
+        row = {"id": str(r["id"])[:200], "title": str(r["title"])[:24]}
+        if r.get("description"):
+            row["description"] = str(r["description"])[:72]
+        list_rows.append(row)
+    interactive: dict = {
+        "type":   "list",
+        "body":   {"text": body[:1024]},
+        "action": {"button": button_text[:20],
+                   "sections": [{"title": section_title[:24], "rows": list_rows}]},
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": header[:60]}
+    log_text = body + "\n[" + " | ".join(r["title"] for r in rows[:10]) + "]"
+    return _post_interactive(phone, interactive, log_text)
+
+
 def send_file_received(job_id: str, filename: str, sender: str):
     """Message 1 - instant receipt when file arrives."""
     if not sender:

@@ -748,6 +748,24 @@ def _process_meta_webhook(data: dict) -> None:
                             upsert_contact(sender, name=pushname)
                         except Exception:
                             pass
+                elif msg_type == "interactive":
+                    # Customer tapped a reply button or list row. Extract the id
+                    # (e.g. 'bk_ml', 'qty_2', 'ord_yes') and route it through the
+                    # same text handler — book_bot interprets these ids.
+                    inter = msg.get("interactive", {})
+                    itype = inter.get("type", "")
+                    reply = inter.get(itype, {}) if itype else {}
+                    reply_id    = reply.get("id", "")
+                    reply_title = reply.get("title", "")
+                    if reply_id:
+                        try:
+                            from db_cloud import log_message, upsert_contact
+                            log_message(sender, "inbound", reply_title or reply_id,
+                                        message_type="text")
+                            upsert_contact(sender, name=pushname)
+                        except Exception:
+                            pass
+                        _handle_text(sender, reply_id, name=pushname)
 
 
 def _process_razorpay_payment(data: dict) -> None:
