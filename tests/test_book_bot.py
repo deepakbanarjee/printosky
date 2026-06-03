@@ -324,3 +324,33 @@ def test_non_book_message_returns_none(fake):
 @pytest.mark.unit
 def test_confirm_unknown_order(fake):
     assert book_bot.confirm_book_order("XTR-NOPE")["ok"] is False
+
+
+# ── abandoned-cart reminders ──────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_send_abandoned_reminders(fake, monkeypatch):
+    db, sent = fake
+    carts = [
+        {"order_code": "XTR-1", "phone": "919111111111", "items": {"malayalam": 2}},
+        {"order_code": "XTR-2", "phone": "919222222222", "items": {}},
+    ]
+    monkeypatch.setattr(_dbc, "find_abandoned_book_carts", lambda **kw: carts)
+    marked = []
+    monkeypatch.setattr(_dbc, "mark_abandoned_reminded", lambda code: marked.append(code))
+
+    res = book_bot.send_abandoned_reminders()
+    assert res == {"carts": 2, "reminded": 2}
+    assert marked == ["XTR-1", "XTR-2"]                 # each reminded exactly once
+    assert len(sent["text"]) == 2
+    assert "Aksharamrutham × 2" in sent["text"][0]       # cart contents shown
+    assert "didn't finish" in sent["text"][1].lower() or "didn’t finish" in sent["text"][1].lower()
+
+
+@pytest.mark.unit
+def test_no_abandoned_carts_no_messages(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(_dbc, "find_abandoned_book_carts", lambda **kw: [])
+    res = book_bot.send_abandoned_reminders()
+    assert res == {"carts": 0, "reminded": 0}
+    assert sent["text"] == []

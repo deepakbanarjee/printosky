@@ -46,3 +46,21 @@ def test_mark_sla_alerted_does_not_raise(monkeypatch):
     chain.table.return_value.upsert.return_value.execute.return_value = MagicMock(data=[{}])
     monkeypatch.setattr(db_cloud, "_client", lambda: chain)
     db_cloud.mark_sla_alerted("918000000001")  # must not raise
+
+
+@pytest.mark.unit
+def test_find_abandoned_book_carts_does_not_raise(monkeypatch):
+    chain = MagicMock()
+    (chain.table.return_value.select.return_value.in_.return_value.is_.return_value
+        .lt.return_value.gt.return_value.order.return_value.limit.return_value
+        .execute.return_value.data) = []
+    monkeypatch.setattr(db_cloud, "_client", lambda: chain)
+    assert db_cloud.find_abandoned_book_carts() == []
+
+
+@pytest.mark.unit
+def test_mark_abandoned_reminded_does_not_raise(monkeypatch):
+    chain = MagicMock()
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    monkeypatch.setattr(db_cloud, "_client", lambda: chain)
+    db_cloud.mark_abandoned_reminded("XTR-TEST")  # must not raise

@@ -1,9 +1,9 @@
-name: SLA watchdog (ping owner on >1h unanswered)
+name: Printosky crons (SLA watchdog + abandoned book carts)
 
-# Vercel Hobby plan only allows once-per-day crons, so the 30-minute SLA check
-# is driven from GitHub Actions instead. It simply hits the public endpoint
-# /cron/sla-check, which scans conversation_log and messages the owner phone
-# if any customer has been waiting > 1 hour without a reply.
+# Vercel Hobby plan only allows once-per-day crons, so these 30-minute jobs are
+# driven from GitHub Actions instead:
+#   /cron/sla-check       — message the owner if a customer has waited > 1h
+#   /cron/abandoned-carts — nudge customers who left a book order unfinished
 on:
   schedule:
     - cron: "*/30 * * * *"   # every 30 minutes (UTC)
@@ -13,15 +13,23 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Hit SLA check endpoint
+      - name: SLA watchdog
         run: |
           echo "Calling SLA watchdog..."
-          code=$(curl -s -o /tmp/out.json -w "%{http_code}" \
+          code=$(curl -s -o /tmp/sla.json -w "%{http_code}" \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "https://printosky.vercel.app/cron/sla-check")
-          echo "HTTP $code"
-          cat /tmp/out.json || true
-          # Don't fail the workflow on a non-200 (endpoint is best-effort).
+          echo "HTTP $code"; cat /tmp/sla.json || true
+          exit 0
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      - name: Abandoned book carts
+        run: |
+          echo "Calling abandoned-cart reminder..."
+          code=$(curl -s -o /tmp/cart.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://printosky.vercel.app/cron/abandoned-carts")
+          echo "HTTP $code"; cat /tmp/cart.json || true
           exit 0
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

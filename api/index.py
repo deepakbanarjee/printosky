@@ -1988,6 +1988,27 @@ def _handle_cron_sla_check(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_cron_abandoned_carts(h) -> None:
+    """GET /cron/abandoned-carts — nudge customers who left a book order unfinished.
+
+    Sweeps book_orders for open carts (collecting / awaiting_payment) that have
+    been idle a couple of hours but are still within WhatsApp's 24-hour window,
+    and sends each a one-time 'finish your order' reminder.
+    Auth: optional `Authorization: Bearer ${CRON_SECRET}` when CRON_SECRET is set.
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected and h.headers.get("Authorization", "") != f"Bearer {expected}":
+        _json_response(h, 401, {"error": "Unauthorized"})
+        return
+    try:
+        from book_bot import send_abandoned_reminders
+        result = send_abandoned_reminders()
+        _json_response(h, 200, {"ok": True, **result})
+    except Exception as exc:
+        logger.error("abandoned-carts cron error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_admin_book_orders_list(h) -> None:
     """GET /admin/book-orders[?status=collecting|awaiting_payment|payment_review|confirmed]
     Returns book orders newest-first. Omit status (or 'all') for everything.
@@ -3888,9 +3909,14 @@ class handler(BaseHTTPRequestHandler):
             _handle_admin_book_orders_list(self)
             return
 
-        # ── SLA watchdog (Vercel cron, fires every 30 min) ────────────────────
+        # ── SLA watchdog (GitHub Actions cron, every 30 min) ──────────────────
         if self.path == "/cron/sla-check" or self.path.startswith("/cron/sla-check?"):
             _handle_cron_sla_check(self)
+            return
+
+        # ── Abandoned book-cart reminders (GitHub Actions cron) ───────────────
+        if self.path == "/cron/abandoned-carts" or self.path.startswith("/cron/abandoned-carts?"):
+            _handle_cron_abandoned_carts(self)
             return
 
         # ── Operator queue (P0 Day 2.5) ──────────────────────────────────────

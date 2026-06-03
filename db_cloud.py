@@ -885,6 +885,48 @@ def list_book_orders(status: str | None = None, limit: int = 100) -> list:
         return []
 
 
+def find_abandoned_book_carts(idle_hours: int = 2, window_hours: int = 24,
+                              limit: int = 100) -> list:
+    """Return open book carts that have gone quiet but are still messageable.
+
+    A cart qualifies when its status is still open (collecting / awaiting_payment),
+    it hasn't been touched for `idle_hours`, its last activity is within
+    `window_hours` (so a free-form WhatsApp message is still allowed by Meta's
+    24-hour rule), and it hasn't already been reminded.
+    """
+    try:
+        now        = datetime.now(timezone.utc)
+        idle_cut   = (now - timedelta(hours=idle_hours)).isoformat()
+        window_cut = (now - timedelta(hours=window_hours)).isoformat()
+        rows = (
+            _client().table("book_orders")
+            .select("order_code,phone,items,status,updated_at")
+            .in_("status", ["collecting", "awaiting_payment"])
+            .is_("abandoned_reminder_at", "null")
+            .lt("updated_at", idle_cut)
+            .gt("updated_at", window_cut)
+            .order("updated_at", desc=True)
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+        return rows
+    except Exception as exc:
+        logger.error("find_abandoned_book_carts error: %s", exc)
+        return []
+
+
+def mark_abandoned_reminded(order_code: str) -> None:
+    """Stamp abandoned_reminder_at=now (without bumping updated_at). Silent on error."""
+    try:
+        _client().table("book_orders").update(
+            {"abandoned_reminder_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("order_code", order_code).execute()
+    except Exception as exc:
+        logger.warning("mark_abandoned_reminded error for %s: %s", order_code, exc)
+
+
 def upload_book_payment_proof(order_code: str, content: bytes, mime_type: str) -> str:
     """Upload a payment screenshot to storage. Returns its public URL, or ''."""
     ext = ".jpg"

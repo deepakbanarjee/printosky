@@ -570,6 +570,36 @@ def handle_payment_proof(phone: str, content: bytes, mime_type: str) -> list[str
     ]
 
 
+def _abandoned_message(order: dict) -> str:
+    items = order.get("items") or {}
+    have = [(k, q) for k, q in items.items() if q and k in bc.BOOKS]
+    line = ""
+    if have:
+        cart = ", ".join(f"{bc.BOOKS[k]['label'].split(' (')[0]} × {q}" for k, q in have)
+        line = f"\n\n🛒 In your cart: {cart}"
+    return (
+        "👋 *Did you still want the Xtraa books?*\n"
+        "You started an order but didn't finish it." + line +
+        "\n\nReply *books* to continue — it only takes a minute! 🙏\n"
+        "_Aksharamrutham · Vidyamrut · Easy English_"
+    )
+
+
+def send_abandoned_reminders(idle_hours: int = 2) -> dict:
+    """Nudge customers who started a book order but went quiet (within the 24h
+    WhatsApp window). One reminder per cart. Returns {carts, reminded}."""
+    carts = _dbc.find_abandoned_book_carts(idle_hours=idle_hours)
+    reminded = 0
+    for o in carts:
+        try:
+            _send_text(o["phone"], _abandoned_message(o))
+            _dbc.mark_abandoned_reminded(o["order_code"])
+            reminded += 1
+        except Exception as exc:
+            logger.error("abandoned reminder failed for %s: %s", o.get("order_code"), exc)
+    return {"carts": len(carts), "reminded": reminded}
+
+
 def confirm_book_order(order_code: str) -> dict:
     order = _dbc.get_book_order(order_code)
     if not order:
