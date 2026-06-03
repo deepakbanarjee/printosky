@@ -64,3 +64,15 @@ def test_mark_abandoned_reminded_does_not_raise(monkeypatch):
     chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
     monkeypatch.setattr(db_cloud, "_client", lambda: chain)
     db_cloud.mark_abandoned_reminded("XTR-TEST")  # must not raise
+
+
+@pytest.mark.unit
+def test_create_walk_in_order_does_not_raise(monkeypatch):
+    chain = MagicMock()
+    chain.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"order_code": "XTR-W"}])
+    monkeypatch.setattr(db_cloud, "_client", lambda: chain)
+    row = db_cloud.create_walk_in_order(
+        "XTR-W", "Walk In", "919000000009", None,
+        {"malayalam": 1}, 200.0, 0.0, 200.0, "cash", "delivered")
+    assert row == {"order_code": "XTR-W"}
+    chain.table.assert_called_with("book_orders")

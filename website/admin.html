@@ -1319,15 +1319,47 @@
       <div style="display:flex;gap:8px;align-items:center">
         <select id="book-status-filter" onchange="loadBookOrders()" style="padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:.85rem">
           <option value="payment_review" selected>Awaiting confirmation</option>
+          <option value="confirmed">Confirmed · to pack</option>
+          <option value="dispatched">Dispatched</option>
+          <option value="delivered">Delivered</option>
           <option value="awaiting_payment">Awaiting payment</option>
           <option value="collecting">In progress</option>
-          <option value="confirmed">Confirmed</option>
+          <option value="cancelled">Cancelled</option>
           <option value="all">All</option>
         </select>
+        <button class="ctrl-btn" onclick="openWalkInForm()">➕ New order</button>
         <button class="ctrl-btn" onclick="loadBookOrders()">↻ Refresh</button>
       </div>
     </div>
     <div id="book-orders-list"></div>
+  </div>
+
+  <!-- Walk-in / in-store book order modal -->
+  <div id="walkin-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:20px;max-width:430px;width:92%;max-height:92vh;overflow:auto">
+      <div style="font-weight:600;font-size:16px;margin-bottom:12px">➕ New book order (walk-in / in-store)</div>
+      <div style="display:grid;gap:10px;font-size:.9rem">
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Aksharamrutham <span style="color:#888">ML · ₹200</span>
+          <input id="wi-ml" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Vidyamrut <span style="color:#888">HI · ₹150</span>
+          <input id="wi-hi" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Easy English <span style="color:#888">EN · ₹200</span>
+          <input id="wi-en" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+        <input id="wi-name" placeholder="Customer name (optional)" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+        <input id="wi-phone" placeholder="Phone (optional, for delivery updates)" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+        <textarea id="wi-address" placeholder="Delivery address + PIN (only if couriering)" style="padding:7px;border:1px solid #ccc;border-radius:6px;min-height:48px"></textarea>
+        <select id="wi-payment" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+          <option value="cash">Paid: Cash</option>
+          <option value="upi">Paid: UPI</option>
+        </select>
+        <label style="display:flex;gap:8px;align-items:center"><input id="wi-handed" type="checkbox" checked> Handed over now (in-store — no courier)</label>
+      </div>
+      <div id="wi-error" style="color:#dc2626;font-size:.8rem;margin-top:8px"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+        <button class="ctrl-btn" onclick="closeWalkInForm()">Cancel</button>
+        <button class="ctrl-btn" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="submitWalkIn()">Create order</button>
+      </div>
+    </div>
   </div>
 
   <div id="opq-tab" style="display:none">
@@ -4105,29 +4137,41 @@ function renderBookOrders(rows) {
   }
   const badgeColor = {
     collecting: '#999', awaiting_payment: '#d97706', payment_review: '#dc2626',
-    confirmed: '#16a34a', cancelled: '#666',
+    confirmed: '#16a34a', dispatched: '#2563eb', delivered: '#15803d', cancelled: '#666',
   };
   list.innerHTML = rows.map(o => {
     const color = badgeColor[o.status] || '#666';
-    const proof = o.payment_proof_url
+    const showProof = o.payment_proof_url || o.status === 'payment_review' || o.status === 'awaiting_payment';
+    const proof = !showProof ? '' : (o.payment_proof_url
       ? `<div style="font-size:.75rem;color:var(--muted);margin-bottom:4px">Payment screenshot (tap to enlarge):</div>
          <a href="${o.payment_proof_url}" target="_blank" rel="noopener" title="Open full screenshot">
            <img src="${o.payment_proof_url}" alt="payment screenshot" loading="lazy"
                 style="max-width:200px;max-height:260px;border-radius:8px;border:1px solid #ddd;object-fit:cover;display:block;cursor:zoom-in">
          </a>`
-      : `<span style="font-size:.8rem;color:#999">No payment screenshot received yet.</span>`;
-    const confirmBtn = (o.status === 'payment_review')
-      ? `<button class="ctrl-btn" onclick="confirmBookOrder('${o.order_code}')">✅ Confirm payment</button>` : '';
+      : `<span style="font-size:.8rem;color:#999">No payment screenshot received yet.</span>`);
+    const actions = [];
+    if (o.status === 'payment_review')
+      actions.push(`<button class="ctrl-btn" onclick="confirmBookOrder('${o.order_code}')">✅ Confirm payment</button>`);
+    if (o.status === 'confirmed')
+      actions.push(`<button class="ctrl-btn" onclick="dispatchBookOrder('${o.order_code}')">📦 Mark dispatched</button>`);
+    if (o.status === 'dispatched')
+      actions.push(`<button class="ctrl-btn" onclick="deliverBookOrder('${o.order_code}')">✅ Mark delivered</button>`);
+    const actionsHtml = actions.length ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${actions.join('')}</div>` : '';
     const addr = (o.address || '').replace(/</g, '&lt;');
+    const srcTag = o.source === 'walk_in' ? `<span style="background:#eef2ff;color:#3730a3;border-radius:6px;padding:1px 6px;font-size:.62rem;margin-left:6px;vertical-align:middle">WALK-IN</span>` : '';
+    const payTag = o.payment_mode ? `<span style="color:#888;font-size:.7rem;margin-left:6px">${(o.payment_mode||'').toUpperCase()}</span>` : '';
+    const shipInfo = (o.courier_name || o.tracking_no)
+      ? `<div style="font-size:.78rem;color:#555;margin-top:2px">🚚 ${(o.courier_name || '')}${o.tracking_no ? ' · ' + o.tracking_no : ''}</div>` : '';
     return `<div style="border:1px solid #e6e6e6;border-radius:8px;padding:12px;margin-bottom:10px;background:#fff">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <strong>${o.order_code}</strong>
+        <strong>${o.order_code}${srcTag}</strong>
         <span style="color:${color};font-weight:700;text-transform:uppercase;font-size:.7rem;letter-spacing:.05em">${(o.status || '').replace('_', ' ')}</span>
       </div>
-      <div style="font-size:.85rem;margin-top:5px">${_bookItemsSummary(o.items)} &nbsp;·&nbsp; <strong>₹${o.grand_total || 0}</strong></div>
-      <div style="font-size:.8rem;color:#555;margin-top:4px">📞 ${o.contact_phone || o.phone || ''}${o.name ? ' · ' + o.name : ''}</div>
-      <div style="font-size:.8rem;color:#555;margin-top:2px">📍 ${addr}</div>
-      <div style="margin-top:8px">${confirmBtn}</div>
+      <div style="font-size:.85rem;margin-top:5px">${_bookItemsSummary(o.items)} &nbsp;·&nbsp; <strong>₹${o.grand_total || 0}</strong>${payTag}</div>
+      <div style="font-size:.8rem;color:#555;margin-top:4px">📞 ${o.contact_phone || o.phone || '—'}${o.name ? ' · ' + o.name : ''}</div>
+      <div style="font-size:.8rem;color:#555;margin-top:2px">📍 ${addr || '—'}</div>
+      ${shipInfo}
+      ${actionsHtml}
       <div style="margin-top:8px">${proof}</div>
     </div>`;
   }).join('');
@@ -4149,6 +4193,80 @@ async function confirmBookOrder(code) {
   } catch (e) {
     alert(`Network error: ${e.message}`);
   }
+}
+
+async function _bookOrderAction(code, action, body) {
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/${encodeURIComponent(code)}/${action}`, {
+      method: 'POST',
+      headers: { 'X-Admin-Password': _convPw(), 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) { alert(`Failed: ${data.error || ('HTTP ' + r.status)}`); return; }
+    loadBookOrders();
+  } catch (e) { alert(`Network error: ${e.message}`); }
+}
+
+async function dispatchBookOrder(code) {
+  const courier = prompt(`Mark ${code} as dispatched.\n\nCourier name (optional):`, '');
+  if (courier === null) return;                      // cancelled
+  const tracking = prompt('Tracking number (optional):', '');
+  if (tracking === null) return;
+  await _bookOrderAction(code, 'dispatch', { courier: courier.trim(), tracking: (tracking || '').trim() });
+}
+
+async function deliverBookOrder(code) {
+  if (!confirm(`Mark ${code} as delivered?`)) return;
+  await _bookOrderAction(code, 'deliver', null);
+}
+
+function openWalkInForm() {
+  if (!_convPw()) {
+    _adminPwPrompt(false).then(pw => { if (pw) { sessionStorage.setItem('admin_pw_cache', pw); openWalkInForm(); } });
+    return;
+  }
+  ['wi-ml', 'wi-hi', 'wi-en'].forEach(id => document.getElementById(id).value = 0);
+  ['wi-name', 'wi-phone', 'wi-address'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('wi-payment').value = 'cash';
+  document.getElementById('wi-handed').checked = true;
+  document.getElementById('wi-error').textContent = '';
+  document.getElementById('walkin-modal').style.display = 'flex';
+}
+
+function closeWalkInForm() { document.getElementById('walkin-modal').style.display = 'none'; }
+
+async function submitWalkIn() {
+  const items = {
+    malayalam: parseInt(document.getElementById('wi-ml').value || '0', 10),
+    hindi:     parseInt(document.getElementById('wi-hi').value || '0', 10),
+    english:   parseInt(document.getElementById('wi-en').value || '0', 10),
+  };
+  const err = document.getElementById('wi-error');
+  if (!(items.malayalam + items.hindi + items.english)) { err.textContent = 'Select at least one book (quantity > 0).'; return; }
+  const handed = document.getElementById('wi-handed').checked;
+  const address = document.getElementById('wi-address').value.trim();
+  if (!handed && !address) { err.textContent = 'A courier (not-handed-over) order needs a delivery address.'; return; }
+  err.textContent = 'Creating…';
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/create`, {
+      method: 'POST',
+      headers: { 'X-Admin-Password': _convPw(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items,
+        name: document.getElementById('wi-name').value.trim(),
+        phone: document.getElementById('wi-phone').value.trim(),
+        address,
+        payment_mode: document.getElementById('wi-payment').value,
+        handed_over: handed,
+      })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) { err.textContent = `Failed: ${data.error || ('HTTP ' + r.status)}`; return; }
+    closeWalkInForm();
+    alert(`Order ${data.order_code} created — ₹${data.grand_total}.`);
+    loadBookOrders();
+  } catch (e) { err.textContent = `Network error: ${e.message}`; }
 }
 
 async function loadOperatorQueue() {

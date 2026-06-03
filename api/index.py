@@ -2054,6 +2054,117 @@ def _handle_admin_book_order_confirm(h, order_code: str) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_admin_book_order_dispatch(h, body, order_code: str) -> None:
+    """POST /admin/book-orders/<code>/dispatch — mark shipped + notify customer.
+    Body: {courier, tracking} (both optional).
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        data = {}
+    courier  = (data.get("courier") or "").strip()
+    tracking = (data.get("tracking") or "").strip()
+    try:
+        from db_cloud import update_book_order, get_book_order
+        from datetime import datetime, timezone
+        order = get_book_order(order_code)
+        if not order:
+            _json_response(h, 404, {"error": "Order not found"})
+            return
+        update_book_order(order_code, status="dispatched",
+                          dispatched_at=datetime.now(timezone.utc).isoformat(),
+                          courier_name=courier or None, tracking_no=tracking or None)
+        # Best-effort customer notification (subject to Meta's 24h window).
+        try:
+            from whatsapp_notify import _send
+            extra = ""
+            if courier:
+                extra += f"\nCourier: {courier}"
+            if tracking:
+                extra += f"\nTracking: {tracking}"
+            if order.get("phone"):
+                _send(order["phone"], f"📦 *Order dispatched!*\nOrder: {order_code}"
+                                      f"{extra}\n\nYour Xtraa books are on the way. 🙏")
+        except Exception:
+            pass
+        _json_response(h, 200, {"ok": True})
+    except Exception as exc:
+        logger.error("book-order dispatch error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_book_order_deliver(h, order_code: str) -> None:
+    """POST /admin/book-orders/<code>/deliver — mark delivered."""
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from db_cloud import update_book_order, get_book_order
+        from datetime import datetime, timezone
+        if not get_book_order(order_code):
+            _json_response(h, 404, {"error": "Order not found"})
+            return
+        update_book_order(order_code, status="delivered",
+                          delivered_at=datetime.now(timezone.utc).isoformat())
+        _json_response(h, 200, {"ok": True})
+    except Exception as exc:
+        logger.error("book-order deliver error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_book_order_create(h, body) -> None:
+    """POST /admin/book-orders/create — staff create a walk-in / in-store order.
+    Body: {items:{malayalam,hindi,english}, name, phone, address, payment_mode, handed_over}.
+    handed_over=true → no courier, status 'delivered'. Else → courier added, status 'confirmed'.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        data = {}
+    raw = data.get("items") or {}
+    items = {}
+    for k in ("malayalam", "hindi", "english"):
+        try:
+            q = int(raw.get(k) or 0)
+        except (TypeError, ValueError):
+            q = 0
+        if q > 0:
+            items[k] = q
+    if not items:
+        _json_response(h, 400, {"error": "Select at least one book"})
+        return
+    name         = (data.get("name") or "").strip() or None
+    phone        = re.sub(r"\D", "", data.get("phone") or "") or None
+    address      = (data.get("address") or "").strip() or None
+    payment_mode = (data.get("payment_mode") or "cash").strip().lower()
+    handed_over  = bool(data.get("handed_over"))
+    try:
+        import book_catalog as bc
+        from db_cloud import create_walk_in_order
+        from datetime import datetime
+        totals      = bc.compute_totals(items)
+        books_total = totals["books_total"]
+        courier     = 0.0 if handed_over else totals["courier"]
+        grand       = books_total + courier
+        code        = f"XTR-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
+        status      = "delivered" if handed_over else "confirmed"
+        row = create_walk_in_order(code, name, phone, address, items,
+                                   books_total, courier, grand, payment_mode, status)
+        if not row:
+            _json_response(h, 500, {"error": "Could not create order"})
+            return
+        _json_response(h, 200, {"ok": True, "order_code": code, "grand_total": grand})
+    except Exception as exc:
+        logger.error("book-order create error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_admin_operator_queue_depth(h) -> None:
     """GET /admin/operator-queue/depth — counts for the SLA gauge."""
     if not _auth_admin_pw(_admin_pw_from_request(h)):
@@ -4108,11 +4219,26 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # ── Xtraa book order: owner confirms payment ─────────────────────────
+        if self.path == "/admin/book-orders/create":
+            _handle_admin_book_order_create(self, body)
+            return
         _book_confirm = re.match(
             r"^/admin/book-orders/([A-Za-z0-9\-]+)/confirm$", self.path,
         )
         if _book_confirm:
             _handle_admin_book_order_confirm(self, _book_confirm.group(1))
+            return
+        _book_dispatch = re.match(
+            r"^/admin/book-orders/([A-Za-z0-9\-]+)/dispatch$", self.path,
+        )
+        if _book_dispatch:
+            _handle_admin_book_order_dispatch(self, body, _book_dispatch.group(1))
+            return
+        _book_deliver = re.match(
+            r"^/admin/book-orders/([A-Za-z0-9\-]+)/deliver$", self.path,
+        )
+        if _book_deliver:
+            _handle_admin_book_order_deliver(self, _book_deliver.group(1))
             return
 
         # ── Referral store-credit redemption (staff) ─────────────────────────

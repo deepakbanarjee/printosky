@@ -885,6 +885,37 @@ def list_book_orders(status: str | None = None, limit: int = 100) -> list:
         return []
 
 
+def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
+                         address: str | None, items: dict,
+                         books_total: float, courier: float, grand_total: float,
+                         payment_mode: str, status: str) -> dict:
+    """Insert a manually-created (walk-in / in-store) book order. Returns the row."""
+    now = datetime.now(timezone.utc).isoformat()
+    row = {
+        "order_code":   order_code,
+        "phone":        phone or "",
+        "name":         name,
+        "items":        items,
+        "books_total":  books_total,
+        "courier":      courier,
+        "grand_total":  grand_total,
+        "address":      address,
+        "contact_phone": phone,
+        "status":       status,
+        "payment_mode": payment_mode,
+        "source":       "walk_in",
+        "confirmed_at": now,
+    }
+    if status == "delivered":
+        row["delivered_at"] = now
+    try:
+        result = _client().table("book_orders").insert(row).execute()
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("create_walk_in_order error: %s", exc)
+        return {}
+
+
 def find_abandoned_book_carts(idle_hours: int = 2, window_hours: int = 24,
                               limit: int = 100) -> list:
     """Return open book carts that have gone quiet but are still messageable.
