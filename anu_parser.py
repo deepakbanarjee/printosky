@@ -74,6 +74,10 @@ _TOOL = {
                     "required": ["title", "qty"],
                 },
             },
+            "book_explicit": {
+                "type": "boolean",
+                "description": "true ONLY if a specific book title was actually named in the text (e.g. 'Aksharamrutham'/'അക്ഷരാമൃതം'). false if no book was named or you inferred it.",
+            },
             "needs_clarification": {
                 "type": "boolean",
                 "description": "true if the book is NOT clearly named, or the titles/quantities are ambiguous (e.g. 'both books'), or the customer asked a question that affects the order.",
@@ -99,10 +103,12 @@ Books in this campaign (enum keys):
 - "english"   = Easy English
 
 CRITICAL rules:
-- Only set is_order=true if there is a customer name AND a phone or address.
-- If a specific book title is clearly named, put it in `books` with the copy count.
+- Set is_order=true if there is a customer name AND (a phone OR a postal address).
+  A name + address with no phone is STILL an order (phone may arrive separately).
+- If a specific book title is clearly named, put it in `books` with the copy count
+  and set book_explicit=true.
 - If NO specific book is named (the message just says e.g. "1 copy"), leave `books`
-  EMPTY and set needs_clarification=true with a question asking which book. DO NOT guess.
+  EMPTY, set book_explicit=false and needs_clarification=true. DO NOT guess the book.
 - If the customer says something vague like "both books" / "രണ്ട് പുസ്തകങ്ങളും", leave
   `books` empty, set needs_clarification=true, and ask which two titles.
 - If the customer asks a question (e.g. price), still extract the order and set

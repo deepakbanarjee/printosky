@@ -757,11 +757,6 @@ def _cancel_divya_order(code: str) -> None:
     _send_text(VERIFIER_PHONE, f"🗑️ Cancelled *{code}* — it won't be printed or couriered.")
 
 
-def _new_order_code() -> str:
-    from datetime import datetime
-    return f"XTR-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
-
-
 def _divya_summary(code, name, phone, items, courier, grand, commission,
                    payment_collected_by, delivery_method) -> str:
     pay_label = {"divya": "Divya collected", "oxygen": "Oxygen collected",
@@ -812,107 +807,136 @@ _BOOK_BUTTONS = [("abook_malayalam", "📕 Aksharamrutham"),
                  ("abook_english",   "📘 Easy English")]
 
 
-def _parse_book_choice(text: str, copies: int) -> dict:
-    """Parse Anu's 'which book' reply into an items dict. Returns {} if unclear."""
-    t = (text or "").strip().lower()
-    bm = re.match(r"^abook_(malayalam|hindi|english)$", t)
-    if bm:
-        return {bm.group(1): copies}
-    keys = bc.parse_selection(t)
-    if not keys:
-        alias = {"aksharamrutham": "malayalam", "akshara": "malayalam",
-                 "vidyamrut": "hindi", "vidya": "hindi",
-                 "easy english": "english", "english": "english",
-                 "malayalam": "malayalam", "hindi": "hindi"}
-        keys = list(dict.fromkeys(v for k, v in alias.items() if k in t)) or None
-    if not keys:
-        return {}
-    return {k: copies for k in keys}
+# ── Free-form intake: auto-combine across messages, confirm before saving ─────
+ANU_BUFFER_TTL_MIN = 20
+_BOOK_TITLE = {"malayalam": "Aksharamrutham", "hindi": "Vidyamrut", "english": "Easy English"}
 
 
-def _handle_anu_order_freeform(text: str) -> None:
-    """Auto-detect + LLM-parse a free-form teacher forward, then create or clarify."""
-    # Cheap gate: skip the LLM on obvious non-orders (short chit-chat).
-    if len(text.strip()) < 15 or (len(re.findall(r"\d", text)) < 8 and text.count("\n") < 2):
-        return
-    parsed = anu_parser.parse_order_message(text)
-    if not parsed.get("is_order"):
-        return
-    name    = (parsed.get("name") or "").strip()
-    phone   = re.sub(r"\D", "", parsed.get("phone") or "")
+def _anu_session() -> dict:
+    return _dbc.get_session(DB, VERIFIER_PHONE) or {}
+
+
+def _anu_buffer(sess: dict) -> str:
+    """Anu's fresh accumulated raw text, or '' if none / stale."""
+    import json
+    from datetime import datetime, timedelta, timezone
+    try:
+        blob = json.loads(sess.get("saved_json") or "{}")
+        ts = blob.get("ts")
+        if ts:
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(ts)
+            if age <= timedelta(minutes=ANU_BUFFER_TTL_MIN):
+                return blob.get("raw") or ""
+    except Exception:
+        pass
+    return ""
+
+
+def _anu_save_buffer(raw: str, step: str, order: dict | None = None) -> None:
+    import json
+    from datetime import datetime, timezone
+    blob = {"raw": raw, "ts": datetime.now(timezone.utc).isoformat()}
+    if order is not None:
+        blob["order"] = order
+    _dbc.save_session(DB, VERIFIER_PHONE, step=step,
+                      saved_json=json.dumps(blob, ensure_ascii=True))
+
+
+def _anu_clear_buffer() -> None:
+    _dbc.save_session(DB, VERIFIER_PHONE, step="", saved_json="")
+
+
+def _assemble(parsed: dict) -> dict:
+    """Normalise an LLM parse into order fields."""
+    copies = int(parsed.get("copies") or 1) or 1
+    items: dict[str, int] = {}
+    for b in (parsed.get("books") or []):
+        if b.get("title"):
+            items[b["title"]] = items.get(b["title"], 0) + int(b.get("qty") or copies or 1)
     address = ", ".join(p for p in [(parsed.get("address") or "").strip(),
                                     (parsed.get("pincode") or "").strip()] if p)
-    copies  = int(parsed.get("copies") or 1) or 1
-    if not name or len(phone) < 10:
+    return {
+        "name":          (parsed.get("name") or "").strip(),
+        "phone":         re.sub(r"\D", "", parsed.get("phone") or ""),
+        "address":       address,
+        "copies":        copies,
+        "items":         items,
+        "book_explicit": bool(parsed.get("book_explicit")),
+    }
+
+
+def _handle_anu_freeform(text: str) -> None:
+    """Auto-combine Anu's messages into one order; ask for gaps; confirm before save."""
+    msg = (text or "").strip()
+    # A book-button tap becomes plain text the LLM understands when re-parsed.
+    bm = re.match(r"^abook_(malayalam|hindi|english)$", msg)
+    if bm:
+        msg = f"Book: {_BOOK_TITLE[bm.group(1)]}"
+
+    sess = _anu_session()
+    prev = _anu_buffer(sess)
+    raw  = (prev + "\n" + msg).strip() if prev else msg
+
+    # Cheap gate only with no buffer yet — don't drop a short continuation.
+    if not prev and len(raw) < 12 and len(re.findall(r"\d", raw)) < 8:
+        return
+
+    o = _assemble(anu_parser.parse_order_message(raw))
+
+    if not o["name"]:                                   # can't identify a customer yet
+        _anu_save_buffer(raw, "anu_intake")
         _send_text(VERIFIER_PHONE,
-                   "📕 I read an order but couldn't get a clear name + 10-digit phone — "
-                   "please resend it.")
+                   "👍 Got it — send the rest of the order (name + address + book).")
         return
-    books_list = [b for b in (parsed.get("books") or []) if b.get("title")]
-    code = _new_order_code()
-
-    if parsed.get("needs_clarification") or not books_list:
-        # Park the order (no book yet) and ask Anu which book.
-        courier = float(bc.COURIER)
-        _dbc.create_walk_in_order(
-            code, name, phone, address, {}, 0.0, courier, courier,
-            payment_mode="", status="awaiting_clarification", commission=0.0,
-            payment_collected_by="pending", delivery_method="courier",
-            via_divya=True, source="divya",
-        )
-        _dbc.save_session(DB, VERIFIER_PHONE, step="anu_clarify_book", job_id=code, copies=copies)
-        q = (parsed.get("clarification") or f"Which book for {name}?").strip()
-        _send_buttons(
-            VERIFIER_PHONE,
-            f"📕 Order for *{name}* · {copies} copy(s)\n{address}\n\n{q}\n"
-            "_Tap the book — or for more than one reply like_ `1 3`.",
-            _BOOK_BUTTONS,
-        )
+    if len(o["phone"]) < 10:                            # missing phone → ask
+        _anu_save_buffer(raw, "anu_intake")
+        _send_text(VERIFIER_PHONE, f"📞 What's the phone number for *{o['name']}*?")
+        return
+    if not o["items"] or not o["book_explicit"]:        # book not named → ask
+        _anu_save_buffer(raw, "anu_intake")
+        _send_buttons(VERIFIER_PHONE,
+                      f"📕 Which book for *{o['name']}* ({o['copies']} copy/s)?",
+                      _BOOK_BUTTONS)
         return
 
-    # Book is clear → create immediately.
-    items: dict[str, int] = {}
-    for b in books_list:
-        items[b["title"]] = items.get(b["title"], 0) + int(b.get("qty") or copies or 1)
-    _create_divya_confirmed(code, name, phone, address, items)
-
-
-def _handle_anu_clarification(text: str, code: str) -> None:
-    """Anu answered 'which book?' for a parked order — fill it in and confirm."""
-    order = _dbc.get_book_order(code)
-    if not order or order.get("status") != "awaiting_clarification":
-        # Stale pointer — reset and treat the message as a fresh forward.
-        _dbc.save_session(DB, VERIFIER_PHONE, step="", job_id="")
-        _handle_anu_order_freeform(text)
-        return
-    sess   = _dbc.get_session(DB, VERIFIER_PHONE) or {}
-    copies = int(sess.get("copies") or 1) or 1
-    items  = _parse_book_choice(text, copies)
-    if not items:
-        _send_buttons(
-            VERIFIER_PHONE,
-            "Sorry, I didn't catch the book. Tap one — or reply like `1 3` for more than one:",
-            _BOOK_BUTTONS,
-        )
-        return
-    deliv      = order.get("delivery_method") or "courier"
-    totals     = bc.compute_totals(items)
-    courier    = 0.0 if deliv == "xtraa_office" else totals["courier"]
+    # Complete → stage for confirmation (NOT created yet).
+    _anu_save_buffer(raw, "anu_staged", order=o)
+    totals     = bc.compute_totals(o["items"])
+    courier    = totals["courier"]
     grand      = totals["books_total"] + courier
-    commission = bc.commission_for(items)
-    _dbc.update_book_order(
-        code, items=items, books_total=totals["books_total"], courier=courier,
-        grand_total=grand, commission=commission, status="confirmed",
-    )
-    _dbc.save_session(DB, VERIFIER_PHONE, step="", job_id="")
-    name  = order.get("name") or ""
-    phone = order.get("contact_phone") or order.get("phone") or ""
+    commission = bc.commission_for(o["items"])
     _send_buttons(
         VERIFIER_PHONE,
-        _divya_summary(code, name, phone, items, courier, grand, commission,
-                       order.get("payment_collected_by") or "pending", deliv),
-        [(f"acanc_{code}", "❌ Cancel order")],
+        "📋 *Confirm this order?*\n"
+        f"{o['name']} · +{o['phone']}\n"
+        f"{o['address'] or '—'}\n"
+        f"{_cart_line(o['items'])}\n"
+        f"Books ₹{totals['books_total']:.0f} + Courier ₹{courier:.0f} = *₹{grand:.0f}*\n"
+        f"Divya commission: ₹{commission:.0f}",
+        [("aok", "✅ Confirm & print"), ("axx", "❌ Cancel")],
     )
+
+
+def _confirm_staged() -> None:
+    """Anu tapped Confirm — create the staged order."""
+    import json
+    sess = _anu_session()
+    try:
+        o = json.loads(sess.get("saved_json") or "{}").get("order")
+    except Exception:
+        o = None
+    if not o or not o.get("items"):
+        _anu_clear_buffer()
+        _send_text(VERIFIER_PHONE, "⚠️ That order expired — please forward it again.")
+        return
+    _anu_clear_buffer()
+    _create_divya_confirmed(_new_order_code(), o["name"], o["phone"],
+                            o.get("address") or "", o["items"])
+
+
+def _discard_staged() -> None:
+    _anu_clear_buffer()
+    _send_text(VERIFIER_PHONE, "❌ Discarded. Forward the order again when ready.")
 
 
 def _handle_payment_verdict(action: str, code: str) -> None:
@@ -941,10 +965,10 @@ def _handle_payment_verdict(action: str, code: str) -> None:
 def handle_verifier_reply(sender: str, text: str) -> bool:
     """Route a message from Anu (payment verifier + Divya order forwarder).
 
-    Precedence: payment Confirm/Reject, order Cancel, a pending 'which book?'
-    clarification, the rigid ORDER template, then a free-form teacher forward
-    (auto-detected + LLM-parsed). Every message from Anu's number is consumed
-    here (returns True) so it never falls into the customer flow.
+    Precedence: payment Confirm/Reject, staged-order Confirm/Cancel, order Cancel,
+    the rigid ORDER template, then a free-form teacher forward (auto-combined +
+    LLM-parsed). Every message from Anu's number is consumed here (returns True)
+    so it never falls into the customer flow.
     """
     if re.sub(r"\D", "", sender or "") != re.sub(r"\D", "", VERIFIER_PHONE):
         return False
@@ -964,16 +988,18 @@ def handle_verifier_reply(sender: str, text: str) -> bool:
         _handle_payment_verdict(action, code)
         return True
 
-    # 2. Cancel a just-created Divya order.
+    # 2. Confirm / Cancel a STAGED order (the auto-combine confirmation gate).
+    if t == "aok":
+        _confirm_staged()
+        return True
+    if t == "axx":
+        _discard_staged()
+        return True
+
+    # 3. Cancel an already-created Divya order.
     cm = re.match(r"^acanc_(\S+)$", t) or re.match(r"(?i)^cancel\s+(XTR-\S+)", t)
     if cm:
         _cancel_divya_order(cm.group(1).upper())
-        return True
-
-    # 3. Pending 'which book?' clarification for a parked order.
-    sess = _dbc.get_session(DB, VERIFIER_PHONE) or {}
-    if sess.get("step") == "anu_clarify_book" and sess.get("job_id"):
-        _handle_anu_clarification(t, sess["job_id"])
         return True
 
     # 4. Rigid ORDER template (backward-compatible).
@@ -982,8 +1008,8 @@ def handle_verifier_reply(sender: str, text: str) -> bool:
         _handle_anu_order(parsed)
         return True
 
-    # 5. Free-form teacher forward → LLM parse + create / clarify.
-    _handle_anu_order_freeform(t)
+    # 5. Free-form teacher forward → auto-combine + confirm before save.
+    _handle_anu_freeform(t)
     return True
 
 

@@ -415,16 +415,21 @@ def test_verifier_chitchat_consumed_silently(fake):
 
 
 @pytest.mark.unit
-def test_parse_book_choice():
-    pbc = book_bot._parse_book_choice
-    assert pbc("abook_malayalam", 1) == {"malayalam": 1}     # button tap
-    assert pbc("abook_hindi", 2) == {"hindi": 2}             # carries copy count
-    assert pbc("1", 2) == {"malayalam": 2}                   # number → Aksharamrutham
-    assert pbc("2", 1) == {"hindi": 1}
-    assert pbc("3", 1) == {"english": 1}
-    assert pbc("1 3", 1) == {"malayalam": 1, "english": 1}   # multiple
-    assert pbc("vidyamrut", 1) == {"hindi": 1}               # name alias
-    assert pbc("blah blah", 1) == {}                         # unclear → empty
+def test_assemble_normalises_parse():
+    o = book_bot._assemble({
+        "name": " Deepa ps ", "phone": "+91 98472-20820",
+        "address": "Kausthubham, Malappuram", "pincode": "673634",
+        "copies": 20, "books": [{"title": "malayalam", "qty": 20}],
+        "book_explicit": True,
+    })
+    assert o["name"] == "Deepa ps"
+    assert o["phone"] == "919847220820"
+    assert o["address"] == "Kausthubham, Malappuram, 673634"
+    assert o["items"] == {"malayalam": 20}
+    assert o["book_explicit"] is True
+    # No book named → items stay EMPTY (never guessed), book_explicit False.
+    o2 = book_bot._assemble({"name": "X", "phone": "9495706405", "copies": 1, "books": []})
+    assert o2["items"] == {} and o2["book_explicit"] is False
 
 
 # ── post-order follow-up ──────────────────────────────────────────────────────
