@@ -11,6 +11,11 @@
 node_modules/
 **/node_modules/
 
+# Separate frontend / media apps — NOT part of the Python API lambda
+pdf-editor/
+video/
+oxygens-website/
+
 # Throwaway scratch files and dirs from local dev sessions
 _tmp_*
 _tmp_v3_out/
