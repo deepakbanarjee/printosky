@@ -2144,24 +2144,163 @@ def _handle_admin_book_order_create(h, body) -> None:
     address      = (data.get("address") or "").strip() or None
     payment_mode = (data.get("payment_mode") or "cash").strip().lower()
     handed_over  = bool(data.get("handed_over"))
+    payment_collected_by = (data.get("payment_collected_by") or "oxygen").strip().lower()
+    if payment_collected_by not in ("oxygen", "divya", "pending"):
+        payment_collected_by = "oxygen"
+    delivery_method = (data.get("delivery_method") or "courier").strip().lower()
+    if delivery_method not in ("courier", "xtraa_office"):
+        delivery_method = "courier"
+    # Required-field validation (walk-in / manual order entry).
+    # Name + phone are always required; address is required unless handed over.
+    if not name:
+        _json_response(h, 400, {"error": "Customer name is required"})
+        return
+    if not phone or len(phone) < 10:
+        _json_response(h, 400, {"error": "A valid phone number (at least 10 digits) is required"})
+        return
+    if not handed_over and not address:
+        _json_response(h, 400, {"error": "A delivery address is required unless the order is handed over"})
+        return
     try:
         import book_catalog as bc
         from db_cloud import create_walk_in_order
         from datetime import datetime
         totals      = bc.compute_totals(items)
         books_total = totals["books_total"]
-        courier     = 0.0 if handed_over else totals["courier"]
+        no_courier  = handed_over or delivery_method == "xtraa_office"
+        courier     = 0.0 if no_courier else totals["courier"]
         grand       = books_total + courier
+        commission  = bc.commission_for(items)
         code        = f"XTR-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
         status      = "delivered" if handed_over else "confirmed"
         row = create_walk_in_order(code, name, phone, address, items,
-                                   books_total, courier, grand, payment_mode, status)
+                                   books_total, courier, grand, payment_mode, status,
+                                   commission=commission,
+                                   payment_collected_by=payment_collected_by,
+                                   delivery_method=delivery_method)
         if not row:
             _json_response(h, 500, {"error": "Could not create order"})
             return
         _json_response(h, 200, {"ok": True, "order_code": code, "grand_total": grand})
     except Exception as exc:
         logger.error("book-order create error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_divya_ledger(h) -> None:
+    """GET /admin/book-orders/divya-ledger — Divya teacher settlement statement."""
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from db_cloud import divya_ledger
+        _json_response(h, 200, divya_ledger())
+    except Exception as exc:
+        logger.error("divya-ledger error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_book_order_settle_divya(h, body, order_code: str) -> None:
+    """POST /admin/book-orders/<code>/settle-divya — mark commission reconciled.
+    Body: {settled: bool} (default true).
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        data = {}
+    settled = bool(data.get("settled", True))
+    try:
+        from db_cloud import mark_divya_settled, get_book_order
+        if not get_book_order(order_code):
+            _json_response(h, 404, {"error": "Order not found"})
+            return
+        mark_divya_settled(order_code, settled)
+        _json_response(h, 200, {"ok": True, "settled": settled})
+    except Exception as exc:
+        logger.error("settle-divya error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_book_order_edit(h, body, order_code: str) -> None:
+    """POST /admin/book-orders/<code>/edit — edit an existing order.
+
+    Body may include any of: name, phone, address, payment_mode,
+    payment_collected_by, delivery_method, via_divya, items{malayalam,hindi,english}.
+    When items or delivery_method change, books_total/courier/grand_total/commission
+    are recomputed so the ledger stays correct.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        data = {}
+    try:
+        import book_catalog as bc
+        from db_cloud import get_book_order, update_book_order
+        order = get_book_order(order_code)
+        if not order:
+            _json_response(h, 404, {"error": "Order not found"})
+            return
+
+        fields = {}
+        for k in ("name", "address", "payment_mode", "payment_collected_by", "delivery_method"):
+            if data.get(k) is not None:
+                fields[k] = str(data[k]).strip()
+        if data.get("phone") is not None:
+            ph = re.sub(r"\D", "", str(data["phone"]))
+            fields["phone"] = ph
+            fields["contact_phone"] = ph
+        if "via_divya" in data:
+            fields["via_divya"] = bool(data["via_divya"])
+
+        if fields.get("payment_collected_by") and fields["payment_collected_by"] not in ("oxygen", "divya", "pending"):
+            _json_response(h, 400, {"error": "payment_collected_by must be oxygen, divya or pending"})
+            return
+        if fields.get("delivery_method") and fields["delivery_method"] not in ("courier", "xtraa_office"):
+            _json_response(h, 400, {"error": "delivery_method must be courier or xtraa_office"})
+            return
+
+        # Recompute money when items change.
+        if isinstance(data.get("items"), dict):
+            raw, items = data["items"], {}
+            for k in ("malayalam", "hindi", "english"):
+                try:
+                    q = int(raw.get(k) or 0)
+                except (TypeError, ValueError):
+                    q = 0
+                if q > 0:
+                    items[k] = q
+            if not items:
+                _json_response(h, 400, {"error": "An order needs at least one book"})
+                return
+            totals = bc.compute_totals(items)
+            deliv = fields.get("delivery_method") or order.get("delivery_method") or "courier"
+            courier = 0.0 if deliv == "xtraa_office" else totals["courier"]
+            fields["items"]       = items
+            fields["books_total"] = totals["books_total"]
+            fields["courier"]     = courier
+            fields["grand_total"] = totals["books_total"] + courier
+            fields["commission"]  = bc.commission_for(items)
+        elif fields.get("delivery_method"):
+            # Delivery changed without items — recompute courier from existing items.
+            items = order.get("items") or {}
+            totals = bc.compute_totals(items)
+            courier = 0.0 if fields["delivery_method"] == "xtraa_office" else totals["courier"]
+            fields["courier"]     = courier
+            fields["grand_total"] = totals["books_total"] + courier
+
+        if not fields:
+            _json_response(h, 400, {"error": "Nothing to update"})
+            return
+        update_book_order(order_code, **fields)
+        _json_response(h, 200, {"ok": True, "order": get_book_order(order_code)})
+    except Exception as exc:
+        logger.error("book-order edit error: %s", exc)
         _json_response(h, 500, {"error": str(exc)})
 
 
@@ -4029,6 +4168,11 @@ class handler(BaseHTTPRequestHandler):
             _handle_admin_book_orders_list(self)
             return
 
+        # Divya teacher settlement statement (admin-only).
+        if self.path == "/admin/book-orders/divya-ledger" or self.path.startswith("/admin/book-orders/divya-ledger?"):
+            _handle_admin_divya_ledger(self)
+            return
+
         # ── SLA watchdog (GitHub Actions cron, every 30 min) ──────────────────
         if self.path == "/cron/sla-check" or self.path.startswith("/cron/sla-check?"):
             _handle_cron_sla_check(self)
@@ -4239,6 +4383,18 @@ class handler(BaseHTTPRequestHandler):
         )
         if _book_deliver:
             _handle_admin_book_order_deliver(self, _book_deliver.group(1))
+            return
+        _book_settle = re.match(
+            r"^/admin/book-orders/([A-Za-z0-9\-]+)/settle-divya$", self.path,
+        )
+        if _book_settle:
+            _handle_admin_book_order_settle_divya(self, body, _book_settle.group(1))
+            return
+        _book_edit = re.match(
+            r"^/admin/book-orders/([A-Za-z0-9\-]+)/edit$", self.path,
+        )
+        if _book_edit:
+            _handle_admin_book_order_edit(self, body, _book_edit.group(1))
             return
 
         # ── Referral store-credit redemption (staff) ─────────────────────────

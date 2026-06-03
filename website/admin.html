@@ -1328,6 +1328,7 @@
           <option value="all">All</option>
         </select>
         <button class="ctrl-btn" onclick="openWalkInForm()">➕ New order</button>
+        <button class="ctrl-btn" onclick="openDivyaStatement()">📊 Divya statement</button>
         <button class="ctrl-btn" onclick="loadBookOrders()">↻ Refresh</button>
       </div>
     </div>
@@ -1345,12 +1346,21 @@
           <input id="wi-hi" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
         <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Easy English <span style="color:#888">EN · ₹200</span>
           <input id="wi-en" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
-        <input id="wi-name" placeholder="Customer name (optional)" style="padding:7px;border:1px solid #ccc;border-radius:6px">
-        <input id="wi-phone" placeholder="Phone (optional, for delivery updates)" style="padding:7px;border:1px solid #ccc;border-radius:6px">
-        <textarea id="wi-address" placeholder="Delivery address + PIN (only if couriering)" style="padding:7px;border:1px solid #ccc;border-radius:6px;min-height:48px"></textarea>
+        <input id="wi-name" placeholder="Customer name *" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+        <input id="wi-phone" placeholder="Phone number * (for delivery updates)" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+        <textarea id="wi-address" placeholder="Delivery address + PIN (required unless handed over)" style="padding:7px;border:1px solid #ccc;border-radius:6px;min-height:48px"></textarea>
         <select id="wi-payment" style="padding:7px;border:1px solid #ccc;border-radius:6px">
           <option value="cash">Paid: Cash</option>
           <option value="upi">Paid: UPI</option>
+        </select>
+        <select id="wi-collected" style="padding:7px;border:1px solid #ccc;border-radius:6px" title="Who collected the payment — drives the Divya ledger">
+          <option value="oxygen">Collected by: Oxygen</option>
+          <option value="divya">Collected by: Divya teacher</option>
+          <option value="pending">Payment pending</option>
+        </select>
+        <select id="wi-delivery" style="padding:7px;border:1px solid #ccc;border-radius:6px" title="Delivery method (ignored when handed over in-store)">
+          <option value="courier">Courier (₹75)</option>
+          <option value="xtraa_office">Drop at Xtraa office (no courier)</option>
         </select>
         <label style="display:flex;gap:8px;align-items:center"><input id="wi-handed" type="checkbox" checked> Handed over now (in-store — no courier)</label>
       </div>
@@ -1358,6 +1368,58 @@
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
         <button class="ctrl-btn" onclick="closeWalkInForm()">Cancel</button>
         <button class="ctrl-btn" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="submitWalkIn()">Create order</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Divya teacher settlement statement (admin-only) -->
+  <div id="divya-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:20px;max-width:560px;width:94%;max-height:90vh;overflow:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px">
+        <div style="font-weight:600;font-size:16px">📊 Divya teacher — settlement</div>
+        <button id="divya-copy-btn" class="ctrl-btn" onclick="copyDivyaStatement()">📋 Copy for WhatsApp</button>
+      </div>
+      <div id="divya-body"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px">
+        <button class="ctrl-btn" onclick="closeDivyaStatement()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit book order (admin-only) -->
+  <div id="edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:20px;max-width:430px;width:92%;max-height:92vh;overflow:auto">
+      <div id="edit-title" style="font-weight:600;font-size:16px;margin-bottom:12px">✏️ Edit order</div>
+      <input type="hidden" id="edit-code">
+      <div style="display:grid;gap:10px;font-size:.9rem">
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Aksharamrutham <span style="color:#888">ML · ₹200</span>
+          <input id="edit-ml" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Vidyamrut <span style="color:#888">HI · ₹150</span>
+          <input id="edit-hi" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Easy English <span style="color:#888">EN · ₹200</span>
+          <input id="edit-en" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+        <input id="edit-name" placeholder="Customer name *" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+        <input id="edit-phone" placeholder="Phone number *" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+        <textarea id="edit-address" placeholder="Delivery address + PIN" style="padding:7px;border:1px solid #ccc;border-radius:6px;min-height:48px"></textarea>
+        <select id="edit-payment" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+          <option value="">Payment mode —</option>
+          <option value="cash">Cash</option>
+          <option value="upi">UPI</option>
+        </select>
+        <select id="edit-collected" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+          <option value="oxygen">Collected by: Oxygen</option>
+          <option value="divya">Collected by: Divya teacher</option>
+          <option value="pending">Payment pending</option>
+        </select>
+        <select id="edit-delivery" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+          <option value="courier">Courier (₹75)</option>
+          <option value="xtraa_office">Xtraa office (no courier)</option>
+        </select>
+      </div>
+      <div id="edit-error" style="color:#dc2626;font-size:.8rem;margin-top:8px"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+        <button class="ctrl-btn" onclick="closeEditBookOrder()">Cancel</button>
+        <button class="ctrl-btn" style="background:#2563eb;color:#fff;border-color:#2563eb" onclick="submitEditBookOrder()">Save changes</button>
       </div>
     </div>
   </div>
@@ -4156,9 +4218,19 @@ function renderBookOrders(rows) {
       actions.push(`<button class="ctrl-btn" onclick="dispatchBookOrder('${o.order_code}')">📦 Mark dispatched</button>`);
     if (o.status === 'dispatched')
       actions.push(`<button class="ctrl-btn" onclick="deliverBookOrder('${o.order_code}')">✅ Mark delivered</button>`);
+    if (o.status !== 'cancelled')
+      actions.push(`<button class="ctrl-btn" onclick="openEditBookOrder('${o.order_code}')">✏️ Edit</button>`);
     const actionsHtml = actions.length ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${actions.join('')}</div>` : '';
     const addr = (o.address || '').replace(/</g, '&lt;');
-    const srcTag = o.source === 'walk_in' ? `<span style="background:#eef2ff;color:#3730a3;border-radius:6px;padding:1px 6px;font-size:.62rem;margin-left:6px;vertical-align:middle">WALK-IN</span>` : '';
+    const srcTag = o.source === 'walk_in'
+      ? `<span style="background:#eef2ff;color:#3730a3;border-radius:6px;padding:1px 6px;font-size:.62rem;margin-left:6px;vertical-align:middle">WALK-IN</span>`
+      : o.source === 'divya'
+      ? `<span style="background:#fef3c7;color:#92400e;border-radius:6px;padding:1px 6px;font-size:.62rem;margin-left:6px;vertical-align:middle">DIVYA</span>`
+      : '';
+    const collLabel = { oxygen: 'we collected', divya: 'Divya collected', pending: 'payment pending' }[o.payment_collected_by] || (o.payment_collected_by || '');
+    const commLine = (o.via_divya === false)
+      ? ''
+      : `<div style="font-size:.78rem;color:#92400e;margin-top:3px">🏷️ Divya commission <strong>₹${o.commission || 0}</strong>${collLabel ? ' · ' + collLabel : ''}${o.divya_settled ? ' · <span style="color:#15803d">✓ settled</span>' : ''}${o.delivery_method === 'xtraa_office' ? ' · 🏫 Xtraa office' : ''}</div>`;
     const payTag = o.payment_mode ? `<span style="color:#888;font-size:.7rem;margin-left:6px">${(o.payment_mode||'').toUpperCase()}</span>` : '';
     const shipInfo = (o.courier_name || o.tracking_no)
       ? `<div style="font-size:.78rem;color:#555;margin-top:2px">🚚 ${(o.courier_name || '')}${o.tracking_no ? ' · ' + o.tracking_no : ''}</div>` : '';
@@ -4168,6 +4240,7 @@ function renderBookOrders(rows) {
         <span style="color:${color};font-weight:700;text-transform:uppercase;font-size:.7rem;letter-spacing:.05em">${(o.status || '').replace('_', ' ')}</span>
       </div>
       <div style="font-size:.85rem;margin-top:5px">${_bookItemsSummary(o.items)} &nbsp;·&nbsp; <strong>₹${o.grand_total || 0}</strong>${payTag}</div>
+      ${commLine}
       <div style="font-size:.8rem;color:#555;margin-top:4px">📞 ${o.contact_phone || o.phone || '—'}${o.name ? ' · ' + o.name : ''}</div>
       <div style="font-size:.8rem;color:#555;margin-top:2px">📍 ${addr || '—'}</div>
       ${shipInfo}
@@ -4229,6 +4302,8 @@ function openWalkInForm() {
   ['wi-ml', 'wi-hi', 'wi-en'].forEach(id => document.getElementById(id).value = 0);
   ['wi-name', 'wi-phone', 'wi-address'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('wi-payment').value = 'cash';
+  document.getElementById('wi-collected').value = 'oxygen';
+  document.getElementById('wi-delivery').value = 'courier';
   document.getElementById('wi-handed').checked = true;
   document.getElementById('wi-error').textContent = '';
   document.getElementById('walkin-modal').style.display = 'flex';
@@ -4244,9 +4319,13 @@ async function submitWalkIn() {
   };
   const err = document.getElementById('wi-error');
   if (!(items.malayalam + items.hindi + items.english)) { err.textContent = 'Select at least one book (quantity > 0).'; return; }
+  const name = document.getElementById('wi-name').value.trim();
+  const phone = document.getElementById('wi-phone').value.trim();
+  if (!name) { err.textContent = 'Customer name is required.'; return; }
+  if (phone.replace(/\D/g, '').length < 10) { err.textContent = 'A valid phone number (at least 10 digits) is required.'; return; }
   const handed = document.getElementById('wi-handed').checked;
   const address = document.getElementById('wi-address').value.trim();
-  if (!handed && !address) { err.textContent = 'A courier (not-handed-over) order needs a delivery address.'; return; }
+  if (!handed && !address) { err.textContent = 'A delivery address (with PIN) is required unless the books are handed over now.'; return; }
   err.textContent = 'Creating…';
   try {
     const r = await fetch(`${ACAD_API}/admin/book-orders/create`, {
@@ -4254,10 +4333,12 @@ async function submitWalkIn() {
       headers: { 'X-Admin-Password': _convPw(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         items,
-        name: document.getElementById('wi-name').value.trim(),
-        phone: document.getElementById('wi-phone').value.trim(),
+        name,
+        phone,
         address,
         payment_mode: document.getElementById('wi-payment').value,
+        payment_collected_by: document.getElementById('wi-collected').value,
+        delivery_method: document.getElementById('wi-delivery').value,
         handed_over: handed,
       })
     });
@@ -4265,6 +4346,165 @@ async function submitWalkIn() {
     if (!r.ok || !data.ok) { err.textContent = `Failed: ${data.error || ('HTTP ' + r.status)}`; return; }
     closeWalkInForm();
     alert(`Order ${data.order_code} created — ₹${data.grand_total}.`);
+    loadBookOrders();
+  } catch (e) { err.textContent = `Network error: ${e.message}`; }
+}
+
+// ── Divya teacher settlement statement (admin-only report) ───────────────────
+async function openDivyaStatement() {
+  if (!_convPw()) {
+    const pw = await _adminPwPrompt(false);
+    if (pw) sessionStorage.setItem('admin_pw_cache', pw); else return;
+  }
+  const modal = document.getElementById('divya-modal');
+  const body = document.getElementById('divya-body');
+  modal.style.display = 'flex';
+  body.innerHTML = '<div style="color:#999">Loading…</div>';
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/divya-ledger`, {
+      headers: { 'X-Admin-Password': _convPw() }
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      body.innerHTML = `<div style="color:#dc2626">Error ${r.status} — ${e.error || 'failed to load'}</div>`;
+      return;
+    }
+    const d = await r.json();
+    window._divyaLedger = d;
+    renderDivyaStatement(d);
+  } catch (e) { body.innerHTML = `<div style="color:#dc2626">Network error: ${e.message}</div>`; }
+}
+
+function _divyaStatementText(d) {
+  const lines = ['📊 DIVYA TEACHER — SETTLEMENT',
+    `Books sold via Divya: ${d.total_books}   →  Commission: ₹${d.total_commission}`, '',
+    `Oxygen owes Divya (we collected):  ₹${d.oxygen_owes_divya}`,
+    `Divya owes Oxygen (she collected): ₹${d.divya_owes_oxygen}`,
+    '──────────────────────────'];
+  const net = d.net;
+  lines.push(net > 0 ? `NET: Divya pays Oxygen ₹${net}`
+    : net < 0 ? `NET: Oxygen pays Divya ₹${Math.abs(net)}`
+    : 'NET: settled — nothing due');
+  if (d.unsettled && d.unsettled.length) {
+    lines.push('', 'Unsettled:');
+    d.unsettled.forEach(o => {
+      const who = o.collected_by === 'divya' ? 'she collected' : (o.collected_by === 'pending' ? 'pending' : 'we collected');
+      const owe = o.direction === 'divya_owes_oxygen' ? `she owes ₹${o.amount}` : `we owe ₹${o.amount}`;
+      lines.push(`• ${o.order_code}  ${o.books}bk  ₹${o.grand_total}  ${who}  → ${owe}`);
+    });
+  }
+  return lines.join('\n');
+}
+
+function renderDivyaStatement(d) {
+  const body = document.getElementById('divya-body');
+  const net = d.net;
+  const netLabel = net > 0 ? `Divya pays Oxygen <strong>₹${net}</strong>`
+    : net < 0 ? `Oxygen pays Divya <strong>₹${Math.abs(net)}</strong>`
+    : 'Settled — nothing due';
+  const rows = (d.unsettled || []).map(o => {
+    const who = o.collected_by === 'divya' ? 'she collected' : (o.collected_by === 'pending' ? 'pending' : 'we collected');
+    const owe = o.direction === 'divya_owes_oxygen' ? `she owes ₹${o.amount}` : `we owe ₹${o.amount}`;
+    return `<tr>
+      <td style="font-family:var(--mono);font-size:.72rem">${o.order_code}</td>
+      <td style="text-align:center">${o.books}</td>
+      <td style="text-align:right">₹${o.grand_total}</td>
+      <td style="font-size:.72rem">${who}</td>
+      <td style="text-align:right;font-weight:600">${owe}</td>
+      <td style="text-align:center"><button class="ctrl-btn" style="padding:2px 8px;font-size:.7rem" onclick="settleDivya('${o.order_code}')">✓ Settle</button></td>
+    </tr>`;
+  }).join('');
+  body.innerHTML = `
+    <div style="display:grid;gap:4px;font-size:.9rem;margin-bottom:10px">
+      <div>Books sold via Divya: <strong>${d.total_books}</strong> · Commission accrued: <strong>₹${d.total_commission}</strong></div>
+      <div>Oxygen owes Divya: <strong>₹${d.oxygen_owes_divya}</strong> · Divya owes Oxygen: <strong>₹${d.divya_owes_oxygen}</strong></div>
+      <div style="font-size:1rem;margin-top:4px;padding:6px 10px;background:#fef3c7;border-radius:6px">NET: ${netLabel}</div>
+    </div>
+    ${rows ? `<table style="width:100%;border-collapse:collapse;font-size:.8rem">
+      <thead><tr style="text-align:left;color:#777;border-bottom:1px solid #eee">
+        <th>Order</th><th style="text-align:center">Bk</th><th style="text-align:right">Total</th><th>Who</th><th style="text-align:right">Owed</th><th></th>
+      </tr></thead><tbody>${rows}</tbody></table>`
+    : '<div style="color:#15803d;padding:8px">Everything is settled — nothing outstanding. 🎉</div>'}
+  `;
+}
+
+async function settleDivya(code) {
+  if (!confirm(`Mark ${code} as settled with Divya?\n\nIt drops off the outstanding list.`)) return;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/${encodeURIComponent(code)}/settle-divya`, {
+      method: 'POST',
+      headers: { 'X-Admin-Password': _convPw(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settled: true })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) { alert(`Failed: ${data.error || ('HTTP ' + r.status)}`); return; }
+    openDivyaStatement();
+    loadBookOrders();
+  } catch (e) { alert(`Network error: ${e.message}`); }
+}
+
+function copyDivyaStatement() {
+  const txt = window._divyaLedger ? _divyaStatementText(window._divyaLedger) : '';
+  if (!txt) return;
+  navigator.clipboard.writeText(txt).then(
+    () => { const b = document.getElementById('divya-copy-btn'); if (b) { b.textContent = '✓ Copied'; setTimeout(() => b.textContent = '📋 Copy for WhatsApp', 1500); } },
+    () => alert('Copy failed — select & copy manually:\n\n' + txt)
+  );
+}
+
+function closeDivyaStatement() { document.getElementById('divya-modal').style.display = 'none'; }
+
+// ── Edit a book order ────────────────────────────────────────────────────────
+function openEditBookOrder(code) {
+  const o = (_bookOrdersCache || []).find(x => x.order_code === code);
+  if (!o) { alert('Order not found — refresh and retry.'); return; }
+  const items = o.items || {};
+  document.getElementById('edit-code').value = code;
+  document.getElementById('edit-title').textContent = `✏️ Edit ${code}`;
+  document.getElementById('edit-ml').value = items.malayalam || 0;
+  document.getElementById('edit-hi').value = items.hindi || 0;
+  document.getElementById('edit-en').value = items.english || 0;
+  document.getElementById('edit-name').value = o.name || '';
+  document.getElementById('edit-phone').value = o.contact_phone || o.phone || '';
+  document.getElementById('edit-address').value = o.address || '';
+  document.getElementById('edit-payment').value = o.payment_mode || '';
+  document.getElementById('edit-collected').value = o.payment_collected_by || 'oxygen';
+  document.getElementById('edit-delivery').value = o.delivery_method || 'courier';
+  document.getElementById('edit-error').textContent = '';
+  document.getElementById('edit-modal').style.display = 'flex';
+}
+
+function closeEditBookOrder() { document.getElementById('edit-modal').style.display = 'none'; }
+
+async function submitEditBookOrder() {
+  const code = document.getElementById('edit-code').value;
+  const err = document.getElementById('edit-error');
+  const items = {
+    malayalam: parseInt(document.getElementById('edit-ml').value || '0', 10),
+    hindi:     parseInt(document.getElementById('edit-hi').value || '0', 10),
+    english:   parseInt(document.getElementById('edit-en').value || '0', 10),
+  };
+  if (!(items.malayalam + items.hindi + items.english)) { err.textContent = 'An order needs at least one book.'; return; }
+  const name = document.getElementById('edit-name').value.trim();
+  const phone = document.getElementById('edit-phone').value.trim();
+  if (!name) { err.textContent = 'Customer name is required.'; return; }
+  if (phone.replace(/\D/g, '').length < 10) { err.textContent = 'A valid phone number (at least 10 digits) is required.'; return; }
+  err.textContent = 'Saving…';
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/${encodeURIComponent(code)}/edit`, {
+      method: 'POST',
+      headers: { 'X-Admin-Password': _convPw(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items, name, phone,
+        address: document.getElementById('edit-address').value.trim(),
+        payment_mode: document.getElementById('edit-payment').value,
+        payment_collected_by: document.getElementById('edit-collected').value,
+        delivery_method: document.getElementById('edit-delivery').value,
+      })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) { err.textContent = `Failed: ${data.error || ('HTTP ' + r.status)}`; return; }
+    closeEditBookOrder();
     loadBookOrders();
   } catch (e) { err.textContent = `Network error: ${e.message}`; }
 }

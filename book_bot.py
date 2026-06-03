@@ -50,7 +50,22 @@ _QR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 # Staff member who verifies UPI payments. Payment screenshots are forwarded here;
 # she taps Confirm/Reject. International format, no '+'.
+# Anu is ALSO the Xtraa/Divya order forwarder — she sends new orders here using
+# the ORDER template below (see _handle_anu_order / book_catalog.parse_anu_order).
 VERIFIER_PHONE = os.environ.get("PAYMENT_VERIFIER_PHONE", "919072034907")
+
+# The template Anu uses to forward a Divya order (echoed back to her on errors).
+ANU_TEMPLATE = (
+    "ORDER\n"
+    "Name: <customer name>\n"
+    "Phone: <10-digit number>\n"
+    "Address: <full address + PIN>\n"
+    "Aksharamrutham: <qty>\n"
+    "Vidyamrut: <qty>\n"
+    "Easy English: <qty>\n"
+    "Payment: pending / divya\n"
+    "Delivery: courier / office"
+)
 
 _BOOK_STEPS = {"book_select", "book_qty", "book_address", "book_phone",
                "book_summary", "book_pay", "book_edit", "book_edit_address",
@@ -678,6 +693,69 @@ def send_abandoned_reminders(idle_hours: int = 2) -> dict:
     return {"carts": len(carts), "reminded": reminded}
 
 
+def _handle_anu_order(parsed: dict) -> None:
+    """Create a Divya-forwarded order from a parsed ORDER template, reply to Anu.
+
+    Divya's orders print on receipt — they are created as 'confirmed' immediately
+    and never wait for payment. Anu gets a summary + a one-tap Cancel.
+    """
+    if not parsed.get("ok"):
+        problems = "\n".join(f"• {e}" for e in (parsed.get("errors") or ["Couldn't read the order"]))
+        _send_text(VERIFIER_PHONE,
+                   "⚠️ I couldn't save that order:\n" + problems +
+                   "\n\nPlease resend using this template:\n\n" + ANU_TEMPLATE)
+        return
+
+    items   = parsed["items"]
+    deliv   = parsed["delivery_method"]
+    totals  = bc.compute_totals(items)
+    courier = 0.0 if deliv == "xtraa_office" else totals["courier"]
+    grand   = totals["books_total"] + courier
+    commission = bc.commission_for(items)
+
+    from datetime import datetime
+    code = f"XTR-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
+    row = _dbc.create_walk_in_order(
+        code, parsed["name"], parsed["phone"], parsed["address"], items,
+        totals["books_total"], courier, grand,
+        payment_mode="", status="confirmed",
+        commission=commission, payment_collected_by=parsed["payment_collected_by"],
+        delivery_method=deliv, via_divya=True, source="divya",
+    )
+    if not row:
+        _send_text(VERIFIER_PHONE, "⚠️ Something went wrong saving the order — please try again.")
+        return
+
+    pay_label = {"divya":   "Divya collected",
+                 "oxygen":  "Oxygen collected",
+                 "pending": "Pending (we collect)"}.get(parsed["payment_collected_by"],
+                                                        parsed["payment_collected_by"])
+    deliv_label = "Xtraa office" if deliv == "xtraa_office" else "Courier"
+    summary = (
+        f"✅ *Order saved & queued:* {code}\n"
+        f"{parsed['name']} · +{parsed['phone']}\n"
+        f"{_cart_line(items)}\n"
+        f"Books ₹{totals['books_total']:.0f}"
+        + (f" + Courier ₹{courier:.0f}" if courier else "")
+        + f" = *₹{grand:.0f}*\n"
+        f"Delivery: {deliv_label}\n"
+        f"Payment: {pay_label}\n"
+        f"Divya commission: ₹{commission:.0f}\n\n"
+        "Printing now — no need to wait for payment. If anything's wrong, tap Cancel."
+    )
+    _send_buttons(VERIFIER_PHONE, summary, [(f"acanc_{code}", "❌ Cancel order")])
+
+
+def _cancel_divya_order(code: str) -> None:
+    """Cancel a just-created Divya order at Anu's request."""
+    order = _dbc.get_book_order(code)
+    if not order:
+        _send_text(VERIFIER_PHONE, f"⚠️ Couldn't find order *{code}* to cancel.")
+        return
+    _dbc.update_book_order(code, status="cancelled")
+    _send_text(VERIFIER_PHONE, f"🗑️ Cancelled *{code}* — it won't be printed or couriered.")
+
+
 def handle_verifier_reply(sender: str, text: str) -> bool:
     """Handle the verifier (Anu) tapping Confirm/Reject on a payment.
 
@@ -687,6 +765,18 @@ def handle_verifier_reply(sender: str, text: str) -> bool:
     if re.sub(r"\D", "", sender or "") != re.sub(r"\D", "", VERIFIER_PHONE):
         return False
     t = (text or "").strip()
+
+    # Anu also forwards new Divya orders (ORDER template) and may cancel a
+    # just-created one. Handle those before payment verification.
+    parsed = bc.parse_anu_order(t)
+    if parsed is not None:
+        _handle_anu_order(parsed)
+        return True
+    cm = re.match(r"^acanc_(\S+)$", t) or re.match(r"(?i)^cancel\s+(XTR-\S+)", t)
+    if cm:
+        _cancel_divya_order(cm.group(1).upper())
+        return True
+
     action = code = None
     m = re.match(r"^(vconf|vrej)_(\S+)$", t)
     if m:
@@ -733,6 +823,7 @@ def confirm_book_order(order_code: str) -> dict:
 
     from datetime import datetime, timezone
     _dbc.update_book_order(order_code, status="confirmed",
+                           commission=bc.commission_for(order.get("items") or {}),
                            confirmed_at=datetime.now(timezone.utc).isoformat())
 
     phone = order["phone"]

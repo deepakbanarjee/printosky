@@ -888,8 +888,18 @@ def list_book_orders(status: str | None = None, limit: int = 100) -> list:
 def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
                          address: str | None, items: dict,
                          books_total: float, courier: float, grand_total: float,
-                         payment_mode: str, status: str) -> dict:
-    """Insert a manually-created (walk-in / in-store) book order. Returns the row."""
+                         payment_mode: str, status: str,
+                         commission: float = 0.0,
+                         payment_collected_by: str = "oxygen",
+                         delivery_method: str = "courier",
+                         via_divya: bool = True,
+                         source: str = "walk_in") -> dict:
+    """Insert a manually-created book order (walk-in / in-store, or Divya-via-Anu).
+
+    Returns the inserted row. `source` distinguishes 'walk_in' from 'divya'.
+    `commission` is the ₹50/book owed to Divya teacher; `payment_collected_by`
+    is 'oxygen' | 'divya' | 'pending' and drives the settlement ledger.
+    """
     now = datetime.now(timezone.utc).isoformat()
     row = {
         "order_code":   order_code,
@@ -903,7 +913,11 @@ def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
         "contact_phone": phone,
         "status":       status,
         "payment_mode": payment_mode,
-        "source":       "walk_in",
+        "source":       source,
+        "commission":   commission,
+        "payment_collected_by": payment_collected_by,
+        "delivery_method":      delivery_method,
+        "via_divya":    via_divya,
         "confirmed_at": now,
     }
     if status == "delivered":
@@ -914,6 +928,97 @@ def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
     except Exception as exc:
         logger.error("create_walk_in_order error: %s", exc)
         return {}
+
+
+# Statuses that count as a real (sold) order for the Divya commission ledger.
+DIVYA_LEDGER_STATUSES = ("confirmed", "dispatched", "delivered")
+
+
+def divya_ledger(include_settled: bool = False) -> dict:
+    """Aggregate the Divya teacher commission ledger.
+
+    Counts only sold orders (status in DIVYA_LEDGER_STATUSES) attributed to
+    Divya. Returns headline totals plus the list of UNSETTLED orders, each
+    tagged with who owes whom:
+        * payment_collected_by in ('oxygen','pending') -> Oxygen owes Divya the
+          commission.
+        * payment_collected_by == 'divya'              -> Divya owes Oxygen
+          (grand_total - commission).
+    `net` > 0 means Divya pays Oxygen; < 0 means Oxygen pays Divya.
+    """
+    empty = {"total_orders": 0, "total_books": 0, "total_commission": 0.0,
+             "oxygen_owes_divya": 0.0, "divya_owes_oxygen": 0.0, "net": 0.0,
+             "unsettled": []}
+    try:
+        rows = (
+            _client().table("book_orders")
+            .select("order_code,name,items,grand_total,commission,"
+                    "payment_collected_by,delivery_method,divya_settled,status,created_at")
+            .eq("via_divya", True)
+            .in_("status", list(DIVYA_LEDGER_STATUSES))
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as exc:
+        logger.error("divya_ledger error: %s", exc)
+        return empty
+
+    total_books = total_commission = 0
+    oxygen_owes = divya_owes = 0.0
+    unsettled = []
+    for r in rows:
+        comm = float(r.get("commission") or 0)
+        gt = float(r.get("grand_total") or 0)
+        items = r.get("items") or {}
+        books = sum(int(v) for k, v in items.items()
+                    if k in ("malayalam", "hindi", "english") and v)
+        total_books += books
+        total_commission += comm
+        if r.get("divya_settled") and not include_settled:
+            continue
+        collected = r.get("payment_collected_by") or "oxygen"
+        if collected == "divya":
+            amount, direction = gt - comm, "divya_owes_oxygen"
+            divya_owes += amount
+        else:  # 'oxygen' or 'pending'
+            amount, direction = comm, "oxygen_owes_divya"
+            oxygen_owes += amount
+        unsettled.append({
+            "order_code":   r.get("order_code"),
+            "name":         r.get("name"),
+            "books":        books,
+            "grand_total":  gt,
+            "commission":   comm,
+            "collected_by": collected,
+            "direction":    direction,
+            "amount":       amount,
+            "settled":      bool(r.get("divya_settled")),
+        })
+    return {
+        "total_orders":      len(rows),
+        "total_books":       total_books,
+        "total_commission":  float(total_commission),
+        "oxygen_owes_divya": oxygen_owes,
+        "divya_owes_oxygen": divya_owes,
+        "net":               divya_owes - oxygen_owes,
+        "unsettled":         unsettled,
+    }
+
+
+def mark_divya_settled(order_code: str, settled: bool = True) -> None:
+    """Mark (or unmark) a Divya order's commission as reconciled. Silent on error."""
+    now = datetime.now(timezone.utc).isoformat()
+    fields = {
+        "divya_settled":    settled,
+        "divya_settled_at": now if settled else None,
+        "updated_at":       now,
+    }
+    try:
+        _client().table("book_orders").update(fields).eq("order_code", order_code).execute()
+    except Exception as exc:
+        logger.error("mark_divya_settled error for %s: %s", order_code, exc)
 
 
 def find_abandoned_book_carts(idle_hours: int = 2, window_hours: int = 24,
