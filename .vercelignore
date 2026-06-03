@@ -1,0 +1,27 @@
+# Keep the deploy bundle small. `vercel deploy` (CLI) uploads the whole working
+# directory; without this it balloons past Vercel's 245 MB Lambda limit because
+# of local-only junk. Git deploys only use tracked files, so these are no-ops
+# there — but listing them keeps the CLI deploy path working too.
+
+# Agent / editor state — includes .claude/worktrees (multiple full repo copies)
+.claude/
+.git/
+
+# Node dependencies (the Python API doesn't need any frontend node_modules)
+node_modules/
+**/node_modules/
+
+# Throwaway scratch files and dirs from local dev sessions
+_tmp_*
+_tmp_v3_out/
+_tmp_samples/
+tools/aswathy_rebuild/
+vault_dryrun.txt
+design.pen
+
+# Local virtualenvs / caches
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
