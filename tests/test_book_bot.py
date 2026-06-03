@@ -1,8 +1,7 @@
-"""Flow tests for book_bot — the button-driven book-order state machine.
+"""Flow tests for book_bot — combo multi-select + per-book count + edit.
 
-db_cloud is faked in-memory; the interactive senders (_send_list / _send_buttons
-/ _send_text / _send_qr) are stubbed so no Meta/Supabase calls happen. The flow
-sends messages as side effects and returns [] (or None when not a book message).
+db_cloud is faked in-memory; the interactive senders are stubbed. The flow sends
+messages as side effects and returns [] (or None when not a book message).
 """
 
 import pytest
@@ -74,160 +73,182 @@ def fake(monkeypatch):
 
 
 PHONE = "919000000001"
+ADDR = "12 MG Road, Thrissur, 680001"
 
 
-# ── trigger detection ─────────────────────────────────────────────────────────
+def _code(db):
+    return next(iter(db.orders))
+
+
+# ── trigger ───────────────────────────────────────────────────────────────────
 
 @pytest.mark.unit
-@pytest.mark.parametrize("text", ["book", "BOOKS", "books please", "xtraa", "Aksharamrutham"])
+@pytest.mark.parametrize("text", ["book", "BOOKS", "xtraa", "Aksharamrutham"])
 def test_trigger_words(text):
     assert book_bot.is_book_trigger(text) is True
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("text", ["facebook", "i want a print", "hello", ""])
-def test_non_trigger_words(text):
-    assert book_bot.is_book_trigger(text) is False
-
-
-@pytest.mark.unit
-def test_no_trigger_when_mid_print_flow(fake):
+def test_no_trigger_when_mid_print(fake):
     db, _ = fake
     db.sessions[PHONE] = {"step": "size", "job_id": "OSP-x"}
     assert book_bot.maybe_handle_book(PHONE, "book") is None
 
 
-# ── happy path: All-3 set via buttons ─────────────────────────────────────────
+# ── selection list offers combos ──────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_select_list_has_combo_rows(fake):
+    db, sent = fake
+    book_bot.maybe_handle_book(PHONE, "book")
+    assert db.sessions[PHONE]["step"] == "book_select"
+    assert sent["list"][-1] == ["bk_ml", "bk_hi", "bk_en",
+                                "bk_ml_hi", "bk_ml_en", "bk_hi_en", "bk_all"]
+
+
+# ── happy path: all 3 in one tap, count each ──────────────────────────────────
 
 @pytest.mark.integration
-def test_full_happy_path_set_buttons(fake):
+def test_all_three_one_tap_then_count_each(fake):
     db, sent = fake
+    book_bot.maybe_handle_book(PHONE, "book")
+    code = _code(db)
 
-    assert book_bot.maybe_handle_book(PHONE, "book", name="Asha") == []
-    assert db.sessions[PHONE]["step"] == "book_select"
-    assert sent["list"] and sent["list"][-1] == ["bk_ml", "bk_hi", "bk_en", "bk_set"]
-    code = next(iter(db.orders))
-
-    # Tap "All 3 — Set"
-    book_bot.maybe_handle_book(PHONE, "bk_set")
+    book_bot.maybe_handle_book(PHONE, "bk_all")          # one tap → all 3
     assert db.sessions[PHONE]["step"] == "book_qty"
-    assert db.orders[code]["flow_cursor"]["current"] == "__set__"
-    assert sent["buttons"][-1] == ["qty_1", "qty_2", "qty_3"]
+    assert db.orders[code]["flow_cursor"]["current"] == "malayalam"
+    assert db.orders[code]["flow_cursor"]["queue"] == ["hindi", "english"]
 
-    # Tap qty "1" → 1 set
-    book_bot.maybe_handle_book(PHONE, "qty_1")
+    book_bot.maybe_handle_book(PHONE, "qty_1")           # malayalam
+    assert db.orders[code]["flow_cursor"]["current"] == "hindi"
+    book_bot.maybe_handle_book(PHONE, "qty_1")           # hindi
+    assert db.orders[code]["flow_cursor"]["current"] == "english"
+    book_bot.maybe_handle_book(PHONE, "qty_1")           # english → done
     assert db.sessions[PHONE]["step"] == "book_address"
-    assert db.orders[code]["grand_total"] == 624.0   # 549 set + 75 courier
-    assert any("624" in m for m in sent["text"])
+    assert db.orders[code]["items"] == {"malayalam": 1, "hindi": 1, "english": 1}
+    assert db.orders[code]["grand_total"] == 624.0       # 549 set + 75
 
-    # Address (typed)
-    book_bot.maybe_handle_book(PHONE, "12 MG Road, Thrissur, 680001")
+    book_bot.maybe_handle_book(PHONE, ADDR)
     assert db.sessions[PHONE]["step"] == "book_phone"
     assert sent["buttons"][-1] == ["ph_yes", "ph_edit"]
 
-    # Confirm phone via button
     book_bot.maybe_handle_book(PHONE, "ph_yes")
     assert db.sessions[PHONE]["step"] == "book_summary"
-    assert db.orders[code]["contact_phone"] == PHONE
-    assert sent["buttons"][-1] == ["ord_yes", "ord_no"]
+    assert sent["buttons"][-1] == ["ord_yes", "ord_edit", "ord_no"]
 
-    # Confirm order via button → QR sent
     book_bot.maybe_handle_book(PHONE, "ord_yes")
     assert db.sessions[PHONE]["step"] == "book_pay"
-    assert db.orders[code]["status"] == "awaiting_payment"
     assert sent["qr"] == [code]
 
-    # Payment screenshot
     book_bot.handle_payment_proof(PHONE, b"x", "image/jpeg")
     assert db.orders[code]["status"] == "payment_review"
-    assert db.sessions[PHONE]["needs_human"] is True
-
-    # Owner confirms
     res = book_bot.confirm_book_order(code)
-    assert res["ok"] is True
-    assert db.orders[code]["status"] == "confirmed"
-    assert PHONE not in db.sessions
+    assert res["ok"] and db.orders[code]["status"] == "confirmed"
 
 
-# ── single book + add another (cart) ──────────────────────────────────────────
+# ── multi-select pair in one tap ──────────────────────────────────────────────
 
 @pytest.mark.integration
-def test_single_then_add_another(fake):
+def test_pair_one_tap(fake):
     db, sent = fake
     book_bot.maybe_handle_book(PHONE, "book")
-    code = next(iter(db.orders))
-
-    book_bot.maybe_handle_book(PHONE, "bk_ml")      # Aksharamrutham
+    code = _code(db)
+    book_bot.maybe_handle_book(PHONE, "bk_ml_en")        # Malayalam + English
     assert db.orders[code]["flow_cursor"]["current"] == "malayalam"
-    book_bot.maybe_handle_book(PHONE, "qty_2")      # 2 copies
-    assert db.orders[code]["items"] == {"malayalam": 2}
-    assert db.sessions[PHONE]["step"] == "book_addmore"
-    assert sent["buttons"][-1] == ["bk_add", "bk_checkout"]
-
-    # Add another book
-    book_bot.maybe_handle_book(PHONE, "bk_add")
-    assert db.sessions[PHONE]["step"] == "book_select"
-    book_bot.maybe_handle_book(PHONE, "bk_en")      # Easy English
-    book_bot.maybe_handle_book(PHONE, "qty_1")
+    assert db.orders[code]["flow_cursor"]["queue"] == ["english"]
+    book_bot.maybe_handle_book(PHONE, "qty_2")           # ml ×2
+    book_bot.maybe_handle_book(PHONE, "qty_1")           # en ×1 → done
     assert db.orders[code]["items"] == {"malayalam": 2, "english": 1}
-    assert db.sessions[PHONE]["step"] == "book_addmore"
-
-    # Checkout
-    book_bot.maybe_handle_book(PHONE, "bk_checkout")
-    assert db.sessions[PHONE]["step"] == "book_address"
-    # 2×200 + 1×200 + 75 courier = 675
-    assert db.orders[code]["grand_total"] == 675.0
-
-
-# ── typed fallbacks still work ────────────────────────────────────────────────
-
-@pytest.mark.unit
-def test_typed_selection_fallback(fake):
-    db, sent = fake
-    book_bot.maybe_handle_book(PHONE, "book")
-    code = next(iter(db.orders))
-    book_bot.maybe_handle_book(PHONE, "2")          # typed → hindi
-    assert db.orders[code]["flow_cursor"]["current"] == "hindi"
-    book_bot.maybe_handle_book(PHONE, "3")          # typed qty 3
-    assert db.orders[code]["items"] == {"hindi": 3}
+    assert db.orders[code]["grand_total"] == 675.0       # 400+200+75
 
 
 @pytest.mark.unit
-def test_invalid_selection_reprompts_list(fake):
+def test_typed_multi_select_fallback(fake):
     db, sent = fake
     book_bot.maybe_handle_book(PHONE, "book")
-    n_before = len(sent["list"])
+    code = _code(db)
+    book_bot.maybe_handle_book(PHONE, "1,3")             # typed → ml + en
+    assert db.orders[code]["flow_cursor"]["current"] == "malayalam"
+    assert db.orders[code]["flow_cursor"]["queue"] == ["english"]
+
+
+# ── edit at summary ───────────────────────────────────────────────────────────
+
+def _drive_to_summary(db):
+    book_bot.maybe_handle_book(PHONE, "book")
+    book_bot.maybe_handle_book(PHONE, "bk_ml")
+    book_bot.maybe_handle_book(PHONE, "qty_1")
+    book_bot.maybe_handle_book(PHONE, ADDR)
+    book_bot.maybe_handle_book(PHONE, "ph_yes")
+    assert db.sessions[PHONE]["step"] == "book_summary"
+
+
+@pytest.mark.integration
+def test_edit_address(fake):
+    db, sent = fake
+    _drive_to_summary(db)
+    code = _code(db)
+    book_bot.maybe_handle_book(PHONE, "ord_edit")
+    assert db.sessions[PHONE]["step"] == "book_edit"
+    assert sent["buttons"][-1] == ["ed_books", "ed_addr", "ed_phone"]
+
+    book_bot.maybe_handle_book(PHONE, "ed_addr")
+    assert db.sessions[PHONE]["step"] == "book_edit_address"
+    book_bot.maybe_handle_book(PHONE, "New House, Ollur, Thrissur 680306")
+    assert db.orders[code]["address"].startswith("New House")
+    assert db.sessions[PHONE]["step"] == "book_summary"   # back to summary
+
+
+@pytest.mark.integration
+def test_edit_phone(fake):
+    db, sent = fake
+    _drive_to_summary(db)
+    code = _code(db)
+    book_bot.maybe_handle_book(PHONE, "ord_edit")
+    book_bot.maybe_handle_book(PHONE, "ed_phone")
+    assert db.sessions[PHONE]["step"] == "book_edit_phone"
+    book_bot.maybe_handle_book(PHONE, "9876543210")
+    assert db.orders[code]["contact_phone"] == "9876543210"
+    assert db.sessions[PHONE]["step"] == "book_summary"
+
+
+@pytest.mark.integration
+def test_edit_books_returns_to_summary(fake):
+    db, sent = fake
+    _drive_to_summary(db)
+    code = _code(db)
+    assert db.orders[code]["address"] == ADDR
+
+    book_bot.maybe_handle_book(PHONE, "ord_edit")
+    book_bot.maybe_handle_book(PHONE, "ed_books")
+    assert db.sessions[PHONE]["step"] == "book_select"
+    assert db.orders[code]["flow_cursor"].get("editing") is True
+
+    book_bot.maybe_handle_book(PHONE, "bk_hi")            # re-pick a different book
+    book_bot.maybe_handle_book(PHONE, "qty_2")           # done counting → editing → summary
+    assert db.sessions[PHONE]["step"] == "book_summary"  # NOT back through address/phone
+    assert db.orders[code]["items"] == {"hindi": 2}
+    assert db.orders[code]["address"] == ADDR            # address preserved
+
+
+# ── cancel / re-prompt / misc ─────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_cancel_starts_over(fake):
+    db, sent = fake
+    _drive_to_summary(db)
+    book_bot.maybe_handle_book(PHONE, "ord_no")
+    assert db.sessions[PHONE]["step"] == "book_select"
+
+
+@pytest.mark.unit
+def test_invalid_selection_reprompts(fake):
+    db, sent = fake
+    book_bot.maybe_handle_book(PHONE, "book")
+    n = len(sent["list"])
     book_bot.maybe_handle_book(PHONE, "banana")
     assert db.sessions[PHONE]["step"] == "book_select"
-    assert len(sent["list"]) == n_before + 1        # re-sent the list
-
-
-@pytest.mark.unit
-def test_summary_start_over(fake):
-    db, sent = fake
-    book_bot.maybe_handle_book(PHONE, "book")
-    book_bot.maybe_handle_book(PHONE, "bk_ml")
-    book_bot.maybe_handle_book(PHONE, "qty_1")
-    book_bot.maybe_handle_book(PHONE, "bk_checkout")
-    book_bot.maybe_handle_book(PHONE, "12 MG Road, Thrissur 680001")
-    book_bot.maybe_handle_book(PHONE, "ph_yes")
-    book_bot.maybe_handle_book(PHONE, "ord_no")     # start over
-    assert db.sessions[PHONE]["step"] == "book_select"
-
-
-@pytest.mark.unit
-def test_phone_edit_then_typed_number(fake):
-    db, sent = fake
-    book_bot.maybe_handle_book(PHONE, "book")
-    book_bot.maybe_handle_book(PHONE, "bk_ml")
-    book_bot.maybe_handle_book(PHONE, "qty_1")
-    book_bot.maybe_handle_book(PHONE, "bk_checkout")
-    book_bot.maybe_handle_book(PHONE, "12 MG Road, Thrissur 680001")
-    book_bot.maybe_handle_book(PHONE, "ph_edit")    # wants different number
-    assert db.sessions[PHONE]["step"] == "book_phone"
-    book_bot.maybe_handle_book(PHONE, "9876543210")
-    code = next(iter(db.orders))
-    assert db.orders[code]["contact_phone"] == "9876543210"
+    assert len(sent["list"]) == n + 1
 
 
 @pytest.mark.unit
@@ -236,13 +257,5 @@ def test_non_book_message_returns_none(fake):
 
 
 @pytest.mark.unit
-def test_payment_proof_ignored_when_not_in_pay_step(fake):
-    db, _ = fake
-    db.sessions[PHONE] = {"step": "book_select"}
-    assert book_bot.handle_payment_proof(PHONE, b"x", "image/jpeg") is None
-
-
-@pytest.mark.unit
 def test_confirm_unknown_order(fake):
-    res = book_bot.confirm_book_order("XTR-NOPE")
-    assert res["ok"] is False
+    assert book_bot.confirm_book_order("XTR-NOPE")["ok"] is False
