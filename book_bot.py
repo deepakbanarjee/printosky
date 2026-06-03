@@ -48,9 +48,13 @@ _NEGATE = {"no", "cancel", "wrong", "restart", "redo", "start over"}
 _QR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "brand-kit", "printosky-payment-qr.png")
 
+# Staff member who verifies UPI payments. Payment screenshots are forwarded here;
+# she taps Confirm/Reject. International format, no '+'.
+VERIFIER_PHONE = os.environ.get("PAYMENT_VERIFIER_PHONE", "919072034907")
+
 _BOOK_STEPS = {"book_select", "book_qty", "book_address", "book_phone",
                "book_summary", "book_pay", "book_edit", "book_edit_address",
-               "book_edit_phone"}
+               "book_edit_phone", "post_order", "post_order_ask"}
 
 # Selection list-row ids → the set of book keys they choose (one tap = multi-select).
 _SELECT_IDS = {
@@ -271,6 +275,36 @@ def _send_qr(phone: str, order: dict) -> bool:
         return False
 
 
+def _cart_line(items: dict) -> str:
+    parts = [f"{bc.BOOKS[k]['label'].split(' (')[0]} × {q}"
+             for k, q in (items or {}).items() if q and k in bc.BOOKS]
+    return ", ".join(parts) if parts else "—"
+
+
+def _forward_to_verifier(order: dict, content: bytes, mime_type: str) -> None:
+    """Forward a payment screenshot to the verifier (Anu) with Confirm/Reject."""
+    code   = order.get("order_code")
+    totals = bc.compute_totals(order.get("items") or {})
+    caption = (
+        "💳 *Payment to verify*\n"
+        f"Order: {code}\n"
+        f"Amount: ₹{totals['grand_total']:.0f}\n"
+        f"Customer: +{re.sub(r'[^0-9]', '', order.get('phone', ''))}\n"
+        f"Items: {_cart_line(order.get('items') or {})}\n"
+        f"📍 {order.get('address', '')}"
+    )
+    try:
+        from whatsapp_notify import send_file
+        send_file(VERIFIER_PHONE, content, mime_type or "image/jpeg",
+                  "payment.jpg", caption=caption)
+    except Exception as exc:
+        logger.error("verifier screenshot forward failed: %s", exc)
+    _send_buttons(
+        VERIFIER_PHONE, f"Is this payment received for *{code}*?",
+        [(f"vconf_{code}", "✅ Confirm"), (f"vrej_{code}", "❌ Reject")],
+    )
+
+
 # ── flow ──────────────────────────────────────────────────────────────────────
 
 def _address_prompt(totals: dict) -> str:
@@ -486,6 +520,40 @@ def _handle_edit_phone(phone: str, text: str, order: dict) -> list[str]:
     return []
 
 
+def _handle_post_order(phone: str, text: str) -> list[str]:
+    """First message after a confirmed order → offer further help."""
+    _dbc.save_session(DB, phone, step="post_order_ask")
+    _send_buttons(phone, "Is there anything else we can help you with?",
+                  [("po_yes", "✅ Yes"), ("po_no", "❌ No, I'm done")])
+    return []
+
+
+def _handle_post_order_ask(phone: str, text: str, name: str | None) -> list[str]:
+    t = (text or "").strip().lower()
+    if t == "po_no" or t in _NEGATE:
+        try:
+            _dbc.clear_session(DB, phone)
+        except Exception:
+            pass
+        _send_text(phone, "Thank you for shopping with *Printosky × Xtraa*! 🙏 "
+                          "Have a great day. 📚")
+        return []
+    if t == "po_yes" or t in _AFFIRM:
+        # Start from the top: clear state and show the general help menu.
+        try:
+            _dbc.clear_session(DB, phone)
+        except Exception:
+            pass
+        _send_text(phone, "👍 *How can we help?*\n\n"
+                          "📄 *Printouts* — send your PDF or document here.\n"
+                          "📚 *Xtraa books* — reply *books*.\n"
+                          "🧑‍💼 *Talk to staff* — reply *agent*.")
+        return []
+    _send_buttons(phone, "Anything else? Tap *Yes* or *No*.",
+                  [("po_yes", "✅ Yes"), ("po_no", "❌ No, I'm done")])
+    return []
+
+
 def _handle_pay(phone: str, text: str, order: dict) -> list[str]:
     code = order["order_code"]
     t = (text or "").strip().lower()
@@ -525,6 +593,11 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
             return _start(phone, name)
         return None
 
+    if step == "post_order":
+        return _handle_post_order(phone, text)
+    if step == "post_order_ask":
+        return _handle_post_order_ask(phone, text, name)
+
     if (text or "").strip().lower() == "new":
         return _start(phone, name, force_new=True)
 
@@ -563,6 +636,11 @@ def handle_payment_proof(phone: str, content: bytes, mime_type: str) -> list[str
     _dbc.update_book_order(order["order_code"], status="payment_review",
                            payment_proof_url=url or None)
     _dbc.save_session(DB, phone, step="book_pay", needs_human=True)
+    # Forward the screenshot to the verifier (Anu) for Confirm/Reject.
+    try:
+        _forward_to_verifier(_dbc.get_book_order(order["order_code"]), content, mime_type)
+    except Exception as exc:
+        logger.error("forward to verifier failed for %s: %s", order["order_code"], exc)
     return [
         f"✅ Got your payment screenshot for *{order['order_code']}*.\n\n"
         "We're verifying it now — you'll receive your order confirmation "
@@ -600,6 +678,52 @@ def send_abandoned_reminders(idle_hours: int = 2) -> dict:
     return {"carts": len(carts), "reminded": reminded}
 
 
+def handle_verifier_reply(sender: str, text: str) -> bool:
+    """Handle the verifier (Anu) tapping Confirm/Reject on a payment.
+
+    Returns True if the message was a verification action (and was handled),
+    False otherwise (so a non-verification message falls through to normal flow).
+    """
+    if re.sub(r"\D", "", sender or "") != re.sub(r"\D", "", VERIFIER_PHONE):
+        return False
+    t = (text or "").strip()
+    action = code = None
+    m = re.match(r"^(vconf|vrej)_(\S+)$", t)
+    if m:
+        action, code = m.group(1), m.group(2)
+    else:
+        m = re.match(r"(?i)^(confirm|approve|reject|deny)\s+(XTR-\S+)", t)
+        if m:
+            action = "vconf" if m.group(1).lower() in ("confirm", "approve") else "vrej"
+            code = m.group(2).upper()
+    if not action or not code:
+        return False
+
+    if action == "vconf":
+        res = confirm_book_order(code)
+        if res.get("ok"):
+            _send_text(VERIFIER_PHONE, f"✅ Confirmed *{code}* — customer notified. "
+                                       "Thanks Anu! 🙏")
+        else:
+            _send_text(VERIFIER_PHONE, f"⚠️ Couldn't find order *{code}*.")
+        return True
+
+    # Reject → ask the customer to resend, keep the order open.
+    order = _dbc.get_book_order(code)
+    if not order:
+        _send_text(VERIFIER_PHONE, f"⚠️ Couldn't find order *{code}*.")
+        return True
+    _dbc.update_book_order(code, status="awaiting_payment")
+    cust = order.get("phone")
+    if cust:
+        _dbc.save_session(DB, cust, step="book_pay", needs_human=False)
+        _send_text(cust, f"⚠️ We couldn't verify your payment for *{code}*. "
+                         "Please *resend a clear screenshot* of the payment, "
+                         "or contact us if you've already paid. 🙏")
+    _send_text(VERIFIER_PHONE, f"❌ Rejected *{code}* — customer asked to resend.")
+    return True
+
+
 def confirm_book_order(order_code: str) -> dict:
     order = _dbc.get_book_order(order_code)
     if not order:
@@ -612,8 +736,10 @@ def confirm_book_order(order_code: str) -> dict:
                            confirmed_at=datetime.now(timezone.utc).isoformat())
 
     phone = order["phone"]
+    # Move the customer into the post-order state: their next message triggers
+    # the "anything else?" follow-up (instead of leaving them with no session).
     try:
-        _dbc.clear_session(DB, phone)
+        _dbc.save_session(DB, phone, step="post_order", needs_human=False)
     except Exception:
         pass
 

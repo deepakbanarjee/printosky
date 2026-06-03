@@ -354,6 +354,15 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     from whatsapp_bot import handle_message
     from whatsapp_notify import _send, send_staff_alert
 
+    # Payment verifier (Anu) tapping Confirm/Reject on a forwarded screenshot —
+    # handle before any customer-flow routing.
+    try:
+        from book_bot import handle_verifier_reply
+        if handle_verifier_reply(sender, text):
+            return
+    except Exception as e:
+        logger.error(f"Verifier reply error for {sender}: {e}")
+
     # Help escape hatch: short-circuit before any state-machine work.
     # Customer typed `help` / `support` / `human` / `agent` → flag session,
     # alert staff, ack the customer. TASK-009.

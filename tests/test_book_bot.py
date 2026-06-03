@@ -60,7 +60,7 @@ def fake(monkeypatch):
                "get_book_order", "upload_book_payment_proof", "log_message"):
         monkeypatch.setattr(_dbc, fn, getattr(db, fn))
 
-    sent = {"list": [], "buttons": [], "text": [], "qr": []}
+    sent = {"list": [], "buttons": [], "text": [], "qr": [], "forward": []}
     monkeypatch.setattr(book_bot, "_send_list",
                         lambda phone, body, btn, rows, header=None: sent["list"].append([r["id"] for r in rows]))
     monkeypatch.setattr(book_bot, "_send_buttons",
@@ -69,6 +69,8 @@ def fake(monkeypatch):
                         lambda phone, msg: sent["text"].append(msg))
     monkeypatch.setattr(book_bot, "_send_qr",
                         lambda phone, order: (sent["qr"].append(order["order_code"]) or True))
+    monkeypatch.setattr(book_bot, "_forward_to_verifier",
+                        lambda order, content, mime: sent["forward"].append(order["order_code"]))
     return db, sent
 
 
@@ -142,8 +144,10 @@ def test_all_three_one_tap_then_count_each(fake):
 
     book_bot.handle_payment_proof(PHONE, b"x", "image/jpeg")
     assert db.orders[code]["status"] == "payment_review"
+    assert sent["forward"] == [code]                       # screenshot forwarded to verifier
     res = book_bot.confirm_book_order(code)
     assert res["ok"] and db.orders[code]["status"] == "confirmed"
+    assert db.sessions[PHONE]["step"] == "post_order"       # follow-up armed
 
 
 # ── multi-select pair in one tap ──────────────────────────────────────────────
@@ -354,3 +358,77 @@ def test_no_abandoned_carts_no_messages(fake, monkeypatch):
     res = book_bot.send_abandoned_reminders()
     assert res == {"carts": 0, "reminded": 0}
     assert sent["text"] == []
+
+
+# ── verifier (Anu) confirm / reject ───────────────────────────────────────────
+
+VERIFIER = "919072034907"
+
+
+@pytest.mark.integration
+def test_verifier_confirm(fake):
+    db, sent = fake
+    db.create_book_order("XTR-V1", "919888888888", "Cust")
+    db.update_book_order("XTR-V1", status="payment_review", items={"malayalam": 1})
+    handled = book_bot.handle_verifier_reply(VERIFIER, "vconf_XTR-V1")
+    assert handled is True
+    assert db.orders["XTR-V1"]["status"] == "confirmed"
+    assert db.sessions["919888888888"]["step"] == "post_order"     # customer follow-up armed
+    assert any("confirmed" in m.lower() for m in sent["text"])
+
+
+@pytest.mark.integration
+def test_verifier_reject_asks_resend(fake):
+    db, sent = fake
+    db.create_book_order("XTR-V2", "919888888888", "Cust")
+    db.update_book_order("XTR-V2", status="payment_review")
+    handled = book_bot.handle_verifier_reply(VERIFIER, "vrej_XTR-V2")
+    assert handled is True
+    assert db.orders["XTR-V2"]["status"] == "awaiting_payment"     # reopened
+    assert db.sessions["919888888888"]["step"] == "book_pay"       # can resend screenshot
+    assert any("resend" in m.lower() for m in sent["text"])
+
+
+@pytest.mark.unit
+def test_verifier_typed_confirm(fake):
+    db, sent = fake
+    db.create_book_order("XTR-V3", "919888888888")
+    db.update_book_order("XTR-V3", status="payment_review", items={"hindi": 1})
+    assert book_bot.handle_verifier_reply(VERIFIER, "confirm XTR-V3") is True
+    assert db.orders["XTR-V3"]["status"] == "confirmed"
+
+
+@pytest.mark.unit
+def test_non_verifier_not_handled(fake):
+    db, _ = fake
+    assert book_bot.handle_verifier_reply("919999999999", "vconf_XTR-X") is False
+
+
+@pytest.mark.unit
+def test_verifier_non_command_falls_through(fake):
+    db, _ = fake
+    assert book_bot.handle_verifier_reply(VERIFIER, "hello there") is False
+
+
+# ── post-order follow-up ──────────────────────────────────────────────────────
+
+@pytest.mark.integration
+def test_post_order_yes_shows_menu(fake):
+    db, sent = fake
+    db.sessions[PHONE] = {"step": "post_order"}
+    book_bot.maybe_handle_book(PHONE, "thanks!")              # any message → ask
+    assert db.sessions[PHONE]["step"] == "post_order_ask"
+    assert sent["buttons"][-1] == ["po_yes", "po_no"]
+    book_bot.maybe_handle_book(PHONE, "po_yes")
+    assert PHONE not in db.sessions                          # cleared → start from top
+    assert any("How can we help" in m for m in sent["text"])
+
+
+@pytest.mark.integration
+def test_post_order_no_thanks_and_stops(fake):
+    db, sent = fake
+    db.sessions[PHONE] = {"step": "post_order"}
+    book_bot.maybe_handle_book(PHONE, "ok")
+    book_bot.maybe_handle_book(PHONE, "po_no")
+    assert PHONE not in db.sessions
+    assert any("thank you" in m.lower() for m in sent["text"])
