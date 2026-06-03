@@ -231,6 +231,71 @@ def test_edit_books_returns_to_summary(fake):
     assert db.orders[code]["address"] == ADDR            # address preserved
 
 
+# ── address must include a PIN code ───────────────────────────────────────────
+
+@pytest.mark.unit
+def test_address_without_pincode_rejected(fake):
+    db, sent = fake
+    book_bot.maybe_handle_book(PHONE, "book")
+    book_bot.maybe_handle_book(PHONE, "bk_ml")
+    book_bot.maybe_handle_book(PHONE, "qty_1")
+    assert db.sessions[PHONE]["step"] == "book_address"
+    book_bot.maybe_handle_book(PHONE, "My house, MG Road, Thrissur")   # no PIN
+    assert db.sessions[PHONE]["step"] == "book_address"                # stayed
+    assert any("PIN" in m for m in sent["text"])
+    book_bot.maybe_handle_book(PHONE, "My house, MG Road, Thrissur 680001")  # with PIN
+    assert db.sessions[PHONE]["step"] == "book_phone"                 # advanced
+
+
+@pytest.mark.unit
+def test_edit_address_requires_pincode(fake):
+    db, sent = fake
+    _drive_to_summary(db)
+    book_bot.maybe_handle_book(PHONE, "ord_edit")
+    book_bot.maybe_handle_book(PHONE, "ed_addr")
+    book_bot.maybe_handle_book(PHONE, "New place, Ollur")             # no PIN
+    assert db.sessions[PHONE]["step"] == "book_edit_address"          # stayed
+    book_bot.maybe_handle_book(PHONE, "New place, Ollur 680306")      # with PIN
+    assert db.sessions[PHONE]["step"] == "book_summary"
+
+
+# ── cancel / edit at the payment stage ────────────────────────────────────────
+
+def _drive_to_pay(db):
+    _drive_to_summary(db)
+    book_bot.maybe_handle_book(PHONE, "ord_yes")
+    assert db.sessions[PHONE]["step"] == "book_pay"
+
+
+@pytest.mark.integration
+def test_pay_stage_offers_edit_cancel(fake):
+    db, sent = fake
+    _drive_to_pay(db)
+    assert sent["buttons"][-1] == ["pay_edit", "pay_cancel"]
+
+
+@pytest.mark.integration
+def test_pay_stage_cancel(fake):
+    db, sent = fake
+    _drive_to_pay(db)
+    code = _code(db)
+    book_bot.maybe_handle_book(PHONE, "pay_cancel")
+    assert db.orders[code]["status"] == "cancelled"
+    assert PHONE not in db.sessions                                  # session cleared
+    assert any("cancelled" in m.lower() for m in sent["text"])
+
+
+@pytest.mark.integration
+def test_pay_stage_edit_reopens_order(fake):
+    db, sent = fake
+    _drive_to_pay(db)
+    code = _code(db)
+    book_bot.maybe_handle_book(PHONE, "pay_edit")
+    assert db.sessions[PHONE]["step"] == "book_edit"
+    assert db.orders[code]["status"] == "collecting"                 # reopened
+    assert sent["buttons"][-1] == ["ed_books", "ed_addr", "ed_phone"]
+
+
 # ── cancel / re-prompt / misc ─────────────────────────────────────────────────
 
 @pytest.mark.unit

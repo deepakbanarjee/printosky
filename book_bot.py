@@ -129,6 +129,11 @@ def _extract_phone(text: str) -> str | None:
     return None
 
 
+def _has_pincode(text: str) -> bool:
+    """True if the text contains an isolated 6-digit Indian PIN code."""
+    return bool(re.search(r"(?<!\d)[1-9]\d{5}(?!\d)", text or ""))
+
+
 def _parse_choice(text: str) -> list[str] | None:
     """A selection (button id or typed) → ordered list of book keys, or None."""
     t = (text or "").strip().lower()
@@ -223,6 +228,15 @@ def _send_summary(phone: str, order: dict) -> None:
 def _send_edit_menu(phone: str) -> None:
     _send_buttons(phone, "What would you like to edit?",
                   [("ed_books", "📚 Books & qty"), ("ed_addr", "📍 Address"), ("ed_phone", "📞 Phone")])
+
+
+def _send_pay_buttons(phone: str) -> None:
+    _send_buttons(
+        phone,
+        "After paying, *send a screenshot* here.\n\nNeed to change something "
+        "before paying?",
+        [("pay_edit", "✏️ Edit order"), ("pay_cancel", "❌ Cancel order")],
+    )
 
 
 def _payment_caption(order: dict) -> str:
@@ -360,6 +374,10 @@ def _handle_address(phone: str, text: str, order: dict) -> list[str]:
         _send_text(phone, "That address looks too short. Please type your *full "
                           "delivery address* including place and PIN code. 📍")
         return []
+    if not _has_pincode(address):
+        _send_text(phone, "Please include your *6-digit PIN code* in the address "
+                          "(we can't ship without it). 📍")
+        return []
     _dbc.update_book_order(order["order_code"], address=address)
     _dbc.save_session(DB, phone, step="book_phone")
     _send_phone_buttons(phone)
@@ -411,6 +429,7 @@ def _handle_summary(phone: str, text: str, order: dict) -> list[str]:
             totals = bc.compute_totals(refreshed.get("items") or {})
             _send_text(phone, f"Please pay *₹{totals['grand_total']:.0f}* to our UPI "
                               "and send a screenshot here. (Reply *QR* to retry the image.)")
+        _send_pay_buttons(phone)
         return []
     _send_summary(phone, order)
     return []
@@ -442,6 +461,10 @@ def _handle_edit_address(phone: str, text: str, order: dict) -> list[str]:
         _send_text(phone, "That address looks too short. Please type your *full "
                           "delivery address* including place and PIN code. 📍")
         return []
+    if not _has_pincode(address):
+        _send_text(phone, "Please include your *6-digit PIN code* in the address "
+                          "(we can't ship without it). 📍")
+        return []
     _dbc.update_book_order(order["order_code"], address=address)
     _dbc.save_session(DB, phone, step="book_summary")
     _send_summary(phone, _dbc.get_book_order(order["order_code"]))
@@ -464,11 +487,30 @@ def _handle_edit_phone(phone: str, text: str, order: dict) -> list[str]:
 
 
 def _handle_pay(phone: str, text: str, order: dict) -> list[str]:
-    if (text or "").strip().lower() == "qr":
+    code = order["order_code"]
+    t = (text or "").strip().lower()
+    if t == "qr":
         _send_qr(phone, order)
+        _send_pay_buttons(phone)
+        return []
+    if t == "pay_edit" or t == "ord_edit" or "edit" in t:
+        # Re-open the order for editing before payment.
+        _dbc.update_book_order(code, status="collecting")
+        _dbc.save_session(DB, phone, step="book_edit")
+        _send_edit_menu(phone)
+        return []
+    if t == "pay_cancel" or "cancel" in t or t in _NEGATE:
+        _dbc.update_book_order(code, status="cancelled")
+        try:
+            _dbc.clear_session(DB, phone)
+        except Exception:
+            pass
+        _send_text(phone, "❌ Your order has been *cancelled*. Reply *books* "
+                          "anytime to start a new order. 🙏")
         return []
     _send_text(phone, "Please complete the UPI payment and *send a screenshot* of "
-                      "the confirmation here. 🙏\n\nReply *QR* if you need the QR again.")
+                      "the confirmation here. 🙏")
+    _send_pay_buttons(phone)
     return []
 
 
