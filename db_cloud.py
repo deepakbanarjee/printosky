@@ -1033,6 +1033,31 @@ def mark_divya_settled(order_code: str, settled: bool = True) -> None:
         logger.error("mark_divya_settled error for %s: %s", order_code, exc)
 
 
+def log_llm_cost(engine: str, model: str, input_tokens: int, output_tokens: int,
+                 cost_usd: float, cost_inr: float, elapsed_ms: int | None = None,
+                 error: str | None = None) -> None:
+    """Record one Claude API call's cost into pb_api_calls telemetry. Best-effort.
+
+    Reuses the existing pb_api_calls table so spend is queryable, e.g.:
+        select count(*), sum(cost_inr) from pb_api_calls where engine = 'anu_parser';
+    """
+    import uuid
+    try:
+        _client().table("pb_api_calls").insert({
+            "job_token":     str(uuid.uuid4()),
+            "engine":        engine,
+            "model":         model,
+            "input_tokens":  int(input_tokens or 0),
+            "output_tokens": int(output_tokens or 0),
+            "cost_usd":      round(float(cost_usd or 0), 6),
+            "cost_inr":      round(float(cost_inr or 0), 4),
+            "elapsed_ms":    elapsed_ms,
+            "error":         error,
+        }).execute()
+    except Exception as exc:
+        logger.warning("log_llm_cost failed (best-effort): %s", exc)
+
+
 def find_abandoned_book_carts(idle_hours: int = 2, window_hours: int = 24,
                               limit: int = 100) -> list:
     """Return open book carts that have gone quiet but are still messageable.

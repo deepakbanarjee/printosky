@@ -29,6 +29,7 @@ import re
 
 import book_catalog as bc
 import db_cloud as _dbc
+import anu_parser
 
 logger = logging.getLogger(__name__)
 
@@ -756,27 +757,200 @@ def _cancel_divya_order(code: str) -> None:
     _send_text(VERIFIER_PHONE, f"🗑️ Cancelled *{code}* — it won't be printed or couriered.")
 
 
-def handle_verifier_reply(sender: str, text: str) -> bool:
-    """Handle the verifier (Anu) tapping Confirm/Reject on a payment.
+def _new_order_code() -> str:
+    from datetime import datetime
+    return f"XTR-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
 
-    Returns True if the message was a verification action (and was handled),
-    False otherwise (so a non-verification message falls through to normal flow).
+
+def _divya_summary(code, name, phone, items, courier, grand, commission,
+                   payment_collected_by, delivery_method) -> str:
+    pay_label = {"divya": "Divya collected", "oxygen": "Oxygen collected",
+                 "pending": "Pending (we collect)"}.get(payment_collected_by, payment_collected_by)
+    deliv_label = "Xtraa office" if delivery_method == "xtraa_office" else "Courier"
+    books_total = grand - courier
+    return (
+        f"✅ *Order saved & queued:* {code}\n"
+        f"{name} · +{phone}\n"
+        f"{_cart_line(items)}\n"
+        f"Books ₹{books_total:.0f}"
+        + (f" + Courier ₹{courier:.0f}" if courier else "")
+        + f" = *₹{grand:.0f}*\n"
+        f"Delivery: {deliv_label}\n"
+        f"Payment: {pay_label}\n"
+        f"Divya commission: ₹{commission:.0f}\n\n"
+        "Printing now — no need to wait for payment. If anything's wrong, tap Cancel."
+    )
+
+
+def _create_divya_confirmed(code, name, phone, address, items,
+                            payment_collected_by="pending", delivery_method="courier") -> None:
+    """Create a confirmed Divya order from a clear, complete parse, and ping Anu."""
+    totals  = bc.compute_totals(items)
+    courier = 0.0 if delivery_method == "xtraa_office" else totals["courier"]
+    grand   = totals["books_total"] + courier
+    commission = bc.commission_for(items)
+    row = _dbc.create_walk_in_order(
+        code, name, phone, address, items, totals["books_total"], courier, grand,
+        payment_mode="", status="confirmed", commission=commission,
+        payment_collected_by=payment_collected_by, delivery_method=delivery_method,
+        via_divya=True, source="divya",
+    )
+    if not row:
+        _send_text(VERIFIER_PHONE, "⚠️ Something went wrong saving the order — please try again.")
+        return
+    _send_buttons(
+        VERIFIER_PHONE,
+        _divya_summary(code, name, phone, items, courier, grand, commission,
+                       payment_collected_by, delivery_method),
+        [(f"acanc_{code}", "❌ Cancel order")],
+    )
+
+
+# Buttons offered when asking Anu which book a forwarded order is for.
+_BOOK_BUTTONS = [("abook_malayalam", "📕 Aksharamrutham"),
+                 ("abook_hindi",     "📗 Vidyamrut"),
+                 ("abook_english",   "📘 Easy English")]
+
+
+def _parse_book_choice(text: str, copies: int) -> dict:
+    """Parse Anu's 'which book' reply into an items dict. Returns {} if unclear."""
+    t = (text or "").strip().lower()
+    bm = re.match(r"^abook_(malayalam|hindi|english)$", t)
+    if bm:
+        return {bm.group(1): copies}
+    keys = bc.parse_selection(t)
+    if not keys:
+        alias = {"aksharamrutham": "malayalam", "akshara": "malayalam",
+                 "vidyamrut": "hindi", "vidya": "hindi",
+                 "easy english": "english", "english": "english",
+                 "malayalam": "malayalam", "hindi": "hindi"}
+        keys = list(dict.fromkeys(v for k, v in alias.items() if k in t)) or None
+    if not keys:
+        return {}
+    return {k: copies for k in keys}
+
+
+def _handle_anu_order_freeform(text: str) -> None:
+    """Auto-detect + LLM-parse a free-form teacher forward, then create or clarify."""
+    # Cheap gate: skip the LLM on obvious non-orders (short chit-chat).
+    if len(text.strip()) < 15 or (len(re.findall(r"\d", text)) < 8 and text.count("\n") < 2):
+        return
+    parsed = anu_parser.parse_order_message(text)
+    if not parsed.get("is_order"):
+        return
+    name    = (parsed.get("name") or "").strip()
+    phone   = re.sub(r"\D", "", parsed.get("phone") or "")
+    address = ", ".join(p for p in [(parsed.get("address") or "").strip(),
+                                    (parsed.get("pincode") or "").strip()] if p)
+    copies  = int(parsed.get("copies") or 1) or 1
+    if not name or len(phone) < 10:
+        _send_text(VERIFIER_PHONE,
+                   "📕 I read an order but couldn't get a clear name + 10-digit phone — "
+                   "please resend it.")
+        return
+    books_list = [b for b in (parsed.get("books") or []) if b.get("title")]
+    code = _new_order_code()
+
+    if parsed.get("needs_clarification") or not books_list:
+        # Park the order (no book yet) and ask Anu which book.
+        courier = float(bc.COURIER)
+        _dbc.create_walk_in_order(
+            code, name, phone, address, {}, 0.0, courier, courier,
+            payment_mode="", status="awaiting_clarification", commission=0.0,
+            payment_collected_by="pending", delivery_method="courier",
+            via_divya=True, source="divya",
+        )
+        _dbc.save_session(DB, VERIFIER_PHONE, step="anu_clarify_book", job_id=code, copies=copies)
+        q = (parsed.get("clarification") or f"Which book for {name}?").strip()
+        _send_buttons(
+            VERIFIER_PHONE,
+            f"📕 Order for *{name}* · {copies} copy(s)\n{address}\n\n{q}\n"
+            "_Tap the book — or for more than one reply like_ `1 3`.",
+            _BOOK_BUTTONS,
+        )
+        return
+
+    # Book is clear → create immediately.
+    items: dict[str, int] = {}
+    for b in books_list:
+        items[b["title"]] = items.get(b["title"], 0) + int(b.get("qty") or copies or 1)
+    _create_divya_confirmed(code, name, phone, address, items)
+
+
+def _handle_anu_clarification(text: str, code: str) -> None:
+    """Anu answered 'which book?' for a parked order — fill it in and confirm."""
+    order = _dbc.get_book_order(code)
+    if not order or order.get("status") != "awaiting_clarification":
+        # Stale pointer — reset and treat the message as a fresh forward.
+        _dbc.save_session(DB, VERIFIER_PHONE, step="", job_id="")
+        _handle_anu_order_freeform(text)
+        return
+    sess   = _dbc.get_session(DB, VERIFIER_PHONE) or {}
+    copies = int(sess.get("copies") or 1) or 1
+    items  = _parse_book_choice(text, copies)
+    if not items:
+        _send_buttons(
+            VERIFIER_PHONE,
+            "Sorry, I didn't catch the book. Tap one — or reply like `1 3` for more than one:",
+            _BOOK_BUTTONS,
+        )
+        return
+    deliv      = order.get("delivery_method") or "courier"
+    totals     = bc.compute_totals(items)
+    courier    = 0.0 if deliv == "xtraa_office" else totals["courier"]
+    grand      = totals["books_total"] + courier
+    commission = bc.commission_for(items)
+    _dbc.update_book_order(
+        code, items=items, books_total=totals["books_total"], courier=courier,
+        grand_total=grand, commission=commission, status="confirmed",
+    )
+    _dbc.save_session(DB, VERIFIER_PHONE, step="", job_id="")
+    name  = order.get("name") or ""
+    phone = order.get("contact_phone") or order.get("phone") or ""
+    _send_buttons(
+        VERIFIER_PHONE,
+        _divya_summary(code, name, phone, items, courier, grand, commission,
+                       order.get("payment_collected_by") or "pending", deliv),
+        [(f"acanc_{code}", "❌ Cancel order")],
+    )
+
+
+def _handle_payment_verdict(action: str, code: str) -> None:
+    """Apply Anu's Confirm/Reject on a customer payment screenshot."""
+    if action == "vconf":
+        res = confirm_book_order(code)
+        if res.get("ok"):
+            _send_text(VERIFIER_PHONE, f"✅ Confirmed *{code}* — customer notified. Thanks Anu! 🙏")
+        else:
+            _send_text(VERIFIER_PHONE, f"⚠️ Couldn't find order *{code}*.")
+        return
+    order = _dbc.get_book_order(code)
+    if not order:
+        _send_text(VERIFIER_PHONE, f"⚠️ Couldn't find order *{code}*.")
+        return
+    _dbc.update_book_order(code, status="awaiting_payment")
+    cust = order.get("phone")
+    if cust:
+        _dbc.save_session(DB, cust, step="book_pay", needs_human=False)
+        _send_text(cust, f"⚠️ We couldn't verify your payment for *{code}*. "
+                         "Please *resend a clear screenshot* of the payment, "
+                         "or contact us if you've already paid. 🙏")
+    _send_text(VERIFIER_PHONE, f"❌ Rejected *{code}* — customer asked to resend.")
+
+
+def handle_verifier_reply(sender: str, text: str) -> bool:
+    """Route a message from Anu (payment verifier + Divya order forwarder).
+
+    Precedence: payment Confirm/Reject, order Cancel, a pending 'which book?'
+    clarification, the rigid ORDER template, then a free-form teacher forward
+    (auto-detected + LLM-parsed). Every message from Anu's number is consumed
+    here (returns True) so it never falls into the customer flow.
     """
     if re.sub(r"\D", "", sender or "") != re.sub(r"\D", "", VERIFIER_PHONE):
         return False
     t = (text or "").strip()
 
-    # Anu also forwards new Divya orders (ORDER template) and may cancel a
-    # just-created one. Handle those before payment verification.
-    parsed = bc.parse_anu_order(t)
-    if parsed is not None:
-        _handle_anu_order(parsed)
-        return True
-    cm = re.match(r"^acanc_(\S+)$", t) or re.match(r"(?i)^cancel\s+(XTR-\S+)", t)
-    if cm:
-        _cancel_divya_order(cm.group(1).upper())
-        return True
-
+    # 1. Payment verification (buttons or "confirm/reject XTR-...").
     action = code = None
     m = re.match(r"^(vconf|vrej)_(\S+)$", t)
     if m:
@@ -786,31 +960,30 @@ def handle_verifier_reply(sender: str, text: str) -> bool:
         if m:
             action = "vconf" if m.group(1).lower() in ("confirm", "approve") else "vrej"
             code = m.group(2).upper()
-    if not action or not code:
-        return False
-
-    if action == "vconf":
-        res = confirm_book_order(code)
-        if res.get("ok"):
-            _send_text(VERIFIER_PHONE, f"✅ Confirmed *{code}* — customer notified. "
-                                       "Thanks Anu! 🙏")
-        else:
-            _send_text(VERIFIER_PHONE, f"⚠️ Couldn't find order *{code}*.")
+    if action and code:
+        _handle_payment_verdict(action, code)
         return True
 
-    # Reject → ask the customer to resend, keep the order open.
-    order = _dbc.get_book_order(code)
-    if not order:
-        _send_text(VERIFIER_PHONE, f"⚠️ Couldn't find order *{code}*.")
+    # 2. Cancel a just-created Divya order.
+    cm = re.match(r"^acanc_(\S+)$", t) or re.match(r"(?i)^cancel\s+(XTR-\S+)", t)
+    if cm:
+        _cancel_divya_order(cm.group(1).upper())
         return True
-    _dbc.update_book_order(code, status="awaiting_payment")
-    cust = order.get("phone")
-    if cust:
-        _dbc.save_session(DB, cust, step="book_pay", needs_human=False)
-        _send_text(cust, f"⚠️ We couldn't verify your payment for *{code}*. "
-                         "Please *resend a clear screenshot* of the payment, "
-                         "or contact us if you've already paid. 🙏")
-    _send_text(VERIFIER_PHONE, f"❌ Rejected *{code}* — customer asked to resend.")
+
+    # 3. Pending 'which book?' clarification for a parked order.
+    sess = _dbc.get_session(DB, VERIFIER_PHONE) or {}
+    if sess.get("step") == "anu_clarify_book" and sess.get("job_id"):
+        _handle_anu_clarification(t, sess["job_id"])
+        return True
+
+    # 4. Rigid ORDER template (backward-compatible).
+    parsed = bc.parse_anu_order(t)
+    if parsed is not None:
+        _handle_anu_order(parsed)
+        return True
+
+    # 5. Free-form teacher forward → LLM parse + create / clarify.
+    _handle_anu_order_freeform(t)
     return True
 
 

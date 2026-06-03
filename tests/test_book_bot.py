@@ -405,9 +405,26 @@ def test_non_verifier_not_handled(fake):
 
 
 @pytest.mark.unit
-def test_verifier_non_command_falls_through(fake):
-    db, _ = fake
-    assert book_bot.handle_verifier_reply(VERIFIER, "hello there") is False
+def test_verifier_chitchat_consumed_silently(fake):
+    # Anu's number is now multi-purpose (verifier + Divya order forwarder), so her
+    # messages are ALWAYS consumed (never fall through to the customer flow).
+    # Short chit-chat trips the cheap pre-gate: consumed, but nothing is created.
+    db, sent = fake
+    assert book_bot.handle_verifier_reply(VERIFIER, "hello there") is True
+    assert sent["text"] == [] and sent["buttons"] == []
+
+
+@pytest.mark.unit
+def test_parse_book_choice():
+    pbc = book_bot._parse_book_choice
+    assert pbc("abook_malayalam", 1) == {"malayalam": 1}     # button tap
+    assert pbc("abook_hindi", 2) == {"hindi": 2}             # carries copy count
+    assert pbc("1", 2) == {"malayalam": 2}                   # number → Aksharamrutham
+    assert pbc("2", 1) == {"hindi": 1}
+    assert pbc("3", 1) == {"english": 1}
+    assert pbc("1 3", 1) == {"malayalam": 1, "english": 1}   # multiple
+    assert pbc("vidyamrut", 1) == {"hindi": 1}               # name alias
+    assert pbc("blah blah", 1) == {}                         # unclear → empty
 
 
 # ── post-order follow-up ──────────────────────────────────────────────────────
