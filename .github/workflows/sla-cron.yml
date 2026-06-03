@@ -1,0 +1,27 @@
+name: SLA watchdog (ping owner on >1h unanswered)
+
+# Vercel Hobby plan only allows once-per-day crons, so the 30-minute SLA check
+# is driven from GitHub Actions instead. It simply hits the public endpoint
+# /cron/sla-check, which scans conversation_log and messages the owner phone
+# if any customer has been waiting > 1 hour without a reply.
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # every 30 minutes (UTC)
+  workflow_dispatch: {}        # allow manual run from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit SLA check endpoint
+        run: |
+          echo "Calling SLA watchdog..."
+          code=$(curl -s -o /tmp/out.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://printosky.vercel.app/cron/sla-check")
+          echo "HTTP $code"
+          cat /tmp/out.json || true
+          # Don't fail the workflow on a non-200 (endpoint is best-effort).
+          exit 0
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
