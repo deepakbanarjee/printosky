@@ -1337,7 +1337,7 @@
 
   <!-- Walk-in / in-store book order modal -->
   <div id="walkin-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
-    <div style="background:#fff;border-radius:12px;padding:20px;max-width:430px;width:92%;max-height:92vh;overflow:auto">
+    <div style="background:#fff;color:#1a2330;border-radius:12px;padding:20px;max-width:430px;width:92%;max-height:92vh;overflow:auto">
       <div style="font-weight:600;font-size:16px;margin-bottom:12px">➕ New book order (walk-in / in-store)</div>
       <div style="display:grid;gap:10px;font-size:.9rem">
         <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Aksharamrutham <span style="color:#888">ML · ₹200</span>
@@ -1374,10 +1374,21 @@
 
   <!-- Divya teacher settlement statement (admin-only) -->
   <div id="divya-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
-    <div style="background:#fff;border-radius:12px;padding:20px;max-width:560px;width:94%;max-height:90vh;overflow:auto">
+    <div style="background:#fff;color:#1a2330;border-radius:12px;padding:20px;max-width:560px;width:94%;max-height:90vh;overflow:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px">
         <div style="font-weight:600;font-size:16px">📊 Divya teacher — settlement</div>
         <button id="divya-copy-btn" class="ctrl-btn" onclick="copyDivyaStatement()">📋 Copy for WhatsApp</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
+        <select id="divya-period" onchange="loadDivyaLedger()" style="padding:5px 8px;border:1px solid #ccc;border-radius:6px;color:#1a2330">
+          <option value="today">Today</option>
+          <option value="week">This week</option>
+          <option value="month">This month</option>
+          <option value="all" selected>All time</option>
+        </select>
+        <button class="ctrl-btn" onclick="loadDivyaLedger()">↻ View</button>
+        <button class="ctrl-btn" onclick="exportDivyaCSV()">⬇ CSV</button>
+        <button class="ctrl-btn" onclick="exportDivyaPDF()">🖨 PDF</button>
       </div>
       <div id="divya-body"></div>
       <div style="display:flex;justify-content:flex-end;margin-top:14px">
@@ -1388,7 +1399,7 @@
 
   <!-- Edit book order (admin-only) -->
   <div id="edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
-    <div style="background:#fff;border-radius:12px;padding:20px;max-width:430px;width:92%;max-height:92vh;overflow:auto">
+    <div style="background:#fff;color:#1a2330;border-radius:12px;padding:20px;max-width:430px;width:92%;max-height:92vh;overflow:auto">
       <div id="edit-title" style="font-weight:600;font-size:16px;margin-bottom:12px">✏️ Edit order</div>
       <input type="hidden" id="edit-code">
       <div style="display:grid;gap:10px;font-size:.9rem">
@@ -4356,27 +4367,51 @@ async function openDivyaStatement() {
     const pw = await _adminPwPrompt(false);
     if (pw) sessionStorage.setItem('admin_pw_cache', pw); else return;
   }
-  const modal = document.getElementById('divya-modal');
+  document.getElementById('divya-modal').style.display = 'flex';
+  loadDivyaLedger();
+}
+
+function _divyaRange() {
+  const p = document.getElementById('divya-period')?.value || 'all';
+  const now = new Date();
+  let from = null;
+  if (p === 'today') {
+    from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  } else if (p === 'week') {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));   // back to Monday
+    from = d;
+  } else if (p === 'month') {
+    from = new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  const labels = { today: 'Today', week: 'This week', month: 'This month', all: 'All time' };
+  return { from: from ? from.toISOString() : null, label: labels[p] || 'All time' };
+}
+
+async function loadDivyaLedger() {
   const body = document.getElementById('divya-body');
-  modal.style.display = 'flex';
-  body.innerHTML = '<div style="color:#999">Loading…</div>';
+  if (body) body.innerHTML = '<div style="color:#888">Loading…</div>';
+  const range = _divyaRange();
+  const qs = range.from ? `?from=${encodeURIComponent(range.from)}` : '';
   try {
-    const r = await fetch(`${ACAD_API}/admin/book-orders/divya-ledger`, {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/divya-ledger${qs}`, {
       headers: { 'X-Admin-Password': _convPw() }
     });
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
-      body.innerHTML = `<div style="color:#dc2626">Error ${r.status} — ${e.error || 'failed to load'}</div>`;
+      if (body) body.innerHTML = `<div style="color:#b91c1c">Error ${r.status} — ${e.error || 'failed to load'}</div>`;
       return;
     }
     const d = await r.json();
+    d._label = range.label;
     window._divyaLedger = d;
     renderDivyaStatement(d);
-  } catch (e) { body.innerHTML = `<div style="color:#dc2626">Network error: ${e.message}</div>`; }
+  } catch (e) { if (body) body.innerHTML = `<div style="color:#b91c1c">Network error: ${e.message}</div>`; }
 }
 
 function _divyaStatementText(d) {
   const lines = ['📊 DIVYA TEACHER — SETTLEMENT',
+    `Period: ${d._label || 'All time'}`,
     `Books sold via Divya: ${d.total_books}   →  Commission: ₹${d.total_commission}`, '',
     `Oxygen owes Divya (we collected):  ₹${d.oxygen_owes_divya}`,
     `Divya owes Oxygen (she collected): ₹${d.divya_owes_oxygen}`,
@@ -4416,6 +4451,7 @@ function renderDivyaStatement(d) {
   }).join('');
   body.innerHTML = `
     <div style="display:grid;gap:4px;font-size:.9rem;margin-bottom:10px">
+      <div style="font-size:.78rem;color:#666">Period: <strong>${d._label || 'All time'}</strong> · ${d.total_orders} order(s)</div>
       <div>Books sold via Divya: <strong>${d.total_books}</strong> · Commission accrued: <strong>₹${d.total_commission}</strong></div>
       <div>Oxygen owes Divya: <strong>₹${d.oxygen_owes_divya}</strong> · Divya owes Oxygen: <strong>₹${d.divya_owes_oxygen}</strong></div>
       <div style="font-size:1rem;margin-top:4px;padding:6px 10px;background:#fef3c7;border-radius:6px">NET: ${netLabel}</div>
@@ -4450,6 +4486,73 @@ function copyDivyaStatement() {
     () => { const b = document.getElementById('divya-copy-btn'); if (b) { b.textContent = '✓ Copied'; setTimeout(() => b.textContent = '📋 Copy for WhatsApp', 1500); } },
     () => alert('Copy failed — select & copy manually:\n\n' + txt)
   );
+}
+
+function _divyaOwesLabel(o) {
+  return o.direction === 'divya_owes_oxygen' ? 'Divya owes Oxygen' : 'Oxygen owes Divya';
+}
+
+function exportDivyaCSV() {
+  const d = window._divyaLedger;
+  if (!d) { alert('Load the statement first.'); return; }
+  const rows = [['Order', 'Date', 'Customer', 'Books', 'Grand total', 'Commission', 'Collected by', 'Direction', 'Amount', 'Settled']];
+  (d.orders || []).forEach(o => rows.push([
+    o.order_code, (o.created_at || '').slice(0, 10), o.name || '', o.books,
+    o.grand_total, o.commission, o.collected_by, _divyaOwesLabel(o), o.amount, o.settled ? 'yes' : 'no'
+  ]));
+  rows.push([]);
+  rows.push(['Period', d._label || 'All time']);
+  rows.push(['Total orders', d.total_orders]);
+  rows.push(['Total books', d.total_books]);
+  rows.push(['Total commission', d.total_commission]);
+  rows.push(['Oxygen owes Divya (unsettled)', d.oxygen_owes_divya]);
+  rows.push(['Divya owes Oxygen (unsettled)', d.divya_owes_oxygen]);
+  rows.push(['NET (positive = Divya pays Oxygen)', d.net]);
+  const csv = rows.map(r => r.map(c => {
+    const s = String(c == null ? '' : c);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `divya-settlement-${(d._label || 'all').toLowerCase().replace(/\s+/g, '-')}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+function exportDivyaPDF() {
+  const d = window._divyaLedger;
+  if (!d) { alert('Load the statement first.'); return; }
+  const net = d.net;
+  const netLabel = net > 0 ? `Divya pays Oxygen ₹${net}`
+    : net < 0 ? `Oxygen pays Divya ₹${Math.abs(net)}`
+    : 'Settled — nothing due';
+  const rows = (d.orders || []).map(o => {
+    const owe = o.direction === 'divya_owes_oxygen' ? `she owes ₹${o.amount}` : `we owe ₹${o.amount}`;
+    return `<tr><td>${o.order_code}</td><td>${(o.created_at || '').slice(0, 10)}</td><td>${(o.name || '').replace(/</g, '&lt;')}</td>
+      <td style="text-align:center">${o.books}</td><td style="text-align:right">₹${o.grand_total}</td>
+      <td style="text-align:right">₹${o.commission}</td><td>${o.collected_by}</td><td>${owe}</td>
+      <td style="text-align:center">${o.settled ? '✓' : ''}</td></tr>`;
+  }).join('');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Divya settlement — ${d._label || 'All time'}</title>
+    <style>body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:24px}h1{font-size:18px;margin:0 0 4px}
+    .sum{margin:6px 0;font-size:13px}.net{font-size:15px;font-weight:bold;background:#fef3c7;padding:8px 12px;display:inline-block;border-radius:6px;margin:6px 0}
+    table{width:100%;border-collapse:collapse;font-size:11px;margin-top:10px}th,td{border:1px solid #ccc;padding:4px 6px;text-align:left}
+    th{background:#f3f4f6}.foot{margin-top:14px;font-size:11px;color:#666}</style></head>
+    <body>
+      <h1>📊 Divya teacher — settlement</h1>
+      <div class="sum">Period: <b>${d._label || 'All time'}</b> · ${d.total_orders} order(s)</div>
+      <div class="sum">Books sold: <b>${d.total_books}</b> · Commission accrued: <b>₹${d.total_commission}</b></div>
+      <div class="sum">Oxygen owes Divya: <b>₹${d.oxygen_owes_divya}</b> · Divya owes Oxygen: <b>₹${d.divya_owes_oxygen}</b></div>
+      <div class="net">NET: ${netLabel}</div>
+      <table><thead><tr><th>Order</th><th>Date</th><th>Customer</th><th>Bk</th><th>Total</th><th>Comm.</th><th>Collected</th><th>Owed</th><th>Settled</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="9" style="text-align:center">No orders in this period.</td></tr>'}</tbody></table>
+      <div class="foot">Oxygen Students Paradise · printosky.com · generated ${new Date().toLocaleString()}</div>
+      <scr` + `ipt>window.onload=function(){setTimeout(function(){window.print();},150);}</scr` + `ipt>
+    </body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) { alert('Allow pop-ups for this site to export the PDF.'); return; }
+  w.document.write(html); w.document.close();
 }
 
 function closeDivyaStatement() { document.getElementById('divya-modal').style.display = 'none'; }

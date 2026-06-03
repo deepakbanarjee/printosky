@@ -2188,13 +2188,21 @@ def _handle_admin_book_order_create(h, body) -> None:
 
 
 def _handle_admin_divya_ledger(h) -> None:
-    """GET /admin/book-orders/divya-ledger — Divya teacher settlement statement."""
+    """GET /admin/book-orders/divya-ledger[?from=ISO&to=ISO] — Divya settlement.
+
+    Optional `from`/`to` (ISO-8601) restrict the period for daily/weekly/monthly
+    summaries and CSV/PDF export.
+    """
     if not _auth_admin_pw(_admin_pw_from_request(h)):
         _json_response(h, 403, {"error": "Unauthorized"})
         return
     try:
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(h.path).query)
+        date_from = (qs.get("from") or [None])[0]
+        date_to   = (qs.get("to") or [None])[0]
         from db_cloud import divya_ledger
-        _json_response(h, 200, divya_ledger())
+        _json_response(h, 200, divya_ledger(date_from=date_from, date_to=date_to))
     except Exception as exc:
         logger.error("divya-ledger error: %s", exc)
         _json_response(h, 500, {"error": str(exc)})

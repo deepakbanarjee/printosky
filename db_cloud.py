@@ -934,12 +934,16 @@ def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
 DIVYA_LEDGER_STATUSES = ("confirmed", "dispatched", "delivered")
 
 
-def divya_ledger(include_settled: bool = False) -> dict:
+def divya_ledger(include_settled: bool = False,
+                 date_from: str | None = None,
+                 date_to: str | None = None) -> dict:
     """Aggregate the Divya teacher commission ledger.
 
     Counts only sold orders (status in DIVYA_LEDGER_STATUSES) attributed to
-    Divya. Returns headline totals plus the list of UNSETTLED orders, each
-    tagged with who owes whom:
+    Divya, optionally restricted to created_at in [date_from, date_to)
+    (ISO-8601 strings — used for daily/weekly/monthly summaries). Returns
+    headline totals, the full `orders` list for the period (for CSV/PDF export),
+    and the `unsettled` subset tagged with who owes whom:
         * payment_collected_by in ('oxygen','pending') -> Oxygen owes Divya the
           commission.
         * payment_collected_by == 'divya'              -> Divya owes Oxygen
@@ -948,26 +952,27 @@ def divya_ledger(include_settled: bool = False) -> dict:
     """
     empty = {"total_orders": 0, "total_books": 0, "total_commission": 0.0,
              "oxygen_owes_divya": 0.0, "divya_owes_oxygen": 0.0, "net": 0.0,
-             "unsettled": []}
+             "orders": [], "unsettled": []}
     try:
-        rows = (
+        q = (
             _client().table("book_orders")
             .select("order_code,name,items,grand_total,commission,"
                     "payment_collected_by,delivery_method,divya_settled,status,created_at")
             .eq("via_divya", True)
             .in_("status", list(DIVYA_LEDGER_STATUSES))
-            .order("created_at", desc=True)
-            .execute()
-            .data
-            or []
         )
+        if date_from:
+            q = q.gte("created_at", date_from)
+        if date_to:
+            q = q.lt("created_at", date_to)
+        rows = q.order("created_at", desc=True).execute().data or []
     except Exception as exc:
         logger.error("divya_ledger error: %s", exc)
         return empty
 
     total_books = total_commission = 0
     oxygen_owes = divya_owes = 0.0
-    unsettled = []
+    orders, unsettled = [], []
     for r in rows:
         comm = float(r.get("commission") or 0)
         gt = float(r.get("grand_total") or 0)
@@ -976,16 +981,13 @@ def divya_ledger(include_settled: bool = False) -> dict:
                     if k in ("malayalam", "hindi", "english") and v)
         total_books += books
         total_commission += comm
-        if r.get("divya_settled") and not include_settled:
-            continue
         collected = r.get("payment_collected_by") or "oxygen"
+        settled = bool(r.get("divya_settled"))
         if collected == "divya":
             amount, direction = gt - comm, "divya_owes_oxygen"
-            divya_owes += amount
         else:  # 'oxygen' or 'pending'
             amount, direction = comm, "oxygen_owes_divya"
-            oxygen_owes += amount
-        unsettled.append({
+        entry = {
             "order_code":   r.get("order_code"),
             "name":         r.get("name"),
             "books":        books,
@@ -994,8 +996,17 @@ def divya_ledger(include_settled: bool = False) -> dict:
             "collected_by": collected,
             "direction":    direction,
             "amount":       amount,
-            "settled":      bool(r.get("divya_settled")),
-        })
+            "settled":      settled,
+            "created_at":   r.get("created_at"),
+        }
+        orders.append(entry)
+        if settled and not include_settled:
+            continue
+        if direction == "divya_owes_oxygen":
+            divya_owes += amount
+        else:
+            oxygen_owes += amount
+        unsettled.append(entry)
     return {
         "total_orders":      len(rows),
         "total_books":       total_books,
@@ -1003,6 +1014,7 @@ def divya_ledger(include_settled: bool = False) -> dict:
         "oxygen_owes_divya": oxygen_owes,
         "divya_owes_oxygen": divya_owes,
         "net":               divya_owes - oxygen_owes,
+        "orders":            orders,
         "unsettled":         unsettled,
     }
 
