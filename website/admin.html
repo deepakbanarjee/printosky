@@ -4110,7 +4110,12 @@ function renderBookOrders(rows) {
   list.innerHTML = rows.map(o => {
     const color = badgeColor[o.status] || '#666';
     const proof = o.payment_proof_url
-      ? `<a href="${o.payment_proof_url}" target="_blank" style="font-size:.8rem">📎 view payment screenshot</a>` : '';
+      ? `<div style="font-size:.75rem;color:var(--muted);margin-bottom:4px">Payment screenshot (tap to enlarge):</div>
+         <a href="${o.payment_proof_url}" target="_blank" rel="noopener" title="Open full screenshot">
+           <img src="${o.payment_proof_url}" alt="payment screenshot" loading="lazy"
+                style="max-width:200px;max-height:260px;border-radius:8px;border:1px solid #ddd;object-fit:cover;display:block;cursor:zoom-in">
+         </a>`
+      : `<span style="font-size:.8rem;color:#999">No payment screenshot received yet.</span>`;
     const confirmBtn = (o.status === 'payment_review')
       ? `<button class="ctrl-btn" onclick="confirmBookOrder('${o.order_code}')">✅ Confirm payment</button>` : '';
     const addr = (o.address || '').replace(/</g, '&lt;');
@@ -4122,7 +4127,8 @@ function renderBookOrders(rows) {
       <div style="font-size:.85rem;margin-top:5px">${_bookItemsSummary(o.items)} &nbsp;·&nbsp; <strong>₹${o.grand_total || 0}</strong></div>
       <div style="font-size:.8rem;color:#555;margin-top:4px">📞 ${o.contact_phone || o.phone || ''}${o.name ? ' · ' + o.name : ''}</div>
       <div style="font-size:.8rem;color:#555;margin-top:2px">📍 ${addr}</div>
-      <div style="margin-top:8px;display:flex;gap:12px;align-items:center">${confirmBtn}${proof}</div>
+      <div style="margin-top:8px">${confirmBtn}</div>
+      <div style="margin-top:8px">${proof}</div>
     </div>`;
   }).join('');
 }
