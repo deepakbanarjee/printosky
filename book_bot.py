@@ -47,7 +47,7 @@ _AFFIRM = {
 _NEGATE = {"no", "cancel", "wrong", "restart", "redo", "start over"}
 
 _QR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "brand-kit", "printosky-payment-qr.png")
+                        "brand-kit", "printosky-payment-qr-v2.png")
 
 # Staff member who verifies UPI payments. Payment screenshots are forwarded here;
 # she taps Confirm/Reject. International format, no '+'.
@@ -278,7 +278,7 @@ def _send_qr(phone: str, order: dict) -> bool:
         return False
     try:
         from whatsapp_notify import send_file
-        ok = send_file(phone, data, "image/png", "printosky-payment-qr.png",
+        ok = send_file(phone, data, "image/png", "printosky-payment-qr-v2.png",
                        caption=_payment_caption(order))
         if ok:
             try:
