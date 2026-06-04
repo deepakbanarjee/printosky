@@ -41,6 +41,7 @@ class FakeDB:
 
     def update_book_order(self, code, **fields):
         self.orders[code].update(fields)
+        return True
 
     def get_book_order(self, code):
         return dict(self.orders.get(code, {}))
@@ -454,3 +455,36 @@ def test_post_order_no_thanks_and_stops(fake):
     book_bot.maybe_handle_book(PHONE, "po_no")
     assert PHONE not in db.sessions
     assert any("thank you" in m.lower() for m in sent["text"])
+
+
+# ── regression: payment-proof routing + confirm verification (2026-06-04) ─────
+
+@pytest.mark.unit
+def test_payment_proof_routes_on_order_state_without_book_pay_session(fake):
+    """Bug A: a payment screenshot must route to the verifier based on the ORDER
+    state, even when the session step is NOT 'book_pay' (QR sent out-of-band, or
+    session drift). Otherwise it falls through to print-job intake (the
+    'considered it as a print' bug) and Anu never sees it."""
+    db, sent = fake
+    db.create_book_order("XTR-OOB", "918888800000", "Cust")
+    db.update_book_order("XTR-OOB", status="awaiting_payment", items={"malayalam": 1})
+    db.sessions.pop("918888800000", None)                    # no book_pay session
+    replies = book_bot.handle_payment_proof("918888800000", b"img", "image/jpeg")
+    assert replies is not None                                # not ignored → not print
+    assert db.orders["XTR-OOB"]["status"] == "payment_review"
+    assert sent["forward"] == ["XTR-OOB"]                     # forwarded to Anu
+
+
+@pytest.mark.unit
+def test_confirm_failure_does_not_send_false_confirmation(fake, monkeypatch):
+    """Bug B: if the status write does not persist, confirm_book_order must
+    report failure and must NOT send a false '🎉 Order confirmed!' message."""
+    db, sent = fake
+    db.create_book_order("XTR-FAIL", "918888811111", "Cust")
+    db.update_book_order("XTR-FAIL", status="payment_review", items={"malayalam": 1})
+    monkeypatch.setattr(_dbc, "update_book_order", lambda code, **f: False)  # write fails
+    res = book_bot.confirm_book_order("XTR-FAIL")
+    assert res["ok"] is False
+    assert res.get("error") == "status_not_persisted"
+    assert db.orders["XTR-FAIL"]["status"] == "payment_review"     # unchanged
+    assert not any("Order confirmed" in m for m in sent["text"])

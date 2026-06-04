@@ -845,15 +845,22 @@ def create_book_order(order_code: str, phone: str, name: str | None = None) -> d
         return {}
 
 
-def update_book_order(order_code: str, **fields) -> None:
-    """Update fields on a book order by order_code. Silent on error."""
+def update_book_order(order_code: str, **fields) -> bool:
+    """Update fields on a book order by order_code.
+
+    Returns True on success, False on failure (failure is also logged).
+    Callers that must guarantee a state change (e.g. confirm) should check the
+    return value and/or re-read the row — never assume success.
+    """
     if not fields:
-        return
+        return False
     fields["updated_at"] = datetime.now(timezone.utc).isoformat()
     try:
         _client().table("book_orders").update(fields).eq("order_code", order_code).execute()
+        return True
     except Exception as exc:
         logger.error("update_book_order error for %s: %s", order_code, exc)
+        return False
 
 
 def get_book_order(order_code: str) -> dict:

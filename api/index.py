@@ -472,9 +472,16 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
     # NOT a print job. Intercept before any print-job side effects.
     if msg_type == "image":
         try:
-            from db_cloud import get_session, log_message
+            from db_cloud import get_active_book_order
             from book_bot import handle_payment_proof
-            if (get_session("supabase", sender) or {}).get("step") == "book_pay":
+            # Source of truth is the ORDER state, NOT the volatile session step.
+            # If the sender has a book order awaiting payment / in review, any
+            # image is a payment screenshot — route it to the verifier (Anu),
+            # never to print-job intake. (Gating on step=="book_pay" misrouted
+            # screenshots to print whenever the session drifted or the QR was
+            # sent out-of-band.)
+            _bo = get_active_book_order(sender) or {}
+            if _bo.get("status") in ("awaiting_payment", "payment_review"):
                 from whatsapp_notify import _send
                 content = _download_meta_media(media_id)
                 replies = None

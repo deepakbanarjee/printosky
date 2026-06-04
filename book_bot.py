@@ -641,9 +641,11 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
 
 
 def handle_payment_proof(phone: str, content: bytes, mime_type: str) -> list[str] | None:
-    session = _dbc.get_session(DB, phone) or {}
-    if session.get("step") != "book_pay":
-        return None
+    # Gate on the authoritative ORDER state, not the volatile session step.
+    # An out-of-band QR resend (e.g. a manual broadcast) or session drift can
+    # leave step != "book_pay" while the order is legitimately awaiting payment;
+    # the screenshot must still be treated as a payment proof, otherwise it
+    # falls through to print-job intake (the "considered it as a print" bug).
     order = _dbc.get_active_book_order(phone)
     if not order or order.get("status") not in ("awaiting_payment", "payment_review"):
         return None
@@ -945,6 +947,9 @@ def _handle_payment_verdict(action: str, code: str) -> None:
         res = confirm_book_order(code)
         if res.get("ok"):
             _send_text(VERIFIER_PHONE, f"✅ Confirmed *{code}* — customer notified. Thanks Anu! 🙏")
+        elif res.get("error") == "status_not_persisted":
+            _send_text(VERIFIER_PHONE, f"⚠️ Couldn't save the confirmation for *{code}* — "
+                                       "it is still NOT confirmed. Please tap Confirm again.")
         else:
             _send_text(VERIFIER_PHONE, f"⚠️ Couldn't find order *{code}*.")
         return
@@ -1021,9 +1026,19 @@ def confirm_book_order(order_code: str) -> dict:
         return {"ok": True, "already_confirmed": True, "order": order}
 
     from datetime import datetime, timezone
-    _dbc.update_book_order(order_code, status="confirmed",
-                           commission=bc.commission_for(order.get("items") or {}),
-                           confirmed_at=datetime.now(timezone.utc).isoformat())
+    ok = _dbc.update_book_order(order_code, status="confirmed",
+                                commission=bc.commission_for(order.get("items") or {}),
+                                confirmed_at=datetime.now(timezone.utc).isoformat())
+
+    # Verify the status actually persisted BEFORE telling the customer it is
+    # confirmed. A swallowed/transient DB write failure must NOT produce a false
+    # "Order confirmed!" message while the row stays unpaid (the bug where a
+    # manual accept "succeeded" but the order still read awaiting_payment).
+    fresh = _dbc.get_book_order(order_code) or {}
+    if not ok or fresh.get("status") != "confirmed":
+        logger.error("confirm_book_order: status did not persist for %s "
+                     "(ok=%s, status=%s)", order_code, ok, fresh.get("status"))
+        return {"ok": False, "error": "status_not_persisted", "order": fresh or order}
 
     phone = order["phone"]
     # Move the customer into the post-order state: their next message triggers
@@ -1042,4 +1057,4 @@ def confirm_book_order(order_code: str) -> dict:
         "Your books will be couriered to the address you shared. "
         "Thank you for ordering from Printosky × Xtraa! 📚",
     )
-    return {"ok": True, "order": _dbc.get_book_order(order_code)}
+    return {"ok": True, "order": fresh}
