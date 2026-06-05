@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Xtraa Books — Order on WhatsApp | Printosky</title>
+  <meta name="description" content="Aksharamrutham, Vidyamrut &amp; Easy English — curated learning books for every student. Order now on WhatsApp. Fast delivery across Kerala.">
+  <meta property="og:title" content="Xtraa Books — Curated Learning for Every Student">
+  <meta property="og:description" content="Set of 3 books only ₹549. Order on WhatsApp for fast delivery across Kerala.">
+  <meta property="og:url" content="https://printosky.com/books">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&family=Baloo+Chettan+2:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --red:    #e94235;
+      --navy:   #1a1a2e;
+      --teal:   #0f7b6c;
+      --gold:   #f5a623;
+      --light:  #fff6ea;
+      --mid:    #7a7a8c;
+      --ink:    #1a1a2e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Baloo 2', sans-serif;
+      background: #f8f4ef;
+      color: var(--ink);
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .header {
+      background: var(--navy);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .header img { height: 36px; }
+    .header-text h1 {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #fff;
+      line-height: 1.1;
+    }
+    .header-text p {
+      font-size: 0.72rem;
+      color: #aab4d0;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    /* Hero */
+    .hero {
+      background: linear-gradient(135deg, var(--navy) 0%, #16213e 100%);
+      color: #fff;
+      text-align: center;
+      padding: 36px 20px 28px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      width: 300px; height: 300px;
+      background: var(--red);
+      border-radius: 50%;
+      top: -150px; left: -80px;
+      opacity: 0.12;
+    }
+    .hero::after {
+      content: '';
+      position: absolute;
+      width: 200px; height: 200px;
+      background: var(--teal);
+      border-radius: 50%;
+      bottom: -80px; right: -60px;
+      opacity: 0.15;
+    }
+    .hero-badge {
+      display: inline-block;
+      background: var(--red);
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 4px 14px;
+      border-radius: 40px;
+      margin-bottom: 12px;
+    }
+    .hero h2 {
+      font-family: 'Baloo 2', sans-serif;
+      font-size: 2rem;
+      font-weight: 800;
+      line-height: 1.15;
+      margin-bottom: 8px;
+      position: relative;
+    }
+    .hero h2 span { color: var(--gold); }
+    .hero .tagline {
+      font-size: 0.9rem;
+      color: #b0c0d8;
+      font-weight: 500;
+      position: relative;
+    }
+
+    /* Books grid */
+    .section { padding: 24px 16px; max-width: 640px; margin: 0 auto; }
+    .section-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--mid);
+      margin-bottom: 14px;
+    }
+    .books-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    .book-card {
+      background: #fff;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(26,26,46,0.08);
+      text-align: center;
+    }
+    .book-card .cover {
+      width: 100%;
+      aspect-ratio: 3/4;
+      object-fit: cover;
+      display: block;
+    }
+    .book-card .info { padding: 10px 8px 12px; }
+    .book-card .lang {
+      font-size: 0.6rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--red);
+      margin-bottom: 2px;
+    }
+    .book-card .title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      line-height: 1.2;
+      color: var(--navy);
+      margin-bottom: 6px;
+    }
+    .book-card .prices { display: flex; align-items: baseline; justify-content: center; gap: 4px; }
+    .book-card .mrp {
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: var(--mid);
+      text-decoration: line-through;
+    }
+    .book-card .offer {
+      font-size: 0.95rem;
+      font-weight: 800;
+      color: var(--teal);
+    }
+
+    /* Bundle offer */
+    .bundle-wrap { padding: 0 16px 8px; max-width: 672px; margin: 0 auto; }
+    .bundle {
+      background: var(--teal);
+      border-radius: 18px;
+      padding: 20px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: #fff;
+    }
+    .bundle-icon { font-size: 2.4rem; flex-shrink: 0; }
+    .bundle-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #a8e6d8;
+      margin-bottom: 2px;
+    }
+    .bundle-price {
+      font-family: 'Baloo 2', sans-serif;
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: var(--gold);
+      line-height: 1;
+    }
+    .bundle-sub {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: #cdeee6;
+      margin-top: 2px;
+    }
+    .save-tag {
+      margin-left: auto;
+      background: var(--gold);
+      color: #3a2400;
+      font-size: 0.7rem;
+      font-weight: 800;
+      border-radius: 30px;
+      padding: 4px 10px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    /* Chips */
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 16px 16px 20px;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+    .chip {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--teal);
+      border: 1.5px solid var(--teal);
+      border-radius: 30px;
+      padding: 4px 12px;
+      background: rgba(255,246,234,0.7);
+    }
+
+    /* CTA Section */
+    .cta-section {
+      background: var(--navy);
+      padding: 28px 16px 32px;
+      text-align: center;
+    }
+    .cta-title {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+    .cta-sub {
+      font-size: 0.82rem;
+      color: #aab4d0;
+      font-weight: 500;
+      margin-bottom: 24px;
+    }
+    .order-box {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 20px;
+      padding: 22px 16px 20px;
+      max-width: 380px;
+      margin: 0 auto 16px;
+    }
+    .qr-wrap {
+      background: #fff;
+      border-radius: 14px;
+      padding: 14px;
+      display: inline-block;
+      margin-bottom: 14px;
+    }
+    .order-ml {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #cdeee6;
+      margin-bottom: 4px;
+      font-family: 'Baloo Chettan 2', sans-serif;
+    }
+    .order-hint {
+      font-size: 0.7rem;
+      color: #6a7a96;
+    }
+    .wa-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: #25D366;
+      color: #fff;
+      font-family: 'Baloo 2', sans-serif;
+      font-size: 1rem;
+      font-weight: 800;
+      text-decoration: none;
+      border-radius: 50px;
+      padding: 14px 28px;
+      width: 100%;
+      max-width: 380px;
+      margin: 0 auto;
+      transition: background 0.2s, transform 0.1s;
+      box-shadow: 0 4px 18px rgba(37,211,102,0.35);
+    }
+    .wa-btn:active { transform: scale(0.97); background: #1ebe5d; }
+    .wa-btn svg { width: 22px; height: 22px; flex-shrink: 0; }
+    .wa-contact {
+      font-size: 0.72rem;
+      color: #6a7a96;
+      margin-top: 12px;
+    }
+
+    /* Footer note */
+    .note-bar {
+      background: #fff8ed;
+      border-top: 1px solid #f0e4cc;
+      padding: 14px 20px;
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--mid);
+    }
+    .note-bar strong { color: var(--navy); }
+
+    footer {
+      background: var(--navy);
+      color: #7080a0;
+      text-align: center;
+      padding: 18px 16px;
+      font-size: 0.72rem;
+    }
+    footer a { color: #aab4d0; text-decoration: none; }
+
+    @media (min-width: 480px) {
+      .hero h2 { font-size: 2.4rem; }
+      .book-card .title { font-size: 0.82rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <img src="assets/xtraa-logo.png" alt="Xtraa">
+    <div class="header-text">
+      <h1>Xtraa Books</h1>
+      <p>Curated learning for every student</p>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="hero-badge">Campaign Offer</div>
+    <h2>3 Books.<br><span>One Smart Bundle.</span></h2>
+    <p class="tagline">Malayalam · Hindi · English — all in one order</p>
+  </section>
+
+  <section class="section">
+    <div class="section-title">Our books</div>
+    <div class="books-grid">
+
+      <div class="book-card">
+        <img class="cover" src="assets/book-malayalam.jpg" alt="Aksharamrutham — Malayalam">
+        <div class="info">
+          <div class="lang">Malayalam</div>
+          <div class="title">Aksharamrutham</div>
+          <div class="prices">
+            <span class="mrp">₹250</span>
+            <span class="offer">₹200</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="book-card">
+        <img class="cover" src="assets/book-hindi.jpg" alt="Vidyamrut — Hindi">
+        <div class="info">
+          <div class="lang">Hindi</div>
+          <div class="title">Vidyamrut</div>
+          <div class="prices">
+            <span class="mrp">₹200</span>
+            <span class="offer">₹150</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="book-card">
+        <img class="cover" src="assets/book-english.jpg" alt="Easy English">
+        <div class="info">
+          <div class="lang">English</div>
+          <div class="title">Easy English</div>
+          <div class="prices">
+            <span class="mrp">₹250</span>
+            <span class="offer">₹200</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <div class="bundle-wrap">
+    <div class="bundle">
+      <div class="bundle-icon">📦</div>
+      <div>
+        <div class="bundle-label">Best value</div>
+        <div class="bundle-price">Set of 3 — ₹549</div>
+        <div class="bundle-sub">+ courier · home delivery</div>
+      </div>
+      <div class="save-tag">Save ₹101</div>
+    </div>
+  </div>
+
+  <div class="chips">
+    <span class="chip">Kerala Curriculum</span>
+    <span class="chip">Phonics</span>
+    <span class="chip">Sight Words</span>
+    <span class="chip">Trace &amp; Write</span>
+    <span class="chip">Picture Stories</span>
+  </div>
+
+  <section class="cta-section">
+    <div class="cta-title">Order on WhatsApp</div>
+    <div class="cta-sub">Scan the QR or tap the button below</div>
+
+    <div class="order-box">
+      <div class="qr-wrap">
+        <canvas id="wa-qr"></canvas>
+      </div>
+      <div class="order-ml">സ്കാൻ ചെയ്ത് ഓർഡർ ചെയ്യൂ</div>
+      <div class="order-hint">Fast delivery across Kerala · Courier charges extra</div>
+    </div>
+
+    <a class="wa-btn" href="https://wa.me/919495706405?text=Hi%2C%20I%20want%20to%20order%20Xtraa%20books" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+      </svg>
+      Order on WhatsApp
+    </a>
+    <div class="wa-contact">WhatsApp 94957 06405 · printosky.com</div>
+  </section>
+
+  <div class="note-bar">
+    <strong>Delivery:</strong> Courier charges calculated on order · Ships from Thrissur · Fast delivery across Kerala
+  </div>
+
+  <footer>
+    <div>Published by <strong style="color:#aab4d0">Xtraa</strong> · Printed &amp; delivered by <strong style="color:#aab4d0">Printosky</strong></div>
+    <div style="margin-top:4px;">Oxygen Students Paradise · Thrissur · <a href="https://printosky.com">printosky.com</a></div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+  <script>
+    QRCode.toCanvas(
+      document.getElementById('wa-qr'),
+      'https://wa.me/919495706405?text=Hi%2C%20I%20want%20to%20order%20Xtraa%20books',
+      { width: 180, margin: 0, color: { dark: '#000000', light: '#ffffff' } }
+    );
+  </script>
+</body>
+</html>
