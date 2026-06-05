@@ -10,7 +10,7 @@
   <meta property="og:url" content="https://printosky.com/books">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&family=Baloo+Chettan+2:wght@400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&family=Baloo+Chettan+2:wght@400;600;700&family=Syne:wght@800&display=swap" rel="stylesheet">
   <style>
     :root {
       --red:    #e94235;
@@ -35,9 +35,15 @@
       padding: 16px 20px;
       display: flex;
       align-items: center;
-      gap: 12px;
+      justify-content: space-between;
     }
-    .header img { height: 36px; }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+    .header-left img { height: 36px; }
     .header-text h1 {
       font-size: 1.1rem;
       font-weight: 800;
@@ -51,6 +57,18 @@
       letter-spacing: 0.5px;
       text-transform: uppercase;
     }
+    .header-logo-right {
+      font-family: 'Syne', sans-serif;
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+      text-decoration: none;
+      letter-spacing: -0.3px;
+      opacity: 0.85;
+      transition: opacity 0.15s;
+    }
+    .header-logo-right span { color: var(--red); }
+    .header-logo-right:hover { opacity: 1; }
 
     /* Hero */
     .hero {
@@ -328,11 +346,14 @@
 <body>
 
   <header class="header">
-    <img src="assets/xtraa-logo.png" alt="Xtraa">
-    <div class="header-text">
-      <h1>Xtraa Books</h1>
-      <p>Curated learning for every student</p>
-    </div>
+    <a class="header-left" href="/books">
+      <img src="assets/xtraa-logo.png" alt="Xtraa">
+      <div class="header-text">
+        <h1>Xtraa Books</h1>
+        <p>Curated learning for every student</p>
+      </div>
+    </a>
+    <a class="header-logo-right" href="https://printosky.com">Print<span>osky</span></a>
   </header>
 
   <section class="hero">
@@ -410,7 +431,9 @@
 
     <div class="order-box">
       <div class="qr-wrap">
-        <canvas id="wa-qr"></canvas>
+        <img id="wa-qr" width="180" height="180"
+             src="https://api.qrserver.com/v1/create-qr-code/?size=360x360&margin=0&data=https%3A%2F%2Fwa.me%2F919495706405%3Ftext%3DHi%2C%20I%20want%20to%20order%20Xtraa%20books"
+             alt="Scan to order on WhatsApp">
       </div>
       <div class="order-ml">സ്കാൻ ചെയ്ത് ഓർഡർ ചെയ്യൂ</div>
       <div class="order-hint">Fast delivery across Kerala · Courier charges extra</div>
@@ -434,13 +457,5 @@
     <div style="margin-top:4px;">Oxygen Students Paradise · Thrissur · <a href="https://printosky.com">printosky.com</a></div>
   </footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
-  <script>
-    QRCode.toCanvas(
-      document.getElementById('wa-qr'),
-      'https://wa.me/919495706405?text=Hi%2C%20I%20want%20to%20order%20Xtraa%20books',
-      { width: 180, margin: 0, color: { dark: '#000000', light: '#ffffff' } }
-    );
-  </script>
 </body>
 </html>
