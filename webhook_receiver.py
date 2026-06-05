@@ -408,6 +408,27 @@ def _handle_meta_media(sender: str, msg_type: str, media_id: str,
 
 
 # ── Payment processor ─────────────────────────────────────────────────────────
+def _payment_already_processed(pay_id: str, db_path: str) -> bool:
+    """True if this Razorpay payment_id was already stamped on a job.
+
+    Used to make webhook handling idempotent against Razorpay's redelivery.
+    Fails open (returns False) on any error so a real payment is never blocked
+    by a transient DB issue or a missing column on an un-migrated database.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM jobs WHERE razorpay_payment_id=? LIMIT 1", (pay_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        return row is not None
+    except Exception as e:
+        logger.warning(f"Idempotency check failed for {pay_id} (proceeding): {e}")
+        return False
+
+
 def process_payment(data: dict, db_path: str):
     """Handle confirmed payment — update DB, notify customer, notify staff."""
     from razorpay_integration import parse_payment_webhook
@@ -424,6 +445,16 @@ def process_payment(data: dict, db_path: str):
     pay_id = payment["payment_id"]
 
     logger.info(f"Payment confirmed: {ref_id} ₹{amount} via {method} ({pay_id})")
+
+    # ── Idempotency guard ────────────────────────────────────────────────────
+    # Razorpay redelivers webhooks on any non-2xx/timeout. The DB write is
+    # naturally idempotent (Paid→Paid), but customer/staff notifications are
+    # not — without this guard a retry double-notifies (and risks a re-print).
+    # Fail-open: if the lookup errors (e.g. column missing on an old DB), we
+    # proceed rather than block a real payment.
+    if pay_id and _payment_already_processed(pay_id, db_path):
+        logger.info(f"Duplicate webhook for {pay_id} — already processed, skipping")
+        return
 
     # ── Check if this is a batch payment ─────────────────────────────────────
     try:
@@ -501,10 +532,20 @@ def _process_batch_payment(batch_row, amount: float, method: str, pay_id: str, d
 
     try:
         conn = sqlite3.connect(db_path)
-        for jid in job_ids:
+        # Distribute the batch total across its jobs so SUM(amount_collected)
+        # equals the amount paid exactly. The dashboard reports revenue as a
+        # per-job SUM (dashboard.py), so writing the full total onto every job
+        # would over-count by N×; leaving it NULL (the old bug) under-counts to
+        # zero. Split in paise and put any remainder on the first job.
+        n = len(job_ids)
+        total_paise = round(amount * 100)
+        base, rem = divmod(total_paise, n)
+        for i, jid in enumerate(job_ids):
+            share = (base + (1 if i < rem else 0)) / 100
             conn.execute(
-                "UPDATE jobs SET status='Paid', payment_mode=?, razorpay_payment_id=? WHERE job_id=?",
-                (method, pay_id, jid)
+                "UPDATE jobs SET status='Paid', amount_collected=?, "
+                "payment_mode=?, razorpay_payment_id=? WHERE job_id=?",
+                (share, method, pay_id, jid)
             )
         conn.execute(
             "UPDATE job_batches SET status='paid' WHERE batch_id=?", (batch_id,)

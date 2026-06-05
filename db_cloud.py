@@ -247,13 +247,14 @@ def update_job_paid(job_id: str, amount: float, method: str, pay_id: str) -> Non
 
 
 def update_jobs_payment_link(job_ids: list, link_id: str, link_sent_at: str) -> None:
-    """Set the Razorpay link ID on multiple jobs."""
+    """Set the Razorpay link ID on multiple jobs (single batched query)."""
+    if not job_ids:
+        return
     try:
-        for jid in job_ids:
-            _client().table("jobs").update({
-                "razorpay_link_id": link_id,
-                "link_sent_at":     link_sent_at,
-            }).eq("job_id", jid).execute()
+        _client().table("jobs").update({
+            "razorpay_link_id": link_id,
+            "link_sent_at":     link_sent_at,
+        }).in_("job_id", list(job_ids)).execute()
     except Exception as e:
         logger.error(f"update_jobs_payment_link error: {e}")
 
