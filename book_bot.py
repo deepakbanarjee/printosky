@@ -1,4 +1,4 @@
-"""Xtraa book campaign — WhatsApp conversational order flow (button-driven).
+﻿"""Xtraa book campaign — WhatsApp conversational order flow (button-driven).
 
 Cloud-only (runs in the Vercel webhook). Order data lives in the `book_orders`
 table; the `bot_sessions.step` column drives state (book_* steps). Pure pricing
@@ -365,9 +365,10 @@ def _is_valid_name(text: str) -> bool:
 def _send_dtdc_prompt(phone: str) -> None:
     _send_buttons(
         phone,
-        "🏢 Do you have a *preferred DTDC center* for delivery?\n\n"
-        "If yes, type the branch name (e.g. *DTDC Kozhikode City*).\n"
-        "If not, tap *Skip*.",
+        "📦 Books will be shipped via *DTDC courier*.\n\n"
+        "⚠️ Home delivery is not guaranteed — depends on your local DTDC branch.\n\n"
+        "Do you have a *preferred DTDC center* (e.g. *DTDC Kozhikode City*)? "
+        "If yes, type it. If not, tap *Skip*.",
         [("dtdc_skip", "⏭️ No preference")],
     )
 
