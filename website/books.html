@@ -470,6 +470,22 @@
       .hero h2 { font-size: 2.4rem; }
       .book-card .title { font-size: 0.82rem; }
     }
+    /* Book rows: payment QR beside the order button */
+    .books-grid{grid-template-columns:1fr;}
+    .book-card{display:flex;align-items:center;gap:12px;padding:10px 12px;text-align:left;}
+    .book-card .cover{width:64px;flex-shrink:0;border-radius:8px;}
+    .book-card .info{padding:0;flex:1;min-width:0;}
+    .book-card .prices{justify-content:flex-start;margin-bottom:8px;}
+    .book-btn{display:inline-block;width:auto;margin:0;padding:8px 18px;font-size:0.8rem;border:none;cursor:pointer;}
+    .book-qr{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:3px;}
+    .book-qr img{width:90px;height:90px;display:block;border-radius:6px;background:#fff;padding:3px;box-sizing:border-box;}
+    .book-qr span{font-size:0.6rem;font-weight:700;color:var(--mid);text-align:center;line-height:1.2;}
+    .bundle-cta{width:100%;margin-top:14px;display:flex;align-items:center;gap:14px;}
+    .bundle-cta .bundle-btn{margin-top:0;flex:1;}
+    .bundle-cta .book-qr img{background:#fff;}
+    .upi-foot{max-width:640px;margin:8px auto 0;padding:0 16px;text-align:center;font-size:0.75rem;color:var(--mid);}
+    .upi-foot code{background:#eef1f7;padding:2px 6px;border-radius:4px;color:#1a1a2e;font-weight:700;}
+    @media (max-width:380px){.book-qr img{width:76px;height:76px;}.book-card .cover{width:54px;}}
   </style>
 </head>
 <body>
@@ -505,7 +521,7 @@
             <span class="offer">₹200</span>
           </div>
         </div>
-        <button class="book-btn" type="button" onclick="startOrder('malayalam')">Order &#8377;200</button>
+        <button class="book-btn" type="button" onclick="startOrder('malayalam')">Order &#8377;200</button><div class="book-qr"><img src="assets/pay-qr-malayalam.png" alt="Scan to pay Rs.200"><span>Scan to pay<br>&#8377;200</span></div>
       </div>
 
       <div class="book-card">
@@ -518,7 +534,7 @@
             <span class="offer">₹150</span>
           </div>
         </div>
-        <button class="book-btn" type="button" onclick="startOrder('hindi')">Order &#8377;150</button>
+        <button class="book-btn" type="button" onclick="startOrder('hindi')">Order &#8377;150</button><div class="book-qr"><img src="assets/pay-qr-hindi.png" alt="Scan to pay Rs.150"><span>Scan to pay<br>&#8377;150</span></div>
       </div>
 
       <div class="book-card">
@@ -531,7 +547,7 @@
             <span class="offer">₹200</span>
           </div>
         </div>
-        <button class="book-btn" type="button" onclick="startOrder('english')">Order &#8377;200</button>
+        <button class="book-btn" type="button" onclick="startOrder('english')">Order &#8377;200</button><div class="book-qr"><img src="assets/pay-qr-english.png" alt="Scan to pay Rs.200"><span>Scan to pay<br>&#8377;200</span></div>
       </div>
 
     </div>
@@ -546,7 +562,7 @@
         <div class="bundle-sub">+ courier · home delivery</div>
       </div>
       <div class="save-tag">Save ₹101</div>
-      <button class="bundle-btn" type="button" onclick="orderBundle()">&#128722; Buy All 3 Books &mdash; &#8377;549</button>
+      <div class="bundle-cta"><button class="bundle-btn" type="button" onclick="orderBundle()">&#128722; Buy All 3 Books &mdash; &#8377;549</button><div class="book-qr"><img src="assets/pay-qr-set3.png" alt="Scan to pay Rs.549"><span>Scan to pay<br>&#8377;549</span></div></div>
     </div>
   </div>
 
@@ -559,41 +575,7 @@
   </div>
 
 
-  <!-- UPI Payment QRs -->
-  <section class="upi-section">
-    <div class="upi-title">Pay via UPI</div>
-    <div class="upi-sub">Scan with GPay, PhonePe or BHIM. After paying, send the screenshot on WhatsApp with your delivery address.</div>
-    <div class="upi-grid">
-      <div class="upi-card">
-        <img class="upi-qr-img" src="assets/pay-qr-malayalam.png" alt="Pay Rs.200 Aksharamrutham">
-        <div class="upi-book-lang">Malayalam</div>
-        <div class="upi-book-name">Aksharamrutham</div>
-        <div class="upi-amount">Rs.200</div>
-      </div>
-      <div class="upi-card">
-        <img class="upi-qr-img" src="assets/pay-qr-hindi.png" alt="Pay Rs.150 Vidyamrut">
-        <div class="upi-book-lang">Hindi</div>
-        <div class="upi-book-name">Vidyamrut</div>
-        <div class="upi-amount">Rs.150</div>
-      </div>
-      <div class="upi-card">
-        <img class="upi-qr-img" src="assets/pay-qr-english.png" alt="Pay Rs.200 Easy English">
-        <div class="upi-book-lang">English</div>
-        <div class="upi-book-name">Easy English</div>
-        <div class="upi-amount">Rs.200</div>
-      </div>
-      <div class="upi-card set3">
-        <img class="upi-qr-img" src="assets/pay-qr-set3.png" alt="Pay Rs.549 Set of 3">
-        <div>
-          <div class="upi-book-lang">Best value</div>
-          <div class="upi-book-name">Set of 3 Books</div>
-          <div class="upi-amount">Rs.549</div>
-          <div class="upi-note">Save Rs.101 vs buying separately</div>
-        </div>
-      </div>
-    </div>
-    <div class="upi-id-bar">UPI ID: <code>bhqr.2323001A@sib</code> | Oxygen Students Paradise</div>
-  </section>
+  <div class="upi-foot">All QR payments go to <strong>Oxygen Students Paradise</strong> &middot; UPI <code>bhqr.2323001A@sib</code></div>
   <!-- Authors -->
   <section class="authors">
     <div class="authors-title">About the authors</div>
