@@ -227,6 +227,46 @@
       flex-shrink: 0;
     }
 
+    /* Book buy buttons */
+    .book-btn {
+      display: block;
+      margin: 8px 8px 4px;
+      padding: 7px 10px;
+      background: var(--teal);
+      color: #fff;
+      font-family: 'Baloo 2', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-align: center;
+      text-decoration: none;
+      border-radius: 30px;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .book-btn:active { background: #0a5f54; transform: scale(0.97); }
+
+    /* Bundle restructure for button */
+    .bundle { flex-wrap: wrap; }
+    .bundle-body { flex: 1; }
+    .bundle-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      margin-top: 14px;
+      padding: 12px 20px;
+      background: var(--gold);
+      color: #3a2400;
+      font-family: 'Baloo 2', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 800;
+      text-decoration: none;
+      border-radius: 40px;
+      transition: background 0.15s, transform 0.1s;
+      box-shadow: 0 3px 12px rgba(245,166,35,0.35);
+    }
+    .bundle-btn:active { background: #e0941a; transform: scale(0.98); }
+
     /* Chips */
     .chips {
       display: flex;
@@ -447,6 +487,7 @@
             <span class="offer">₹200</span>
           </div>
         </div>
+        <a class="book-btn" href="https://wa.me/919495706405?text=Hi%2C%20I%20want%20to%20order%20Aksharamrutham%20(Malayalam)%20%E2%80%94%20%E2%82%B9200" target="_blank" rel="noopener">Order ₹200</a>
       </div>
 
       <div class="book-card">
@@ -459,6 +500,7 @@
             <span class="offer">₹150</span>
           </div>
         </div>
+        <a class="book-btn" href="https://wa.me/919495706405?text=Hi%2C%20I%20want%20to%20order%20Vidyamrut%20(Hindi)%20%E2%80%94%20%E2%82%B9150" target="_blank" rel="noopener">Order ₹150</a>
       </div>
 
       <div class="book-card">
@@ -471,6 +513,7 @@
             <span class="offer">₹200</span>
           </div>
         </div>
+        <a class="book-btn" href="https://wa.me/919495706405?text=Hi%2C%20I%20want%20to%20order%20Easy%20English%20%E2%80%94%20%E2%82%B9200" target="_blank" rel="noopener">Order ₹200</a>
       </div>
 
     </div>
@@ -479,12 +522,15 @@
   <div class="bundle-wrap">
     <div class="bundle">
       <div class="bundle-icon">📦</div>
-      <div>
+      <div class="bundle-body">
         <div class="bundle-label">Best value</div>
         <div class="bundle-price">Set of 3 — ₹549</div>
         <div class="bundle-sub">+ courier · home delivery</div>
       </div>
       <div class="save-tag">Save ₹101</div>
+      <a class="bundle-btn" href="https://wa.me/919495706405?text=Hi%2C%20I%20want%20to%20order%20the%20Xtraa%20set%20of%203%20books%20(Aksharamrutham%20%2B%20Vidyamrut%20%2B%20Easy%20English)%20%E2%80%94%20%E2%82%B9549" target="_blank" rel="noopener">
+        🛒 Buy All 3 Books — ₹549
+      </a>
     </div>
   </div>
 
