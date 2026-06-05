@@ -68,9 +68,13 @@ ANU_TEMPLATE = (
     "Delivery: courier / office"
 )
 
-_BOOK_STEPS = {"book_select", "book_qty", "book_address", "book_phone",
-               "book_summary", "book_pay", "book_edit", "book_edit_address",
+_BOOK_STEPS = {"book_select", "book_qty", "book_name", "book_address", "book_dtdc",
+               "book_phone", "book_summary", "book_pay", "book_edit",
+               "book_edit_name", "book_edit_address", "book_edit_dtdc",
                "book_edit_phone", "post_order", "post_order_ask"}
+
+_DTDC_SKIP = {"no", "none", "skip", "nope", "any", "no preference", "don't know",
+              "dont know", "na", "n/a", "-", "--", "nil", "നോ", "ഇല്ല", "dtdc_skip"}
 
 # Selection list-row ids → the set of book keys they choose (one tap = multi-select).
 _SELECT_IDS = {
@@ -125,15 +129,16 @@ def _send_buttons(phone: str, body: str, buttons: list, header: str | None = Non
 
 
 def _send_list(phone: str, body: str, button_text: str, rows: list,
-               header: str | None = None) -> bool:
+               header: str | None = None,
+               section_title: str = "Choose books") -> bool:
     try:
         from whatsapp_notify import send_list
         return send_list(phone, body, button_text, rows, header=header,
-                         section_title="Choose books")
+                         section_title=section_title)
     except Exception as exc:
         logger.error("book_bot send_list failed: %s", exc)
         lines = "\n".join(f"• {r['title']} — {r.get('description', '')}" for r in rows)
-        _send_text(phone, body + "\n\n" + lines + "\n\n_Reply 1, 2, 3, '1,3' or 'all'._")
+        _send_text(phone, body + "\n\n" + lines + "\n\n_Reply with your choice._")
         return False
 
 
@@ -229,13 +234,18 @@ def _summary_text(order: dict) -> str:
         f"• {ln['label'].split(' (')[0]} × {ln['qty']} = ₹{ln['line_total']:.0f}"
         for ln in bc.line_items(items)
     )
+    name = order.get("name") or "—"
+    dtdc = order.get("dtdc_center")
+    dtdc_line = f"\n🏢 DTDC: {dtdc}" if dtdc else ""
     return (
         "🧾 *Order summary*\n\n"
         f"{lines}\n\n"
         f"Books: ₹{totals['books_total']:.0f}\n"
         f"Courier: ₹{totals['courier']:.0f}\n"
         f"*Total: ₹{totals['grand_total']:.0f}*\n\n"
-        f"📍 {order.get('address', '')}\n"
+        f"👤 {name}\n"
+        f"📍 {order.get('address', '')}"
+        f"{dtdc_line}\n"
         f"📞 {_format_phone(order.get('contact_phone', ''))}"
     )
 
@@ -246,8 +256,18 @@ def _send_summary(phone: str, order: dict) -> None:
 
 
 def _send_edit_menu(phone: str) -> None:
-    _send_buttons(phone, "What would you like to edit?",
-                  [("ed_books", "📚 Books & qty"), ("ed_addr", "📍 Address"), ("ed_phone", "📞 Phone")])
+    _send_list(
+        phone, "What would you like to edit?", "✏️ Edit",
+        [
+            {"id": "ed_name",  "title": "👤 Recipient name"},
+            {"id": "ed_books", "title": "📚 Books & qty"},
+            {"id": "ed_addr",  "title": "📍 Delivery address"},
+            {"id": "ed_dtdc",  "title": "🏢 DTDC center"},
+            {"id": "ed_phone", "title": "📞 Phone number"},
+        ],
+        header="Edit order",
+        section_title="Choose what to edit",
+    )
 
 
 def _send_pay_buttons(phone: str) -> None:
@@ -301,13 +321,16 @@ def _forward_to_verifier(order: dict, content: bytes, mime_type: str) -> None:
     """Forward a payment screenshot to the verifier (Anu) with Confirm/Reject."""
     code   = order.get("order_code")
     totals = bc.compute_totals(order.get("items") or {})
+    dtdc = order.get("dtdc_center")
+    dtdc_line = f"\n🏢 DTDC: {dtdc}" if dtdc else ""
     caption = (
         "💳 *Payment to verify*\n"
         f"Order: {code}\n"
         f"Amount: ₹{totals['grand_total']:.0f}\n"
-        f"Customer: +{re.sub(r'[^0-9]', '', order.get('phone', ''))}\n"
+        f"Customer: {order.get('name') or '—'} "
+        f"+{re.sub(r'[^0-9]', '', order.get('phone', ''))}\n"
         f"Items: {_cart_line(order.get('items') or {})}\n"
-        f"📍 {order.get('address', '')}"
+        f"📍 {order.get('address', '')}{dtdc_line}"
     )
     try:
         from whatsapp_notify import send_file
@@ -323,12 +346,29 @@ def _forward_to_verifier(order: dict, content: bytes, mime_type: str) -> None:
 
 # ── flow ──────────────────────────────────────────────────────────────────────
 
-def _address_prompt(totals: dict) -> str:
+def _address_prompt() -> str:
     return (
-        f"Great! Your order comes to *₹{totals['grand_total']:.0f}* "
-        f"(incl. ₹{totals['courier']:.0f} courier).\n\n"
-        "📍 Please *type your full delivery address* (house/street, place, "
-        "district, PIN code)."
+        "📍 Please type the *full delivery address* — "
+        "house/flat no., street, place, district and *PIN code*."
+    )
+
+
+def _is_valid_name(text: str) -> bool:
+    """Return True if text looks like a real recipient name (not a placeholder)."""
+    t = (text or "").strip()
+    if len(t) < 3:
+        return False
+    # Must have at least one letter (Latin or Malayalam)
+    return bool(re.search(r"[A-Za-zഀ-ൿ]", t))
+
+
+def _send_dtdc_prompt(phone: str) -> None:
+    _send_buttons(
+        phone,
+        "🏢 Do you have a *preferred DTDC center* for delivery?\n\n"
+        "If yes, type the branch name (e.g. *DTDC Kozhikode City*).\n"
+        "If not, tap *Skip*.",
+        [("dtdc_skip", "⏭️ No preference")],
     )
 
 
@@ -413,8 +453,25 @@ def _handle_qty(phone: str, text: str, order: dict) -> list[str]:
         _dbc.save_session(DB, phone, step="book_summary")
         _send_summary(phone, _dbc.get_book_order(code))
         return []
+    _dbc.save_session(DB, phone, step="book_name")
+    _send_text(
+        phone,
+        f"Your order comes to *₹{totals['grand_total']:.0f}* "
+        f"(incl. ₹{totals['courier']:.0f} courier).\n\n"
+        "👤 Please type the *full name* of the person receiving the parcel.",
+    )
+    return []
+
+
+def _handle_name(phone: str, text: str, order: dict) -> list[str]:
+    name = (text or "").strip()
+    if not _is_valid_name(name):
+        _send_text(phone, "Please type the *full name* of the person receiving the parcel "
+                          "(e.g. Priya Krishnan, John Thomas). 👤")
+        return []
+    _dbc.update_book_order(order["order_code"], name=name)
     _dbc.save_session(DB, phone, step="book_address")
-    _send_text(phone, _address_prompt(totals))
+    _send_text(phone, _address_prompt())
     return []
 
 
@@ -429,6 +486,15 @@ def _handle_address(phone: str, text: str, order: dict) -> list[str]:
                           "(we can't ship without it). 📍")
         return []
     _dbc.update_book_order(order["order_code"], address=address)
+    _dbc.save_session(DB, phone, step="book_dtdc")
+    _send_dtdc_prompt(phone)
+    return []
+
+
+def _handle_dtdc(phone: str, text: str, order: dict) -> list[str]:
+    t = (text or "").strip()
+    dtdc = None if (t.lower() in _DTDC_SKIP or len(t) < 2) else t
+    _dbc.update_book_order(order["order_code"], dtdc_center=dtdc)
     _dbc.save_session(DB, phone, step="book_phone")
     _send_phone_buttons(phone)
     return []
@@ -488,6 +554,10 @@ def _handle_summary(phone: str, text: str, order: dict) -> list[str]:
 def _handle_edit(phone: str, text: str, order: dict) -> list[str]:
     code = order["order_code"]
     t = (text or "").strip().lower()
+    if t == "ed_name" or t in {"name", "recipient"}:
+        _dbc.save_session(DB, phone, step="book_edit_name")
+        _send_text(phone, "👤 Please type the *new recipient name*.")
+        return []
     if t == "ed_books" or "book" in t:
         _dbc.update_book_order(code, flow_cursor={"editing": True})
         _dbc.save_session(DB, phone, step="book_select")
@@ -495,13 +565,28 @@ def _handle_edit(phone: str, text: str, order: dict) -> list[str]:
         return []
     if t == "ed_addr" or "address" in t:
         _dbc.save_session(DB, phone, step="book_edit_address")
-        _send_text(phone, "📍 Please *type the new delivery address*.")
+        _send_text(phone, "📍 Please *type the new delivery address* (include PIN code).")
+        return []
+    if t == "ed_dtdc" or "dtdc" in t or "center" in t or "centre" in t:
+        _dbc.save_session(DB, phone, step="book_edit_dtdc")
+        _send_dtdc_prompt(phone)
         return []
     if t == "ed_phone" or "phone" in t or "number" in t:
         _dbc.save_session(DB, phone, step="book_edit_phone")
         _send_phone_buttons(phone)
         return []
     _send_edit_menu(phone)
+    return []
+
+
+def _handle_edit_name(phone: str, text: str, order: dict) -> list[str]:
+    name = (text or "").strip()
+    if not _is_valid_name(name):
+        _send_text(phone, "Please type the *full name* of the person receiving the parcel. 👤")
+        return []
+    _dbc.update_book_order(order["order_code"], name=name)
+    _dbc.save_session(DB, phone, step="book_summary")
+    _send_summary(phone, _dbc.get_book_order(order["order_code"]))
     return []
 
 
@@ -516,6 +601,15 @@ def _handle_edit_address(phone: str, text: str, order: dict) -> list[str]:
                           "(we can't ship without it). 📍")
         return []
     _dbc.update_book_order(order["order_code"], address=address)
+    _dbc.save_session(DB, phone, step="book_summary")
+    _send_summary(phone, _dbc.get_book_order(order["order_code"]))
+    return []
+
+
+def _handle_edit_dtdc(phone: str, text: str, order: dict) -> list[str]:
+    t = (text or "").strip()
+    dtdc = None if (t.lower() in _DTDC_SKIP or len(t) < 2) else t
+    _dbc.update_book_order(order["order_code"], dtdc_center=dtdc)
     _dbc.save_session(DB, phone, step="book_summary")
     _send_summary(phone, _dbc.get_book_order(order["order_code"]))
     return []
@@ -625,11 +719,15 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
     handlers = {
         "book_select":       _handle_select,
         "book_qty":          _handle_qty,
+        "book_name":         _handle_name,
         "book_address":      _handle_address,
+        "book_dtdc":         _handle_dtdc,
         "book_phone":        _handle_phone,
         "book_summary":      _handle_summary,
         "book_edit":         _handle_edit,
+        "book_edit_name":    _handle_edit_name,
         "book_edit_address": _handle_edit_address,
+        "book_edit_dtdc":    _handle_edit_dtdc,
         "book_edit_phone":   _handle_edit_phone,
         "book_pay":          _handle_pay,
     }

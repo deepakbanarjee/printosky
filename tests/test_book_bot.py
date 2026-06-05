@@ -63,7 +63,7 @@ def fake(monkeypatch):
 
     sent = {"list": [], "buttons": [], "text": [], "qr": [], "forward": []}
     monkeypatch.setattr(book_bot, "_send_list",
-                        lambda phone, body, btn, rows, header=None: sent["list"].append([r["id"] for r in rows]))
+                        lambda phone, body, btn, rows, header=None, section_title="": sent["list"].append([r["id"] for r in rows]))
     monkeypatch.setattr(book_bot, "_send_buttons",
                         lambda phone, body, buttons, header=None: sent["buttons"].append([b[0] for b in buttons]))
     monkeypatch.setattr(book_bot, "_send_text",
@@ -127,11 +127,17 @@ def test_all_three_one_tap_then_count_each(fake):
     book_bot.maybe_handle_book(PHONE, "qty_1")           # hindi
     assert db.orders[code]["flow_cursor"]["current"] == "english"
     book_bot.maybe_handle_book(PHONE, "qty_1")           # english → done
-    assert db.sessions[PHONE]["step"] == "book_address"
+    assert db.sessions[PHONE]["step"] == "book_name"
     assert db.orders[code]["items"] == {"malayalam": 1, "hindi": 1, "english": 1}
     assert db.orders[code]["grand_total"] == 664.0       # 549 set + 115 courier (1250g)
 
-    book_bot.maybe_handle_book(PHONE, ADDR)
+    book_bot.maybe_handle_book(PHONE, "Priya Krishnan")  # book_name step
+    assert db.sessions[PHONE]["step"] == "book_address"
+
+    book_bot.maybe_handle_book(PHONE, ADDR)              # book_address step
+    assert db.sessions[PHONE]["step"] == "book_dtdc"
+
+    book_bot.maybe_handle_book(PHONE, "dtdc_skip")       # book_dtdc step
     assert db.sessions[PHONE]["step"] == "book_phone"
     assert sent["buttons"][-1] == ["ph_yes", "ph_edit"]
 
@@ -183,8 +189,10 @@ def _drive_to_summary(db):
     book_bot.maybe_handle_book(PHONE, "book")
     book_bot.maybe_handle_book(PHONE, "bk_ml")
     book_bot.maybe_handle_book(PHONE, "qty_1")
-    book_bot.maybe_handle_book(PHONE, ADDR)
-    book_bot.maybe_handle_book(PHONE, "ph_yes")
+    book_bot.maybe_handle_book(PHONE, "Priya Krishnan")   # book_name step
+    book_bot.maybe_handle_book(PHONE, ADDR)               # book_address step
+    book_bot.maybe_handle_book(PHONE, "dtdc_skip")        # book_dtdc step (no preference)
+    book_bot.maybe_handle_book(PHONE, "ph_yes")           # book_phone step
     assert db.sessions[PHONE]["step"] == "book_summary"
 
 
@@ -195,7 +203,8 @@ def test_edit_address(fake):
     code = _code(db)
     book_bot.maybe_handle_book(PHONE, "ord_edit")
     assert db.sessions[PHONE]["step"] == "book_edit"
-    assert sent["buttons"][-1] == ["ed_books", "ed_addr", "ed_phone"]
+    # edit menu is now a list (5 options: name, books, address, dtdc, phone)
+    assert sent["list"][-1] == ["ed_name", "ed_books", "ed_addr", "ed_dtdc", "ed_phone"]
 
     book_bot.maybe_handle_book(PHONE, "ed_addr")
     assert db.sessions[PHONE]["step"] == "book_edit_address"
@@ -244,12 +253,14 @@ def test_address_without_pincode_rejected(fake):
     book_bot.maybe_handle_book(PHONE, "book")
     book_bot.maybe_handle_book(PHONE, "bk_ml")
     book_bot.maybe_handle_book(PHONE, "qty_1")
+    assert db.sessions[PHONE]["step"] == "book_name"
+    book_bot.maybe_handle_book(PHONE, "Priya Krishnan")               # book_name step
     assert db.sessions[PHONE]["step"] == "book_address"
     book_bot.maybe_handle_book(PHONE, "My house, MG Road, Thrissur")   # no PIN
     assert db.sessions[PHONE]["step"] == "book_address"                # stayed
     assert any("PIN" in m for m in sent["text"])
     book_bot.maybe_handle_book(PHONE, "My house, MG Road, Thrissur 680001")  # with PIN
-    assert db.sessions[PHONE]["step"] == "book_phone"                 # advanced
+    assert db.sessions[PHONE]["step"] == "book_dtdc"                  # advanced to dtdc
 
 
 @pytest.mark.unit
@@ -298,7 +309,8 @@ def test_pay_stage_edit_reopens_order(fake):
     book_bot.maybe_handle_book(PHONE, "pay_edit")
     assert db.sessions[PHONE]["step"] == "book_edit"
     assert db.orders[code]["status"] == "collecting"                 # reopened
-    assert sent["buttons"][-1] == ["ed_books", "ed_addr", "ed_phone"]
+    # edit menu is now a list (5 options)
+    assert sent["list"][-1] == ["ed_name", "ed_books", "ed_addr", "ed_dtdc", "ed_phone"]
 
 
 # ── cancel / re-prompt / misc ─────────────────────────────────────────────────
