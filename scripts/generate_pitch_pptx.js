@@ -418,7 +418,7 @@ prs.title   = 'Printosky Marketplace';
 
   addChip(s, 'Traction', 0.5, 0.35);
   addHeading(s, 'Built on a real, live store.', { y: 0.65, fontSize: 30 });
-  addBody(s,  'Printosky is not a concept deck. It runs live at Oxygen Students Paradise, Thriprayar, Thrissur — processing real print jobs, real payments, real customers every day.', {
+  addBody(s,  'Printosky is not a concept deck. It runs live at Oxygen Students Paradise, Thriprayar — processing real print jobs, real payments, real customers every day.', {
     y: 1.65, w: 8.5, fontSize: 11.5, color: 'AACCEE',
   });
 
