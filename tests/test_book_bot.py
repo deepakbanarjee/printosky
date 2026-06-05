@@ -83,6 +83,56 @@ def _code(db):
     return next(iter(db.orders))
 
 
+# ── website checkout hand-off (ORDER template) ────────────────────────────────
+
+WEB_ORDER = (
+    "ORDER\n"
+    "Name: Priya Krishnan\n"
+    "Phone: 9876543210\n"
+    "Address: 12 MG Road, Thrissur 680001\n"
+    "Aksharamrutham: 2\n"
+    "Vidyamrut: 1\n"
+    "Delivery: courier\n"
+)
+
+
+@pytest.mark.integration
+def test_website_order_ingested_without_reasking(fake):
+    db, sent = fake
+    res = book_bot.maybe_handle_book(PHONE, WEB_ORDER)
+    assert res == []                                    # handled in one shot
+    code = _code(db)
+    o = db.orders[code]
+    assert o["items"] == {"malayalam": 2, "hindi": 1}   # parsed + alias-mapped
+    assert o["name"] == "Priya Krishnan"
+    assert o["address"] == "12 MG Road, Thrissur 680001"
+    assert o["contact_phone"] == "9876543210"
+    assert db.sessions[PHONE]["step"] == "book_summary"
+    # Jumped straight to the summary (Confirm / Edit / Cancel) — never re-asked.
+    assert sent["buttons"][-1] == ["ord_yes", "ord_edit", "ord_no"]
+    assert sent["list"] == []                           # selection list never shown
+
+    # Confirm -> payment QR, status awaiting_payment.
+    book_bot.maybe_handle_book(PHONE, "ord_yes")
+    assert db.orders[code]["status"] == "awaiting_payment"
+    assert sent["qr"] == [code]
+
+
+@pytest.mark.unit
+def test_website_order_ignored_mid_print(fake):
+    db, _ = fake
+    db.sessions[PHONE] = {"step": "size", "job_id": "OSP-x"}
+    # An ORDER message must NOT hijack an in-progress print job.
+    assert book_bot.maybe_handle_book(PHONE, WEB_ORDER) is None
+
+
+@pytest.mark.unit
+def test_incomplete_order_template_not_ingested(fake):
+    db, _ = fake
+    bad = "ORDER\nName: Priya\n"   # no phone, no books -> parse ok=False
+    assert book_bot.maybe_handle_book(PHONE, bad) is None
+
+
 # ── trigger ───────────────────────────────────────────────────────────────────
 
 @pytest.mark.unit

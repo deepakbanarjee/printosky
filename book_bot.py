@@ -695,11 +695,52 @@ def _handle_pay(phone: str, text: str, order: dict) -> list[str]:
 
 # ── public entry points ───────────────────────────────────────────────────────
 
+def _try_website_order(phone: str, text: str, name: str | None) -> list[str] | None:
+    """Ingest a complete ORDER-template message from the website checkout.
+
+    The website collects books, quantities and the delivery address, then sends a
+    fixed ORDER template (book_catalog.parse_anu_order). We create/populate the
+    order in one shot — no re-asking — and drop the customer at the summary step,
+    where the existing Confirm / Edit / Cancel buttons take over (Confirm → QR).
+    Returns [] when handled, or None when the message is not a website order.
+    """
+    parsed = bc.parse_anu_order(text)
+    if parsed is None or not parsed.get("ok"):
+        return None
+
+    existing = _dbc.get_active_book_order(phone)
+    if existing:
+        code = existing["order_code"]
+    else:
+        code = _new_order_code()
+        if not _dbc.create_book_order(code, phone, parsed["name"] or name):
+            code = _new_order_code()
+            _dbc.create_book_order(code, phone, parsed["name"] or name)
+
+    _dbc.update_book_order(
+        code,
+        items=parsed["items"],
+        name=parsed["name"] or name,
+        address=parsed["address"],
+        contact_phone=parsed["phone"],
+        flow_cursor={},
+        status="collecting",
+    )
+    order = _dbc.get_book_order(code)
+    _dbc.save_session(DB, phone, step="book_summary", needs_human=False)
+    _send_summary(phone, order)
+    return []
+
+
 def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[str] | None:
     session = _dbc.get_session(DB, phone) or {}
     step = session.get("step") or ""
 
     if step not in _BOOK_STEPS:
+        if not _in_print_flow(session):
+            web = _try_website_order(phone, text, name)
+            if web is not None:
+                return web
         if is_book_trigger(text) and not _in_print_flow(session):
             return _start(phone, name)
         return None

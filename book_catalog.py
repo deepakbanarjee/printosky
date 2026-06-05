@@ -34,6 +34,11 @@ _COURIER_SLAB_G    = 500    # grams per extra slab
 _COURIER_SLAB_RATE = 40     # ₹ per extra slab
 
 
+# Bulk incentive: orders of 5+ physical books earn a discount on courier charge.
+_BULK_QTY_THRESHOLD    = 5
+_BULK_COURIER_DISCOUNT = 0.07   # 7% off courier for 5+ books
+
+
 def courier_charge(items: dict[str, int]) -> float:
     """Weight-based courier charge for an order.
 
@@ -45,7 +50,10 @@ def courier_charge(items: dict[str, int]) -> float:
         return 0.0
     weight = sum(_WEIGHT_G.get(k, 0) * q for k, q in clean.items())
     extra_slabs = math.ceil(max(0, weight - _COURIER_THRESHOLD) / _COURIER_SLAB_G)
-    return float(_COURIER_BASE + extra_slabs * _COURIER_SLAB_RATE)
+    base = _COURIER_BASE + extra_slabs * _COURIER_SLAB_RATE
+    if sum(clean.values()) >= _BULK_QTY_THRESHOLD:
+        base *= (1 - _BULK_COURIER_DISCOUNT)
+    return float(round(base))
 
 # Divya teacher (Xtraa coordinator) earns a flat commission per physical book
 # sold. Applies to every book order; courier is excluded. CRITICAL: this figure

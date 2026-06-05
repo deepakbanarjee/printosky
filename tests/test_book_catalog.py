@@ -85,8 +85,21 @@ def test_totals_all_three_uses_set_price():
 def test_totals_two_complete_sets():
     t = bc.compute_totals({"malayalam": 2, "hindi": 2, "english": 2})
     assert t["books_total"] == 1098.0     # 549 * 2
-    assert t["grand_total"] == 1293.0  # 1098 books + 195 courier (2500g, 3 extra slabs)
+    # 6 books -> 7% off courier: 195 * 0.93 = 181.35 -> 181
+    assert t["courier"] == 181.0
+    assert t["grand_total"] == 1279.0     # 1098 books + 181 discounted courier
     assert t["is_set"] is True
+
+
+@pytest.mark.unit
+def test_courier_bulk_discount_applies_at_5_books():
+    # 4 books: standard courier, no discount.
+    four = bc.compute_totals({"malayalam": 4})
+    assert four["courier"] == 155.0       # 2000g -> 75 + 2*40
+
+    # 5 books: 7% off courier.
+    five = bc.compute_totals({"malayalam": 5})
+    assert five["courier"] == 181.0       # 2500g -> 195, minus 7% -> 181
 
 
 @pytest.mark.unit

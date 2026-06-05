@@ -670,23 +670,23 @@
 .co-h{font-size:1.15rem;font-weight:800;color:#1a1a2e;margin-bottom:2px;}
 .co-sub{font-size:.82rem;color:#6a7a96;margin-bottom:14px;}
 .co-cart{background:#f6f8fc;border-radius:12px;padding:10px 12px;margin-bottom:14px;}
-.co-line{display:flex;justify-content:space-between;font-size:.85rem;color:#33384a;padding:3px 0;gap:10px;}
+.co-line{display:flex;justify-content:space-between;align-items:center;font-size:.85rem;color:#33384a;padding:4px 0;gap:10px;}
 .co-line.co-total{border-top:1px dashed #cdd5e5;margin-top:6px;padding-top:7px;font-weight:800;color:#0f7b6c;}
-.co-rm{border:none;background:none;color:#c0392b;cursor:pointer;font-size:.72rem;padding:0 2px;}
+.co-qty{display:inline-flex;align-items:center;gap:8px;margin-left:8px;}
+.co-step{width:24px;height:24px;border:1px solid #cdd5e5;background:#fff;border-radius:6px;font-size:16px;line-height:1;cursor:pointer;color:#0f7b6c;font-weight:700;}
+.co-qty b{min-width:16px;text-align:center;}
+.co-courier-note{font-size:.72rem;color:#6a7a96;margin-top:8px;text-align:center;}
 .co-in{width:100%;border:1.5px solid #d8deea;border-radius:10px;padding:11px 12px;font-size:.92rem;margin-bottom:10px;font-family:inherit;box-sizing:border-box;}
 .co-in:focus{outline:none;border-color:#0f7b6c;}
 .co-err{color:#c0392b;font-size:.8rem;margin-bottom:8px;min-height:1em;}
 .co-primary{display:block;width:100%;text-align:center;background:#0f7b6c;color:#fff;border:none;border-radius:12px;padding:14px;font-size:1rem;font-weight:700;cursor:pointer;text-decoration:none;box-sizing:border-box;margin-top:4px;}
 .co-primary:active{transform:scale(.98);}
-.co-wa{background:#25d366;margin-bottom:4px;}
-.co-upi{background:#f0a01a;}
+.co-wa{background:#25d366;}
 .co-add-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;}
 .co-add{border:1.5px solid #0f7b6c;background:#f0faf8;color:#0f7b6c;border-radius:10px;padding:10px 6px;font-size:.72rem;font-weight:700;cursor:pointer;line-height:1.3;}
 .co-add small{font-weight:500;color:#6a7a96;}
 .co-addr-box{background:#f6f8fc;border-radius:12px;padding:10px 12px;font-size:.82rem;color:#33384a;margin-bottom:14px;line-height:1.5;}
-.co-step1{font-size:.74rem;font-weight:700;color:#6a7a96;margin:14px 0 6px;text-transform:uppercase;letter-spacing:.4px;}
-.co-upi-id{text-align:center;font-size:.78rem;color:#6a7a96;margin-top:10px;}
-.co-upi-id code{background:#eef1f7;padding:2px 7px;border-radius:5px;font-weight:700;color:#1a1a2e;}
+.co-upi-id{text-align:center;font-size:.78rem;color:#6a7a96;margin-top:12px;line-height:1.5;}
 </style>
 
 <div id="co-modal" class="co-modal" onclick="if(event.target===this)coClose()">
@@ -694,8 +694,8 @@
     <button class="co-x" type="button" onclick="coClose()" aria-label="Close">&#10005;</button>
 
     <div id="co-addr">
-      <div class="co-h">Delivery address</div>
-      <div class="co-sub">Where should we ship your books?</div>
+      <div class="co-h">Your order</div>
+      <div class="co-sub">Set the number of copies, then add your delivery address.</div>
       <div id="co-addr-cart" class="co-cart"></div>
       <input id="co-name" class="co-in" placeholder="Full name" autocomplete="name">
       <input id="co-phone" class="co-in" placeholder="Phone (10 digit)" inputmode="numeric" autocomplete="tel">
@@ -707,25 +707,22 @@
 
     <div id="co-more" style="display:none">
       <div class="co-h">Add another book?</div>
-      <div class="co-sub">Tap a title to add it, or proceed to payment.</div>
+      <div class="co-sub">Tap a title to add it, adjust copies, or review your order.</div>
       <div id="co-more-cart" class="co-cart"></div>
       <div class="co-add-grid">
         <button type="button" class="co-add" onclick="coAdd('malayalam')">+ Aksharamrutham<br><small>Malayalam &middot; &#8377;200</small></button>
         <button type="button" class="co-add" onclick="coAdd('hindi')">+ Vidyamrut<br><small>Hindi &middot; &#8377;150</small></button>
         <button type="button" class="co-add" onclick="coAdd('english')">+ Easy English<br><small>English &middot; &#8377;200</small></button>
       </div>
-      <button class="co-primary" type="button" onclick="coMoreNext()">No, proceed to payment</button>
+      <button class="co-primary" type="button" onclick="coMoreNext()">No, review my order</button>
     </div>
 
     <div id="co-pay" style="display:none">
-      <div class="co-h">Confirm &amp; pay</div>
+      <div class="co-h">Review &amp; send</div>
       <div id="co-pay-cart" class="co-cart"></div>
       <div id="co-pay-addr" class="co-addr-box"></div>
-      <div class="co-step1">Step 1 &mdash; send your order so we know where to ship</div>
       <a id="co-wa" class="co-primary co-wa" href="#" target="_blank" rel="noopener">&#128241; Send order on WhatsApp</a>
-      <div class="co-step1">Step 2 &mdash; pay <span id="co-upi-amt"></span> via UPI</div>
-      <a id="co-upi" class="co-primary co-upi" href="#">&#128179; Pay via UPI</a>
-      <div class="co-upi-id">Or pay to UPI ID: <code>bhqr.2323001A@sib</code></div>
+      <div class="co-upi-id">We&#39;ll confirm your order and final total (including courier) and share the UPI payment QR on WhatsApp. 5+ books get 7&#37; off courier.</div>
     </div>
 
   </div>
@@ -734,9 +731,7 @@
 <script>
 (function(){
   var WA='919495706405';
-  var UPI_ID='bhqr.2323001A@sib';
-  var UPI_NAME='Oxygen Students Paradise';
-  var R='₹';
+  var R=String.fromCharCode(8377);
   var BOOKS={
     malayalam:{title:'Aksharamrutham (Malayalam)',price:200},
     hindi:{title:'Vidyamrut (Hindi)',price:150},
@@ -745,6 +740,7 @@
   };
   var cart={};
   var addr={name:'',phone:'',line:'',pincode:''};
+  var STEP='addr';
   function g(id){return document.getElementById(id);}
   function total(){var t=0;for(var k in cart){t+=BOOKS[k].price*cart[k];}return t;}
   function count(){var n=0;for(var k in cart){n+=cart[k];}return n;}
@@ -752,55 +748,76 @@
   window.coClose=function(){g('co-modal').classList.remove('open');document.body.style.overflow='';};
   function show(step){['addr','more','pay'].forEach(function(s){g('co-'+s).style.display=(s===step?'block':'none');});}
   function esc(s){return (s||'').replace(/[<>&]/g,function(c){return c==='<'?'&lt;':c==='>'?'&gt;':'&amp;';});}
+  function stepper(k){
+    return '<span class="co-qty">'
+      +'<button type="button" class="co-step" onclick="coSet(\''+k+'\',-1)">-</button>'
+      +'<b>'+cart[k]+'</b>'
+      +'<button type="button" class="co-step" onclick="coSet(\''+k+'\',1)">+</button>'
+      +'</span>';
+  }
   function cartHTML(editable){
     var h='';
     for(var k in cart){
-      var rm=editable?' <button class="co-rm" type="button" onclick="coRemove(\''+k+'\')">remove</button>':'';
-      h+='<div class="co-line"><span>'+BOOKS[k].title+' x'+cart[k]+rm+'</span><span>'+R+(BOOKS[k].price*cart[k])+'</span></div>';
+      var ctrl=editable?stepper(k):('x'+cart[k]);
+      h+='<div class="co-line"><span>'+BOOKS[k].title+' '+ctrl+'</span><span>'+R+(BOOKS[k].price*cart[k])+'</span></div>';
     }
-    h+='<div class="co-line co-total"><span>Total</span><span>'+R+total()+'</span></div>';
+    h+='<div class="co-line co-total"><span>Total (books)</span><span>'+R+total()+'</span></div>';
+    if(editable){h+='<div class="co-courier-note">+ courier, shown on WhatsApp &middot; 5+ books: 7% off courier</div>';}
     return h;
   }
+  function bookCounts(){
+    var cnt={malayalam:0,hindi:0,english:0};
+    for(var k in cart){
+      if(k==='set3'){cnt.malayalam+=cart[k];cnt.hindi+=cart[k];cnt.english+=cart[k];}
+      else if(cnt[k]!==undefined){cnt[k]+=cart[k];}
+    }
+    return cnt;
+  }
   function orderText(){
-    var t='Hi, I want to order Xtraa books:\n';
-    for(var k in cart){t+='- '+BOOKS[k].title+' x'+cart[k]+' ('+R+(BOOKS[k].price*cart[k])+')\n';}
-    t+='Total: '+R+total()+'\n\nDeliver to:\n';
-    t+='Name: '+addr.name+'\nPhone: '+addr.phone+'\nAddress: '+addr.line+'\nPincode: '+addr.pincode;
+    var c=bookCounts();
+    var t='ORDER\n';
+    t+='Name: '+addr.name+'\n';
+    t+='Phone: '+addr.phone+'\n';
+    t+='Address: '+addr.line+' '+addr.pincode+'\n';
+    if(c.malayalam>0){t+='Aksharamrutham: '+c.malayalam+'\n';}
+    if(c.hindi>0){t+='Vidyamrut: '+c.hindi+'\n';}
+    if(c.english>0){t+='Easy English: '+c.english+'\n';}
+    t+='Delivery: courier';
     return t;
   }
   function render(step){
+    STEP=step;
     show(step);
-    if(step==='addr'){g('co-addr-cart').innerHTML=cartHTML(false);}
+    if(step==='addr'){g('co-addr-cart').innerHTML=cartHTML(true);}
     if(step==='more'){g('co-more-cart').innerHTML=cartHTML(true);}
     if(step==='pay'){
       g('co-pay-cart').innerHTML=cartHTML(false);
       g('co-pay-addr').innerHTML='<strong>Deliver to:</strong><br>'+esc(addr.name)+' &middot; '+esc(addr.phone)+'<br>'+esc(addr.line)+' - '+esc(addr.pincode);
       g('co-wa').setAttribute('href','https://wa.me/'+WA+'?text='+encodeURIComponent(orderText()));
-      g('co-upi').setAttribute('href','upi://pay?pa='+encodeURIComponent(UPI_ID)+'&pn='+encodeURIComponent(UPI_NAME)+'&am='+total()+'&cu=INR&tn='+encodeURIComponent('Xtraa books order'));
-      g('co-upi-amt').textContent=R+total();
     }
   }
   window.startOrder=function(id){cart={};cart[id]=1;render('addr');openM();};
   window.orderBundle=function(){cart={};cart.set3=1;render('addr');openM();};
+  window.coSet=function(k,d){cart[k]=(cart[k]||0)+d;if(cart[k]<=0){delete cart[k];}render(STEP);};
+  window.coAdd=function(id){cart[id]=(cart[id]||0)+1;render('more');};
   window.coAddrNext=function(){
+    if(!count()){g('co-addr-err').textContent='Add at least one book.';return;}
     var n=g('co-name').value.trim();
     var p=g('co-phone').value.replace(/\D/g,'');
     var l=g('co-line').value.trim();
     var pin=g('co-pin').value.replace(/\D/g,'');
     var e=[];
-    if(n.length<2)e.push('name');
-    if(p.length!==10)e.push('10-digit phone');
-    if(l.length<8)e.push('full address');
-    if(pin.length!==6)e.push('6-digit pincode');
+    if(n.length<2){e.push('name');}
+    if(p.length!==10){e.push('10-digit phone');}
+    if(l.length<8){e.push('full address');}
+    if(pin.length!==6){e.push('6-digit pincode');}
     if(e.length){g('co-addr-err').textContent='Please enter a valid '+e.join(', ')+'.';return;}
     g('co-addr-err').textContent='';
     addr={name:n,phone:p,line:l,pincode:pin};
     render('more');
   };
-  window.coAdd=function(id){cart[id]=(cart[id]||0)+1;render('more');};
-  window.coRemove=function(id){if(cart[id]){cart[id]--;if(cart[id]<=0)delete cart[id];}render('more');};
   window.coMoreNext=function(){if(!count()){g('co-more-cart').innerHTML='<div class="co-err">Add at least one book.</div>';return;}render('pay');};
-  document.addEventListener('keydown',function(ev){if(ev.key==='Escape')coClose();});
+  document.addEventListener('keydown',function(ev){if(ev.key==='Escape'){coClose();}});
 })();
 </script>
 </body>
