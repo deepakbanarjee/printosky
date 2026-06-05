@@ -1435,6 +1435,17 @@
     </div>
   </div>
 
+  <!-- Book order detail modal -->
+  <div id="book-detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center" onclick="if(event.target===this)closeBookDetail()">
+    <div style="background:#fff;color:#1a2330;border-radius:12px;padding:20px;max-width:480px;width:94%;max-height:92vh;overflow:auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+        <div id="bd-title" style="font-weight:700;font-size:15px;line-height:1.4"></div>
+        <button onclick="closeBookDetail()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#888;line-height:1;padding:0 0 0 10px">✕</button>
+      </div>
+      <div id="bd-body"></div>
+    </div>
+  </div>
+
   <div id="opq-tab" style="display:none">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div style="font-size:.85rem;color:var(--muted)">AI-failed orders awaiting operator finish · SLA 6h</div>
@@ -4247,7 +4258,7 @@ function renderBookOrders(rows) {
       ? `<div style="font-size:.78rem;color:#555;margin-top:2px">🚚 ${(o.courier_name || '')}${o.tracking_no ? ' · ' + o.tracking_no : ''}</div>` : '';
     return `<div style="border:1px solid #e6e6e6;border-radius:8px;padding:12px;margin-bottom:10px;background:#fff">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <strong>${o.order_code}${srcTag}</strong>
+        <strong style="cursor:pointer;text-decoration:underline;text-underline-offset:3px;text-decoration-color:#bbb" onclick="openBookOrderDetail('${o.order_code}')">${o.order_code}</strong>${srcTag}
         <span style="color:${color};font-weight:700;text-transform:uppercase;font-size:.7rem;letter-spacing:.05em">${(o.status || '').replace('_', ' ')}</span>
       </div>
       <div style="font-size:.85rem;margin-top:5px">${_bookItemsSummary(o.items)} &nbsp;·&nbsp; <strong>₹${o.grand_total || 0}</strong>${payTag}</div>
@@ -4578,6 +4589,90 @@ function openEditBookOrder(code) {
 }
 
 function closeEditBookOrder() { document.getElementById('edit-modal').style.display = 'none'; }
+
+function openBookOrderDetail(code) {
+  const o = (_bookOrdersCache || []).find(x => x.order_code === code);
+  if (!o) { alert('Order not found — refresh and retry.'); return; }
+  const badgeColor = {
+    collecting:'#999', awaiting_payment:'#d97706', payment_review:'#dc2626',
+    confirmed:'#16a34a', dispatched:'#2563eb', delivered:'#15803d', cancelled:'#666',
+  };
+  const color = badgeColor[o.status] || '#666';
+  const statusLabel = (o.status || '').replace(/_/g, ' ').toUpperCase();
+  const fmt = ts => ts ? new Date(ts).toLocaleString('en-IN', {
+    timeZone:'Asia/Kolkata', day:'numeric', month:'short', year:'numeric',
+    hour:'2-digit', minute:'2-digit'
+  }) : '—';
+  const bookNames  = { malayalam:'Aksharamrutham (ML)', hindi:'Vidyamrut (HI)', english:'Easy English (EN)' };
+  const bookPrices = { malayalam:200, hindi:150, english:200 };
+  const items = o.items || {};
+  const itemLines = Object.entries(items).filter(([,q])=>q>0).map(([k,q])=>
+    `<div style="display:flex;justify-content:space-between"><span>${bookNames[k]||k} × ${q}</span><span>₹${(bookPrices[k]||0)*q}</span></div>`
+  ).join('');
+  const proof = o.payment_proof_url
+    ? `<a href="${o.payment_proof_url}" target="_blank" rel="noopener">
+         <img src="${o.payment_proof_url}" alt="payment proof" loading="lazy"
+              style="max-width:100%;border-radius:8px;border:1px solid #ddd;margin-top:4px;display:block;cursor:zoom-in">
+       </a>`
+    : `<span style="color:#999;font-size:.82rem">No screenshot received</span>`;
+  const collLabel = { oxygen:'Oxygen collected', divya:'Divya collected', pending:'Payment pending' }[o.payment_collected_by] || (o.payment_collected_by||'—');
+  const srcTag = o.source === 'walk_in' ? ' · Walk-in' : o.source === 'divya' ? ' · Divya intake' : ' · WhatsApp';
+  document.getElementById('bd-title').innerHTML =
+    `<span style="font-family:monospace;font-size:13px">${o.order_code}</span>&nbsp;` +
+    `<span style="color:${color};font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em">${statusLabel}</span>`;
+  document.getElementById('bd-body').innerHTML = `
+    <div style="display:grid;gap:16px;font-size:.88rem">
+      <div>
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:#aaa;margin-bottom:5px">Customer</div>
+        <div style="font-weight:600;font-size:.95rem">${(o.name||'—').replace(/</g,'&lt;')}</div>
+        <div style="color:#555;margin-top:2px">📞 ${o.contact_phone||o.phone||'—'}</div>
+      </div>
+      <div>
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:#aaa;margin-bottom:5px">Books ordered</div>
+        <div style="display:grid;gap:3px">${itemLines||'<span style="color:#999">—</span>'}</div>
+        <div style="border-top:1px solid #f0f0f0;margin-top:7px;padding-top:7px;display:grid;gap:3px">
+          <div style="display:flex;justify-content:space-between;color:#666"><span>Courier</span><span>₹${o.courier||0}</span></div>
+          <div style="display:flex;justify-content:space-between;font-weight:700"><span>Grand total</span><span>₹${o.grand_total||0}</span></div>
+          ${o.payment_mode ? `<div style="color:#888;font-size:.77rem">Paid via ${(o.payment_mode||'').toUpperCase()}</div>` : ''}
+        </div>
+      </div>
+      <div>
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:#aaa;margin-bottom:5px">Delivery address</div>
+        <div style="white-space:pre-wrap;color:#333;line-height:1.5">${(o.address||'—').replace(/</g,'&lt;')}</div>
+        ${o.dtdc_center ? `<div style="margin-top:5px;color:#555">🏢 DTDC: ${o.dtdc_center.replace(/</g,'&lt;')}</div>` : ''}
+      </div>
+      ${o.via_divya !== false ? `
+      <div>
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:#aaa;margin-bottom:5px">Divya commission</div>
+        <div>₹${o.commission||0} · ${collLabel}</div>
+        <div style="margin-top:3px;font-size:.8rem">
+          ${o.divya_settled
+            ? `<span style="color:#15803d">✓ Settled</span>`
+            : `<span style="color:#d97706">Unsettled</span>`}
+          ${o.delivery_method === 'xtraa_office' ? ' · 🏫 Xtraa office delivery' : ''}
+        </div>
+      </div>` : ''}
+      <div>
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:#aaa;margin-bottom:5px">Payment proof</div>
+        ${proof}
+      </div>
+      ${(o.courier_name||o.tracking_no) ? `
+      <div>
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:#aaa;margin-bottom:5px">Shipment</div>
+        <div>🚚 ${(o.courier_name||'').replace(/</g,'&lt;')}${o.tracking_no ? ' · ' + o.tracking_no.replace(/</g,'&lt;') : ''}</div>
+      </div>` : ''}
+      <div style="font-size:.77rem;color:#999;border-top:1px solid #f0f0f0;padding-top:10px;display:grid;gap:4px">
+        <div>📅 Created: ${fmt(o.created_at)}</div>
+        ${o.confirmed_at  ? `<div>✅ Confirmed: ${fmt(o.confirmed_at)}</div>`  : ''}
+        ${o.dispatched_at ? `<div>📦 Dispatched: ${fmt(o.dispatched_at)}</div>` : ''}
+        ${o.delivered_at  ? `<div>🏠 Delivered: ${fmt(o.delivered_at)}</div>`  : ''}
+        <div>Source: ${(o.source||'—').replace(/_/g,' ')}${o.via_divya ? ' · via Divya' : ''}</div>
+      </div>
+    </div>`;
+  document.getElementById('book-detail-modal').style.display = 'flex';
+}
+
+function closeBookDetail() { document.getElementById('book-detail-modal').style.display = 'none'; }
 
 async function submitEditBookOrder() {
   const code = document.getElementById('edit-code').value;
