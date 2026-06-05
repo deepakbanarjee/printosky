@@ -669,6 +669,21 @@ def _process_meta_webhook(data: dict) -> None:
             contacts = value.get("contacts", [])
             pushname = (contacts[0].get("profile", {}).get("name")
                         if contacts else None)
+
+            # Outbound status callbacks (sent/delivered/read/failed) carry a
+            # `pricing` object — Meta's billing category + billable flag. Record
+            # per-message cost telemetry (wa_message_costs). Best-effort: never
+            # blocks message handling. A webhook value holds messages OR statuses.
+            for st in value.get("statuses", []):
+                try:
+                    from db_cloud import record_wa_message_cost
+                    record_wa_message_cost(
+                        st.get("id", ""), st.get("recipient_id"), st.get("status"),
+                        pricing=st.get("pricing"), conversation=st.get("conversation"),
+                    )
+                except Exception as exc:
+                    logger.error("wa status cost record failed: %s", exc)
+
             for msg in value.get("messages", []):
                 # Idempotency guard (TASK-013): Meta retries on slow handlers.
                 # Each WhatsApp message has a unique wamid (msg.id). Skip

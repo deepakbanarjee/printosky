@@ -373,6 +373,63 @@ def log_message(phone: str, direction: str, body: str,
         logger.warning(f"log_message error ({direction} {phone}): {e}")
 
 
+# ── WhatsApp (Meta) per-message cost tracking ─────────────────────────────────
+# Meta never returns a money amount, but each outbound message's status callback
+# carries a `pricing` object: category (service / marketing / utility /
+# authentication) + a `billable` flag. We honour `billable` (service and
+# in-window utility are free) and apply this rate card to ESTIMATE the INR spend.
+# VERIFY rates against Meta's current India price list — they change; only the
+# `billable` flag from Meta is authoritative for whether a message is charged.
+WA_RATE_CARD_INR: dict[str, float] = {
+    "marketing":      0.78,
+    "utility":        0.12,
+    "authentication": 0.12,
+    "service":        0.00,
+}
+
+
+def wa_estimated_cost_inr(category: str | None, billable: bool | None) -> float:
+    """Estimated INR for one message given Meta's category + billable flag."""
+    if not billable:
+        return 0.0
+    return float(WA_RATE_CARD_INR.get((category or "").lower(), 0.0))
+
+
+def record_wa_message_cost(wamid: str, recipient: str | None, status: str | None,
+                           pricing: dict | None = None,
+                           conversation: dict | None = None) -> None:
+    """Upsert a per-message WhatsApp cost row from a Meta status callback.
+
+    Keyed by wamid; called for every status (sent / delivered / read / failed).
+    The `pricing` object usually arrives on 'sent'. Cost fields are written only
+    when `pricing` is present, so a later status without pricing never clears an
+    earlier estimate. Silent on error — cost telemetry must never break the
+    webhook.
+    """
+    if not wamid:
+        return
+    row: dict = {
+        "wamid":      wamid,
+        "recipient":  recipient,
+        "status":     status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if pricing:
+        category = pricing.get("category")
+        billable = pricing.get("billable")
+        row["category"]      = category
+        row["billable"]      = billable
+        row["pricing_model"] = pricing.get("pricing_model")
+        row["est_cost_inr"]  = wa_estimated_cost_inr(category, billable)
+    if conversation:
+        row["conversation_id"] = conversation.get("id")
+        row["origin_type"]     = (conversation.get("origin") or {}).get("type")
+    try:
+        _client().table("wa_message_costs").upsert(row, on_conflict="wamid").execute()
+    except Exception as exc:
+        logger.warning("record_wa_message_cost error for %s: %s", wamid, exc)
+
+
 def find_sla_breaches(threshold_hours: int = 1,
                       alert_cooldown_hours: int = 6,
                       lookback_hours: int = 48) -> list[dict]:
