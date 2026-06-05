@@ -129,7 +129,7 @@ def test_all_three_one_tap_then_count_each(fake):
     book_bot.maybe_handle_book(PHONE, "qty_1")           # english → done
     assert db.sessions[PHONE]["step"] == "book_address"
     assert db.orders[code]["items"] == {"malayalam": 1, "hindi": 1, "english": 1}
-    assert db.orders[code]["grand_total"] == 624.0       # 549 set + 75
+    assert db.orders[code]["grand_total"] == 664.0       # 549 set + 115 courier (1250g)
 
     book_bot.maybe_handle_book(PHONE, ADDR)
     assert db.sessions[PHONE]["step"] == "book_phone"
@@ -164,7 +164,7 @@ def test_pair_one_tap(fake):
     book_bot.maybe_handle_book(PHONE, "qty_2")           # ml ×2
     book_bot.maybe_handle_book(PHONE, "qty_1")           # en ×1 → done
     assert db.orders[code]["items"] == {"malayalam": 2, "english": 1}
-    assert db.orders[code]["grand_total"] == 675.0       # 400+200+75
+    assert db.orders[code]["grand_total"] == 715.0       # 400+200 + 115 courier (1500g)
 
 
 @pytest.mark.unit
