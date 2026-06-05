@@ -202,7 +202,7 @@ def _send_select_list(phone: str, edit: bool = False) -> None:
         body = ("📚 *Xtraa — Adithara Balappeduthu*\nFoundation books for early "
                 "readers.\n\nChoose the books you'd like — pick *one row* for a "
                 "single book, a pair, or all three.\n\n"
-                f"_+ ₹{bc.COURIER} courier per order._")
+                f"_+ courier charged by weight (₹75+)._")
     _send_list(phone, body, "📚 Choose books", rows, header="Xtraa Books")
 
 
@@ -347,7 +347,7 @@ def _start(phone: str, name: str | None, force_new: bool = False) -> list[str]:
     if active and active.get("status") in ("collecting", "awaiting_payment"):
         code = active["order_code"]
         _dbc.update_book_order(code, items={}, flow_cursor={}, status="collecting",
-                               books_total=0, courier=bc.COURIER, grand_total=0,
+                               books_total=0, courier=0, grand_total=0,
                                address=None, contact_phone=None, payment_proof_url=None)
     elif active and active.get("status") == "payment_review":
         return [
@@ -465,7 +465,7 @@ def _handle_summary(phone: str, text: str, order: dict) -> list[str]:
         return []
     if t == "ord_no" or t in _NEGATE:
         _dbc.update_book_order(code, items={}, flow_cursor={},
-                               books_total=0, courier=bc.COURIER, grand_total=0,
+                               books_total=0, courier=0, grand_total=0,
                                address=None, contact_phone=None)
         _dbc.save_session(DB, phone, step="book_select")
         _send_text(phone, "No problem — let's start over.")

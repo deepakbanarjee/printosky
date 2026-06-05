@@ -77,7 +77,7 @@ def test_totals_two_books_no_set_price():
 def test_totals_all_three_uses_set_price():
     t = bc.compute_totals({"malayalam": 1, "hindi": 1, "english": 1})
     assert t["books_total"] == 549.0      # set price, not 550
-    assert t["grand_total"] == 624.0
+    assert t["grand_total"] == 664.0   # 549 books + 115 courier (1250g, 1 extra slab)
     assert t["is_set"] is True
 
 
@@ -85,7 +85,7 @@ def test_totals_all_three_uses_set_price():
 def test_totals_two_complete_sets():
     t = bc.compute_totals({"malayalam": 2, "hindi": 2, "english": 2})
     assert t["books_total"] == 1098.0     # 549 * 2
-    assert t["grand_total"] == 1173.0
+    assert t["grand_total"] == 1293.0  # 1098 books + 195 courier (2500g, 3 extra slabs)
     assert t["is_set"] is True
 
 

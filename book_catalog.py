@@ -1,12 +1,12 @@
 """Xtraa book campaign — catalog data and pure order logic.
 
 This module holds NO I/O. Everything here is pure and unit-tested so the
-conversational flow in book_bot.py can stay thin. Edit BOOKS / SET_PRICE /
-COURIER below to change pricing — nothing else needs to change.
+conversational flow in book_bot.py can stay thin. Edit BOOKS / SET_PRICE / courier constants below to change pricing — nothing else needs to change.
 """
 
 from __future__ import annotations
 
+import math
 import re
 
 # ── Catalog ───────────────────────────────────────────────────────────────────
@@ -24,8 +24,28 @@ BOOK_KEYS: list[str] = ["malayalam", "hindi", "english"]
 # Price for a complete set of all three (one of each). Honours the poster offer.
 SET_PRICE = 549
 
-# Flat courier charge added to every order (owner decision, 2026-06-02).
-COURIER = 75
+# Book weights in grams (used for courier calculation).
+_WEIGHT_G: dict[str, int] = {"malayalam": 500, "hindi": 250, "english": 500}
+
+# Courier pricing: ₹75 for first 1 kg, +₹40 per additional 500 g slab (ceiling).
+_COURIER_BASE      = 75
+_COURIER_THRESHOLD = 1000   # grams included in base rate
+_COURIER_SLAB_G    = 500    # grams per extra slab
+_COURIER_SLAB_RATE = 40     # ₹ per extra slab
+
+
+def courier_charge(items: dict[str, int]) -> float:
+    """Weight-based courier charge for an order.
+
+    ₹75 for the first kg, +₹40 per additional 500 g slab (ceiling division).
+    Returns 0 for an empty cart.
+    """
+    clean = {k: int(q) for k, q in items.items() if q and int(q) > 0}
+    if not clean:
+        return 0.0
+    weight = sum(_WEIGHT_G.get(k, 0) * q for k, q in clean.items())
+    extra_slabs = math.ceil(max(0, weight - _COURIER_THRESHOLD) / _COURIER_SLAB_G)
+    return float(_COURIER_BASE + extra_slabs * _COURIER_SLAB_RATE)
 
 # Divya teacher (Xtraa coordinator) earns a flat commission per physical book
 # sold. Applies to every book order; courier is excluded. CRITICAL: this figure
@@ -215,7 +235,7 @@ def compute_totals(items: dict[str, int]) -> dict:
     else:
         books_total = sum(BOOKS[k]["price"] * q for k, q in clean.items() if k in BOOKS)
 
-    courier = COURIER if clean else 0
+    courier = courier_charge(clean)
     return {
         "books_total": float(books_total),
         "courier":     float(courier),
