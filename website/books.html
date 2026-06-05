@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -286,7 +286,25 @@
       background: rgba(255,246,234,0.7);
     }
 
-    /* Authors */
+    
+    /* UPI Payment QRs */
+    .upi-section { padding: 28px 16px 8px; max-width: 640px; margin: 0 auto; }
+    .upi-title { font-size: 0.72rem; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--mid); margin-bottom: 4px; }
+    .upi-sub { font-size: 0.78rem; color: #6a7a96; margin-bottom: 16px; line-height: 1.4; }
+    .upi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .upi-card { background: #fff; border-radius: 14px; padding: 14px 12px 12px; text-align: center; box-shadow: 0 2px 10px rgba(26,26,46,0.07); }
+    .upi-card.set3 { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; text-align: left; background: linear-gradient(135deg,#fff,#f0faf8); border: 1.5px solid rgba(15,123,108,0.2); }
+    .upi-qr-img { width: 120px; height: 120px; display: block; margin: 0 auto 8px; border-radius: 6px; }
+    .upi-card.set3 .upi-qr-img { margin: 0; flex-shrink: 0; }
+    .upi-book-lang { font-size: 0.62rem; font-weight: 600; color: var(--mid); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+    .upi-book-name { font-size: 0.75rem; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+    .upi-amount { font-size: 1rem; font-weight: 800; color: var(--teal); }
+    .upi-card.set3 .upi-amount { font-size: 1.2rem; color: var(--gold); }
+    .upi-card.set3 .upi-book-name { font-size: 0.9rem; }
+    .upi-note { font-size: 0.68rem; color: #6a7a96; margin-top: 4px; }
+    .upi-id-bar { margin-top: 14px; padding: 10px 14px; background: #f0f4ff; border-radius: 10px; font-size: 0.75rem; color: #4a5070; text-align: center; }
+    .upi-id-bar code { font-family: monospace; font-weight: 700; color: var(--navy); background: #e0e6ff; padding: 2px 7px; border-radius: 4px; }
+/* Authors */
     .authors {
       padding: 28px 16px 24px;
       max-width: 640px;
@@ -542,6 +560,42 @@
     <span class="chip">Picture Stories</span>
   </div>
 
+
+  <!-- UPI Payment QRs -->
+  <section class="upi-section">
+    <div class="upi-title">Pay via UPI</div>
+    <div class="upi-sub">Scan with GPay, PhonePe or BHIM. After paying, send the screenshot on WhatsApp with your delivery address.</div>
+    <div class="upi-grid">
+      <div class="upi-card">
+        <img class="upi-qr-img" src="assets/pay-qr-malayalam.png" alt="Pay Rs.200 Aksharamrutham">
+        <div class="upi-book-lang">Malayalam</div>
+        <div class="upi-book-name">Aksharamrutham</div>
+        <div class="upi-amount">Rs.200</div>
+      </div>
+      <div class="upi-card">
+        <img class="upi-qr-img" src="assets/pay-qr-hindi.png" alt="Pay Rs.150 Vidyamrut">
+        <div class="upi-book-lang">Hindi</div>
+        <div class="upi-book-name">Vidyamrut</div>
+        <div class="upi-amount">Rs.150</div>
+      </div>
+      <div class="upi-card">
+        <img class="upi-qr-img" src="assets/pay-qr-english.png" alt="Pay Rs.200 Easy English">
+        <div class="upi-book-lang">English</div>
+        <div class="upi-book-name">Easy English</div>
+        <div class="upi-amount">Rs.200</div>
+      </div>
+      <div class="upi-card set3">
+        <img class="upi-qr-img" src="assets/pay-qr-set3.png" alt="Pay Rs.549 Set of 3">
+        <div>
+          <div class="upi-book-lang">Best value</div>
+          <div class="upi-book-name">Set of 3 Books</div>
+          <div class="upi-amount">Rs.549</div>
+          <div class="upi-note">Save Rs.101 vs buying separately</div>
+        </div>
+      </div>
+    </div>
+    <div class="upi-id-bar">UPI ID: <code>bhqr.2323001A@sib</code> | Oxygen Students Paradise</div>
+  </section>
   <!-- Authors -->
   <section class="authors">
     <div class="authors-title">About the authors</div>
