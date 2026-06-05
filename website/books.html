@@ -246,6 +246,77 @@
       background: rgba(255,246,234,0.7);
     }
 
+    /* Authors */
+    .authors {
+      padding: 28px 16px 24px;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+    .authors-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--mid);
+      margin-bottom: 16px;
+    }
+    .author-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .author-card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 18px 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      box-shadow: 0 2px 12px rgba(26,26,46,0.07);
+    }
+    .author-photo {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      object-fit: cover;
+      object-position: top center;
+      flex-shrink: 0;
+      border: 3px solid var(--light);
+    }
+    .author-info {}
+    .author-name {
+      font-size: 1rem;
+      font-weight: 800;
+      color: var(--navy);
+      line-height: 1.1;
+      margin-bottom: 2px;
+    }
+    .author-role {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--teal);
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .author-bio {
+      font-size: 0.8rem;
+      color: #4a4a5e;
+      line-height: 1.5;
+      font-weight: 500;
+    }
+    .author-quote {
+      margin-top: 10px;
+      padding: 10px 12px;
+      background: #f0faf8;
+      border-left: 3px solid var(--teal);
+      border-radius: 0 8px 8px 0;
+      font-size: 0.78rem;
+      color: var(--teal);
+      font-style: italic;
+      line-height: 1.45;
+    }
+
     /* CTA Section */
     .cta-section {
       background: var(--navy);
@@ -424,6 +495,38 @@
     <span class="chip">Trace &amp; Write</span>
     <span class="chip">Picture Stories</span>
   </div>
+
+  <!-- Authors -->
+  <section class="authors">
+    <div class="authors-title">About the authors</div>
+    <div class="author-cards">
+
+      <div class="author-card">
+        <img class="author-photo" src="assets/author-pradeep.jpg" alt="Pradeep K K">
+        <div class="author-info">
+          <div class="author-name">Pradeep K K</div>
+          <div class="author-role">Author · Educator</div>
+          <div class="author-bio">
+            Hindi teacher at SRKGVMHSS Puranattukara, Kerala.<br>
+            MCA, BA, B.Ed (Hindi) · Author of all three Xtraa Learning Buddy editions.
+          </div>
+          <div class="author-quote">"Learning should feel like play — a daily, gentle adventure shared with a friendly buddy."</div>
+        </div>
+      </div>
+
+      <div class="author-card">
+        <img class="author-photo" src="assets/author-divya.png" alt="Divya M">
+        <div class="author-info">
+          <div class="author-name">Divya M</div>
+          <div class="author-role">Founder · Xtraa Learning Buddy</div>
+          <div class="author-bio">
+            Educator and founder of Xtraa Learning Buddy. Conceptualised the series to make early language learning joyful, accessible and rooted in the Kerala curriculum.
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
 
   <section class="cta-section">
     <div class="cta-title">Order on WhatsApp</div>
