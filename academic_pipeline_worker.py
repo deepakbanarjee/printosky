@@ -100,7 +100,10 @@ def _process(order: dict) -> None:
         _client().storage.from_(STORAGE_BUCKET).upload(
             storage_filename,
             content,
-            {"content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+            {"content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+             # upsert so re-processing a project (retry after a partial failure)
+             # overwrites the object instead of erroring on a duplicate name.
+             "upsert": "true"},
         )
         public_url: str = _client().storage.from_(STORAGE_BUCKET).get_public_url(storage_filename)
 
@@ -113,12 +116,18 @@ def _process(order: dict) -> None:
             "updated_at": datetime.datetime.utcnow().isoformat(),
         }).eq("project_id", project_id).execute()
 
-        phone = order["whatsapp_phone"]
-        name  = order.get("customer_name", "")
-        if phase == 1:
-            notify_chapters_ready(phone, name, project_id)
-        else:
-            notify_phase2_link(phone, name, project_id)
+        # Notify best-effort. The order is already committed at this point
+        # (DOCX uploaded + status advanced), so a flaky WhatsApp send must NOT
+        # bubble up to the outer except and revert a completed generation.
+        try:
+            phone = order["whatsapp_phone"]
+            name  = order.get("customer_name", "")
+            if phase == 1:
+                notify_chapters_ready(phone, name, project_id)
+            else:
+                notify_phase2_link(phone, name, project_id)
+        except Exception as e:
+            logger.error(f"{project_id}: notify failed (order still completed): {e}")
 
         logger.info(f"{project_id}: phase {phase} complete → {next_status}")
 
@@ -140,7 +149,13 @@ def poll_once() -> None:
         if orders:
             logger.info(f"Found {len(orders)} order(s) to process")
         for order in orders:
-            _process(order)
+            # Guard each order so one malformed/poison row (e.g. missing
+            # project_id) cannot abort processing of the rest of the batch.
+            try:
+                _process(order)
+            except Exception as e:
+                oid = order.get("project_id", "<unknown>") if isinstance(order, dict) else "<unknown>"
+                logger.error(f"{oid}: _process crashed, skipping (batch continues): {e}")
     except Exception as e:
         logger.error(f"poll error: {e}")
 
