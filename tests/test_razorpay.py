@@ -284,3 +284,43 @@ class TestCreatePaymentLink:
         result = rz.create_payment_link("OSP-1", 50.0, "d")
         assert "error" in result
         assert "no network" in result["error"]
+
+
+class TestVerifyCheckoutPayment:
+    """Inline-checkout signature verification — gates the payment-confirm
+    endpoint at api/index.py:3861. Razorpay signs
+    HMAC_SHA256("{order_id}|{payment_id}", KEY_SECRET). Had zero coverage."""
+
+    KEY_SECRET = "test_secret"
+
+    @pytest.fixture(autouse=True)
+    def _use_test_key_secret(self, monkeypatch):
+        # conftest may have imported the module with a different env value;
+        # pin it so _checkout_sig() and verify_checkout_payment agree.
+        monkeypatch.setattr(rz, "RAZORPAY_KEY_SECRET", self.KEY_SECRET)
+
+    def _checkout_sig(self, order_id, payment_id, secret=None):
+        secret = secret or self.KEY_SECRET
+        return hmac.new(secret.encode(), f"{order_id}|{payment_id}".encode(),
+                        hashlib.sha256).hexdigest()
+
+    def test_valid_signature_accepted(self):
+        sig = self._checkout_sig("order_1", "pay_1")
+        assert rz.verify_checkout_payment("order_1", "pay_1", sig) is True
+
+    def test_wrong_signature_rejected(self):
+        assert rz.verify_checkout_payment("order_1", "pay_1", "deadbeef") is False
+
+    def test_wrong_secret_rejected(self):
+        sig = self._checkout_sig("order_1", "pay_1", secret="attacker_guess")
+        assert rz.verify_checkout_payment("order_1", "pay_1", sig) is False
+
+    def test_swapped_ids_rejected(self):
+        # a signature for (order_1, pay_1) must not validate (pay_1, order_1)
+        sig = self._checkout_sig("order_1", "pay_1")
+        assert rz.verify_checkout_payment("pay_1", "order_1", sig) is False
+
+    def test_non_ascii_signature_does_not_raise(self):
+        # hmac.compare_digest raises on non-ASCII input; the function must
+        # catch and return False rather than 500 the endpoint.
+        assert rz.verify_checkout_payment("order_1", "pay_1", "bad-☠") is False
