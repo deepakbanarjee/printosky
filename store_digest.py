@@ -144,3 +144,46 @@ def compose_closing_message(
     if monthly_rows is not None and is_last_working_day_of_month(d):
         parts.append(format_monthly_log(monthly_rows))
     return "\n\n".join(parts)
+
+
+# ── Up/down transition brain (pure; I/O lives in the cron handler) ─────────────
+def decide_transition(
+    *,
+    online: bool,
+    prev_state: str,
+    today_str: str,
+    close_date_str: str,
+    opening_sent_date: str | None,
+    closing_sent_date: str | None,
+) -> dict:
+    """Decide what the heartbeat cron should do this tick.
+
+    - online + was down  -> send opening (once per `today_str`)
+    - offline + was up    -> send closing (once per `close_date_str`)
+    - first run (prev_state 'unknown') only records state, never alerts.
+
+    Returns the actions plus the updated sent-date guards to persist.
+    """
+    send_opening = False
+    send_closing = False
+    opening_sent = opening_sent_date
+    closing_sent = closing_sent_date
+
+    if online:
+        new_state = "up"
+        if prev_state == "down" and opening_sent != today_str:
+            send_opening = True
+            opening_sent = today_str
+    else:
+        new_state = "down"
+        if prev_state == "up" and closing_sent != close_date_str:
+            send_closing = True
+            closing_sent = close_date_str
+
+    return {
+        "new_state": new_state,
+        "send_opening": send_opening,
+        "send_closing": send_closing,
+        "opening_sent_date": opening_sent,
+        "closing_sent_date": closing_sent,
+    }

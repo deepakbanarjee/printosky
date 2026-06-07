@@ -1,9 +1,11 @@
-name: Printosky crons (SLA watchdog + abandoned book carts)
+name: Printosky crons (SLA watchdog + abandoned book carts + store-PC watch)
 
 # Vercel Hobby plan only allows once-per-day crons, so these 30-minute jobs are
 # driven from GitHub Actions instead:
 #   /cron/sla-check       — message the owner if a customer has waited > 1h
 #   /cron/abandoned-carts — nudge customers who left a book order unfinished
+#   /cron/store-pc-check  — alert the owner when the store PC goes up/down,
+#                           with day/week/month logs at closing
 on:
   schedule:
     - cron: "*/30 * * * *"   # every 30 minutes (UTC)
@@ -30,6 +32,16 @@ jobs:
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "https://printosky.vercel.app/cron/abandoned-carts")
           echo "HTTP $code"; cat /tmp/cart.json || true
+          exit 0
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      - name: Store-PC liveness watch
+        run: |
+          echo "Calling store-PC watcher..."
+          code=$(curl -s -o /tmp/pc.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://printosky.vercel.app/cron/store-pc-check")
+          echo "HTTP $code"; cat /tmp/pc.json || true
           exit 0
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

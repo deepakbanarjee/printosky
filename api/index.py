@@ -1304,6 +1304,158 @@ def _handle_cron_sla_check(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+# ── Store-PC liveness watcher ─────────────────────────────────────────────────
+# The store PC writes daily_summary.synced_at (naive IST wall-clock text) every
+# ~5 min. This cron treats that as a heartbeat: if it goes stale the PC is down.
+# PRIOFF is the dev/test box; OSP is the real store PC, so we monitor OSP.
+STORE_PC_MONITOR_ID  = os.environ.get("STORE_PC_MONITOR_ID", "OSP")
+STORE_PC_OFFLINE_MIN = int(os.environ.get("STORE_PC_OFFLINE_MIN", "20"))
+
+
+def _sd_week_start(d):
+    """Monday of d's week as 'YYYY-MM-DD'."""
+    from datetime import timedelta
+    return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+
+
+def _sd_summary_row(c, store_id, date_str):
+    r = (c.table("daily_summary").select("*")
+          .eq("store_id", store_id).eq("date", date_str).limit(1).execute())
+    if r.data:
+        return r.data[0]
+    return {"date": date_str, "total_jobs": 0, "completed": 0,
+            "pending": 0, "revenue": 0, "cash": 0, "upi": 0}
+
+
+def _sd_summary_range(c, store_id, start_str, end_str):
+    r = (c.table("daily_summary").select("*")
+          .eq("store_id", store_id)
+          .gte("date", start_str).lte("date", end_str).execute())
+    return r.data or []
+
+
+def _handle_cron_store_pc_check(h) -> None:
+    """GET /cron/store-pc-check — store-PC liveness watcher (heartbeat absence).
+
+    Reads the monitored store's heartbeat (latest daily_summary.synced_at),
+    compares to now (IST), and on an up<->down transition messages the owner:
+      - down -> up : opening message
+      - up -> down : closing message + day log (+ weekly on Sat, + monthly on the
+                     last working day of the month)
+    Catches every shutdown type (clean, crash, power cut) — not just clean ones.
+
+    Auth: optional `Authorization: Bearer ${CRON_SECRET}` when CRON_SECRET is set.
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected and h.headers.get("Authorization", "") != f"Bearer {expected}":
+        _json_response(h, 401, {"error": "Unauthorized"})
+        return
+    try:
+        from datetime import timedelta, timezone
+        import store_digest as sd
+        from db_cloud import _client
+        from whatsapp_notify import _send
+
+        store_id = STORE_PC_MONITOR_ID
+        now_ist = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=5, minutes=30)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        c = _client()
+
+        # Heartbeat = latest synced_at for this store (ISO text -> lexicographic max).
+        hb = c.table("daily_summary").select("synced_at").eq("store_id", store_id).execute()
+        vals = [d.get("synced_at") for d in (hb.data or []) if d.get("synced_at")]
+        last_hb_str = max(vals) if vals else None
+
+        def _parse(ts):
+            try:
+                return datetime.strptime(str(ts)[:19], "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                return None
+
+        last_hb = _parse(last_hb_str)
+        age_min = ((now_ist - last_hb).total_seconds() / 60.0) if last_hb else None
+        online = age_min is not None and age_min < STORE_PC_OFFLINE_MIN
+
+        st = c.table("store_pc_status").select("*").eq("store_id", store_id).limit(1).execute()
+        row = st.data[0] if st.data else {}
+        prev_state = row.get("state", "unknown")
+        clean = bool(row.get("clean_shutdown"))
+
+        close_d = last_hb.date() if last_hb else now_ist.date()
+        decision = sd.decide_transition(
+            online=online, prev_state=prev_state,
+            today_str=now_ist.strftime("%Y-%m-%d"),
+            close_date_str=close_d.strftime("%Y-%m-%d"),
+            opening_sent_date=row.get("opening_sent_date"),
+            closing_sent_date=row.get("closing_sent_date"),
+        )
+
+        sent = []
+        if decision["send_opening"]:
+            if _send(OWNER_ALERT_PHONE, sd.compose_opening_message(now_ist.date())):
+                sent.append("opening")
+        if decision["send_closing"]:
+            close_str = close_d.strftime("%Y-%m-%d")
+            daily = _sd_summary_row(c, store_id, close_str)
+            weekly = (_sd_summary_range(c, store_id, _sd_week_start(close_d), close_str)
+                      if sd.is_last_working_day_of_week(close_d) else None)
+            monthly = (_sd_summary_range(c, store_id, close_str[:7] + "-01", close_str)
+                       if sd.is_last_working_day_of_month(close_d) else None)
+            msg = sd.compose_closing_message(close_d, daily, weekly, monthly, clean=clean)
+            if _send(OWNER_ALERT_PHONE, msg):
+                sent.append("closing")
+
+        update = {
+            "store_id": store_id,
+            "state": decision["new_state"],
+            "last_heartbeat_at": last_hb_str,
+            "opening_sent_date": decision["opening_sent_date"],
+            "closing_sent_date": decision["closing_sent_date"],
+            "updated_at": now_iso,
+        }
+        if online:
+            update["last_up_at"] = now_iso
+            update["clean_shutdown"] = False
+        else:
+            update["last_down_at"] = now_iso
+        c.table("store_pc_status").upsert(update).execute()
+
+        _json_response(h, 200, {
+            "store_id": store_id, "online": online,
+            "age_min": round(age_min, 1) if age_min is not None else None,
+            "state": decision["new_state"], "sent": sent,
+        })
+    except Exception as exc:
+        logger.error("store-pc-check cron error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_cron_pc_shutdown(h) -> None:
+    """GET /cron/pc-shutdown — best-effort clean-shutdown ping from the store PC.
+
+    The store PC curls this as it powers down so the next store-pc-check can word
+    the closing message as a clean shutdown rather than an unexpected offline.
+    Auth: optional Bearer CRON_SECRET.
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected and h.headers.get("Authorization", "") != f"Bearer {expected}":
+        _json_response(h, 401, {"error": "Unauthorized"})
+        return
+    try:
+        from datetime import timezone
+        from db_cloud import _client
+        store_id = STORE_PC_MONITOR_ID
+        _client().table("store_pc_status").upsert({
+            "store_id": store_id,
+            "clean_shutdown": True,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+        _json_response(h, 200, {"store_id": store_id, "clean_shutdown": True})
+    except Exception as exc:
+        logger.error("pc-shutdown cron error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_cron_abandoned_carts(h) -> None:
     """GET /cron/abandoned-carts — nudge customers who left a book order unfinished.
 
@@ -1474,6 +1626,16 @@ class handler(BaseHTTPRequestHandler):
         # ── Abandoned book-cart reminders (GitHub Actions cron) ───────────────
         if self.path == "/cron/abandoned-carts" or self.path.startswith("/cron/abandoned-carts?"):
             _handle_cron_abandoned_carts(self)
+            return
+
+        # ── Store-PC liveness watcher (GitHub Actions cron) ───────────────────
+        if self.path == "/cron/store-pc-check" or self.path.startswith("/cron/store-pc-check?"):
+            _handle_cron_store_pc_check(self)
+            return
+
+        # ── Store-PC clean-shutdown ping (curled by the store PC on shutdown) ──
+        if self.path == "/cron/pc-shutdown" or self.path.startswith("/cron/pc-shutdown?"):
+            _handle_cron_pc_shutdown(self)
             return
 
         # ── Operator queue (P0 Day 2.5) ──────────────────────────────────────

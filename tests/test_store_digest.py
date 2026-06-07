@@ -88,3 +88,42 @@ class TestClosingMessage:
         dirty = sd.compose_closing_message(date(2026, 6, 8), DAILY, clean=False)
         assert clean != dirty
         assert "offline" in dirty.lower()
+
+
+class TestDecideTransition:
+    BASE = dict(today_str="2026-06-08", close_date_str="2026-06-08",
+                opening_sent_date=None, closing_sent_date=None)
+
+    def test_first_run_online_records_up_no_alert(self):
+        r = sd.decide_transition(online=True, prev_state="unknown", **self.BASE)
+        assert r["new_state"] == "up"
+        assert r["send_opening"] is False and r["send_closing"] is False
+
+    def test_down_to_up_sends_opening(self):
+        r = sd.decide_transition(online=True, prev_state="down", **self.BASE)
+        assert r["send_opening"] is True
+        assert r["opening_sent_date"] == "2026-06-08"
+
+    def test_opening_not_resent_same_day(self):
+        b = {**self.BASE, "opening_sent_date": "2026-06-08"}
+        r = sd.decide_transition(online=True, prev_state="down", **b)
+        assert r["send_opening"] is False
+
+    def test_up_to_down_sends_closing(self):
+        r = sd.decide_transition(online=False, prev_state="up", **self.BASE)
+        assert r["new_state"] == "down"
+        assert r["send_closing"] is True
+        assert r["closing_sent_date"] == "2026-06-08"
+
+    def test_closing_not_resent_same_close_date(self):
+        b = {**self.BASE, "closing_sent_date": "2026-06-08"}
+        r = sd.decide_transition(online=False, prev_state="up", **b)
+        assert r["send_closing"] is False
+
+    def test_steady_online_no_alert(self):
+        r = sd.decide_transition(online=True, prev_state="up", **self.BASE)
+        assert r["send_opening"] is False and r["send_closing"] is False
+
+    def test_steady_offline_no_alert(self):
+        r = sd.decide_transition(online=False, prev_state="down", **self.BASE)
+        assert r["send_opening"] is False and r["send_closing"] is False
