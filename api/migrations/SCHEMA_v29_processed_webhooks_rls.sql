@@ -1,0 +1,44 @@
+-- api/migrations/SCHEMA_v29_processed_webhooks_rls.sql
+-- TASK-024 (roadmap-2026-05): tighten processed_webhooks RLS.
+--
+-- The v18 migration created this policy:
+--     CREATE POLICY "service_role_all_processed_webhooks"
+--         ON processed_webhooks FOR ALL
+--         USING (true) WITH CHECK (true);
+-- with NO `TO` clause, so it applies to PUBLIC -- every role including `anon`.
+-- Combined with Supabase's default anon GRANTs (SELECT/INSERT/UPDATE/DELETE),
+-- the public anon key (embedded in website/admin.html + website/notes.html)
+-- can fully read and write the webhook idempotency table.
+--
+-- This is an INTEGRITY hole, not just disclosure:
+--   - INSERT a not-yet-seen event_id  -> the real Razorpay/Meta webhook is
+--     then treated as a duplicate and SKIPPED. Customer pays, order never
+--     created. (event_id is the PRIMARY KEY used for dedupe.)
+--   - DELETE rows                      -> defeats dedupe, enabling replay /
+--     double-processing (double-print, duplicate "ready" notifications).
+--   - SELECT                           -> leaks event ids + handler results.
+--
+-- Live state confirmed before writing (2026-06-08):
+--   rls_enabled=true, policy roles={-} (PUBLIC), cmd=ALL, using=true, check=true
+--   anon + authenticated hold SELECT/INSERT/UPDATE/DELETE grants.
+--
+-- Fix: drop the permissive policy. RLS is already enabled; with NO policy,
+-- anon/authenticated are denied by default. The service_role used by the
+-- Vercel webhook handlers (db_cloud._client() with SUPABASE_SERVICE_KEY)
+-- BYPASSES RLS by Supabase design, so _mark_webhook_processed() keeps working.
+--
+-- Verification audit (before writing this migration):
+--   1. The only readers/writers of processed_webhooks are the webhook handlers
+--      _mark_webhook_processed() in api/index.py, which use _client()
+--      (service role). Confirmed via grep of table("processed_webhooks").
+--   2. No client-side / anon path touches this table (admin.html, notes.html,
+--      mis.html do not reference processed_webhooks). Confirmed.
+--   3. Same deny-by-default pattern already proven by SCHEMA_v19 on
+--      project_builder_orders / referrers / referral_credits.
+
+DROP POLICY IF EXISTS "service_role_all_processed_webhooks" ON processed_webhooks;
+
+-- Defense-in-depth: also revoke the default anon/authenticated table grants so
+-- the table is locked even if a future migration accidentally re-adds a
+-- permissive policy. service_role retains its grants and RLS-bypass.
+REVOKE ALL ON processed_webhooks FROM anon, authenticated;
