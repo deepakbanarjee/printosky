@@ -1105,3 +1105,91 @@ def _handle_admin_format_fixer(h, body: bytes) -> None:
     except Exception as exc:
         logger.error(f"admin format-fixer error: {exc}", exc_info=True)
         _json_response(h, 500, {'error': str(exc)})
+
+
+# ── Notes marketplace admin handlers ─────────────────────────────────────────
+
+def _handle_admin_notes_queue(h) -> None:
+    """GET /admin/notes-queue — list all pending notes for moderation."""
+    try:
+        from db_cloud import pending_notes_queue
+        notes = pending_notes_queue(limit=100)
+        _json_response(h, 200, {"notes": notes, "count": len(notes)})
+    except Exception as exc:
+        logger.error("admin notes-queue error: %s", exc, exc_info=True)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_notes_moderate(h, body: bytes, note_code: str, action: str) -> None:
+    """POST /admin/notes/<code>/approve|reject — moderate a submitted note.
+
+    Body (JSON): { admin_password, reason? }
+    Approve: sets status=approved, notifies uploader via WhatsApp.
+    Reject:  sets status=rejected, sends reason to uploader.
+    """
+    try:
+        payload = json.loads(body) if body else {}
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+
+    if not _auth_admin_pw(payload.get("admin_password", "")):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+
+    if action not in ("approve", "reject"):
+        _json_response(h, 400, {"error": "action must be approve or reject"})
+        return
+
+    reason = (payload.get("reason") or "").strip()
+    if action == "reject" and not reason:
+        _json_response(h, 400, {"error": "reason is required for rejection"})
+        return
+
+    try:
+        from db_cloud import get_note, publish_note, reject_note
+        from whatsapp_notify import _send
+
+        note = get_note(note_code)
+        if not note:
+            _json_response(h, 404, {"error": f"Note {note_code} not found"})
+            return
+
+        if action == "approve":
+            ok = publish_note(note_code)
+            if ok:
+                _send(note["uploader_phone"], {
+                    "messaging_product": "whatsapp",
+                    "to": note["uploader_phone"],
+                    "type": "text",
+                    "text": {"body": (
+                        f"Your notes *{note['title']}* have been approved and are now live!\n\n"
+                        f"Code: *{note_code}*\n"
+                        "Customers can order prints and you'll earn store credit for each copy."
+                    )},
+                })
+                logger.info("Notes admin: approved %s (uploader %s)", note_code, note["uploader_phone"])
+                _json_response(h, 200, {"status": "approved", "note_code": note_code})
+            else:
+                _json_response(h, 500, {"error": "DB update failed"})
+        else:
+            ok = reject_note(note_code, reason)
+            if ok:
+                _send(note["uploader_phone"], {
+                    "messaging_product": "whatsapp",
+                    "to": note["uploader_phone"],
+                    "type": "text",
+                    "text": {"body": (
+                        f"Your notes *{note['title']}* could not be approved.\n\n"
+                        f"Reason: {reason}\n\n"
+                        "You're welcome to revise and resubmit. Type _\"upload notes\"_ to start."
+                    )},
+                })
+                logger.info("Notes admin: rejected %s — %s", note_code, reason)
+                _json_response(h, 200, {"status": "rejected", "note_code": note_code, "reason": reason})
+            else:
+                _json_response(h, 500, {"error": "DB update failed"})
+
+    except Exception as exc:
+        logger.error("admin notes moderate %s/%s: %s", note_code, action, exc, exc_info=True)
+        _json_response(h, 500, {"error": str(exc)})
