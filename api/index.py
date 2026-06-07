@@ -349,6 +349,31 @@ def _session_is_stale(session: dict) -> bool:
         return False
 
 
+# Short acknowledgements / option inputs that should NOT trigger a human handoff.
+_HANDOFF_NOOP = {
+    "ok", "okay", "k", "kk", "thanks", "thank you", "thankyou", "ty", "tq",
+    "done", "good", "great", "nice", "fine", "cool", "yes", "no", "y", "n",
+    "👍", "🙏", "ശരി", "നന്ദി", "ഓക്കെ",
+}
+
+
+def _should_handoff_text(text: str) -> bool:
+    """Heuristic: is this free-text worth routing to a human (vs ignoring)?
+
+    True for real questions/sentences; False for courtesy words, bare digits/
+    option taps, emoji, and very short inputs.
+    """
+    t = (text or "").strip()
+    if len(t) < 3:
+        return False
+    if t.lower() in _HANDOFF_NOOP:
+        return False
+    # Needs a couple of letters (any script) — filters bare digits, punctuation
+    # and emoji, while accepting Malayalam, where combining vowel marks would
+    # break a consecutive-letter run.
+    return sum(1 for ch in t if ch.isalpha()) >= 2
+
+
 def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     """Route a customer text through the bot state machine and send replies."""
     from whatsapp_bot import handle_message
@@ -414,6 +439,8 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     # help" that prompts them to say what they need. Never fires mid print/book
     # flow (no-active-session check); stray non-greeting text from a returning
     # customer stays silent.
+    customer_is_idle = False
+    customer_is_new = False
     try:
         from db_cloud import get_session as _get_session, is_new_contact
         _session = _get_session("supabase", sender) or {}
@@ -421,8 +448,10 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
         # Idle customer (no session) or a stale/abandoned session → eligible for
         # a welcome/greeting. A recent active flow is protected (not interrupted).
         if (not _step) or _session_is_stale(_session):
+            customer_is_idle = True
+            customer_is_new = is_new_contact(sender)
             reply_msg = None
-            if is_new_contact(sender):
+            if customer_is_new:
                 reply_msg = WELCOME_MESSAGE      # first-time customer
             elif _is_greeting(text):
                 reply_msg = GREETING_MESSAGE     # returning customer says hi
@@ -450,16 +479,40 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
         page_count=0,
         db_path="supabase",   # db_path is ignored in cloud mode
     )
+    handled = False
     for reply in replies:
         if isinstance(reply, str):
             # _send_meta logs the outbound to conversation_log on success;
             # don't double-log here.
             _send(sender, reply)
+            handled = True
         elif isinstance(reply, tuple) and reply:
             tag = reply[0]
             if tag in ("STAFF_QUOTE", "STAFF_MIXED_TIMEOUT"):
                 msg = reply[1] if len(reply) > 1 else str(reply)
                 send_staff_alert(msg)
+                handled = True
+
+    # ── Human handoff fallback ────────────────────────────────────────────────
+    # An idle, returning customer said something no handler understood (not a
+    # greeting, book/print command, tracking question, or help keyword). Don't
+    # leave them ignored or dump a canned menu — hold for a human, ack once, and
+    # flag the conversation. staff_hold makes the bot stay quiet on follow-ups
+    # until staff resume (and auto-clears once the session goes stale).
+    if (not handled) and customer_is_idle and (not customer_is_new) \
+            and _should_handoff_text(text):
+        try:
+            from db_cloud import save_session
+            _mark_session_needs_human(sender)
+            save_session("supabase", sender, step="staff_hold", needs_human=True)
+            _send(sender, "🙏 Thanks for your message — a team member will reply to "
+                          "you shortly. You can keep typing in the meantime.")
+            send_staff_alert(
+                f"🤖→🧑 Bot couldn't handle a message from {_fmt_phone(sender)}: "
+                f"\"{text.strip()[:80]}\". Open Conversations → 'Needs human'."
+            )
+        except Exception as e:
+            logger.error(f"Human handoff error for {sender}: {e}")
 
 
 def _handle_media(sender: str, msg_type: str, media_id: str,
