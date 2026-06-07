@@ -65,6 +65,7 @@ html, body {
 }
 #screen-list { background: #fff; transform: translateX(0); }
 #screen-chat { background: #fff; transform: translateX(100%); }
+#chat-thread { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 #screen-list.slide-left  { transform: translateX(-100%); }
 #screen-chat.slide-in    { transform: translateX(0); }
 
@@ -232,6 +233,78 @@ html, body {
 .send-btn:active { background: var(--teal-dk); }
 #upload-status { font-size: 11px; color: var(--muted); align-self: center; }
 
+/* ── DESKTOP LAYOUT (≥700px) ───────────────────────────────────── */
+@media (min-width: 700px) {
+  html, body { background: #111; }
+
+  #login {
+    border-radius: 14px;
+    max-width: 380px;
+    margin: auto;
+    box-shadow: 0 8px 40px rgba(0,0,0,.5);
+    padding: 48px 36px;
+  }
+
+  #app {
+    flex-direction: row;
+    max-width: 1280px;
+    margin: 0 auto;
+    height: 100dvh;
+    box-shadow: 0 0 60px rgba(0,0,0,.5);
+  }
+
+  /* Both screens visible side-by-side — no slide */
+  #screen-list, #screen-chat {
+    position: relative !important;
+    transform: none !important;
+    transition: none !important;
+    flex-shrink: 0;
+  }
+  #screen-list {
+    width: 340px;
+    border-right: 1px solid var(--border);
+    z-index: auto;
+  }
+  #screen-chat {
+    flex: 1;
+    position: relative !important;
+    display: flex !important;
+    flex-direction: column;
+    inset: auto !important;
+  }
+  #chat-thread {
+    flex: 1;
+    min-height: 0;
+  }
+  /* Hide back button on desktop */
+  #screen-chat .icon-btn[onclick="goBack()"] { display: none; }
+
+  /* Wider bubbles on desktop */
+  .bubble { max-width: 65%; }
+
+  /* Bigger message input */
+  #msg-input { font-size: 15px; }
+
+  /* Contact hover instead of active */
+  .contact-item:hover { background: #f0f2f5; }
+  .contact-item.selected { background: #e9edef; }
+
+  /* No-chat placeholder */
+  #no-chat-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    background: var(--bg);
+    color: var(--muted);
+    gap: 14px;
+    font-size: 15px;
+  }
+  #no-chat-placeholder .nc-icon { font-size: 64px; opacity: .4; }
+  #no-chat-placeholder .nc-title { font-size: 22px; font-weight: 600; color: #333; opacity: .6; }
+}
+
 /* ── LIGHTBOX ──────────────────────────────────────────────────── */
 #lightbox {
   display: none; position: fixed; inset: 0; z-index: 9999;
@@ -274,6 +347,13 @@ html, body {
 
   <!-- SCREEN 2: Chat thread -->
   <div id="screen-chat">
+    <!-- shown on desktop when no contact is selected -->
+    <div id="no-chat-placeholder">
+      <div class="nc-icon">💬</div>
+      <div class="nc-title">Printosky Chat</div>
+      <div>Select a conversation to start messaging</div>
+    </div>
+    <div id="chat-thread" style="display:none;flex:1;flex-direction:column;height:100%">
     <div class="topbar">
       <button class="icon-btn" onclick="goBack()">&#8592;</button>
       <div id="chat-av" class="avatar avatar-sm" style="background:#aaa;">?</div>
@@ -292,6 +372,7 @@ html, body {
       <span id="upload-status"></span>
       <button class="send-btn" onclick="sendMsg()">&#10148;</button>
     </div>
+    </div><!-- /chat-thread -->
   </div>
 
 </div>
@@ -307,6 +388,8 @@ html, body {
 const API = 'https://printosky.vercel.app';
 let _pw = '', _phone = '', _name = '', _contacts = [];
 let _sosOnly = false, _pollList = null, _pollThread = null;
+
+function isDesktop() { return window.innerWidth >= 700; }
 
 /* ── UTILS ──────────────────────────────────────────────────── */
 function esc(s) {
@@ -401,8 +484,19 @@ function openChat(phone, name) {
   document.getElementById('chat-phone').textContent = phone;
   document.getElementById('messages').innerHTML = '<div class="empty-state">Loading…</div>';
 
-  document.getElementById('screen-chat').classList.add('slide-in');
-  document.getElementById('screen-list').classList.add('slide-left');
+  if (isDesktop()) {
+    // desktop: show thread panel inline, hide placeholder
+    document.getElementById('no-chat-placeholder').style.display = 'none';
+    const t = document.getElementById('chat-thread');
+    t.style.display = 'flex';
+    // highlight selected contact
+    document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('selected'));
+    const items = document.querySelectorAll('.contact-item');
+    items.forEach(el => { if (el.getAttribute('onclick')?.includes(phone)) el.classList.add('selected'); });
+  } else {
+    document.getElementById('screen-chat').classList.add('slide-in');
+    document.getElementById('screen-list').classList.add('slide-left');
+  }
 
   clearInterval(_pollThread);
   fetchThread();
@@ -416,8 +510,14 @@ function openChat(phone, name) {
 
 function goBack() {
   clearInterval(_pollThread); _pollThread = null;
-  document.getElementById('screen-chat').classList.remove('slide-in');
-  document.getElementById('screen-list').classList.remove('slide-left');
+  if (isDesktop()) {
+    document.getElementById('chat-thread').style.display = 'none';
+    document.getElementById('no-chat-placeholder').style.display = 'flex';
+    document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('selected'));
+  } else {
+    document.getElementById('screen-chat').classList.remove('slide-in');
+    document.getElementById('screen-list').classList.remove('slide-left');
+  }
   _phone = ''; _name = '';
   fetchContacts();
 }
