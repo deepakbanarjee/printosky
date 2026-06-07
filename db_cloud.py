@@ -1318,3 +1318,252 @@ def book_amount_paid(order_code: str) -> float:
     except Exception as exc:
         logger.error("book_amount_paid error for %s: %s", order_code, exc)
         return 0.0
+
+
+# ── notes marketplace ─────────────────────────────────────────────────────────
+# Schema: SCHEMA_v28_notes_marketplace.sql
+# Storage: private "notes" bucket (PDFs) + public INCOMING_BUCKET notes-preview/ (PNGs)
+
+NOTES_BUCKET: str = "notes"
+
+# Pricing constants — use these everywhere; never hardcode the values.
+NOTE_PRINT_PRICE_PAISE: int = 100    # ₹1.00 per page = 100 paise
+NOTE_CREDIT_PAISE_PER_PAGE: int = 10  # 10% of ₹1 = ₹0.10 = 10 paise per page printed
+
+
+def create_note(
+    note_code: str,
+    uploader_phone: str,
+    title: str,
+    category: str,
+    subject: str,
+    page_count: int,
+    storage_path: str | None = None,
+    attests: bool = True,
+) -> dict:
+    """Insert a new note row with status='pending'. Returns inserted dict or {}."""
+    row = {
+        "note_code": note_code,
+        "uploader_phone": uploader_phone,
+        "title": title,
+        "category": category,
+        "subject": subject,
+        "page_count": page_count,
+        "storage_path": storage_path,
+        "uploader_attests": attests,
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        _client().table("notes").insert(row).execute()
+        return row
+    except Exception as exc:
+        logger.error("create_note error %s: %s", note_code, exc)
+        return {}
+
+
+def get_note(note_code: str) -> dict:
+    """Fetch a single note row by code. Returns {} if not found."""
+    try:
+        result = _client().table("notes").select("*").eq("note_code", note_code).execute()
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("get_note error %s: %s", note_code, exc)
+        return {}
+
+
+def list_notes(
+    category: str | None = None,
+    status: str = "approved",
+    limit: int = 50,
+) -> list:
+    """List notes ordered by print_count desc. Optionally filter by category."""
+    try:
+        q = _client().table("notes").select("*").eq("status", status)
+        if category:
+            q = q.eq("category", category)
+        result = q.order("print_count", desc=True).limit(limit).execute()
+        return result.data or []
+    except Exception as exc:
+        logger.error("list_notes error: %s", exc)
+        return []
+
+
+def update_note(note_code: str, **fields) -> bool:
+    """Update arbitrary fields on a note row."""
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        _client().table("notes").update(fields).eq("note_code", note_code).execute()
+        return True
+    except Exception as exc:
+        logger.error("update_note error %s: %s", note_code, exc)
+        return False
+
+
+def publish_note(note_code: str) -> bool:
+    """Approve a note (admin action)."""
+    return update_note(note_code, status="approved")
+
+
+def reject_note(note_code: str, reason: str) -> bool:
+    """Reject a note with a reason (admin action)."""
+    return update_note(note_code, status="rejected", reject_reason=reason)
+
+
+def upload_note_pdf(note_code: str, content: bytes) -> str:
+    """Upload PDF to the private notes bucket. Returns storage path (not a URL)."""
+    path = f"notes/{note_code}.pdf"
+    try:
+        _client().storage.from_(NOTES_BUCKET).upload(
+            path=path,
+            file=content,
+            file_options={"content-type": "application/pdf", "upsert": "true"},
+        )
+        return path
+    except Exception as exc:
+        logger.error("upload_note_pdf error %s: %s", note_code, exc)
+        return ""
+
+
+def note_signed_url(storage_path: str, ttl: int = 3600) -> str:
+    """Return a short-lived signed download URL for a private notes PDF."""
+    try:
+        result = _client().storage.from_(NOTES_BUCKET).create_signed_url(storage_path, ttl)
+        return result.get("signedURL") or result.get("signed_url") or ""
+    except Exception as exc:
+        logger.error("note_signed_url error %s: %s", storage_path, exc)
+        return ""
+
+
+def pending_notes_queue(limit: int = 50) -> list:
+    """All pending notes ordered by submission time — for admin moderation."""
+    try:
+        result = (
+            _client().table("notes")
+            .select("*")
+            .eq("status", "pending")
+            .order("created_at")
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+    except Exception as exc:
+        logger.error("pending_notes_queue error: %s", exc)
+        return []
+
+
+# ── credit wallet ─────────────────────────────────────────────────────────────
+
+def wallet_balance(phone: str) -> int:
+    """Return wallet balance in paise. Returns 0 if no wallet row exists."""
+    try:
+        result = (
+            _client().table("credit_wallet")
+            .select("balance_paise")
+            .eq("phone", phone)
+            .execute()
+        )
+        return result.data[0]["balance_paise"] if result.data else 0
+    except Exception as exc:
+        logger.error("wallet_balance error %s: %s", phone, exc)
+        return 0
+
+
+def wallet_add_credit(
+    note_code: str,
+    uploader_phone: str,
+    print_job_id: str,
+    pages: int,
+    credit_paise: int,
+) -> bool:
+    """Credit the uploader's wallet after a notes print payment is confirmed.
+
+    The caller (payment webhook) must gate this with _mark_webhook_processed
+    to ensure it fires exactly once per payment event.
+    """
+    try:
+        _client().table("note_credits").insert({
+            "note_code": note_code,
+            "uploader_phone": uploader_phone,
+            "print_job_id": print_job_id,
+            "pages_printed": pages,
+            "credit_paise": credit_paise,
+            "note": "print_commission",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+        existing = wallet_balance(uploader_phone)
+        _client().table("credit_wallet").upsert(
+            {
+                "phone": uploader_phone,
+                "balance_paise": existing + credit_paise,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="phone",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("wallet_add_credit error %s: %s", uploader_phone, exc)
+        return False
+
+
+def wallet_redeem(phone: str, paise: int) -> bool:
+    """Deduct `paise` from wallet. Returns False if insufficient balance.
+
+    Uses an optimistic-lock conditional update to prevent double-spend.
+    DB-level CHECK (balance_paise >= 0) is the final backstop.
+    """
+    try:
+        result = (
+            _client().table("credit_wallet")
+            .select("balance_paise")
+            .eq("phone", phone)
+            .execute()
+        )
+        if not result.data:
+            return False
+        current = result.data[0]["balance_paise"]
+        if current < paise:
+            return False
+        update_result = (
+            _client().table("credit_wallet")
+            .update({
+                "balance_paise": current - paise,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("phone", phone)
+            .eq("balance_paise", current)   # optimistic lock
+            .execute()
+        )
+        if not update_result.data:
+            logger.warning("wallet_redeem race condition for %s — caller should retry", phone)
+            return False
+        _client().table("note_credits").insert({
+            "note_code": None,
+            "uploader_phone": phone,
+            "print_job_id": None,
+            "pages_printed": 0,
+            "credit_paise": -paise,
+            "note": "redemption",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.error("wallet_redeem error %s: %s", phone, exc)
+        return False
+
+
+def note_subscription_status(phone: str) -> dict:
+    """Return the active subscription row for a phone, or {} if not subscribed."""
+    try:
+        result = (
+            _client().table("note_subscriptions")
+            .select("*")
+            .eq("phone", phone)
+            .eq("status", "active")
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("note_subscription_status error %s: %s", phone, exc)
+        return {}

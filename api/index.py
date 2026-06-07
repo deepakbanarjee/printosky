@@ -190,6 +190,46 @@ def _credit_referrer(phone: str, order_id: str) -> None:
         logger.error(f"_credit_referrer error for {phone} / {order_id}: {e}")
 
 
+def _maybe_credit_note_uploader(job: dict) -> None:
+    """Credit the notes uploader when a marketplace-sourced print job is paid.
+
+    Triggered from _process_razorpay_payment after update_job_paid().
+    Only fires when job's file_name starts with "[NOTE-" (set at job-creation
+    time when a customer prints a marketplace note).
+    Pattern: "[NOTE-YYYYMMDD-XXXX] <title>.pdf"
+    """
+    import re as _re
+    from db_cloud import get_note, wallet_add_credit, NOTE_CREDIT_PAISE_PER_PAGE
+
+    file_name = (job.get("file_name") or job.get("filename") or "")
+    m = _re.match(r"^\[NOTE-([A-Z0-9\-]+)\]", file_name)
+    if not m:
+        return
+
+    note_code = m.group(1)
+    note = get_note(note_code)
+    if not note:
+        logger.warning("_maybe_credit_note_uploader: note %s not found", note_code)
+        return
+
+    uploader_phone = note.get("uploader_phone", "")
+    pages = int(note.get("page_count") or 0)
+    credit_paise = pages * NOTE_CREDIT_PAISE_PER_PAGE
+    job_id = job.get("job_id") or job.get("id") or ""
+
+    if uploader_phone and credit_paise > 0:
+        ok = wallet_add_credit(note_code, uploader_phone, job_id, pages, credit_paise)
+        if ok:
+            logger.info(
+                "Notes credit ₹%.2f → %s for %s (job %s)",
+                credit_paise / 100, uploader_phone, note_code, job_id,
+            )
+        else:
+            logger.error(
+                "wallet_add_credit failed for %s / %s", uploader_phone, note_code
+            )
+
+
 def _send_credits_balance(phone: str) -> None:
     """Reply to a 'MY CREDITS' message with the customer's referral store-credit balance."""
     from db_cloud import _client
@@ -424,6 +464,48 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
             _send(sender, reply)
         return
 
+    # ── Notes marketplace ──────────────────────────────────────────────────────
+    # 1) Active upload flow or fresh trigger ("upload notes", "sell notes", …)
+    # 2) "print note NOTE-XXXX" — look up note, send info + signed download URL
+    notes_replies = None
+    try:
+        from handlers_notes import maybe_handle_notes, is_print_note_trigger
+        notes_replies = maybe_handle_notes(sender, text, name=name or "")
+        if notes_replies is None:
+            note_code = is_print_note_trigger(text)
+            if note_code:
+                from db_cloud import get_note, note_signed_url
+                note = get_note(note_code)
+                if note and note.get("status") == "approved":
+                    pages = note.get("page_count", 0)
+                    price = pages  # ₹1/page
+                    url = note_signed_url(note.get("storage_path", ""), ttl=1800)
+                    if url:
+                        body = (
+                            f"*{note['title']}*\n"
+                            f"{note.get('subject','')} · {pages} pages\n\n"
+                            f"Print price: *₹{price}* (₹1/page)\n\n"
+                            f"Download to bring to the store:\n{url}\n\n"
+                            "_Link valid for 30 minutes._"
+                        )
+                    else:
+                        body = f"Sorry, couldn't generate a link for *{note_code}* right now. Try again shortly."
+                    notes_replies = [{"messaging_product": "whatsapp", "to": sender,
+                                      "type": "text", "text": {"body": body}}]
+                elif note:
+                    notes_replies = [{"messaging_product": "whatsapp", "to": sender,
+                                      "type": "text", "text": {"body": f"*{note_code}* is pending admin review. Check back soon!"}}]
+                else:
+                    notes_replies = [{"messaging_product": "whatsapp", "to": sender,
+                                      "type": "text", "text": {"body": f"Notes *{note_code}* not found."}}]
+    except Exception as _exc:
+        logger.error("Notes flow error for %s: %s", sender, _exc)
+        notes_replies = None
+    if notes_replies is not None:
+        for _msg in notes_replies:
+            _send(sender, _msg)
+        return
+
     # Capture referral code; treat ref_CODE message as a plain greeting
     _capture_referral_code(sender, text)
 
@@ -552,6 +634,28 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
                 return None
         except Exception as e:
             logger.error(f"Book payment-proof handling failed for {sender}: {e}")
+
+    # ── Notes marketplace: PDF during upload flow ──────────────────────────────
+    # If the customer is in the note_await_pdf step, any PDF they send is their
+    # notes document — route to the notes handler, never to print-job intake.
+    if mime_type == "application/pdf":
+        try:
+            from db_cloud import get_session as _gs_notes
+            _note_sess = _gs_notes(sender) or {}
+            if _note_sess.get("step") == "note_await_pdf":
+                from handlers_notes import handle_notes_pdf
+                from whatsapp_notify import _send as _wa_send
+                _pdf_bytes = _download_meta_media(media_id)
+                if _pdf_bytes is not None:
+                    _note_replies = handle_notes_pdf(sender, _pdf_bytes, orig_filename or "notes.pdf")
+                else:
+                    _note_replies = [{"messaging_product": "whatsapp", "to": sender,
+                                      "type": "text", "text": {"body": "Couldn't download that PDF. Please try again."}}]
+                for _nr in _note_replies:
+                    _wa_send(sender, _nr)
+                return None
+        except Exception as _exc:
+            logger.error("Notes PDF handling failed for %s: %s", sender, _exc)
 
     ext = FILE_MIME_TYPES.get(mime_type, "")
     ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -894,6 +998,12 @@ def _process_razorpay_payment(data: dict) -> None:
     if job.get("sender"):
         send_payment_confirmed(job["sender"], ref_id, amount)
         _credit_referrer(job["sender"], ref_id)
+        # Notes marketplace: credit uploader when a marketplace note is printed.
+        # Filename format set at print-job creation: "[NOTE-XXXX] title.pdf"
+        try:
+            _maybe_credit_note_uploader(job)
+        except Exception as _nc_exc:
+            logger.error("notes credit error for job %s: %s", ref_id, _nc_exc)
     logger.info(f"Job {ref_id} marked Paid")
 
 
@@ -1135,6 +1245,8 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_send_file,
     _handle_admin_thread,
     _handle_admin_upload_token,
+    _handle_admin_notes_queue,
+    _handle_admin_notes_moderate,
 )
 
 
@@ -1678,6 +1790,11 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # ── SLA watchdog (GitHub Actions cron, every 30 min) ──────────────────
+        # ── Notes marketplace: moderation queue ───────────────────────────────
+        if self.path == "/admin/notes-queue" or self.path.startswith("/admin/notes-queue?"):
+            _handle_admin_notes_queue(self)
+            return
+
         if self.path == "/cron/sla-check" or self.path.startswith("/cron/sla-check?"):
             _handle_cron_sla_check(self)
             return
@@ -1912,6 +2029,14 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # ── Referral store-credit redemption (staff) ─────────────────────────
+        # ── Notes marketplace: approve / reject ────────────────────────────────
+        _note_moderate = re.match(
+            r"^/admin/notes/([A-Za-z0-9\-]+)/(approve|reject)$", self.path,
+        )
+        if _note_moderate:
+            _handle_admin_notes_moderate(self, body, _note_moderate.group(1), _note_moderate.group(2))
+            return
+
         if self.path == "/referrals/redeem":
             _handle_referrals_redeem(self, body)
             return
