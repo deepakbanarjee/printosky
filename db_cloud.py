@@ -431,6 +431,63 @@ def record_wa_message_cost(wamid: str, recipient: str | None, status: str | None
         logger.warning("record_wa_message_cost error for %s: %s", wamid, exc)
 
 
+# The webhook logs the bot's auto-reply a few hundred ms BEFORE the inbound that
+# triggered it (clock skew between Meta's inbound timestamp and the server's
+# outbound send time). A strict "outbound after inbound" check therefore flags
+# immediately-answered messages as breaches. Treat an outbound within this many
+# seconds before the inbound (or any time after) as a reply.
+SLA_REPLY_TOLERANCE_SECONDS = 120
+
+
+def _compute_sla_breaches(rows, now, threshold_hours: int = 1,
+                          reply_tolerance_seconds: int = SLA_REPLY_TOLERANCE_SECONDS) -> list[dict]:
+    """Pure breach computation from conversation_log rows (order-independent).
+
+    A breach = a phone whose newest inbound is older than `threshold_hours` and
+    has no outbound reply within `reply_tolerance_seconds` before it (or any time
+    after). `now` and parsed timestamps are timezone-aware UTC.
+    """
+    from datetime import datetime, timedelta
+
+    def _parse(ts):
+        try:
+            return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    latest: dict[str, dict] = {}
+    for r in rows:
+        ph = r.get("phone")
+        if not ph:
+            continue
+        dt = _parse(r.get("created_at"))
+        if dt is None:
+            continue
+        slot = latest.setdefault(ph, {})
+        d = r.get("direction")
+        if d == "inbound":
+            if "in" not in slot or dt > slot["in"]:
+                slot["in"] = dt
+        elif d == "outbound":
+            if "out" not in slot or dt > slot["out"]:
+                slot["out"] = dt
+
+    threshold = now - timedelta(hours=threshold_hours)
+    tol = timedelta(seconds=reply_tolerance_seconds)
+    breaches: list[dict] = []
+    for ph, slot in latest.items():
+        last_in = slot.get("in")
+        if last_in is None:
+            continue
+        last_out = slot.get("out")
+        if last_out is not None and last_out > last_in - tol:
+            continue                       # replied (allowing for the logging artifact)
+        if last_in > threshold:
+            continue                       # not yet older than threshold_hours
+        breaches.append({"phone": ph, "last_inbound_at": last_in.isoformat()})
+    return breaches
+
+
 def find_sla_breaches(threshold_hours: int = 1,
                       alert_cooldown_hours: int = 6,
                       lookback_hours: int = 48) -> list[dict]:
@@ -455,34 +512,7 @@ def find_sla_breaches(threshold_hours: int = 1,
             or []
         )
 
-        latest: dict[str, dict] = {}
-        for r in rows:
-            ph = r.get("phone")
-            if not ph:
-                continue
-            d = r["direction"]
-            slot = latest.setdefault(ph, {})
-            if d == "inbound" and "in" not in slot:
-                slot["in"] = r["created_at"]
-            elif d == "outbound" and "out" not in slot:
-                slot["out"] = r["created_at"]
-
-        threshold = datetime.now(timezone.utc) - timedelta(hours=threshold_hours)
-        breaches: list[dict] = []
-        for ph, slot in latest.items():
-            last_in = slot.get("in")
-            if not last_in:
-                continue
-            last_out = slot.get("out")
-            if last_out and last_out > last_in:
-                continue                       # already replied after the inbound
-            try:
-                in_dt = datetime.fromisoformat(str(last_in).replace("Z", "+00:00"))
-            except Exception:
-                continue
-            if in_dt > threshold:
-                continue                       # not yet > threshold_hours
-            breaches.append({"phone": ph, "last_inbound_at": last_in})
+        breaches = _compute_sla_breaches(rows, datetime.now(timezone.utc), threshold_hours)
 
         if not breaches or alert_cooldown_hours <= 0:
             return breaches
