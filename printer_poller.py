@@ -27,6 +27,7 @@ EPSON counters (confirmed 2026-04-30):
 import time
 import sqlite3
 import logging
+import socket
 import threading
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -801,8 +802,53 @@ def poll_epson_web():
 
 # ── Main poll loop ────────────────────────────────────────────────────────────
 
+# ── Store hours (poll skip / log-severity decisions) ──────────────────────────
+# An unreachable printer DURING open hours is a real fault worth a warning;
+# OUTSIDE open hours it just means the shop is closed and the printers are
+# powered off — expected, not an error. Hours are local to the poller; the cloud
+# `partners.pickup_hours_json` is the marketplace source of truth. Override per
+# store via env. Oxygen: Mon–Sat 08:00–19:00, Sunday closed.
+STORE_OPEN_HOUR     = int(os.environ.get("STORE_OPEN_HOUR", "8"))    # inclusive
+STORE_CLOSE_HOUR    = int(os.environ.get("STORE_CLOSE_HOUR", "19"))  # exclusive
+STORE_OPEN_WEEKDAYS = frozenset({0, 1, 2, 3, 4, 5})  # Mon=0 .. Sun=6; Sunday off
+
+
+def is_store_open(now=None):
+    """Whether the store is within normal open hours right now.
+
+    Used only to decide whether an unreachable printer is alarming and whether
+    to skip a poll cycle — never to gate data capture. Working late (printers
+    still on after hours) is handled by the reachability probe, not this check.
+    """
+    now = now or datetime.now()
+    return (now.weekday() in STORE_OPEN_WEEKDAYS
+            and STORE_OPEN_HOUR <= now.hour < STORE_CLOSE_HOUR)
+
+
+def _printer_reachable(ip, port=80, timeout=2.0):
+    """Cheap TCP probe — True if the printer answers on `port`."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _any_printer_reachable():
+    """True if either printer answers — i.e. someone may be working late."""
+    return _printer_reachable(KONICA_IP) or _printer_reachable(EPSON_IP)
+
+
 def poll_once(db_path):
     """Run one poll cycle for both printers."""
+    # Out of hours the printers are powered off, so an unreachable printer is
+    # EXPECTED — skip quietly (no log noise, no wasted SNMP timeouts). If someone
+    # is working late and the printers are actually on, fall through and poll so
+    # the cycle is still captured.
+    if not is_store_open() and not _any_printer_reachable():
+        logger.info("Store closed and printers unreachable — expected "
+                    "(powered off out of hours); skipping poll cycle")
+        return
     conn = sqlite3.connect(db_path)
     init_printer_tables(conn)
 
