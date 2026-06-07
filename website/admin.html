@@ -812,52 +812,106 @@
     overflow: hidden;
     background: #ece5dd;
 }
-.conv-header {
-    padding: 12px 16px;
-    border-bottom: 1px solid #e0e0e0;
-    font-weight: 600;
-    background: #f8f9fa;
-    font-size: 15px;
+/* ── Sidebar header ─────────────────────────────────────────────────────── */
+.conv-sidebar-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: #128C7E;
+    color: #fff;
 }
+.conv-sidebar-title { font-size: 17px; font-weight: 600; flex: 1; }
+/* ── Chat header ─────────────────────────────────────────────────────────── */
+.conv-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border-bottom: 1px solid #ddd;
+    background: #128C7E;
+    color: #fff;
+    min-height: 52px;
+}
+.conv-header-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.conv-header-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv-header-sub  { font-size: 12px; opacity: .75; }
+/* ── Avatar circle ───────────────────────────────────────────────────────── */
+.conv-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #25d366;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    text-transform: uppercase;
+    user-select: none;
+}
+/* ── Message area ────────────────────────────────────────────────────────── */
 .conv-message-area {
     flex: 1;
     overflow-y: auto;
-    padding: 16px;
+    padding: 12px 16px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
 }
+/* Date separator */
+.conv-date-sep {
+    align-self: center;
+    background: rgba(255,255,255,.85);
+    color: #555;
+    font-size: 11px;
+    padding: 4px 12px;
+    border-radius: 8px;
+    margin: 8px 0 4px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.12);
+}
+/* ── Reply bar ───────────────────────────────────────────────────────────── */
 .conv-reply-bar {
     display: flex;
     align-items: flex-end;
     gap: 8px;
-    padding: 10px 12px;
+    padding: 8px 10px;
     border-top: 1px solid #ddd;
-    background: #f8f9fa;
+    background: #f0f2f5;
 }
+/* ── Contact list ────────────────────────────────────────────────────────── */
 .conv-contact {
-    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
     cursor: pointer;
     border-bottom: 1px solid #f0f0f0;
     transition: background 0.15s;
 }
-.conv-contact:hover, .conv-contact.active { background: #e8f4fd; }
+.conv-contact:hover, .conv-contact.active { background: #f0f2f5; }
+.conv-contact-body { flex: 1; min-width: 0; }
+.conv-contact-row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
 .conv-contact-name { font-weight: 600; font-size: 14px; color: #111; }
+.conv-contact-time { font-size: 11px; color: #999; white-space: nowrap; }
+.conv-contact-row2 { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; }
 .conv-contact-preview {
     font-size: 12px;
-    color: #666;
+    color: #888;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    margin-top: 2px;
+    flex: 1;
+    min-width: 0;
 }
 .conv-contact-meta {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
-    margin-top: 4px;
-    font-size: 11px;
-    color: #999;
+    gap: 4px;
+    flex-shrink: 0;
 }
 .conv-unread-badge {
     background: #25d366;
@@ -869,34 +923,97 @@
     min-width: 18px;
     text-align: center;
 }
-.conv-bubble { max-width: 72%; display: flex; flex-direction: column; }
+/* ── Bubbles ─────────────────────────────────────────────────────────────── */
+.conv-bubble { max-width: 72%; display: flex; flex-direction: column; margin: 2px 12px; position: relative; }
 .conv-bubble-in  { align-self: flex-start; }
 .conv-bubble-out { align-self: flex-end; }
 .conv-bubble-content {
     background: #fff;
-    border-radius: 8px;
-    padding: 8px 12px;
+    border-radius: 0 8px 8px 8px;
+    padding: 7px 12px 5px;
     font-size: 14px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    line-height: 1.45;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.12);
     word-break: break-word;
+    position: relative;
 }
-.conv-bubble-out .conv-bubble-content { background: #dcf8c6; }
+.conv-bubble-out .conv-bubble-content {
+    background: #dcf8c6;
+    border-radius: 8px 0 8px 8px;
+}
+/* Bubble tail */
+.conv-bubble-in .conv-bubble-content::before {
+    content: '';
+    position: absolute;
+    top: 0; left: -8px;
+    border: 8px solid transparent;
+    border-top: 8px solid #fff;
+    border-right: 0;
+}
+.conv-bubble-out .conv-bubble-content::before {
+    content: '';
+    position: absolute;
+    top: 0; right: -8px;
+    border: 8px solid transparent;
+    border-top: 8px solid #dcf8c6;
+    border-left: 0;
+}
+/* Timestamp + ticks row */
 .conv-bubble-ts {
+    display: flex;
+    align-items: center;
+    gap: 3px;
     font-size: 11px;
-    color: #999;
-    margin-top: 3px;
+    color: rgba(0,0,0,.4);
+    margin-top: 4px;
     align-self: flex-end;
 }
 .conv-bubble-in .conv-bubble-ts { align-self: flex-start; }
-.conv-img {
-    max-width: 240px;
-    max-height: 300px;
-    border-radius: 6px;
-    cursor: zoom-in;
+.conv-tick { font-size: 13px; color: #53bdeb; line-height: 1; }
+/* ── Media ───────────────────────────────────────────────────────────────── */
+.conv-img-wrap {
     display: block;
+    max-width: 260px;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: zoom-in;
+    line-height: 0;
 }
+.conv-img {
+    max-width: 260px;
+    max-height: 320px;
+    width: 100%;
+    border-radius: 8px;
+    display: block;
+    object-fit: cover;
+}
+.conv-img-caption { font-size: 13px; margin-top: 6px; color: #333; }
+.conv-audio-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    min-width: 200px;
+}
+.conv-audio-icon { font-size: 26px; flex-shrink: 0; }
+.conv-audio-player { flex: 1; height: 32px; outline: none; width: 100%; }
+.conv-doc-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(0,0,0,.06);
+    border-radius: 6px;
+    padding: 8px 10px;
+    min-width: 180px;
+    text-decoration: none;
+    color: inherit;
+}
+.conv-doc-icon { font-size: 28px; flex-shrink: 0; }
+.conv-doc-name { font-size: 13px; font-weight: 600; flex: 1; word-break: break-all; }
 .conv-dl-btn {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     margin-top: 6px;
     padding: 5px 14px;
     background: #1976d2;
@@ -907,10 +1024,11 @@
 }
 .conv-dl-btn:hover { background: #1565c0; }
 .conv-media-unavail { color: #aaa; font-style: italic; font-size: 13px; }
+/* ── Input bar ───────────────────────────────────────────────────────────── */
 #conv-textarea {
     flex: 1;
     padding: 8px 12px;
-    border: 1px solid #ddd;
+    border: none;
     border-radius: 20px;
     resize: none;
     font-size: 14px;
@@ -919,6 +1037,8 @@
     outline: none;
     font-family: inherit;
     line-height: 1.4;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,.1);
 }
 .conv-attach-btn {
     background: none;
@@ -926,52 +1046,66 @@
     font-size: 22px;
     cursor: pointer;
     padding: 4px 6px;
-    color: #555;
+    color: #54656f;
     line-height: 1;
 }
 .conv-send-btn {
-    background: #25d366;
+    background: #128C7E;
     color: #fff;
     border: none;
     border-radius: 50%;
-    width: 40px;
-    height: 40px;
+    width: 42px;
+    height: 42px;
     font-size: 18px;
     cursor: pointer;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,.25);
 }
-.conv-send-btn:hover { background: #1ebe5d; }
+.conv-send-btn:hover { background: #0e7a6e; }
 #conv-upload-status { font-size: 12px; color: #888; padding: 0 4px; min-width: 60px; }
+/* ── Lightbox ────────────────────────────────────────────────────────────── */
 #conv-lightbox {
     display: none;
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.88);
+    background: rgba(0,0,0,0.92);
     z-index: 9999;
     align-items: center;
     justify-content: center;
     cursor: zoom-out;
 }
 #conv-lightbox img {
-    max-width: 92vw;
-    max-height: 92vh;
+    max-width: 96vw;
+    max-height: 88vh;
     border-radius: 4px;
-    box-shadow: 0 4px 32px rgba(0,0,0,0.4);
+    box-shadow: 0 4px 32px rgba(0,0,0,0.5);
+    object-fit: contain;
 }
-/* ── Conversations: Mobile Responsive ─────────────────────────────────────── */
+#conv-lightbox-close {
+    position: absolute;
+    top: 16px; right: 20px;
+    background: rgba(255,255,255,.15);
+    border: none;
+    color: #fff;
+    font-size: 24px;
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+}
+/* ── Mobile Responsive ───────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   #conv-panel { padding: 0; }
   .conv-layout {
-    height: calc(100dvh - 96px);
+    height: calc(100dvh - 60px);
     border: none;
     border-radius: 0;
     position: relative;
     overflow: hidden;
   }
-  /* Sidebar slides in from left; main slides in from right */
   .conv-sidebar {
     width: 100%;
     border-right: none;
@@ -994,25 +1128,20 @@
   .conv-main.mobile-active {
     transform: translateX(0);
   }
-  /* Back button — hidden on desktop, shown via JS on mobile */
   #conv-back-btn {
     display: none;
     align-items: center;
-    gap: 4px;
     background: none;
     border: none;
-    font-size: 22px;
+    font-size: 24px;
     cursor: pointer;
-    padding: 0 10px 0 0;
-    color: #1976d2;
-    vertical-align: middle;
+    padding: 0 8px 0 0;
+    color: #fff;
     line-height: 1;
   }
-  /* Wider bubbles on narrow screens */
-  .conv-bubble { max-width: 88%; }
-  .conv-img    { max-width: 200px; }
-  .conv-header { font-size: 14px; padding: 10px 12px; }
-  /* Shrink the reply bar inputs on mobile */
+  .conv-bubble { max-width: 86%; margin: 2px 6px; }
+  .conv-img-wrap, .conv-img { max-width: 100%; width: 100%; }
+  .conv-audio-wrap { min-width: 160px; }
   #conv-textarea { font-size: 15px; }
 }
 </style>
@@ -1020,6 +1149,7 @@
 <body>
 <!-- Lightbox for full-size image preview -->
 <div id="conv-lightbox" onclick="closeLightbox()">
+    <button id="conv-lightbox-close" onclick="closeLightbox()" title="Close">&#10005;</button>
     <img id="conv-lightbox-img" src="" alt="Full size image">
 </div>
 
@@ -1215,14 +1345,15 @@
     <div class="conv-layout">
       <!-- Sidebar: contact list -->
       <div class="conv-sidebar">
-        <div class="conv-header">Conversations</div>
-        <div class="conv-filter-bar">
+        <div class="conv-sidebar-header">
+          <div class="conv-avatar" style="background:#25d366;font-size:18px;">💬</div>
+          <span class="conv-sidebar-title">Chats</span>
           <button id="conv-filter-needs-human" type="button"
                   class="conv-filter-chip"
                   onclick="convToggleNeedsHumanFilter()"
-                  title="Show only sessions where the customer typed help / support / human / agent">
-            <span aria-hidden="true">🆘</span> Needs human
-            <span id="conv-needs-human-count" class="conv-filter-count">0</span>
+                  title="Show only sessions where the customer typed help / support / human / agent"
+                  style="background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);color:#fff;font-size:11px;padding:4px 10px;">
+            🆘 <span id="conv-needs-human-count" class="conv-filter-count">0</span>
           </button>
         </div>
         <div id="conv-contact-list">
@@ -1232,18 +1363,22 @@
       <!-- Main: message thread -->
       <div class="conv-main">
         <div class="conv-header" id="conv-active-header">
-          <button id="conv-back-btn" onclick="convMobileBack()" title="Back to conversations">&#8592;</button>
-          <span id="conv-active-name" style="color:#666;">Select a conversation</span>
+          <button id="conv-back-btn" onclick="convMobileBack()" title="Back">&#8592;</button>
+          <div id="conv-active-avatar" class="conv-avatar" style="width:36px;height:36px;font-size:14px;background:#aaa;">?</div>
+          <div class="conv-header-info">
+            <div class="conv-header-name" id="conv-active-name">Select a conversation</div>
+            <div class="conv-header-sub" id="conv-active-sub">WhatsApp</div>
+          </div>
         </div>
         <div id="conv-message-area" class="conv-message-area" style="text-align:center;color:#999;padding:40px;">
         </div>
         <div class="conv-reply-bar">
           <button class="conv-attach-btn" title="Attach file"
-                  onclick="document.getElementById('conv-file-input').click()">&#128206;</button>
+                  onclick="document.getElementById('conv-file-input').click()">📎</button>
           <input type="file" id="conv-file-input" style="display:none"
                  onchange="handleFileAttach(this)">
           <textarea id="conv-textarea" rows="1"
-                    placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
+                    placeholder="Type a message…"
                     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendConvMessage();}"
                     oninput="this.style.height='';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
           <span id="conv-upload-status"></span>
@@ -3692,39 +3827,57 @@ async function convFetchInbox() {
   }
 }
 
+function convAvatarLetter(name) {
+  if (!name) return '?';
+  return name.trim()[0].toUpperCase();
+}
+
+function convAvatarColor(name) {
+  const colors = ['#e53935','#8e24aa','#1e88e5','#00897b','#f4511e','#6d4c41','#039be5','#43a047'];
+  let h = 0;
+  for (let i = 0; i < (name || '').length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
+  return colors[h % colors.length];
+}
+
 function convRenderInbox(contacts) {
   _convInboxCache = contacts;
 
-  // Update the "Needs human" filter count badge regardless of active filter
   const needsHumanCount = contacts.reduce((n, c) => n + (c.needs_human ? 1 : 0), 0);
   const countEl = document.getElementById('conv-needs-human-count');
   if (countEl) countEl.textContent = needsHumanCount;
 
-  const visible = _convNeedsHumanOnly
-    ? contacts.filter(c => c.needs_human)
-    : contacts;
+  const visible = _convNeedsHumanOnly ? contacts.filter(c => c.needs_human) : contacts;
 
   const list = document.getElementById('conv-contact-list');
   if (!list) return;
   if (!visible.length) {
-    const empty = _convNeedsHumanOnly
-      ? 'No sessions awaiting a human.'
-      : 'No conversations yet.';
+    const empty = _convNeedsHumanOnly ? 'No sessions awaiting a human.' : 'No conversations yet.';
     list.innerHTML = `<div style="padding:20px;color:#999;font-size:13px;">${empty}</div>`;
     return;
   }
-  list.innerHTML = visible.map(c => `
+  list.innerHTML = visible.map(c => {
+    const letter = convAvatarLetter(c.name);
+    const color  = convAvatarColor(c.name);
+    const preview = c.last_message
+      ? (c.last_message.startsWith('📷') || c.last_message.startsWith('🎵') ? c.last_message : convEsc(c.last_message))
+      : '<em style="color:#bbb">No messages</em>';
+    return `
     <div class="conv-contact${c.phone === _convActivePhone ? ' active' : ''}"
          data-phone="${convEscAttr(c.phone)}" data-name="${convEscAttr(c.name || '')}"
          onclick="convOpenContact(this.dataset.phone, this.dataset.name)">
-      <div class="conv-contact-name">${convEsc(c.name)}${c.needs_human ? '<span class="conv-needs-human-pill" title="Customer asked for a human">SOS</span>' : ''}</div>
-      <div class="conv-contact-preview">${convEsc(c.last_message)}</div>
-      <div class="conv-contact-meta">
-        <span>${convFmtTs(c.ts)}</span>
-        ${c.unread_count > 0 ? `<span class="conv-unread-badge">${c.unread_count}</span>` : ''}
+      <div class="conv-avatar" style="background:${color}">${letter}</div>
+      <div class="conv-contact-body">
+        <div class="conv-contact-row1">
+          <span class="conv-contact-name">${convEsc(c.name)}${c.needs_human ? '<span class="conv-needs-human-pill">SOS</span>' : ''}</span>
+          <span class="conv-contact-time">${convFmtTs(c.ts)}</span>
+        </div>
+        <div class="conv-contact-row2">
+          <span class="conv-contact-preview">${preview}</span>
+          <span class="conv-contact-meta">${c.unread_count > 0 ? `<span class="conv-unread-badge">${c.unread_count}</span>` : ''}</span>
+        </div>
       </div>
-    </div>`
-  ).join('');
+    </div>`;
+  }).join('');
 }
 
 function convUpdateTabTitle(contacts) {
@@ -3772,7 +3925,19 @@ function convRenderThread(messages) {
   const area = document.getElementById('conv-message-area');
   if (!area) return;
   const wasAtBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 80;
-  area.innerHTML = messages.map(convRenderBubble).join('');
+
+  // Group by date for date separators
+  let lastDate = '';
+  const parts = [];
+  messages.forEach(m => {
+    const d = m.created_at ? new Date(m.created_at).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : '';
+    if (d && d !== lastDate) {
+      parts.push(`<div class="conv-date-sep">${d}</div>`);
+      lastDate = d;
+    }
+    parts.push(convRenderBubble(m));
+  });
+  area.innerHTML = parts.join('');
   if (wasAtBottom || messages.length <= 10) area.scrollTop = area.scrollHeight;
 }
 
@@ -3781,34 +3946,47 @@ function convRenderBubble(m) {
   const ts   = convFmtTs(m.created_at);
   const mt   = (m.message_type || 'text').toLowerCase();
   const url  = m.media_url || '';
+  const tick = dir === 'out' ? '<span class="conv-tick">✓✓</span>' : '';
   let content = '';
 
   if (mt === 'text' || mt === '') {
     content = convEsc(m.body || '');
   } else if (!url) {
-    content = '<em class="conv-media-unavail">Media unavailable</em>';
+    content = '<em class="conv-media-unavail">📎 Media unavailable</em>';
   } else if (mt.startsWith('image')) {
-    content = `<img class="conv-img" src="${convEscAttr(url)}"
-                    data-lightbox-url="${convEscAttr(url)}"
-                    alt="image" loading="lazy">`;
-    if (m.body) content += `<p style="margin:6px 0 0">${convEsc(m.body)}</p>`;
+    const u = convEscAttr(url);
+    content = `<div class="conv-img-wrap" onclick="convOpenLightbox('${u}')">
+                 <img class="conv-img" src="${u}" alt="photo" loading="lazy">
+               </div>`;
+    if (m.body) content += `<div class="conv-img-caption">${convEsc(m.body)}</div>`;
   } else if (mt.startsWith('audio')) {
-    content = `<div style="font-size:13px;margin-bottom:4px">Voice note</div>
-               <audio controls src="${convEscAttr(url)}" style="max-width:240px;display:block"></audio>`;
+    content = `<div class="conv-audio-wrap">
+                 <span class="conv-audio-icon">🎵</span>
+                 <audio class="conv-audio-player" controls src="${convEscAttr(url)}"></audio>
+               </div>`;
   } else if (mt.startsWith('video')) {
-    content = `<div style="font-size:13px;margin-bottom:4px">Video</div>
-               <a href="${convEscAttr(url)}" target="_blank" class="conv-dl-btn">Download</a>`;
+    content = `<div class="conv-doc-wrap">
+                 <span class="conv-doc-icon">🎬</span>
+                 <span class="conv-doc-name">${convEsc(m.filename || 'video')}</span>
+               </div>
+               <a href="${convEscAttr(url)}" target="_blank" class="conv-dl-btn">▶ Open video</a>`;
   } else if (mt.includes('pdf')) {
-    content = `<div style="font-size:13px;margin-bottom:4px">PDF: ${convEsc(m.filename || 'document.pdf')}</div>
-               <a href="${convEscAttr(url)}" target="_blank" class="conv-dl-btn">Download PDF</a>`;
+    const fname = convEsc(m.filename || 'document.pdf');
+    content = `<a href="${convEscAttr(url)}" target="_blank" class="conv-doc-wrap">
+                 <span class="conv-doc-icon">📄</span>
+                 <span class="conv-doc-name">${fname}</span>
+               </a>`;
   } else {
-    content = `<div style="font-size:13px;margin-bottom:4px">File: ${convEsc(m.filename || 'file')}</div>
-               <a href="${convEscAttr(url)}" target="_blank" class="conv-dl-btn">Download</a>`;
+    const fname = convEsc(m.filename || 'file');
+    content = `<a href="${convEscAttr(url)}" target="_blank" class="conv-doc-wrap">
+                 <span class="conv-doc-icon">📎</span>
+                 <span class="conv-doc-name">${fname}</span>
+               </a>`;
   }
 
   return `<div class="conv-bubble conv-bubble-${dir}">
     <div class="conv-bubble-content">${content}</div>
-    <div class="conv-bubble-ts">${ts}</div>
+    <div class="conv-bubble-ts">${ts}${tick}</div>
   </div>`;
 }
 
@@ -3823,8 +4001,15 @@ function convMobileBack() {
 
 async function convOpenContact(phone, name) {
   _convActivePhone = phone;
-  const nameEl = document.getElementById('conv-active-name');
-  if (nameEl) nameEl.textContent = name || phone;
+  const nameEl   = document.getElementById('conv-active-name');
+  const avatarEl = document.getElementById('conv-active-avatar');
+  const subEl    = document.getElementById('conv-active-sub');
+  if (nameEl)   nameEl.textContent   = name || phone;
+  if (subEl)    subEl.textContent    = phone;
+  if (avatarEl) {
+    avatarEl.textContent         = convAvatarLetter(name);
+    avatarEl.style.background    = convAvatarColor(name);
+  }
 
   // Mobile: slide to thread view
   if (window.innerWidth <= 600) {
