@@ -295,6 +295,45 @@ def collect_daily_summary(db_path):
         logger.warning(f"collect_daily_summary: {e}")
         return []
 
+# ── Sync health / heartbeat ───────────────────────────────────────────────────
+# A dead or never-started sync used to be invisible: it logged at INFO/DEBUG and
+# returned. These globals + get_sync_status() make staleness queryable so a
+# health check can alert, instead of the pipeline silently going dark for months.
+_last_successful_sync = None   # datetime of the last fully-successful cycle
+_last_sync_error = None        # str describing the most recent failure, or None
+
+
+def _record_sync_success() -> None:
+    global _last_successful_sync, _last_sync_error
+    _last_successful_sync = datetime.now()
+    _last_sync_error = None
+
+
+def _record_sync_failure(msg: str) -> None:
+    global _last_sync_error
+    _last_sync_error = msg
+
+
+def get_sync_status() -> dict:
+    """Snapshot of sync health for health checks / monitoring.
+
+    healthy == configured AND a fully-successful sync within the last 2 intervals.
+    A long-dead or never-started sync reads healthy=False instead of being
+    silently invisible.
+    """
+    configured = bool(SUPABASE_URL and SUPABASE_KEY)
+    last = _last_successful_sync
+    age = (datetime.now() - last).total_seconds() if last else None
+    healthy = bool(configured and age is not None and age < SYNC_INTERVAL * 2)
+    return {
+        "configured":   configured,
+        "last_success": last.isoformat() if last else None,
+        "age_seconds":  age,
+        "healthy":      healthy,
+        "last_error":   _last_sync_error,
+    }
+
+
 # ── Main sync cycle ───────────────────────────────────────────────────────────
 def sync_once(db_path):
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -324,18 +363,22 @@ def sync_once(db_path):
     ok_sessions   = upsert("staff_sessions",   staff_sess,  on_conflict="id")                           if staff_sess  else True
 
     if ok_jobs and ok_printers and ok_summary and ok_supplies and ok_changes and ok_konica and ok_epson and ok_sessions:
+        _record_sync_success()
         logger.info(f"Supabase sync OK — {len(jobs)} jobs, {len(printers)} printers, "
                     f"{len(supplies)} supplies, {len(sup_changes)} supply_changes, "
                     f"{len(konica_jobs)} konica_jobs, {len(epson_jobs)} epson_jobs, "
                     f"{len(staff_sess)} staff_sessions")
     else:
-        logger.warning("Supabase sync had errors — check warnings above")
+        _record_sync_failure("one or more table upserts failed")
+        logger.error("Supabase sync had errors — admin data is now STALE until the "
+                     "next clean cycle; see warnings above")
 
 def start_sync(db_path, interval=SYNC_INTERVAL):
     """Start Supabase sync in a background daemon thread."""
     if not SUPABASE_URL or not SUPABASE_KEY:
-        logger.info("Supabase not configured (SUPABASE_URL/KEY empty) — admin sync disabled")
-        logger.info("To enable: set SUPABASE_URL and SUPABASE_KEY in supabase_sync.py")
+        logger.error("Supabase NOT configured (SUPABASE_URL/KEY empty) — admin sync is "
+                     "DISABLED. The admin dashboard will show stale data until "
+                     "SUPABASE_URL and SUPABASE_KEY are set in the environment.")
         return None
 
     def loop():
@@ -344,6 +387,7 @@ def start_sync(db_path, interval=SYNC_INTERVAL):
             try:
                 sync_once(db_path)
             except Exception as e:
+                _record_sync_failure(str(e))
                 logger.error(f"Supabase sync error: {e}")
             time.sleep(interval)
 
