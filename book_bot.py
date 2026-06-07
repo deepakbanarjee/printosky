@@ -744,6 +744,63 @@ def _try_website_order(phone: str, text: str, name: str | None) -> list[str] | N
     return []
 
 
+# ── Order tracking (re-share DTDC tracking on request) ────────────────────────
+# After dispatch, customers ask "where's my order / what's the courier / when
+# will I get it". The dispatch flow already stored tracking_no + courier_name and
+# messaged it once; this re-shares it on demand instead of re-showing the catalog.
+# DTDC's site has no verified auto-prefill URL param, so we give the number to
+# paste. Override DTDC_TRACK_URL via env if a prefill link becomes available.
+DTDC_TRACK_URL = os.environ.get("DTDC_TRACK_URL", "https://www.dtdc.com/track-your-shipment/")
+
+_TRACKING_WORDS = {
+    "track", "tracking", "status", "courier", "consignment", "shipped",
+    "shipping", "dispatch", "dispatched", "parcel", "reference", "awb",
+}
+_TRACKING_PHRASES = (
+    "when will i get", "when get", "when do i get", "where is my", "where's my",
+    "where is the", "how do i get", "not received", "not delivered", "reached",
+    "എന്ന് കിട്ടും", "എവിടെ", "എത്തി",   # Malayalam: when will I get / where / arrived
+)
+
+
+def is_tracking_question(text: str) -> bool:
+    """Heuristic: does this message ask about an existing order's whereabouts?"""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    if any(p in t for p in _TRACKING_PHRASES):
+        return True
+    return bool(set(re.findall(r"\w+", t)) & _TRACKING_WORDS)
+
+
+def compose_tracking_reply(order: dict) -> str:
+    """Build the tracking message for a dispatched order."""
+    code = order.get("order_code", "")
+    courier = order.get("courier_name") or "DTDC"
+    tn = order.get("tracking_no")
+    if not tn:
+        return (f"📦 Your order *{code}* has been *dispatched* via {courier}. "
+                "Your tracking number will be shared shortly — reply here if you "
+                "need help.")
+    return (
+        f"📦 Your order *{code}* shipped via *{courier}*.\n"
+        f"🔖 Tracking / Reference no: *{tn}*\n"
+        f"🔗 Track here: {DTDC_TRACK_URL}\n"
+        f"On that page, paste *{tn}* and tap search."
+    )
+
+
+def _maybe_tracking_reply(phone: str, text: str) -> list[str] | None:
+    """If `text` asks about an already-dispatched order, re-share its tracking."""
+    if not is_tracking_question(text):
+        return None
+    order = _dbc.get_dispatched_book_order(phone)
+    if not order:
+        return None
+    _send_text(phone, compose_tracking_reply(order))
+    return []
+
+
 def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[str] | None:
     session = _dbc.get_session(DB, phone) or {}
     step = session.get("step") or ""
@@ -753,6 +810,12 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
             web = _try_website_order(phone, text, name)
             if web is not None:
                 return web
+            # A customer asking about an already-shipped order → re-share tracking
+            # (must come BEFORE is_book_trigger, since "how do I get the book" etc.
+            # would otherwise re-open the catalog).
+            track = _maybe_tracking_reply(phone, text)
+            if track is not None:
+                return track
         if is_book_trigger(text) and not _in_print_flow(session):
             return _start(phone, name)
         return None

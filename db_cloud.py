@@ -914,6 +914,28 @@ def get_active_book_order(phone: str) -> dict:
         return {}
 
 
+def get_dispatched_book_order(phone: str) -> dict:
+    """Return the most recent dispatched/delivered book order for this phone, or {}.
+
+    Used to re-share tracking info when a customer asks about an order that has
+    already shipped (distinct from get_active_book_order, which is in-progress).
+    """
+    try:
+        result = (
+            _client().table("book_orders")
+            .select("*")
+            .eq("phone", phone)
+            .in_("status", ["dispatched", "delivered"])
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("get_dispatched_book_order error for %s: %s", phone, exc)
+        return {}
+
+
 def create_book_order(order_code: str, phone: str, name: str | None = None) -> dict:
     """Insert a new 'collecting' book order. Returns the created row, or {}."""
     try:
