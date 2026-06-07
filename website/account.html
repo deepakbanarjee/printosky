@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>My Account – Printosky</title>
+<meta name="description" content="Your Printosky space — store credit, your uploaded notes, and quick uploads.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<style>
+  :root {
+    --wa:    #25D366;
+    --wa-d:  #128C7E;
+    --ink:   #1a1a1a;
+    --muted: #6b7280;
+    --bg:    #f8f9fa;
+    --card:  #ffffff;
+    --bdr:   #e5e7eb;
+    --err:   #ef4444;
+    --amber: #d97706;
+    --r:     14px;
+    --sh:    0 2px 12px rgba(0,0,0,.08);
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--ink);
+    min-height: 100dvh; display: flex; flex-direction: column; align-items: center;
+  }
+  .hdr { width: 100%; background: var(--wa-d); color: #fff; padding: 18px 20px 16px; text-align: center; }
+  .hdr h1 { font-size: 1.15rem; font-weight: 700; }
+  .hdr p  { font-size: .82rem; opacity: .88; margin-top: 3px; }
+  .page { width: 100%; max-width: 460px; padding: 0 12px 48px; }
+  .card { background: var(--card); border-radius: var(--r); box-shadow: var(--sh); padding: 24px 20px; margin: 16px auto; animation: up .25s ease; }
+  @keyframes up { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+  h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: 6px; }
+  .sub { font-size: .84rem; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+
+  label { display: block; font-size: .82rem; font-weight: 600; color: #374151; margin-bottom: 5px; }
+  .field { margin-bottom: 16px; }
+  input[type=text], input[type=email], input[type=tel], select {
+    width: 100%; padding: 11px 14px; border: 1.5px solid var(--bdr); border-radius: 10px;
+    font-size: .95rem; color: var(--ink); background: #fff; outline: none;
+    transition: border-color .15s; -webkit-appearance: none;
+  }
+  input:focus, select:focus { border-color: var(--wa); }
+  .phone-row { display: flex; gap: 8px; }
+  .pfx { width: 72px; flex-shrink: 0; padding: 11px 12px; border: 1.5px solid var(--bdr); border-radius: 10px; font-size: .95rem; color: var(--muted); background: #f3f4f6; text-align: center; }
+  .phone-row input { flex: 1; }
+
+  .btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 13px 16px; border: none; border-radius: 11px; font-size: .97rem; font-weight: 600; cursor: pointer; transition: opacity .15s, transform .1s; text-decoration: none; }
+  .btn:active { transform: scale(.98); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+  .btn-wa     { background: var(--wa);   color: #fff;        margin-bottom: 10px; }
+  .btn-google { background: #fff;        color: #3c4043;     border: 1.5px solid #dadce0; margin-bottom: 10px; }
+  .btn-email  { background: #fff;        color: var(--wa-d); border: 1.5px solid var(--wa-d); margin-bottom: 10px; }
+  .btn-submit { background: var(--wa-d); color: #fff;        margin-top: 6px; }
+  .btn-out    { background: #fff;        color: var(--muted); border: 1.5px solid var(--bdr); }
+
+  .otp-row { display: flex; gap: 8px; justify-content: center; margin: 16px 0 10px; }
+  .otp-row input { width: 44px; height: 52px; text-align: center; font-size: 1.4rem; font-weight: 700; border: 2px solid var(--bdr); border-radius: 10px; padding: 0; outline: none; transition: border-color .15s; }
+  .otp-row input:focus { border-color: var(--wa); }
+  .wa-btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 16px; background: #e7fbe8; border: 2px solid var(--wa); border-radius: 12px; color: var(--wa-d); font-weight: 700; font-size: 1rem; text-decoration: none; cursor: pointer; transition: background .15s; }
+  .wa-btn:active { background: #d0f5d3; }
+  .cd { text-align: center; font-size: .83rem; color: var(--muted); margin: 10px 0; }
+  .lnk { background: none; border: none; color: var(--wa-d); font-weight: 600; font-size: .88rem; cursor: pointer; text-decoration: underline; }
+  .lnk:disabled { color: var(--muted); text-decoration: none; cursor: not-allowed; }
+
+  .drop { border: 2px dashed var(--bdr); border-radius: 12px; padding: 32px 16px; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; background: #fafafa; margin-bottom: 6px; }
+  .drop.on { border-color: var(--wa); background: #e7fbe8; }
+  .drop .ico { font-size: 2.4rem; margin-bottom: 8px; }
+  .drop p { font-size: .9rem; color: var(--muted); }
+  .drop strong { color: var(--wa-d); }
+  #fileInput { display: none; }
+  .pill { display: flex; align-items: center; gap: 8px; background: #e7fbe8; border-radius: 8px; padding: 10px 14px; font-size: .88rem; color: var(--wa-d); margin-bottom: 16px; }
+  .pill span.name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pill button { background:none; border:none; cursor:pointer; font-size:1rem; color:var(--muted); }
+  .chk { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 18px; }
+  .chk input { width:20px; height:20px; flex-shrink:0; margin-top:1px; accent-color:var(--wa); cursor:pointer; }
+  .chk label { font-size:.88rem; color:#374151; font-weight:400; cursor:pointer; }
+
+  .alert { border-radius: 10px; padding: 12px 14px; font-size: .87rem; margin-bottom: 14px; line-height: 1.5; }
+  .err  { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+  .info { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 20px; }
+  .tab { flex: 1; padding: 8px 4px; text-align: center; border: 1.5px solid var(--bdr); border-radius: 8px; font-size: .82rem; font-weight: 600; cursor: pointer; color: var(--muted); background: #fff; transition: all .15s; }
+  .tab.on { border-color: var(--wa); color: var(--wa-d); background: #e7fbe8; }
+
+  /* ── dashboard ── */
+  .greet { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .greet h2 { margin: 0; }
+  .greet .who { font-size: .78rem; color: var(--muted); margin-top: 2px; }
+  .greet button { background:none; border:none; color:var(--muted); font-size:.82rem; cursor:pointer; text-decoration:underline; }
+
+  .wallet { background: linear-gradient(135deg, var(--wa-d), var(--wa)); color:#fff; border-radius: 14px; padding: 20px; margin-bottom: 18px; }
+  .wallet .lbl { font-size: .8rem; opacity: .9; }
+  .wallet .amt { font-size: 2.2rem; font-weight: 800; margin: 4px 0; }
+  .wallet .hint { font-size: .76rem; opacity: .9; line-height: 1.4; }
+
+  .section-title { font-size: .82rem; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: .4px; margin: 22px 0 10px; }
+
+  .note-item { border: 1px solid var(--bdr); border-radius: 12px; padding: 13px 14px; margin-bottom: 10px; }
+  .note-item .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .note-item .ttl { font-size: .92rem; font-weight: 600; line-height: 1.3; }
+  .note-item .meta { font-size: .76rem; color: var(--muted); margin-top: 3px; }
+  .note-item .foot { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--bdr); }
+  .note-item .earn { font-size: .82rem; color: var(--wa-d); font-weight: 700; }
+  .note-item .prints { font-size: .76rem; color: var(--muted); }
+  .badge { font-size: .68rem; font-weight: 700; padding: 3px 9px; border-radius: 20px; white-space: nowrap; text-transform: uppercase; letter-spacing: .3px; }
+  .badge.pending  { background: #fef3c7; color: var(--amber); }
+  .badge.approved, .badge.published { background: #dcfce7; color: #15803d; }
+  .badge.rejected { background: #fee2e2; color: #b91c1c; }
+
+  .empty { text-align: center; color: var(--muted); padding: 24px 12px; font-size: .86rem; }
+  .empty .e-ico { font-size: 2.4rem; margin-bottom: 8px; }
+
+  .dots { display: flex; gap: 4px; margin-bottom: 20px; }
+  .dot  { flex: 1; height: 4px; border-radius: 2px; background: var(--bdr); }
+  .dot.on { background: var(--wa); }
+
+  .sico { font-size: 3.5rem; text-align: center; margin-bottom: 12px; }
+  .code-box { background: #f3f4f6; border-radius: 10px; padding: 14px; text-align: center; font-family: monospace; font-size: 1.2rem; font-weight: 700; letter-spacing: 2px; color: var(--wa-d); margin: 14px 0; }
+  .cred-box { background: #e7fbe8; border-radius: 10px; padding: 16px; text-align: center; margin-bottom: 16px; }
+  .cred-box .big { font-size: 1.8rem; font-weight: 800; color: var(--wa-d); }
+  .cred-box p { font-size: .83rem; color: #374151; margin-top: 4px; }
+  .emoji-big { font-size: 3rem; text-align: center; margin-bottom: 8px; }
+  .spin { text-align:center; padding: 40px 0; color: var(--muted); font-size: .9rem; }
+
+  .hidden { display: none !important; }
+  @media (max-width: 380px) { .card { padding: 20px 16px; } .otp-row input { width: 38px; height: 46px; font-size: 1.2rem; } }
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <h1>📚 Printosky</h1>
+  <p>Your personal space</p>
+</div>
+
+<div class="page">
+
+  <!-- ═══ AUTH ════════════════════════════════════════════════════════════════ -->
+  <div id="s-auth" class="card">
+    <h2>Sign in</h2>
+    <p class="sub">Access your store credit, your uploaded notes, and quick uploads.</p>
+
+    <div class="tabs">
+      <div class="tab on" id="tab-wa"     onclick="tab('wa')"    >📱 WhatsApp</div>
+      <div class="tab"    id="tab-google" onclick="tab('google')">🔵 Google</div>
+      <div class="tab"    id="tab-email"  onclick="tab('email')" >✉️ Email</div>
+    </div>
+
+    <div id="p-wa">
+      <div class="alert info">One-time code via WhatsApp. No SMS charges.</div>
+      <div class="field">
+        <label for="phoneIn">WhatsApp number</label>
+        <div class="phone-row">
+          <div class="pfx">🇮🇳 +91</div>
+          <input type="tel" id="phoneIn" maxlength="10" inputmode="numeric" placeholder="98765 43210">
+        </div>
+      </div>
+      <div id="wa-err" class="alert err hidden"></div>
+      <button class="btn btn-wa" onclick="reqOtp('login')">Get OTP via WhatsApp</button>
+    </div>
+
+    <div id="p-google" class="hidden">
+      <p class="sub">Sign in with Google. You'll link your WhatsApp number once, so we can send your print credits.</p>
+      <button class="btn btn-google" onclick="doGoogle()">
+        <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        Continue with Google
+      </button>
+      <div id="google-err" class="alert err hidden"></div>
+    </div>
+
+    <div id="p-email" class="hidden">
+      <p class="sub">We'll email you a magic link. You'll link your WhatsApp number once after signing in.</p>
+      <div class="field">
+        <label for="emailIn">Email address</label>
+        <input type="email" id="emailIn" placeholder="you@college.ac.in" autocomplete="email">
+      </div>
+      <div id="email-err" class="alert err hidden"></div>
+      <button class="btn btn-email" id="emailBtn" onclick="doEmail()">✉️ Send magic link</button>
+      <div id="email-sent" class="hidden" style="text-align:center;margin-top:14px">
+        <div class="emoji-big">📬</div>
+        <p style="font-size:.95rem;font-weight:600;margin-bottom:6px">Check your inbox!</p>
+        <p style="font-size:.83rem;color:var(--muted)">Click the link in the email. It expires in 1 hour.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ LINK PHONE (email/Google users) ═════════════════════════════════════ -->
+  <div id="s-link" class="card hidden">
+    <h2>Link your WhatsApp number</h2>
+    <p class="sub">Your store credit and print history live under your phone number — that's how staff find you at the counter. Verify it once and you're set.</p>
+    <div class="field">
+      <label for="linkPhoneIn">WhatsApp number</label>
+      <div class="phone-row">
+        <div class="pfx">🇮🇳 +91</div>
+        <input type="tel" id="linkPhoneIn" maxlength="10" inputmode="numeric" placeholder="98765 43210">
+      </div>
+    </div>
+    <div id="link-err" class="alert err hidden"></div>
+    <button class="btn btn-wa" onclick="reqOtp('link')">Get OTP via WhatsApp</button>
+    <p style="text-align:center;margin-top:12px"><button class="lnk" onclick="signOut()">Use a different account</button></p>
+  </div>
+
+  <!-- ═══ OTP (shared by login + link) ════════════════════════════════════════ -->
+  <div id="s-otp" class="card hidden">
+    <h2>Enter your code</h2>
+    <p class="sub" style="margin-bottom:16px">
+      Tap below — WhatsApp opens with a message ready to send.<br>
+      After sending, your 6-digit code appears in the chat.
+    </p>
+    <a id="waLink" class="wa-btn" target="_blank" rel="noopener">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.126.555 4.126 1.527 5.857L0 24l6.294-1.518A11.944 11.944 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.8 9.8 0 01-4.997-1.363l-.358-.213-3.734.901.934-3.62-.233-.373A9.793 9.793 0 012.182 12C2.182 6.57 6.57 2.182 12 2.182S21.818 6.57 21.818 12 17.43 21.818 12 21.818z"/></svg>
+      Open WhatsApp to get code
+    </a>
+    <p class="cd" id="cdText">Waiting for code…</p>
+    <label>Enter 6-digit code</label>
+    <div class="otp-row" id="otpDigs">
+      <input type="tel" maxlength="1" inputmode="numeric" pattern="[0-9]">
+      <input type="tel" maxlength="1" inputmode="numeric" pattern="[0-9]">
+      <input type="tel" maxlength="1" inputmode="numeric" pattern="[0-9]">
+      <input type="tel" maxlength="1" inputmode="numeric" pattern="[0-9]">
+      <input type="tel" maxlength="1" inputmode="numeric" pattern="[0-9]">
+      <input type="tel" maxlength="1" inputmode="numeric" pattern="[0-9]">
+    </div>
+    <div id="otp-err" class="alert err hidden"></div>
+    <button class="btn btn-wa" id="verifyBtn" onclick="verifyOtp()" disabled>Verify Code</button>
+    <p style="text-align:center;margin-top:12px">
+      <button class="lnk" id="resendBtn" onclick="resendOtp()" disabled>Resend code</button>
+      &nbsp;·&nbsp;
+      <button class="lnk" onclick="backFromOtp()">Change number</button>
+    </p>
+  </div>
+
+  <!-- ═══ HUB (dashboard) ═════════════════════════════════════════════════════ -->
+  <div id="s-hub" class="card hidden">
+    <div class="greet">
+      <div>
+        <h2 id="hubName">Hi there 👋</h2>
+        <div class="who" id="hubWho">—</div>
+      </div>
+      <button onclick="signOut()">Sign out</button>
+    </div>
+
+    <div class="wallet">
+      <div class="lbl">Store credit</div>
+      <div class="amt" id="walletAmt">₹0.00</div>
+      <div class="hint">Use it on your next print — just tell us your number at the counter or on WhatsApp.</div>
+    </div>
+
+    <button class="btn btn-submit" onclick="goUpload()" style="margin-top:0">📤 Upload notes &amp; earn</button>
+
+    <div class="section-title">My notes</div>
+    <div id="notesList"></div>
+  </div>
+
+  <!-- ═══ UPLOAD ══════════════════════════════════════════════════════════════ -->
+  <div id="s-upload" class="card hidden">
+    <div class="dots">
+      <div class="dot on" id="d1"></div>
+      <div class="dot"    id="d2"></div>
+      <div class="dot"    id="d3"></div>
+    </div>
+    <h2>Upload your notes</h2>
+    <p class="sub">PDF only &middot; Max 50 MB &middot; Must be your original work &middot; Earn ₹0.10 per page each time someone prints it</p>
+
+    <div class="drop" id="dropZ" onclick="document.getElementById('fileInput').click()" ondragover="onDragOver(event)" ondragleave="onDragLeave()" ondrop="onDrop(event)">
+      <div class="ico">📄</div>
+      <p><strong>Tap to choose PDF</strong></p>
+      <p style="font-size:.78rem;margin-top:4px">or drag and drop here</p>
+    </div>
+    <input type="file" id="fileInput" accept=".pdf,application/pdf" onchange="onFile(event)">
+
+    <div id="pill" class="pill hidden">
+      <span>📄 </span><span class="name" id="fName">—</span>
+      <span id="pCount" style="flex-shrink:0;font-weight:700;color:var(--wa-d)"></span>
+      <button onclick="clearFile()">✕</button>
+    </div>
+
+    <div id="up-err"  class="alert err  hidden"></div>
+    <div id="up-info" class="alert info hidden"></div>
+
+    <div class="field">
+      <label for="titleIn">Title <span style="color:var(--err)">*</span></label>
+      <input type="text" id="titleIn" placeholder="e.g. B.Com Part 2 — Accounting Notes" maxlength="120">
+    </div>
+    <div class="field">
+      <label for="catSel">University / Exam <span style="color:var(--err)">*</span></label>
+      <select id="catSel">
+        <option value="">— Select —</option>
+        <option value="kerala_university">Kerala University</option>
+        <option value="mg_university">MG University</option>
+        <option value="calicut_university">Calicut University</option>
+        <option value="cusat">CUSAT</option>
+        <option value="entrance_exam">Entrance Exam</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="subjIn">Subject <span style="color:var(--err)">*</span></label>
+      <input type="text" id="subjIn" placeholder="e.g. Financial Accounting" maxlength="80">
+    </div>
+    <div class="chk">
+      <input type="checkbox" id="attIn">
+      <label for="attIn">I confirm these are my original notes and I have the right to share them.</label>
+    </div>
+    <button class="btn btn-submit" id="subBtn" onclick="submit()">📤 Submit Notes</button>
+    <button class="btn btn-out" onclick="backToHub()" style="margin-top:10px">← Back to my account</button>
+  </div>
+
+  <!-- ═══ SUCCESS ═════════════════════════════════════════════════════════════ -->
+  <div id="s-done" class="card hidden">
+    <div class="sico">🎉</div>
+    <h2 style="text-align:center">Submitted!</h2>
+    <p class="sub" style="text-align:center">Admin reviews within a few hours. We'll notify you on WhatsApp once it's live.</p>
+    <div class="code-box" id="okCode">NOTE-XXXXXXXX</div>
+    <div class="cred-box">
+      <div class="big" id="okCred">₹0.00</div>
+      <p>potential store credit per copy printed</p>
+    </div>
+    <p style="font-size:.85rem;color:var(--muted);margin-bottom:20px;text-align:center">
+      <span id="okPages">0</span> pages &middot; ₹0.10 credit per page per print
+    </p>
+    <button class="btn btn-submit" onclick="backToHub()">Done — back to my account</button>
+  </div>
+
+</div><!-- .page -->
+
+<script>
+/* ─── config ──────────────────────────────────────────────────────────────── */
+const SB_URL  = "https://mlhuwlnwwwxdnqafelko.supabase.co";
+const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI";
+const API     = "https://printosky.vercel.app";
+const REDIR   = "https://printosky.com/account.html";
+
+const sb = supabase.createClient(SB_URL, SB_ANON);
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+/* ─── state ───────────────────────────────────────────────────────────────── */
+let token     = null;     // Bearer sent to API (web_token OR Supabase JWT)
+let tokenKind = null;     // 'phone' | 'email'
+let otpCtx    = "login";  // 'login' | 'link'
+let reqTok    = null;
+let waHref    = null;
+let cdTimer   = null;
+let pdfFile   = null;
+let pageCount = 0;
+
+/* ─── boot ────────────────────────────────────────────────────────────────── */
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) { token = session.access_token; tokenKind = "email"; await loadSummary(); }
+  sb.auth.onAuthStateChange(async (_e, s) => {
+    if (s && tokenKind !== "email") { token = s.access_token; tokenKind = "email"; await loadSummary(); }
+  });
+})();
+
+/* ─── tabs ────────────────────────────────────────────────────────────────── */
+function tab(name) {
+  ["wa","google","email"].forEach(t => {
+    ge("tab-"+t).classList.toggle("on", t === name);
+    ge("p-"+t).classList.toggle("hidden", t !== name);
+  });
+}
+
+/* ─── OTP request (shared: login + link) ──────────────────────────────────── */
+async function reqOtp(ctx) {
+  otpCtx = ctx;
+  const errId = ctx === "link" ? "link-err" : "wa-err";
+  const inId  = ctx === "link" ? "linkPhoneIn" : "phoneIn";
+  clrErr(errId);
+  const raw = ge(inId).value.replace(/\D/g,"");
+  if (raw.length !== 10) { showErr(errId, "Enter a valid 10-digit WhatsApp number."); return; }
+  const btn = event.currentTarget;
+  btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    const r = await fetch(API+"/auth/wa-otp/request", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ phone: raw }) });
+    const d = await r.json();
+    if (!r.ok) { showErr(errId, d.error || "Request failed."); return; }
+    reqTok = d.request_token; waHref = d.wa_link;
+    ge("waLink").href = waHref;
+    show("s-otp");
+    startCd(); setupDigs();
+  } catch { showErr(errId, "Network error. Please try again."); }
+  finally   { btn.disabled = false; btn.textContent = "Get OTP via WhatsApp"; }
+}
+
+function backFromOtp() {
+  clearTimeout(cdTimer);
+  show(otpCtx === "link" ? "s-link" : "s-auth");
+}
+
+async function resendOtp() {
+  clrErr("otp-err");
+  const inId = otpCtx === "link" ? "linkPhoneIn" : "phoneIn";
+  const raw  = ge(inId).value.replace(/\D/g,"");
+  ge("resendBtn").disabled = true;
+  try {
+    const r = await fetch(API+"/auth/wa-otp/request", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ phone: raw }) });
+    const d = await r.json();
+    if (!r.ok) { showErr("otp-err", d.error || "Failed to resend."); return; }
+    reqTok = d.request_token; waHref = d.wa_link;
+    ge("waLink").href = waHref;
+    startCd();
+    document.querySelectorAll("#otpDigs input").forEach(i => i.value = "");
+    ge("verifyBtn").disabled = true;
+  } catch { showErr("otp-err", "Network error."); }
+}
+
+function startCd() {
+  clearTimeout(cdTimer);
+  const el = ge("cdText"), rb = ge("resendBtn");
+  rb.disabled = true;
+  let s = 45;
+  const tick = () => {
+    if (s <= 0) { el.textContent = "Didn't receive the code?"; rb.disabled = false; return; }
+    el.textContent = s > 30 ? `Waiting for code… (${s}s)` : `Didn't receive it? Resend in ${s}s`;
+    s--; cdTimer = setTimeout(tick, 1000);
+  };
+  tick();
+}
+
+function setupDigs() {
+  const ins = document.querySelectorAll("#otpDigs input");
+  ins.forEach((inp, i) => {
+    inp.value = "";
+    inp.oninput = () => {
+      inp.value = inp.value.replace(/\D/,"");
+      if (inp.value && i < ins.length - 1) ins[i+1].focus();
+      ge("verifyBtn").disabled = [...ins].some(x => !x.value);
+    };
+    inp.onkeydown = e => { if (e.key === "Backspace" && !inp.value && i > 0) ins[i-1].focus(); };
+    inp.onpaste = e => {
+      const p = (e.clipboardData||window.clipboardData).getData("text").replace(/\D/g,"");
+      if (p.length === 6) { ins.forEach((x,j) => x.value = p[j]||""); ge("verifyBtn").disabled = false; ins[5].focus(); e.preventDefault(); }
+    };
+  });
+  ins[0].focus();
+}
+
+async function verifyOtp() {
+  clrErr("otp-err");
+  const otp = [...document.querySelectorAll("#otpDigs input")].map(i=>i.value).join("");
+  if (otp.length < 6) return;
+  const btn = ge("verifyBtn");
+  btn.disabled = true; btn.textContent = "Verifying…";
+  try {
+    if (otpCtx === "link") {
+      // Email/Google user linking a verified phone — Authorization = Supabase JWT
+      const r = await fetch(API+"/account/link-phone/verify", {
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+        body:JSON.stringify({ request_token: reqTok, otp }),
+      });
+      const d = await r.json();
+      if (!r.ok) { showErr("otp-err", d.error || "Incorrect code."); btn.disabled=false; btn.textContent="Verify Code"; return; }
+      clearTimeout(cdTimer);
+      await loadSummary();
+    } else {
+      // WhatsApp login — issues a web_token
+      const r = await fetch(API+"/auth/wa-otp/verify", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ request_token: reqTok, otp }) });
+      const d = await r.json();
+      if (!r.ok) { showErr("otp-err", d.error || "Incorrect code."); btn.disabled=false; btn.textContent="Verify Code"; return; }
+      clearTimeout(cdTimer);
+      token = d.web_token; tokenKind = "phone";
+      await loadSummary();
+    }
+  } catch { showErr("otp-err", "Network error."); btn.disabled=false; btn.textContent="Verify Code"; }
+  finally { btn.textContent = "Verify Code"; }
+}
+
+/* ─── Google / Email ──────────────────────────────────────────────────────── */
+async function doGoogle() {
+  clrErr("google-err");
+  const { error } = await sb.auth.signInWithOAuth({ provider:"google", options:{ redirectTo: REDIR } });
+  if (error) showErr("google-err", error.message || "Google sign-in failed. Ensure it's enabled in Supabase.");
+}
+async function doEmail() {
+  clrErr("email-err");
+  const email = ge("emailIn").value.trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showErr("email-err","Enter a valid email address."); return; }
+  const btn = ge("emailBtn");
+  btn.disabled = true; btn.textContent = "Sending…";
+  const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: REDIR } });
+  btn.disabled = false; btn.textContent = "✉️ Send magic link";
+  if (error) { showErr("email-err", error.message||"Failed. Try again."); return; }
+  ge("email-sent").classList.remove("hidden"); btn.classList.add("hidden");
+}
+
+/* ─── summary / dashboard ─────────────────────────────────────────────────── */
+async function loadSummary() {
+  show("s-hub");
+  ge("notesList").innerHTML = '<div class="spin">Loading your account…</div>';
+  ge("walletAmt").textContent = "—";
+  try {
+    const r = await fetch(API+"/account/summary", { method:"POST", headers:{"Content-Type":"application/json","Authorization":"Bearer "+token}, body:"{}" });
+    const d = await r.json();
+    if (!r.ok) {
+      if (r.status === 401) { signOut(); return; }
+      ge("notesList").innerHTML = `<div class="empty">Couldn't load your account. ${esc(d.error||"")}</div>`;
+      return;
+    }
+    if (d.needs_phone_link) { show("s-link"); return; }
+    renderHub(d);
+  } catch {
+    ge("notesList").innerHTML = '<div class="empty">Network error. Pull to refresh.</div>';
+  }
+}
+
+function renderHub(d) {
+  show("s-hub");
+  const name = (d.name || "").trim();
+  ge("hubName").textContent = name ? `Hi ${name.split(" ")[0]} 👋` : "Hi there 👋";
+  ge("hubWho").textContent = d.phone_masked || "";
+  ge("walletAmt").textContent = "₹" + (d.wallet_rs || 0).toFixed(2);
+
+  const list = ge("notesList");
+  if (!d.notes || d.notes.length === 0) {
+    list.innerHTML = '<div class="empty"><div class="e-ico">📭</div>No notes yet. Upload your first one and start earning credit.</div>';
+    return;
+  }
+  list.innerHTML = d.notes.map(n => {
+    const st = (n.status || "pending").toLowerCase();
+    const badge = ["approved","published","pending","rejected"].includes(st) ? st : "pending";
+    return `<div class="note-item">
+      <div class="top">
+        <div>
+          <div class="ttl">${esc(n.title || n.note_code)}</div>
+          <div class="meta">${esc(n.subject || "")} · ${n.page_count || 0} pages · ${esc(n.note_code)}</div>
+        </div>
+        <span class="badge ${badge}">${badge}</span>
+      </div>
+      <div class="foot">
+        <span class="prints">${n.print_count || 0} ${n.print_count === 1 ? "print" : "prints"}</span>
+        <span class="earn">₹${(n.earned_rs || 0).toFixed(2)} earned</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+/* ─── sign out ────────────────────────────────────────────────────────────── */
+function signOut() {
+  token = tokenKind = null;
+  sb.auth.signOut();
+  clearFile();
+  show("s-auth");
+}
+
+/* ─── navigation ──────────────────────────────────────────────────────────── */
+function goUpload()  { show("s-upload"); window.scrollTo({top:0,behavior:"smooth"}); }
+function backToHub() { loadSummary(); window.scrollTo({top:0,behavior:"smooth"}); }
+
+/* ─── file handling ──────────────────────────────────────────────────────── */
+function onDragOver(e){ e.preventDefault(); ge("dropZ").classList.add("on"); }
+function onDragLeave() { ge("dropZ").classList.remove("on"); }
+function onDrop(e)     { e.preventDefault(); onDragLeave(); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); }
+function onFile(e)     { if (e.target.files[0]) processFile(e.target.files[0]); }
+
+async function processFile(file) {
+  clrErr("up-err"); clrInfo("up-info");
+  if (file.type !== "application/pdf" && !file.name.endsWith(".pdf")) { showErr("up-err","Please select a PDF file."); return; }
+  if (file.size > 50*1024*1024) { showErr("up-err","File too large (max 50 MB)."); return; }
+  pdfFile = file;
+  ge("fName").textContent = file.name;
+  ge("pCount").textContent = "counting…";
+  ge("pill").classList.remove("hidden");
+  ge("d2").classList.add("on");
+  try {
+    const ab = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+    pageCount = pdf.numPages;
+    ge("pCount").textContent = `${pageCount} pages`;
+    showInfo("up-info", `✅ ${pageCount} pages detected. You can earn up to ₹${(pageCount*0.10).toFixed(2)} per print.`);
+  } catch {
+    pageCount = 0;
+    ge("pCount").textContent = "? pages";
+    showErr("up-err","Couldn't count pages — check the PDF is valid.");
+  }
+}
+function clearFile() {
+  pdfFile = null; pageCount = 0;
+  ge("pill").classList.add("hidden");
+  ge("fileInput").value = "";
+  ge("d2").classList.remove("on"); ge("d3").classList.remove("on");
+  clrErr("up-err"); clrInfo("up-info");
+}
+
+/* ─── submit ─────────────────────────────────────────────────────────────── */
+async function submit() {
+  clrErr("up-err");
+  const title = ge("titleIn").value.trim();
+  const cat   = ge("catSel").value;
+  const subj  = ge("subjIn").value.trim();
+  const att   = ge("attIn").checked;
+  if (!pdfFile)      { showErr("up-err","Please select a PDF file."); return; }
+  if (title.length<5){ showErr("up-err","Title must be at least 5 characters."); return; }
+  if (!cat)          { showErr("up-err","Please select a university or exam."); return; }
+  if (!subj)         { showErr("up-err","Please enter a subject."); return; }
+  if (!att)          { showErr("up-err","Please confirm these are your original notes."); return; }
+  if (pageCount < 1) { showErr("up-err","Could not count PDF pages. Re-upload the file."); return; }
+
+  const btn = ge("subBtn");
+  btn.disabled = true; btn.textContent = "Uploading…";
+  ge("d3").classList.add("on");
+  try {
+    const rr = await fetch(API+"/notes/reserve", { method:"POST", headers:{"Content-Type":"application/json","Authorization":"Bearer "+token}, body:"{}" });
+    const rd = await rr.json();
+    if (rr.status === 403 && rd.needs_phone_link) { show("s-link"); return; }
+    if (!rr.ok) { showErr("up-err", rd.error||"Slot reservation failed."); return; }
+    const { note_code, upload_url, storage_path } = rd;
+
+    const ur = await fetch(upload_url, { method:"PUT", headers:{"Content-Type":"application/pdf"}, body: pdfFile });
+    if (!ur.ok) { showErr("up-err","Upload failed. Please try again."); return; }
+
+    const sr = await fetch(API+"/notes/submit", {
+      method:"POST", headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body:JSON.stringify({ note_code, storage_path, title, category:cat, subject:subj, page_count:pageCount, attests:true }),
+    });
+    const sd = await sr.json();
+    if (!sr.ok) { showErr("up-err", sd.error||"Submission failed."); return; }
+
+    ge("okCode").textContent  = note_code;
+    ge("okCred").textContent  = "₹"+(sd.potential_credit_rs||0).toFixed(2);
+    ge("okPages").textContent = pageCount;
+    resetForm();
+    show("s-done");
+    window.scrollTo({top:0,behavior:"smooth"});
+  } catch { showErr("up-err","Network error. Please try again."); }
+  finally  { btn.disabled = false; btn.textContent = "📤 Submit Notes"; }
+}
+
+function resetForm() {
+  clearFile();
+  ge("titleIn").value = ""; ge("catSel").value = ""; ge("subjIn").value = ""; ge("attIn").checked = false;
+  [1,2,3].forEach(i => ge("d"+i).classList.toggle("on", i===1));
+}
+
+/* ─── screen control + helpers ────────────────────────────────────────────── */
+function show(id) {
+  ["s-auth","s-link","s-otp","s-hub","s-upload","s-done"].forEach(s => ge(s).classList.toggle("hidden", s !== id));
+}
+function ge(id) { return document.getElementById(id); }
+function esc(s) { return (s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function showErr(id,msg){ const e=ge(id); e.textContent=msg; e.classList.remove("hidden"); }
+function clrErr(id){ const e=ge(id); e.textContent=""; e.classList.add("hidden"); }
+function showInfo(id,msg){ const e=ge(id); e.textContent=msg; e.classList.remove("hidden"); }
+function clrInfo(id){ ge(id).classList.add("hidden"); }
+</script>
+</body>
+</html>

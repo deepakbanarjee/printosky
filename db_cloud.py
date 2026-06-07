@@ -1674,3 +1674,57 @@ def note_subscription_status(phone: str) -> dict:
     except Exception as exc:
         logger.error("note_subscription_status error %s: %s", phone, exc)
         return {}
+
+
+# ── Account identity linking (phone is the canonical customer id) ─────────────
+
+def link_account_email(email: str, phone: str, name: str | None = None) -> bool:
+    """Link a Supabase (Google/email) login to a canonical WhatsApp phone.
+
+    Upsert on email so re-linking just updates the phone. Phone is what the
+    wallet, credits, print jobs and subscriptions are all keyed on.
+    """
+    try:
+        row: dict = {"email": (email or "").lower().strip(), "phone": phone}
+        if name:
+            row["name"] = name
+        _client().table("account_links").upsert(row, on_conflict="email").execute()
+        return True
+    except Exception as exc:
+        logger.error("link_account_email error %s: %s", email, exc)
+        return False
+
+
+def get_linked_phone(email: str) -> str | None:
+    """Return the canonical phone linked to an email account, or None."""
+    try:
+        result = (
+            _client().table("account_links")
+            .select("phone")
+            .eq("email", (email or "").lower().strip())
+            .execute()
+        )
+        return result.data[0]["phone"] if result.data else None
+    except Exception as exc:
+        logger.error("get_linked_phone error %s: %s", email, exc)
+        return None
+
+
+def list_notes_by_uploader(phone: str) -> list:
+    """All notes uploaded by a phone, any status, newest first.
+
+    Unlike list_notes() (public catalogue, approved only), this returns the
+    uploader's own notes including pending/rejected so they can see status.
+    """
+    try:
+        result = (
+            _client().table("notes")
+            .select("*")
+            .eq("uploader_phone", phone)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return result.data or []
+    except Exception as exc:
+        logger.error("list_notes_by_uploader error %s: %s", phone, exc)
+        return []

@@ -270,6 +270,160 @@ def _notes_auth(h) -> tuple[str | None, str | None]:
     return None, "Invalid or expired token"
 
 
+def _mask_phone(phone: str) -> str:
+    """Mask a phone for display: keep last 4 digits."""
+    p = (phone or "").strip()
+    return p if len(p) <= 4 else "•••• •••• " + p[-4:]
+
+
+def _resolve_account(h) -> dict:
+    """Resolve the Authorization header to a canonical, phone-anchored account.
+
+    Phone is the real customer identity (wallet, credits, print jobs are all
+    keyed on it). Two ways in:
+      • WhatsApp OTP web_token  → phone is known and verified.
+      • Supabase JWT (Google/email) → email known; phone only if they've linked
+        one. Until then needs_phone_link=True and phone-keyed features are blocked.
+
+    Returns a dict:
+      {ok: False, error: str}                                  on auth failure, or
+      {ok: True, kind: 'phone'|'email', phone: str|None,
+       email: str|None, name: str, needs_phone_link: bool}
+    """
+    auth = h.headers.get("Authorization", "").strip()
+    if not auth.startswith("Bearer "):
+        return {"ok": False, "error": "Authorization required"}
+    token = auth[7:].strip()
+    if not token:
+        return {"ok": False, "error": "Empty token"}
+
+    # WhatsApp OTP web_token → phone (verified)
+    try:
+        from db_cloud import get_otp_session_by_web_token
+        sess = get_otp_session_by_web_token(token)
+        if sess:
+            return {
+                "ok": True, "kind": "phone",
+                "phone": sess.get("phone", ""), "email": None,
+                "name": "", "needs_phone_link": False,
+            }
+    except Exception as _e:
+        logger.error("_resolve_account OTP check: %s", _e)
+
+    # Supabase JWT (Google / email magic link) → email, plus linked phone if any
+    try:
+        from db_cloud import _client, get_linked_phone
+        user_resp = _client().auth.get_user(token)
+        user = getattr(user_resp, "user", None) if user_resp else None
+        if user:
+            email = (user.email or "").lower()
+            meta = getattr(user, "user_metadata", None) or {}
+            name = meta.get("full_name") or meta.get("name") or ""
+            phone = get_linked_phone(email) if email else None
+            return {
+                "ok": True, "kind": "email",
+                "phone": phone, "email": email, "name": name,
+                "needs_phone_link": not bool(phone),
+            }
+    except Exception as _e:
+        logger.debug("_resolve_account Supabase check: %s", _e)
+
+    return {"ok": False, "error": "Invalid or expired token"}
+
+
+def _handle_account_summary(h, body: bytes) -> None:
+    """POST /account/summary — the personal space payload for the logged-in user.
+
+    Returns wallet balance, the user's own uploaded notes (any status, with
+    per-note earnings) and subscription status. If the account is a Google/email
+    login without a linked phone, returns needs_phone_link=True instead.
+    """
+    acct = _resolve_account(h)
+    if not acct.get("ok"):
+        _json_response(h, 401, {"error": acct.get("error", "Unauthorized")})
+        return
+
+    if acct.get("needs_phone_link"):
+        _json_response(h, 200, {
+            "needs_phone_link": True,
+            "kind": acct["kind"],
+            "email": acct.get("email"),
+            "name": acct.get("name") or "",
+        })
+        return
+
+    phone = acct["phone"]
+    try:
+        from db_cloud import wallet_balance, list_notes_by_uploader, note_subscription_status
+        balance_paise = wallet_balance(phone)
+        notes = list_notes_by_uploader(phone)
+        sub = note_subscription_status(phone)
+
+        out_notes = []
+        for n in notes:
+            pages = int(n.get("page_count") or 0)
+            prints = int(n.get("print_count") or 0)
+            out_notes.append({
+                "note_code":   n.get("note_code"),
+                "title":       n.get("title"),
+                "category":    n.get("category"),
+                "subject":     n.get("subject"),
+                "status":      n.get("status"),
+                "page_count":  pages,
+                "print_count": prints,
+                "earned_rs":   round(prints * pages * 10 / 100, 2),
+            })
+
+        _json_response(h, 200, {
+            "needs_phone_link": False,
+            "kind":         acct["kind"],
+            "phone_masked": _mask_phone(phone),
+            "name":         acct.get("name") or "",
+            "wallet_rs":    round(balance_paise / 100, 2),
+            "notes":        out_notes,
+            "subscription": sub or {},
+        })
+    except Exception as exc:
+        logger.error("account/summary error: %s", exc)
+        _json_response(h, 500, {"error": "Internal error"})
+
+
+def _handle_account_link_phone(h, body: bytes) -> None:
+    """POST /account/link-phone/verify — link a verified phone to an email account.
+
+    The user logged in with Google/email (Authorization = Supabase JWT), then
+    verified a WhatsApp number via the OTP flow. Body: { request_token, otp }.
+    On success the email is permanently anchored to that phone.
+    """
+    acct = _resolve_account(h)
+    if not acct.get("ok"):
+        _json_response(h, 401, {"error": acct.get("error", "Unauthorized")})
+        return
+    if acct.get("kind") != "email" or not acct.get("email"):
+        _json_response(h, 400, {"error": "Only Google/email accounts link a phone"})
+        return
+    try:
+        payload = json.loads(body) if body else {}
+        req_token = (payload.get("request_token") or "").strip().upper()
+        otp = (payload.get("otp") or "").strip()
+        if not req_token or not otp:
+            _json_response(h, 400, {"error": "request_token and otp required"})
+            return
+        from db_cloud import verify_otp_session, link_account_email
+        sess = verify_otp_session(req_token, otp)
+        if not sess:
+            _json_response(h, 401, {"error": "Invalid or expired OTP"})
+            return
+        phone = sess["phone"]
+        if not link_account_email(acct["email"], phone, acct.get("name")):
+            _json_response(h, 500, {"error": "Could not link account"})
+            return
+        _json_response(h, 200, {"phone": phone, "phone_masked": _mask_phone(phone), "linked": True})
+    except Exception as exc:
+        logger.error("account/link-phone error: %s", exc)
+        _json_response(h, 500, {"error": "Internal error"})
+
+
 def _handle_wa_otp_request(h, body: bytes) -> None:
     """POST /auth/wa-otp/request — generate request token, return WhatsApp deep link."""
     import secrets as _sec
@@ -318,9 +472,12 @@ def _handle_notes_reserve(h, body: bytes) -> None:
     Returns { note_code, upload_url, storage_path } so the browser can upload
     the PDF directly to Supabase Storage (bypasses Vercel 4.5MB limit).
     """
-    identity, err = _notes_auth(h)
-    if err:
-        _json_response(h, 401, {"error": err})
+    acct = _resolve_account(h)
+    if not acct.get("ok"):
+        _json_response(h, 401, {"error": acct.get("error", "Unauthorized")})
+        return
+    if acct.get("needs_phone_link"):
+        _json_response(h, 403, {"error": "link_phone_required", "needs_phone_link": True})
         return
     try:
         from handlers_notes import _gen_note_code
@@ -347,9 +504,12 @@ def _handle_notes_submit(h, body: bytes) -> None:
 
     Body: { note_code, storage_path, title, category, subject, page_count, attests }
     """
-    identity, err = _notes_auth(h)
-    if err:
-        _json_response(h, 401, {"error": err})
+    acct = _resolve_account(h)
+    if not acct.get("ok"):
+        _json_response(h, 401, {"error": acct.get("error", "Unauthorized")})
+        return
+    if acct.get("needs_phone_link"):
+        _json_response(h, 403, {"error": "link_phone_required", "needs_phone_link": True})
         return
     try:
         payload = json.loads(body) if body else {}
@@ -367,12 +527,11 @@ def _handle_notes_submit(h, body: bytes) -> None:
             _json_response(h, 400, {"error": "You must attest these are your original notes"})
             return
 
-        # Determine uploader identity
-        is_phone = identity and identity.replace("+", "").isdigit()
+        # Uploader is always anchored to the canonical phone (credits pay a phone).
         from db_cloud import create_note
         row = create_note(
             note_code=note_code,
-            uploader_phone=identity if is_phone else None,
+            uploader_phone=acct["phone"],
             title=title,
             category=category,
             subject=subject,
@@ -2243,6 +2402,14 @@ class handler(BaseHTTPRequestHandler):
             return
         if self.path == "/auth/wa-otp/verify":
             _handle_wa_otp_verify(self, body)
+            return
+
+        # ── Account: personal space summary + phone linking ─────────────────────
+        if self.path == "/account/summary":
+            _handle_account_summary(self, body)
+            return
+        if self.path == "/account/link-phone/verify":
+            _handle_account_link_phone(self, body)
             return
 
         # ── Notes: reserve upload slot + finalize ───────────────────────────
