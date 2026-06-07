@@ -14,7 +14,9 @@ class FakeDB:
     def __init__(self):
         self.sessions: dict[str, dict] = {}
         self.orders: dict[str, dict] = {}
+        self.payments: dict[int, dict] = {}
         self._seq = 0
+        self._payseq = 0
 
     def get_session(self, db, phone):
         return dict(self.sessions.get(phone, {}))
@@ -28,7 +30,7 @@ class FakeDB:
     def get_active_book_order(self, phone):
         active = [o for o in self.orders.values()
                   if o["phone"] == phone
-                  and o["status"] in ("collecting", "awaiting_payment", "payment_review")]
+                  and o["status"] in ("collecting", "awaiting_payment", "payment_review", "partially_paid")]
         active.sort(key=lambda o: o["_seq"], reverse=True)
         return dict(active[0]) if active else {}
 
@@ -52,13 +54,45 @@ class FakeDB:
     def log_message(self, *a, **k):
         pass
 
+    # part-payment ledger
+    def add_book_payment(self, order_code, proof_url):
+        self._payseq += 1
+        row = {"id": self._payseq, "order_code": order_code, "proof_url": proof_url,
+               "amount": None, "status": "pending"}
+        self.payments[self._payseq] = row
+        return dict(row)
+
+    def get_book_payment(self, payment_id):
+        return dict(self.payments.get(int(payment_id), {}))
+
+    def get_book_payments(self, order_code):
+        return [dict(p) for p in self.payments.values() if p["order_code"] == order_code]
+
+    def verify_book_payment(self, payment_id, amount):
+        p = self.payments.get(int(payment_id))
+        if p:
+            p.update(status="verified", amount=amount)
+        return dict(p or {})
+
+    def reject_book_payment(self, payment_id):
+        p = self.payments.get(int(payment_id))
+        if p:
+            p["status"] = "rejected"
+        return True
+
+    def book_amount_paid(self, order_code):
+        return float(sum((p.get("amount") or 0) for p in self.payments.values()
+                         if p["order_code"] == order_code and p["status"] == "verified"))
+
 
 @pytest.fixture
 def fake(monkeypatch):
     db = FakeDB()
     for fn in ("get_session", "save_session", "clear_session",
                "get_active_book_order", "create_book_order", "update_book_order",
-               "get_book_order", "upload_book_payment_proof", "log_message"):
+               "get_book_order", "upload_book_payment_proof", "log_message",
+               "add_book_payment", "get_book_payment", "get_book_payments",
+               "verify_book_payment", "reject_book_payment", "book_amount_paid"):
         monkeypatch.setattr(_dbc, fn, getattr(db, fn))
 
     sent = {"list": [], "buttons": [], "text": [], "qr": [], "forward": []}
@@ -71,7 +105,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(book_bot, "_send_qr",
                         lambda phone, order: (sent["qr"].append(order["order_code"]) or True))
     monkeypatch.setattr(book_bot, "_forward_to_verifier",
-                        lambda order, content, mime: sent["forward"].append(order["order_code"]))
+                        lambda order, payment, content, mime: sent["forward"].append((order["order_code"], payment.get("id"))))
     return db, sent
 
 
@@ -131,6 +165,98 @@ def test_incomplete_order_template_not_ingested(fake):
     db, _ = fake
     bad = "ORDER\nName: Priya\n"   # no phone, no books -> parse ok=False
     assert book_bot.maybe_handle_book(PHONE, bad) is None
+
+
+# ── part-payments: multiple screenshots, amount validated by Anu ───────────────
+
+V = book_bot.VERIFIER_PHONE
+
+
+def _make_awaiting_order(db, items, code="XTR-TEST-0001"):
+    db._seq += 1
+    db.orders[code] = {
+        "order_code": code, "phone": PHONE, "name": "Priya",
+        "address": "12 MG Road 680001", "contact_phone": PHONE,
+        "items": items, "status": "awaiting_payment", "_seq": db._seq,
+    }
+    return code
+
+
+@pytest.mark.integration
+def test_part_then_full_two_screenshots_confirms(fake):
+    db, sent = fake
+    code = _make_awaiting_order(db, {"malayalam": 3, "hindi": 2})   # grand 1044
+
+    # Screenshot 1 → ledger row, forwarded to Anu.
+    book_bot.handle_payment_proof(PHONE, b"img1", "image/jpeg")
+    p1 = max(db.payments)
+    # Anu: part payment, types the amount.
+    book_bot.handle_verifier_reply(V, f"pp_{p1}")
+    book_bot.handle_verifier_reply(V, "500")
+    assert db.book_amount_paid(code) == 500
+    assert db.orders[code]["status"] == "partially_paid"
+    assert db.orders[code]["amount_paid"] == 500
+    assert any("Balance" in m for m in sent["text"])      # customer told the balance
+
+    # Screenshot 2 → second ledger row (first NOT overwritten).
+    book_bot.handle_payment_proof(PHONE, b"img2", "image/jpeg")
+    p2 = max(db.payments)
+    assert p2 != p1
+    # Anu: full clears the remaining 544 → order confirmed.
+    book_bot.handle_verifier_reply(V, f"pf_{p2}")
+    assert db.book_amount_paid(code) == 1044
+    assert db.orders[code]["status"] == "confirmed"
+    assert len(db.get_book_payments(code)) == 2           # every screenshot captured
+
+
+@pytest.mark.integration
+def test_anu_can_act_on_any_screenshot_not_just_last(fake):
+    # The old bug: only the last screenshot was confirmable. Now each is addressable.
+    db, sent = fake
+    code = _make_awaiting_order(db, {"malayalam": 1})      # grand 275
+    book_bot.handle_payment_proof(PHONE, b"a", "image/jpeg")
+    first = max(db.payments)
+    book_bot.handle_payment_proof(PHONE, b"b", "image/jpeg")
+    second = max(db.payments)
+    assert first != second
+    # Reject the SECOND (a dup) and act on the FIRST — both independently addressable.
+    book_bot.handle_verifier_reply(V, f"pr_{second}")
+    assert db.payments[second]["status"] == "rejected"
+    book_bot.handle_verifier_reply(V, f"pf_{first}")
+    assert db.payments[first]["status"] == "verified"
+    assert db.orders[code]["status"] == "confirmed"
+
+
+@pytest.mark.integration
+def test_reject_after_partial_keeps_balance_and_asks_remaining(fake):
+    db, sent = fake
+    code = _make_awaiting_order(db, {"malayalam": 3, "hindi": 2})   # grand 1044
+    book_bot.handle_payment_proof(PHONE, b"1", "image/jpeg")
+    p1 = max(db.payments)
+    book_bot.handle_verifier_reply(V, f"pp_{p1}")
+    book_bot.handle_verifier_reply(V, "500")
+    assert db.orders[code]["status"] == "partially_paid"
+
+    book_bot.handle_payment_proof(PHONE, b"2", "image/jpeg")
+    p2 = max(db.payments)
+    sent["text"].clear()
+    book_bot.handle_verifier_reply(V, f"pr_{p2}")          # Anu: not received
+    assert db.payments[p2]["status"] == "rejected"
+    assert db.book_amount_paid(code) == 500               # balance unchanged
+    assert db.orders[code]["status"] == "partially_paid"
+    assert any("remaining" in m for m in sent["text"])    # customer asked for the rest
+
+
+@pytest.mark.integration
+def test_overpayment_is_flagged(fake):
+    db, sent = fake
+    code = _make_awaiting_order(db, {"malayalam": 1})      # grand 275
+    book_bot.handle_payment_proof(PHONE, b"1", "image/jpeg")
+    p1 = max(db.payments)
+    book_bot.handle_verifier_reply(V, f"pp_{p1}")
+    book_bot.handle_verifier_reply(V, "300")              # > 275
+    assert db.orders[code]["status"] == "confirmed"
+    assert any("Overpaid" in m for m in sent["text"])
 
 
 # ── trigger ───────────────────────────────────────────────────────────────────
@@ -201,7 +327,7 @@ def test_all_three_one_tap_then_count_each(fake):
 
     book_bot.handle_payment_proof(PHONE, b"x", "image/jpeg")
     assert db.orders[code]["status"] == "payment_review"
-    assert sent["forward"] == [code]                       # screenshot forwarded to verifier
+    assert sent["forward"] == [(code, 1)]                  # (order, payment id) forwarded to verifier
     res = book_bot.confirm_book_order(code)
     assert res["ok"] and db.orders[code]["status"] == "confirmed"
     assert db.sessions[PHONE]["step"] == "post_order"       # follow-up armed
@@ -534,7 +660,7 @@ def test_payment_proof_routes_on_order_state_without_book_pay_session(fake):
     replies = book_bot.handle_payment_proof("918888800000", b"img", "image/jpeg")
     assert replies is not None                                # not ignored → not print
     assert db.orders["XTR-OOB"]["status"] == "payment_review"
-    assert sent["forward"] == ["XTR-OOB"]                     # forwarded to Anu
+    assert sent["forward"] == [("XTR-OOB", 1)]               # (order, payment id) forwarded to Anu
 
 
 @pytest.mark.unit

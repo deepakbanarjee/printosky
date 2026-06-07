@@ -317,16 +317,26 @@ def _cart_line(items: dict) -> str:
     return ", ".join(parts) if parts else "—"
 
 
-def _forward_to_verifier(order: dict, content: bytes, mime_type: str) -> None:
-    """Forward a payment screenshot to the verifier (Anu) with Confirm/Reject."""
-    code   = order.get("order_code")
-    totals = bc.compute_totals(order.get("items") or {})
+def _forward_to_verifier(order: dict, payment: dict, content: bytes, mime_type: str) -> None:
+    """Forward ONE payment screenshot to Anu with Full / Part / Not-received.
+
+    Buttons are keyed by the *payment row id* (not the order), so Anu can act on
+    each screenshot independently and in any order — fixing the old behaviour
+    where only the last screenshot was effectively confirmable.
+    """
+    code    = order.get("order_code")
+    payid   = payment.get("id")
+    totals  = bc.compute_totals(order.get("items") or {})
+    grand   = totals["grand_total"]
+    paid    = _dbc.book_amount_paid(code)          # verified so far (excludes this pending one)
+    balance = grand - paid
+    n       = len(_dbc.get_book_payments(code))     # which screenshot this is
     dtdc = order.get("dtdc_center")
     dtdc_line = f"\n🏢 DTDC: {dtdc}" if dtdc else ""
     caption = (
         "💳 *Payment to verify*\n"
-        f"Order: {code}\n"
-        f"Amount: ₹{totals['grand_total']:.0f}\n"
+        f"Order: {code}  (screenshot #{n})\n"
+        f"Total ₹{grand:.0f} · Paid ₹{paid:.0f} · *Balance ₹{balance:.0f}*\n"
         f"Customer: {order.get('name') or '—'} "
         f"+{re.sub(r'[^0-9]', '', order.get('phone', ''))}\n"
         f"Items: {_cart_line(order.get('items') or {})}\n"
@@ -339,8 +349,10 @@ def _forward_to_verifier(order: dict, content: bytes, mime_type: str) -> None:
     except Exception as exc:
         logger.error("verifier screenshot forward failed: %s", exc)
     _send_buttons(
-        VERIFIER_PHONE, f"Is this payment received for *{code}*?",
-        [(f"vconf_{code}", "✅ Confirm"), (f"vrej_{code}", "❌ Reject")],
+        VERIFIER_PHONE, f"Full or part payment for *{code}*?",
+        [(f"pf_{payid}", f"✅ Full ₹{balance:.0f}"),
+         (f"pp_{payid}", "➗ Part payment"),
+         (f"pr_{payid}", "❌ Not received")],
     )
 
 
@@ -787,22 +799,25 @@ def handle_payment_proof(phone: str, content: bytes, mime_type: str) -> list[str
     # the screenshot must still be treated as a payment proof, otherwise it
     # falls through to print-job intake (the "considered it as a print" bug).
     order = _dbc.get_active_book_order(phone)
-    if not order or order.get("status") not in ("awaiting_payment", "payment_review"):
+    if not order or order.get("status") not in (
+            "awaiting_payment", "payment_review", "partially_paid"):
         return None
 
-    url = _dbc.upload_book_payment_proof(order["order_code"], content, mime_type)
-    _dbc.update_book_order(order["order_code"], status="payment_review",
+    code = order["order_code"]
+    url = _dbc.upload_book_payment_proof(code, content, mime_type)
+    # One ledger row per screenshot — earlier proofs are never overwritten.
+    payment = _dbc.add_book_payment(code, url or None)
+    _dbc.update_book_order(code, status="payment_review",
                            payment_proof_url=url or None)
     _dbc.save_session(DB, phone, step="book_pay", needs_human=True)
-    # Forward the screenshot to the verifier (Anu) for Confirm/Reject.
+    # Forward THIS screenshot to Anu for full/part validation.
     try:
-        _forward_to_verifier(_dbc.get_book_order(order["order_code"]), content, mime_type)
+        _forward_to_verifier(_dbc.get_book_order(code), payment, content, mime_type)
     except Exception as exc:
-        logger.error("forward to verifier failed for %s: %s", order["order_code"], exc)
+        logger.error("forward to verifier failed for %s: %s", code, exc)
     return [
-        f"✅ Got your payment screenshot for *{order['order_code']}*.\n\n"
-        "We're verifying it now — you'll receive your order confirmation "
-        "shortly. Thank you! 🙏"
+        f"✅ Got your payment screenshot for *{code}*.\n\n"
+        "We're verifying it now — you'll receive an update shortly. Thank you! 🙏"
     ]
 
 
@@ -988,6 +1003,111 @@ def _anu_clear_buffer() -> None:
     _dbc.save_session(DB, VERIFIER_PHONE, step="", saved_json="")
 
 
+# ── part-payment verification (per-screenshot) ────────────────────────────────
+
+def _anu_set_pending_payment(payid, code: str, balance: float) -> None:
+    """Remember that Anu owes a typed amount for one specific screenshot."""
+    import json
+    from datetime import datetime, timezone
+    blob = {"pending_payment_id": payid, "code": code, "balance": balance,
+            "ts": datetime.now(timezone.utc).isoformat()}
+    _dbc.save_session(DB, VERIFIER_PHONE, step="await_part_amount",
+                      saved_json=json.dumps(blob, ensure_ascii=True))
+
+
+def _anu_get_pending_payment() -> dict | None:
+    """The screenshot awaiting a typed amount, or None if none / stale."""
+    import json
+    from datetime import datetime, timedelta, timezone
+    sess = _anu_session()
+    if sess.get("step") != "await_part_amount":
+        return None
+    try:
+        blob = json.loads(sess.get("saved_json") or "{}")
+        ts = blob.get("ts")
+        if ts and datetime.now(timezone.utc) - datetime.fromisoformat(ts) <= timedelta(minutes=30):
+            return blob
+    except Exception:
+        pass
+    return None
+
+
+def _after_payment_change(code: str, rejected: bool = False) -> None:
+    """Recompute paid/balance from the ledger and drive the order's status.
+
+    Fully paid -> confirm (notifies customer). Otherwise -> partially_paid (or
+    awaiting_payment if nothing verified yet) and tell the customer the balance.
+    """
+    order = _dbc.get_book_order(code) or {}
+    grand = bc.compute_totals(order.get("items") or {})["grand_total"]
+    paid = _dbc.book_amount_paid(code)
+    _dbc.update_book_order(code, amount_paid=paid)
+    cust = order.get("phone")
+    balance = grand - paid
+
+    if grand > 0 and paid >= grand:
+        res = confirm_book_order(code)            # notifies the customer
+        if not res.get("ok"):
+            _send_text(VERIFIER_PHONE,
+                       f"⚠️ *{code}* is fully paid but the confirm did not save — "
+                       "please tap Confirm again.")
+            return
+        over = paid - grand
+        msg = f"✅ *{code}* fully paid (₹{paid:.0f}) — confirmed, customer notified."
+        if over > 0:
+            msg += f"\n⚠️ Overpaid by ₹{over:.0f}; refund manually."
+        _send_text(VERIFIER_PHONE, msg)
+        return
+
+    _dbc.update_book_order(code, status="partially_paid" if paid > 0 else "awaiting_payment")
+    if cust:
+        _dbc.save_session(DB, cust, step="book_pay", needs_human=False)
+        if rejected:
+            tail = (f"You've paid ₹{paid:.0f} so far; balance ₹{balance:.0f}. "
+                    "Please send a clear screenshot of the remaining payment. 🙏"
+                    if paid > 0 else
+                    "Please send a clear screenshot of the payment. 🙏")
+            _send_text(cust, f"⚠️ We couldn't verify that payment for *{code}*. " + tail)
+        else:
+            _send_text(cust,
+                       f"✅ Received ₹{paid:.0f} for *{code}*. Balance ₹{balance:.0f}. "
+                       "Please pay the rest and send a screenshot. 🙏")
+    if rejected:
+        _send_text(VERIFIER_PHONE,
+                   f"❌ Marked not received for *{code}* — paid ₹{paid:.0f}, "
+                   f"balance ₹{balance:.0f}. Customer asked to (re)send.")
+    else:
+        _send_text(VERIFIER_PHONE,
+                   f"➗ Recorded ₹{paid:.0f} for *{code}* — balance ₹{balance:.0f}.")
+
+
+def _handle_payment_action(kind: str, payid: int) -> None:
+    """Anu tapped Full / Part / Not-received on a specific screenshot."""
+    pay = _dbc.get_book_payment(payid)
+    if not pay:
+        _send_text(VERIFIER_PHONE, "⚠️ Couldn't find that screenshot.")
+        return
+    if pay.get("status") != "pending":
+        _send_text(VERIFIER_PHONE, f"That screenshot was already {pay.get('status')}.")
+        return
+    code = pay["order_code"]
+    order = _dbc.get_book_order(code) or {}
+    grand = bc.compute_totals(order.get("items") or {})["grand_total"]
+    balance = grand - _dbc.book_amount_paid(code)
+
+    if kind == "pr":                      # not received
+        _dbc.reject_book_payment(payid)
+        _after_payment_change(code, rejected=True)
+    elif kind == "pf":                    # full: this screenshot clears the balance
+        _dbc.verify_book_payment(payid, max(0.0, balance))
+        _after_payment_change(code)
+    else:                                 # pp → part: ask Anu for the amount
+        _anu_set_pending_payment(payid, code, balance)
+        _send_text(VERIFIER_PHONE,
+                   f"How much is this screenshot for *{code}*? "
+                   f"Reply just the amount (e.g. 500). Balance is ₹{balance:.0f}.")
+
+
 def _assemble(parsed: dict) -> dict:
     """Normalise an LLM parse into order fields."""
     copies = int(parsed.get("copies") or 1) or 1
@@ -1118,6 +1238,28 @@ def handle_verifier_reply(sender: str, text: str) -> bool:
     if re.sub(r"\D", "", sender or "") != re.sub(r"\D", "", VERIFIER_PHONE):
         return False
     t = (text or "").strip()
+
+    # 0. Per-screenshot part-payment validation (Full / Part / Not-received).
+    pm = re.match(r"^(pf|pp|pr)_(\d+)$", t)
+    if pm:
+        _handle_payment_action(pm.group(1), int(pm.group(2)))
+        return True
+    pend = _anu_get_pending_payment()
+    if pend:
+        am = re.match(r"^\s*(?:₹|rs\.?\s*)?(\d+(?:\.\d+)?)\s*$", t, re.I)
+        if am:
+            payid = pend.get("pending_payment_id")
+            pay = _dbc.get_book_payment(payid)
+            _anu_clear_buffer()
+            if not pay or pay.get("status") != "pending":
+                _send_text(VERIFIER_PHONE, "That screenshot was already handled.")
+                return True
+            _dbc.verify_book_payment(payid, float(am.group(1)))
+            _after_payment_change(pay["order_code"])
+            return True
+        _send_text(VERIFIER_PHONE,
+                   "Please reply just the amount (e.g. 500), or tap a button on the screenshot.")
+        return True
 
     # 1. Payment verification (buttons or "confirm/reject XTR-...").
     action = code = None

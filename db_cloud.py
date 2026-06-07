@@ -862,7 +862,7 @@ def mark_contact_seen(phone: str) -> None:
 
 # Statuses considered "in progress" — a new enquiry resumes/uses these rather
 # than starting a fresh order. confirmed/cancelled are terminal.
-BOOK_ACTIVE_STATUSES = ("collecting", "awaiting_payment", "payment_review")
+BOOK_ACTIVE_STATUSES = ("collecting", "awaiting_payment", "payment_review", "partially_paid")
 BOOK_PROOF_PREFIX = "book-payments"
 
 
@@ -1182,3 +1182,87 @@ def upload_book_payment_proof(order_code: str, content: bytes, mime_type: str) -
     except Exception as exc:
         logger.error("upload_book_payment_proof error for %s: %s", order_code, exc)
         return ""
+
+
+# ── book part-payment ledger (book_payments) ──────────────────────────────────
+
+def add_book_payment(order_code: str, proof_url: str | None) -> dict:
+    """Insert a pending payment row (one screenshot). Returns the row, or {}."""
+    try:
+        result = (
+            _client().table("book_payments")
+            .insert({"order_code": order_code, "proof_url": proof_url,
+                     "status": "pending"})
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("add_book_payment error for %s: %s", order_code, exc)
+        return {}
+
+
+def get_book_payment(payment_id) -> dict:
+    """Fetch a single payment row by id, or {}."""
+    try:
+        result = (
+            _client().table("book_payments").select("*")
+            .eq("id", payment_id).limit(1).execute()
+        )
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("get_book_payment error for %s: %s", payment_id, exc)
+        return {}
+
+
+def get_book_payments(order_code: str) -> list:
+    """All payment rows for an order, oldest first."""
+    try:
+        result = (
+            _client().table("book_payments").select("*")
+            .eq("order_code", order_code).order("created_at").execute()
+        )
+        return result.data or []
+    except Exception as exc:
+        logger.error("get_book_payments error for %s: %s", order_code, exc)
+        return []
+
+
+def verify_book_payment(payment_id, amount: float) -> dict:
+    """Mark a payment verified with the given amount. Returns the updated row."""
+    from datetime import datetime, timezone
+    try:
+        _client().table("book_payments").update({
+            "status": "verified", "amount": amount,
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", payment_id).execute()
+        return get_book_payment(payment_id)
+    except Exception as exc:
+        logger.error("verify_book_payment error for %s: %s", payment_id, exc)
+        return {}
+
+
+def reject_book_payment(payment_id) -> bool:
+    """Mark a payment rejected (screenshot not a valid/received payment)."""
+    from datetime import datetime, timezone
+    try:
+        _client().table("book_payments").update({
+            "status": "rejected",
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", payment_id).execute()
+        return True
+    except Exception as exc:
+        logger.error("reject_book_payment error for %s: %s", payment_id, exc)
+        return False
+
+
+def book_amount_paid(order_code: str) -> float:
+    """Sum of VERIFIED payments for an order (the running paid total)."""
+    try:
+        result = (
+            _client().table("book_payments").select("amount")
+            .eq("order_code", order_code).eq("status", "verified").execute()
+        )
+        return float(sum((row.get("amount") or 0) for row in (result.data or [])))
+    except Exception as exc:
+        logger.error("book_amount_paid error for %s: %s", order_code, exc)
+        return 0.0
