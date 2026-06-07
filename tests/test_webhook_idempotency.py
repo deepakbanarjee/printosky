@@ -63,6 +63,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 import api.index as api_mod
+import api.handlers_academic as acad_mod  # acad webhook handler lives here after the split
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -261,7 +262,7 @@ class TestRazorpayAcadIdempotency:
         h = _FakeRequestHandler()
         with patch.dict(os.environ, {"RAZORPAY_WEBHOOK_SECRET": "x"}), \
              patch("hmac.compare_digest", return_value=True), \
-             patch.object(api_mod, "_mark_webhook_processed", return_value=False):
+             patch.object(acad_mod, "_mark_webhook_processed", return_value=False):
             api_mod._handle_acad_razorpay_webhook(h, self._body())
         assert 200 in h.responses
         body = b"".join(h.bodies).decode()
@@ -275,6 +276,6 @@ class TestRazorpayAcadIdempotency:
             return True
         with patch.dict(os.environ, {"RAZORPAY_WEBHOOK_SECRET": "x"}), \
              patch("hmac.compare_digest", return_value=True), \
-             patch.object(api_mod, "_mark_webhook_processed", side_effect=fake_mark):
+             patch.object(acad_mod, "_mark_webhook_processed", side_effect=fake_mark):
             api_mod._handle_acad_razorpay_webhook(h, self._body(event_id="evt_acad_42"))
         assert seen == [("evt_acad_42", "razorpay_acad")]
