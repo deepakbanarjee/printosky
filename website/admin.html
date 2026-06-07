@@ -961,6 +961,60 @@
     border-radius: 4px;
     box-shadow: 0 4px 32px rgba(0,0,0,0.4);
 }
+/* ── Conversations: Mobile Responsive ─────────────────────────────────────── */
+@media (max-width: 600px) {
+  #conv-panel { padding: 0; }
+  .conv-layout {
+    height: calc(100dvh - 96px);
+    border: none;
+    border-radius: 0;
+    position: relative;
+    overflow: hidden;
+  }
+  /* Sidebar slides in from left; main slides in from right */
+  .conv-sidebar {
+    width: 100%;
+    border-right: none;
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    transform: translateX(0);
+    transition: transform 0.22s ease;
+  }
+  .conv-sidebar.mobile-hidden {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+  .conv-main {
+    position: absolute;
+    inset: 0;
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+  }
+  .conv-main.mobile-active {
+    transform: translateX(0);
+  }
+  /* Back button — hidden on desktop, shown via JS on mobile */
+  #conv-back-btn {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    font-size: 22px;
+    cursor: pointer;
+    padding: 0 10px 0 0;
+    color: #1976d2;
+    vertical-align: middle;
+    line-height: 1;
+  }
+  /* Wider bubbles on narrow screens */
+  .conv-bubble { max-width: 88%; }
+  .conv-img    { max-width: 200px; }
+  .conv-header { font-size: 14px; padding: 10px 12px; }
+  /* Shrink the reply bar inputs on mobile */
+  #conv-textarea { font-size: 15px; }
+}
 </style>
 </head>
 <body>
@@ -1178,6 +1232,7 @@
       <!-- Main: message thread -->
       <div class="conv-main">
         <div class="conv-header" id="conv-active-header">
+          <button id="conv-back-btn" onclick="convMobileBack()" title="Back to conversations">&#8592;</button>
           <span id="conv-active-name" style="color:#666;">Select a conversation</span>
         </div>
         <div id="conv-message-area" class="conv-message-area" style="text-align:center;color:#999;padding:40px;">
@@ -3757,10 +3812,29 @@ function convRenderBubble(m) {
   </div>`;
 }
 
+function convMobileBack() {
+  const sidebar = document.querySelector('.conv-sidebar');
+  const main    = document.querySelector('.conv-main');
+  const backBtn = document.getElementById('conv-back-btn');
+  if (sidebar) sidebar.classList.remove('mobile-hidden');
+  if (main)    main.classList.remove('mobile-active');
+  if (backBtn) backBtn.style.display = 'none';
+}
+
 async function convOpenContact(phone, name) {
   _convActivePhone = phone;
   const nameEl = document.getElementById('conv-active-name');
   if (nameEl) nameEl.textContent = name || phone;
+
+  // Mobile: slide to thread view
+  if (window.innerWidth <= 600) {
+    const sidebar = document.querySelector('.conv-sidebar');
+    const main    = document.querySelector('.conv-main');
+    const backBtn = document.getElementById('conv-back-btn');
+    if (sidebar) sidebar.classList.add('mobile-hidden');
+    if (main)    main.classList.add('mobile-active');
+    if (backBtn) backBtn.style.display = 'inline-flex';
+  }
 
   clearInterval(_convPollThread);
   const area = document.getElementById('conv-message-area');
