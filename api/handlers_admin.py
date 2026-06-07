@@ -522,7 +522,7 @@ def _handle_admin_dispatch_sheet(h) -> None:
             f'<tr><td>{BOOKS[k][0]}</td>'
             f'<td class="qty">{v}</td>'
             f'<td class="tag {"stock" if BOOKS[k][1] == "STOCK" else "pod"}">'
-            f'{"&#9989; PULL FROM STOCK" if BOOKS[k][1] == "STOCK" else "&#128424; PRINT FIRST (POD)"}</td></tr>'
+            f'{"&#9989; PULL FROM STOCK" if BOOKS[k][1] == "STOCK" else f"&#128424; PRINT FIRST &mdash; {BOOKS[k][0]}.pdf"}</td></tr>'
             for k, v in totals.items() if v
         )
 
@@ -544,9 +544,14 @@ def _handle_admin_dispatch_sheet(h) -> None:
                 BOOKS.get(k, ("", ""))[1] == "POD"
                 for k, v in items.items() if v
             )
+            pod_files = [
+                f"{BOOKS[k][0]}.pdf"
+                for k, v in items.items()
+                if v and BOOKS.get(k, ("", ""))[1] == "POD"
+            ]
             pod_banner = (
-                '<div class="pod-banner">&#128424; PRINT BOOKS FIRST &mdash; POD</div>'
-                if is_pod else ""
+                f'<div class="pod-banner">&#128424; PRINT FIRST: {", ".join(pod_files)}</div>'
+                if pod_files else ""
             )
             raw_phone = order.get("phone") or order.get("contact_phone") or "&mdash;"
             phone = (
@@ -912,13 +917,24 @@ def _handle_admin_upload_token(h, body: bytes) -> None:
     try:
         from db_cloud import _client as _dbc, INCOMING_BUCKET
         resp = _dbc().storage.from_(INCOMING_BUCKET).create_signed_upload_url(storage_path)
+        # supabase-py 2.x returns snake_case; older versions used "signedURL"
+        upload_url = (
+            resp.get("signed_url")
+            or resp.get("signedUrl")
+            or resp.get("signedURL")
+            or resp.get("url")
+        )
+        if not upload_url:
+            logger.error("upload-token: bad response keys: %s", list(resp.keys()))
+            _json_response(h, 500, {"error": "no signed URL in response"})
+            return
         _json_response(h, 200, {
-            "upload_url":   resp["signedURL"],
+            "upload_url":   upload_url,
             "storage_path": storage_path,
         })
     except Exception as exc:
-        logger.error("upload-token error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
+        logger.error("upload-token error %s: %s", type(exc).__name__, exc)
+        _json_response(h, 500, {"error": str(exc), "exc_type": type(exc).__name__})
 
 
 def _handle_admin_send_file(h, body: bytes) -> None:
