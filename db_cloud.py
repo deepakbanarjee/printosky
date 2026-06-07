@@ -1333,18 +1333,22 @@ NOTE_CREDIT_PAISE_PER_PAGE: int = 10  # 10% of ₹1 = ₹0.10 = 10 paise per pag
 
 def create_note(
     note_code: str,
-    uploader_phone: str,
     title: str,
     category: str,
     subject: str,
     page_count: int,
+    uploader_phone: str | None = None,
+    uploader_email: str | None = None,
     storage_path: str | None = None,
     attests: bool = True,
 ) -> dict:
-    """Insert a new note row with status='pending'. Returns inserted dict or {}."""
-    row = {
+    """Insert a new note row with status='pending'. Returns inserted dict or {}.
+
+    Either uploader_phone (WhatsApp auth) or uploader_email (Google/email auth)
+    must be provided — the DB CHECK constraint enforces this.
+    """
+    row: dict = {
         "note_code": note_code,
-        "uploader_phone": uploader_phone,
         "title": title,
         "category": category,
         "subject": subject,
@@ -1355,6 +1359,10 @@ def create_note(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    if uploader_phone:
+        row["uploader_phone"] = uploader_phone
+    if uploader_email:
+        row["uploader_email"] = uploader_email
     try:
         _client().table("notes").insert(row).execute()
         return row
@@ -1551,6 +1559,105 @@ def wallet_redeem(phone: str, paise: int) -> bool:
     except Exception as exc:
         logger.error("wallet_redeem error %s: %s", phone, exc)
         return False
+
+
+# ── WhatsApp OTP sessions ─────────────────────────────────────────────────────
+
+def create_otp_session(phone: str, request_token: str) -> bool:
+    """Create a pending OTP session. Returns True on success."""
+    try:
+        _client().table("otp_sessions").insert({
+            "phone": phone,
+            "request_token": request_token,
+            "status": "pending",
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.error("create_otp_session error %s: %s", phone, exc)
+        return False
+
+
+def get_otp_session(request_token: str) -> dict:
+    """Look up an OTP session by request_token."""
+    try:
+        result = (
+            _client().table("otp_sessions")
+            .select("*")
+            .eq("request_token", request_token)
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("get_otp_session error %s: %s", request_token, exc)
+        return {}
+
+
+def set_otp_code(request_token: str, otp_code: str) -> bool:
+    """Set the OTP code on a pending session (called by bot after user messages)."""
+    try:
+        _client().table("otp_sessions").update({
+            "otp_code": otp_code,
+            "status": "sent",
+        }).eq("request_token", request_token).eq("status", "pending").execute()
+        return True
+    except Exception as exc:
+        logger.error("set_otp_code error %s: %s", request_token, exc)
+        return False
+
+
+def verify_otp_session(request_token: str, otp_code: str) -> dict:
+    """Verify OTP. On success: marks verified, sets web_token, returns session dict."""
+    import secrets as _secrets
+    try:
+        result = (
+            _client().table("otp_sessions")
+            .select("*")
+            .eq("request_token", request_token)
+            .eq("otp_code", otp_code)
+            .eq("status", "sent")
+            .execute()
+        )
+        if not result.data:
+            return {}
+        session = result.data[0]
+        expires_at_str = session.get("expires_at", "")
+        if expires_at_str:
+            try:
+                exp = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) > exp:
+                    _client().table("otp_sessions").update(
+                        {"status": "expired"}
+                    ).eq("id", session["id"]).execute()
+                    return {}
+            except Exception:
+                pass
+        web_token = _secrets.token_urlsafe(32)
+        _client().table("otp_sessions").update({
+            "status": "verified",
+            "web_token": web_token,
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", session["id"]).execute()
+        session["web_token"] = web_token
+        return session
+    except Exception as exc:
+        logger.error("verify_otp_session error %s: %s", request_token, exc)
+        return {}
+
+
+def get_otp_session_by_web_token(web_token: str) -> dict:
+    """Look up a verified OTP session by its web_token (used for API auth)."""
+    try:
+        result = (
+            _client().table("otp_sessions")
+            .select("*")
+            .eq("web_token", web_token)
+            .eq("status", "verified")
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("get_otp_session_by_web_token error: %s", exc)
+        return {}
 
 
 def note_subscription_status(phone: str) -> dict:

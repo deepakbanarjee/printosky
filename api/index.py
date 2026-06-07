@@ -230,6 +230,172 @@ def _maybe_credit_note_uploader(job: dict) -> None:
             )
 
 
+# ── Notes website auth + upload handlers ─────────────────────────────────────
+
+WA_STORE_NUMBER = "919495706405"
+
+
+def _notes_auth(h) -> tuple[str | None, str | None]:
+    """Validate Authorization header. Returns (identity, None) or (None, error_msg).
+
+    Accepts two token types:
+      1. WhatsApp OTP web_token (issued by /auth/wa-otp/verify) — identity = phone
+      2. Supabase JWT (Google / email magic link) — identity = email
+    """
+    auth = h.headers.get("Authorization", "").strip()
+    if not auth.startswith("Bearer "):
+        return None, "Authorization required"
+    token = auth[7:].strip()
+    if not token:
+        return None, "Empty token"
+
+    # Try WhatsApp OTP token first (fast — DB lookup only)
+    try:
+        from db_cloud import get_otp_session_by_web_token
+        otp_sess = get_otp_session_by_web_token(token)
+        if otp_sess:
+            return otp_sess.get("phone", ""), None
+    except Exception as _e:
+        logger.error("_notes_auth OTP check error: %s", _e)
+
+    # Try Supabase JWT (Google / email magic link)
+    try:
+        from db_cloud import _client
+        user_resp = _client().auth.get_user(token)
+        if user_resp and getattr(user_resp, "user", None):
+            return user_resp.user.email or "", None
+    except Exception as _e:
+        logger.debug("_notes_auth Supabase check: %s", _e)
+
+    return None, "Invalid or expired token"
+
+
+def _handle_wa_otp_request(h, body: bytes) -> None:
+    """POST /auth/wa-otp/request — generate request token, return WhatsApp deep link."""
+    import secrets as _sec
+    try:
+        payload = json.loads(body) if body else {}
+        phone_raw = (payload.get("phone") or "").strip().replace("+", "").replace(" ", "").replace("-", "")
+        if not phone_raw or len(phone_raw) < 10:
+            _json_response(h, 400, {"error": "Valid phone number required"})
+            return
+        phone = ("91" + phone_raw) if len(phone_raw) == 10 else phone_raw
+        req_token = "REQ-" + _sec.token_hex(4).upper()
+        from db_cloud import create_otp_session
+        if not create_otp_session(phone, req_token):
+            _json_response(h, 500, {"error": "Session creation failed"})
+            return
+        wa_link = f"https://wa.me/{WA_STORE_NUMBER}?text=GETOTP+{req_token}"
+        _json_response(h, 200, {"request_token": req_token, "wa_link": wa_link, "expires_in": 600})
+    except Exception as exc:
+        logger.error("wa-otp/request error: %s", exc)
+        _json_response(h, 500, {"error": "Internal error"})
+
+
+def _handle_wa_otp_verify(h, body: bytes) -> None:
+    """POST /auth/wa-otp/verify — verify OTP, return web_token."""
+    try:
+        payload = json.loads(body) if body else {}
+        req_token = (payload.get("request_token") or "").strip().upper()
+        otp = (payload.get("otp") or "").strip()
+        if not req_token or not otp:
+            _json_response(h, 400, {"error": "request_token and otp required"})
+            return
+        from db_cloud import verify_otp_session
+        session = verify_otp_session(req_token, otp)
+        if not session:
+            _json_response(h, 401, {"error": "Invalid or expired OTP"})
+            return
+        _json_response(h, 200, {"web_token": session["web_token"], "phone": session["phone"]})
+    except Exception as exc:
+        logger.error("wa-otp/verify error: %s", exc)
+        _json_response(h, 500, {"error": "Internal error"})
+
+
+def _handle_notes_reserve(h, body: bytes) -> None:
+    """POST /notes/reserve — generate note_code and Supabase signed upload URL.
+
+    Returns { note_code, upload_url, storage_path } so the browser can upload
+    the PDF directly to Supabase Storage (bypasses Vercel 4.5MB limit).
+    """
+    identity, err = _notes_auth(h)
+    if err:
+        _json_response(h, 401, {"error": err})
+        return
+    try:
+        from handlers_notes import _gen_note_code
+        from db_cloud import _client, NOTES_BUCKET
+        note_code = _gen_note_code()
+        storage_path = f"notes/{note_code}.pdf"
+        result = _client().storage.from_(NOTES_BUCKET).create_signed_upload_url(storage_path)
+        signed_url = result.get("signedURL") or result.get("signed_url") or ""
+        if not signed_url:
+            _json_response(h, 500, {"error": "Could not generate upload URL"})
+            return
+        _json_response(h, 200, {
+            "note_code": note_code,
+            "upload_url": signed_url,
+            "storage_path": storage_path,
+        })
+    except Exception as exc:
+        logger.error("notes/reserve error: %s", exc)
+        _json_response(h, 500, {"error": "Internal error"})
+
+
+def _handle_notes_submit(h, body: bytes) -> None:
+    """POST /notes/submit — create the note row after PDF is uploaded to Supabase.
+
+    Body: { note_code, storage_path, title, category, subject, page_count, attests }
+    """
+    identity, err = _notes_auth(h)
+    if err:
+        _json_response(h, 401, {"error": err})
+        return
+    try:
+        payload = json.loads(body) if body else {}
+        note_code    = (payload.get("note_code") or "").strip()
+        storage_path = (payload.get("storage_path") or "").strip()
+        title        = (payload.get("title") or "").strip()
+        category     = (payload.get("category") or "").strip()
+        subject      = (payload.get("subject") or "").strip()
+        page_count   = int(payload.get("page_count") or 0)
+        attests      = bool(payload.get("attests", False))
+        if not all([note_code, storage_path, title, category, subject]) or page_count < 1:
+            _json_response(h, 400, {"error": "All fields required; page_count must be > 0"})
+            return
+        if not attests:
+            _json_response(h, 400, {"error": "You must attest these are your original notes"})
+            return
+
+        # Determine uploader identity
+        is_phone = identity and identity.replace("+", "").isdigit()
+        from db_cloud import create_note
+        row = create_note(
+            note_code=note_code,
+            uploader_phone=identity if is_phone else None,
+            title=title,
+            category=category,
+            subject=subject,
+            page_count=page_count,
+            storage_path=storage_path,
+            attests=attests,
+        )
+        if not row:
+            _json_response(h, 500, {"error": "Failed to save note"})
+            return
+
+        potential_rs = page_count * 10 / 100
+        _json_response(h, 200, {
+            "note_code": note_code,
+            "page_count": page_count,
+            "potential_credit_rs": round(potential_rs, 2),
+            "status": "pending",
+        })
+    except Exception as exc:
+        logger.error("notes/submit error: %s", exc)
+        _json_response(h, 500, {"error": "Internal error"})
+
+
 def _send_credits_balance(phone: str) -> None:
     """Reply to a 'MY CREDITS' message with the customer's referral store-credit balance."""
     from db_cloud import _client
@@ -431,6 +597,40 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     # Help escape hatch: short-circuit before any state-machine work.
     # Customer typed `help` / `support` / `human` / `agent` → flag session,
     # alert staff, ack the customer. TASK-009.
+    # ── WhatsApp OTP for website auth (MUST be first — before all other flows) ──
+    # Message format sent by user from wa.me deep link: "GETOTP REQ-XXXXXXXX"
+    if text.strip().upper().startswith("GETOTP "):
+        _otp_parts = text.strip().split()
+        if len(_otp_parts) >= 2:
+            _req_token = _otp_parts[1].upper()
+            try:
+                import random as _random
+                from db_cloud import get_otp_session, set_otp_code
+                _otp_row = get_otp_session(_req_token)
+                if _otp_row:
+                    # Confirm sender phone matches the phone that started the session
+                    _stored = (_otp_row.get("phone") or "").lstrip("+")
+                    _snorm = sender.lstrip("+")
+                    _ok = _stored.endswith(_snorm[-10:]) or _snorm.endswith(_stored[-10:])
+                    if _ok and _otp_row.get("status") in ("pending", "sent"):
+                        if _otp_row["status"] == "pending":
+                            _code = str(_random.randint(100000, 999999))
+                            set_otp_code(_req_token, _code)
+                        else:
+                            _code = _otp_row.get("otp_code", "")
+                        _send(sender, {
+                            "messaging_product": "whatsapp",
+                            "to": sender,
+                            "type": "text",
+                            "text": {"body": (
+                                f"Your Printosky verification code is: *{_code}*\n\n"
+                                "Valid for 10 minutes. Do not share this code."
+                            )},
+                        })
+            except Exception as _oe:
+                logger.error("GETOTP handler error %s: %s", sender, _oe)
+        return
+
     if _is_help_keyword(text):
         _handle_help_request(sender, text.strip().lower())
         return
@@ -2035,6 +2235,22 @@ class handler(BaseHTTPRequestHandler):
         )
         if _note_moderate:
             _handle_admin_notes_moderate(self, body, _note_moderate.group(1), _note_moderate.group(2))
+            return
+
+        # ── Notes: WhatsApp OTP auth ────────────────────────────────────────────
+        if self.path == "/auth/wa-otp/request":
+            _handle_wa_otp_request(self, body)
+            return
+        if self.path == "/auth/wa-otp/verify":
+            _handle_wa_otp_verify(self, body)
+            return
+
+        # ── Notes: reserve upload slot + finalize ───────────────────────────
+        if self.path == "/notes/reserve":
+            _handle_notes_reserve(self, body)
+            return
+        if self.path == "/notes/submit":
+            _handle_notes_submit(self, body)
             return
 
         if self.path == "/referrals/redeem":

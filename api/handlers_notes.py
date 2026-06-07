@@ -202,11 +202,11 @@ def _submit_note(phone: str, session: dict) -> list:
 
     result = create_note(
         note_code=note_code,
-        uploader_phone=phone,
         title=title,
         category=category,
         subject=subject,
         page_count=pages,
+        uploader_phone=phone,
         storage_path=storage_path,
         attests=True,
     )
