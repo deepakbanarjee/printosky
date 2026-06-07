@@ -1057,81 +1057,34 @@ def _handle_staff_resume(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "Server error"})
 
 
-def _handle_admin_reset_pin(h, body: bytes) -> None:
-    """POST /admin/reset-pin — admin resets any staff PIN using admin password."""
-    try:
-        payload = json.loads(body)
-        admin_pw  = payload.get("admin_password", "").strip()
-        staff_id  = payload.get("staff_id", "").strip().lower()
-        new_pin   = payload.get("new_pin", "").strip()
-    except Exception:
-        _json_response(h, 400, {"error": "Invalid JSON"})
-        return
-
-    if not ADMIN_PASSWORD_HASH:
-        _json_response(h, 503, {"error": "Admin auth not configured"})
-        return
-    if not hmac.compare_digest(_sha256(admin_pw), ADMIN_PASSWORD_HASH):
-        _json_response(h, 403, {"error": "Invalid admin password"})
-        return
-    if not staff_id or not new_pin:
-        _json_response(h, 400, {"error": "staff_id, new_pin required"})
-        return
-    if not new_pin.isdigit() or len(new_pin) != 4:
-        _json_response(h, 400, {"error": "new_pin must be 4 digits"})
-        return
-
-    from db_cloud import _client
-    try:
-        new_hash, new_salt = _hash_pin(new_pin)
-        result = _client().table("staff").update({"pin_hash": new_hash, "pin_salt": new_salt}).eq("id", staff_id).execute()
-        if not result.data:
-            _json_response(h, 404, {"error": "Staff not found"})
-            return
-        _json_response(h, 200, {"ok": True, "message": f"PIN reset for {staff_id}"})
-        logger.info(f"Admin reset PIN for {staff_id}")
-    except Exception as e:
-        logger.error(f"admin reset-pin error: {e}")
-        _json_response(h, 500, {"error": "Server error"})
+# ── Admin handlers (extracted to api/handlers_admin.py) ─────────────────────
+from api.handlers_admin import (  # noqa: E402
+    _handle_admin_book_order_confirm,
+    _handle_admin_book_order_create,
+    _handle_admin_book_order_deliver,
+    _handle_admin_book_order_dispatch,
+    _handle_admin_book_order_edit,
+    _handle_admin_book_order_settle_divya,
+    _handle_admin_book_orders_list,
+    _handle_admin_contacts_seen,
+    _handle_admin_conversations,
+    _handle_admin_divya_ledger,
+    _handle_admin_format_fixer,
+    _handle_admin_health_models,
+    _handle_admin_operator_queue_claim,
+    _handle_admin_operator_queue_deliver,
+    _handle_admin_operator_queue_depth,
+    _handle_admin_operator_queue_get,
+    _handle_admin_operator_queue_list,
+    _handle_admin_reset_pin,
+    _handle_admin_send,
+    _handle_admin_send_file,
+    _handle_admin_thread,
+    _handle_admin_upload_token,
+)
 
 
-def _handle_admin_send(h, body: bytes) -> None:
-    """POST /admin/send — staff manually sends a WhatsApp message to a customer."""
-    try:
-        payload  = json.loads(body)
-        admin_pw = payload.get("admin_password", "").strip()
-        phone    = payload.get("phone", "").strip()
-        message  = payload.get("message", "").strip()
-    except Exception:
-        _json_response(h, 400, {"error": "Invalid JSON"})
-        return
 
-    if not ADMIN_PASSWORD_HASH:
-        _json_response(h, 503, {"error": "Admin auth not configured"})
-        return
-    if not hmac.compare_digest(_sha256(admin_pw), ADMIN_PASSWORD_HASH):
-        _json_response(h, 403, {"error": "Invalid admin password"})
-        return
-    if not phone or not message:
-        _json_response(h, 400, {"error": "phone and message required"})
-        return
-
-    from whatsapp_notify import _send
-    try:
-        ok = _send(phone, message)
-        if ok:
-            try:
-                from db_cloud import log_message
-                log_message(phone, "outbound", message, message_type="text")
-            except Exception:
-                pass
-            _json_response(h, 200, {"ok": True})
-            logger.info(f"Admin manually sent message to {phone}")
-        else:
-            _json_response(h, 502, {"error": "WhatsApp send failed"})
-    except Exception as e:
-        logger.error(f"admin-send error: {e}")
-        _json_response(h, 500, {"error": "Server error"})
 
 
 # ── Academic project order endpoints ─────────────────────────────────────────
@@ -1291,196 +1244,16 @@ def _handle_track(h, code: str) -> None:
 
 
 
-def _handle_admin_conversations(h) -> None:
-    """GET /admin/conversations — inbox: one row per contact, last msg + unread count."""
-    from urllib.parse import parse_qs, urlparse
-    admin_pw = h.headers.get("X-Admin-Password", "").strip()
-    if not admin_pw:
-        params   = parse_qs(urlparse(h.path).query)
-        admin_pw = params.get("admin_password", [""])[0]
-    if not _auth_admin_pw(admin_pw):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-
-    try:
-        from db_cloud import _client as _dbc
-        client = _dbc()
-
-        # Fetch recent rows across all contacts (newest first, cap 500)
-        log_rows = (
-            client.table("conversation_log")
-            .select("phone,direction,message_type,body,filename,created_at")
-            .order("created_at", desc=True)
-            .limit(500)
-            .execute()
-            .data
-        )
-
-        # Fetch contacts for names + last_seen_at
-        contacts_data = (
-            client.table("whatsapp_contacts")
-            .select("phone,name,last_seen_at")
-            .execute()
-            .data
-        )
-        contacts_map = {c["phone"]: c for c in contacts_data}
-
-        # Fetch sessions flagged as needing human attention (TASK-009)
-        # Tolerant of pre-v17 schema: missing column returns empty set, no crash.
-        needs_human_phones: set = set()
-        try:
-            help_rows = (
-                client.table("bot_sessions")
-                .select("phone")
-                .eq("needs_human", True)
-                .execute()
-                .data
-            )
-            needs_human_phones = {r["phone"] for r in (help_rows or [])}
-        except Exception as exc:
-            logger.debug("bot_sessions.needs_human read skipped: %s", exc)
-
-        # One entry per phone — first occurrence in log_rows is the newest message
-        seen_phones: set = set()
-        inbox = []
-        for row in log_rows:
-            ph = row["phone"]
-            if ph in seen_phones:
-                continue
-            seen_phones.add(ph)
-
-            contact   = contacts_map.get(ph, {})
-            name      = contact.get("name") or _fmt_phone(ph)
-            last_seen = contact.get("last_seen_at")
-
-            # Count unread inbound messages newer than last_seen_at
-            unread = sum(
-                1 for r in log_rows
-                if r["phone"] == ph
-                and r["direction"] == "inbound"
-                and (not last_seen or r["created_at"] > last_seen)
-            )
-
-            mt = row.get("message_type") or "text"
-            if mt.startswith("image"):
-                preview = "Image"
-            elif mt.startswith("audio"):
-                preview = "Voice note"
-            elif mt.startswith("video"):
-                preview = "Video"
-            elif "pdf" in mt or mt.startswith("application"):
-                preview = f"File: {row.get('filename') or 'file'}"
-            else:
-                preview = (row.get("body") or "")[:60]
-
-            inbox.append({
-                "phone":             ph,
-                "name":              name,
-                "last_message":      preview,
-                "last_message_type": mt,
-                "unread_count":      unread,
-                "ts":                row["created_at"],
-                "needs_human":       ph in needs_human_phones,
-            })
-
-        _json_response(h, 200, sorted(inbox, key=lambda x: x["ts"], reverse=True))
-    except Exception as exc:
-        logger.error("GET /admin/conversations error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_thread(h) -> None:
-    """GET /admin/thread?phone=X — thread messages for one contact."""
-    from urllib.parse import parse_qs, urlparse
-    params   = parse_qs(urlparse(h.path).query)
-    admin_pw = h.headers.get("X-Admin-Password", "").strip() or params.get("admin_password", [""])[0]
-    if not _auth_admin_pw(admin_pw):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-
-    phone = params.get("phone", [""])[0]
-    if not phone:
-        _json_response(h, 400, {"error": "phone required"})
-        return
-    limit = min(int(params.get("limit", ["100"])[0]), 200)
-
-    try:
-        from db_cloud import _client as _dbc, get_media_url
-        rows = (
-            _dbc().table("conversation_log")
-            .select("id,direction,message_type,body,filename,media_url,created_at")
-            .eq("phone", phone)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-            .data
-        )
-        rows.reverse()  # return oldest→newest for display
-        # Resolve storage paths to public URLs
-        for row in rows:
-            mp = row.get("media_url")
-            if mp and not mp.startswith("http"):
-                row["media_url"] = get_media_url(mp)
-        _json_response(h, 200, rows)
-    except Exception as exc:
-        logger.error("GET /admin/thread error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_health_models(h) -> None:
-    """GET /admin/health/models — verify configured Claude models are reachable.
-
-    Returns {"_status": "checked", "<model_id>": "ok"|"FAIL: ..."}.
-    Hit this after every deploy. Cost ~₹0.01/call. Admin-auth only.
-    """
-    from urllib.parse import parse_qs, urlparse
-    admin_pw = h.headers.get("X-Admin-Password", "").strip()
-    if not admin_pw:
-        params   = parse_qs(urlparse(h.path).query)
-        admin_pw = params.get("admin_password", [""])[0]
-    if not _auth_admin_pw(admin_pw):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-
-    try:
-        import docx_engine
-        result = docx_engine.verify_models_available()
-        _json_response(h, 200, result)
-    except Exception as exc:
-        logger.error("GET /admin/health/models error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
 # ── Operator queue (P0 Day 2.5) ──────────────────────────────────────────────
 
-def _admin_pw_from_request(h) -> str:
-    """Read admin password from header or ?admin_password= query string."""
-    from urllib.parse import parse_qs, urlparse
-    pw = h.headers.get("X-Admin-Password", "").strip()
-    if not pw:
-        params = parse_qs(urlparse(h.path).query)
-        pw = params.get("admin_password", [""])[0]
-    return pw
 
 
-def _handle_admin_operator_queue_list(h) -> None:
-    """GET /admin/operator-queue[?status=pending|claimed|delivered|all]
-    Returns sorted-by-deadline list of operator queue rows.
-    """
-    if not _auth_admin_pw(_admin_pw_from_request(h)):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    from urllib.parse import parse_qs, urlparse
-    params = parse_qs(urlparse(h.path).query)
-    status = params.get("status", ["pending"])[0]
-    status_filter: str | None = None if status == "all" else status
-    try:
-        from db_cloud import list_operator_queue
-        rows = list_operator_queue(status=status_filter, limit=200)
-        _json_response(h, 200, {"rows": rows, "count": len(rows)})
-    except Exception as exc:
-        logger.error("operator-queue list error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
 def _handle_cron_sla_check(h) -> None:
@@ -1552,653 +1325,40 @@ def _handle_cron_abandoned_carts(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_book_orders_list(h) -> None:
-    """GET /admin/book-orders[?status=collecting|awaiting_payment|payment_review|confirmed]
-    Returns book orders newest-first. Omit status (or 'all') for everything.
-    """
-    if not _auth_admin_pw(_admin_pw_from_request(h)):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    from urllib.parse import parse_qs, urlparse
-    params = parse_qs(urlparse(h.path).query)
-    status = params.get("status", [None])[0]
-    status_filter = None if status in (None, "", "all") else status
-    try:
-        from db_cloud import list_book_orders
-        rows = list_book_orders(status=status_filter, limit=200)
-        _json_response(h, 200, {"rows": rows, "count": len(rows)})
-    except Exception as exc:
-        logger.error("book-orders list error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_book_order_confirm(h, order_code: str) -> None:
-    """POST /admin/book-orders/<code>/confirm — owner confirms payment received.
-    Marks the order confirmed and messages the customer 'order confirmed'.
-    """
-    if not _auth_admin_pw(_admin_pw_from_request(h)):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    try:
-        from book_bot import confirm_book_order
-        result = confirm_book_order(order_code)
-        _json_response(h, 200 if result.get("ok") else 404, result)
-    except Exception as exc:
-        logger.error("book-order confirm error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_book_order_dispatch(h, body, order_code: str) -> None:
-    """POST /admin/book-orders/<code>/dispatch — mark shipped + notify customer.
-    Body: {courier, tracking} (both optional).
-    """
-    if not _auth_admin_pw(_admin_pw_from_request(h)):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    try:
-        data = json.loads(body or b"{}")
-    except Exception:
-        data = {}
-    courier  = (data.get("courier") or "").strip()
-    tracking = (data.get("tracking") or "").strip()
-    try:
-        from db_cloud import update_book_order, get_book_order
-        from datetime import datetime, timezone
-        order = get_book_order(order_code)
-        if not order:
-            _json_response(h, 404, {"error": "Order not found"})
-            return
-        update_book_order(order_code, status="dispatched",
-                          dispatched_at=datetime.now(timezone.utc).isoformat(),
-                          courier_name=courier or None, tracking_no=tracking or None)
-        # Best-effort customer notification (subject to Meta's 24h window).
-        try:
-            from whatsapp_notify import _send
-            extra = ""
-            if courier:
-                extra += f"\nCourier: {courier}"
-            if tracking:
-                extra += f"\nTracking: {tracking}"
-            if order.get("phone"):
-                _send(order["phone"], f"📦 *Order dispatched!*\nOrder: {order_code}"
-                                      f"{extra}\n\nYour Xtraa books are on the way. 🙏")
-        except Exception:
-            pass
-        _json_response(h, 200, {"ok": True})
-    except Exception as exc:
-        logger.error("book-order dispatch error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_book_order_deliver(h, order_code: str) -> None:
-    """POST /admin/book-orders/<code>/deliver — mark delivered."""
-    if not _auth_admin_pw(_admin_pw_from_request(h)):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    try:
-        from db_cloud import update_book_order, get_book_order
-        from datetime import datetime, timezone
-        if not get_book_order(order_code):
-            _json_response(h, 404, {"error": "Order not found"})
-            return
-        update_book_order(order_code, status="delivered",
-                          delivered_at=datetime.now(timezone.utc).isoformat())
-        _json_response(h, 200, {"ok": True})
-    except Exception as exc:
-        logger.error("book-order deliver error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_book_order_create(h, body) -> None:
-    """POST /admin/book-orders/create — staff create a walk-in / in-store order.
-    Body: {items:{malayalam,hindi,english}, name, phone, address, payment_mode, handed_over}.
-    handed_over=true → no courier, status 'delivered'. Else → courier added, status 'confirmed'.
-    """
-    if not _auth_admin_pw(_admin_pw_from_request(h)):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    try:
-        data = json.loads(body or b"{}")
-    except Exception:
-        data = {}
-    raw = data.get("items") or {}
-    items = {}
-    for k in ("malayalam", "hindi", "english"):
-        try:
-            q = int(raw.get(k) or 0)
-        except (TypeError, ValueError):
-            q = 0
-        if q > 0:
-            items[k] = q
-    if not items:
-        _json_response(h, 400, {"error": "Select at least one book"})
-        return
-    name         = (data.get("name") or "").strip() or None
-    phone        = re.sub(r"\D", "", data.get("phone") or "") or None
-    address      = (data.get("address") or "").strip() or None
-    payment_mode = (data.get("payment_mode") or "cash").strip().lower()
-    handed_over  = bool(data.get("handed_over"))
-    payment_collected_by = (data.get("payment_collected_by") or "oxygen").strip().lower()
-    if payment_collected_by not in ("oxygen", "divya", "pending"):
-        payment_collected_by = "oxygen"
-    delivery_method = (data.get("delivery_method") or "courier").strip().lower()
-    if delivery_method not in ("courier", "xtraa_office"):
-        delivery_method = "courier"
-    # Required-field validation (walk-in / manual order entry).
-    # Name + phone are always required; address is required unless handed over.
-    if not name:
-        _json_response(h, 400, {"error": "Customer name is required"})
-        return
-    if not phone or len(phone) < 10:
-        _json_response(h, 400, {"error": "A valid phone number (at least 10 digits) is required"})
-        return
-    if not handed_over and not address:
-        _json_response(h, 400, {"error": "A delivery address is required unless the order is handed over"})
-        return
-    try:
-        import book_catalog as bc
-        from db_cloud import create_walk_in_order
-        from datetime import datetime
-        totals      = bc.compute_totals(items)
-        books_total = totals["books_total"]
-        no_courier  = handed_over or delivery_method == "xtraa_office"
-        courier     = 0.0 if no_courier else totals["courier"]
-        grand       = books_total + courier
-        commission  = bc.commission_for(items)
-        code        = f"XTR-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
-        status      = "delivered" if handed_over else "confirmed"
-        row = create_walk_in_order(code, name, phone, address, items,
-                                   books_total, courier, grand, payment_mode, status,
-                                   commission=commission,
-                                   payment_collected_by=payment_collected_by,
-                                   delivery_method=delivery_method)
-        if not row:
-            _json_response(h, 500, {"error": "Could not create order"})
-            return
-        _json_response(h, 200, {"ok": True, "order_code": code, "grand_total": grand})
-    except Exception as exc:
-        logger.error("book-order create error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_divya_ledger(h) -> None:
-    """GET /admin/book-orders/divya-ledger[?from=ISO&to=ISO] — Divya settlement.
-
-    Optional `from`/`to` (ISO-8601) restrict the period for daily/weekly/monthly
-    summaries and CSV/PDF export.
-    """
-    if not _auth_admin_pw(_admin_pw_from_request(h)):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    try:
-        from urllib.parse import urlparse, parse_qs
-        qs = parse_qs(urlparse(h.path).query)
-        date_from = (qs.get("from") or [None])[0]
-        date_to   = (qs.get("to") or [None])[0]
-        from db_cloud import divya_ledger
-        _json_response(h, 200, divya_ledger(date_from=date_from, date_to=date_to))
-    except Exception as exc:
-        logger.error("divya-ledger error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_book_order_settle_divya(h, body, order_code: str) -> None:
-    """POST /admin/book-orders/<code>/settle-divya — mark commission reconciled.
-    Body: {settled: bool} (default true).
-    """
-    if not _auth_admin_pw(_admin_pw_from_request(h)):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    try:
-        data = json.loads(body or b"{}")
-    except Exception:
-        data = {}
-    settled = bool(data.get("settled", True))
-    try:
-        from db_cloud import mark_divya_settled, get_book_order
-        if not get_book_order(order_code):
-            _json_response(h, 404, {"error": "Order not found"})
-            return
-        mark_divya_settled(order_code, settled)
-        _json_response(h, 200, {"ok": True, "settled": settled})
-    except Exception as exc:
-        logger.error("settle-divya error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_book_order_edit(h, body, order_code: str) -> None:
-    """POST /admin/book-orders/<code>/edit — edit an existing order.
-
-    Body may include any of: name, phone, address, payment_mode,
-    payment_collected_by, delivery_method, via_divya, items{malayalam,hindi,english}.
-    When items or delivery_method change, books_total/courier/grand_total/commission
-    are recomputed so the ledger stays correct.
-    """
-    if not _auth_admin_pw(_admin_pw_from_request(h)):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    try:
-        data = json.loads(body or b"{}")
-    except Exception:
-        data = {}
-    try:
-        import book_catalog as bc
-        from db_cloud import get_book_order, update_book_order
-        order = get_book_order(order_code)
-        if not order:
-            _json_response(h, 404, {"error": "Order not found"})
-            return
-
-        fields = {}
-        for k in ("name", "address", "payment_mode", "payment_collected_by", "delivery_method"):
-            if data.get(k) is not None:
-                fields[k] = str(data[k]).strip()
-        if data.get("phone") is not None:
-            ph = re.sub(r"\D", "", str(data["phone"]))
-            fields["phone"] = ph
-            fields["contact_phone"] = ph
-        if "via_divya" in data:
-            fields["via_divya"] = bool(data["via_divya"])
-
-        if fields.get("payment_collected_by") and fields["payment_collected_by"] not in ("oxygen", "divya", "pending"):
-            _json_response(h, 400, {"error": "payment_collected_by must be oxygen, divya or pending"})
-            return
-        if fields.get("delivery_method") and fields["delivery_method"] not in ("courier", "xtraa_office"):
-            _json_response(h, 400, {"error": "delivery_method must be courier or xtraa_office"})
-            return
-
-        # Recompute money when items change.
-        if isinstance(data.get("items"), dict):
-            raw, items = data["items"], {}
-            for k in ("malayalam", "hindi", "english"):
-                try:
-                    q = int(raw.get(k) or 0)
-                except (TypeError, ValueError):
-                    q = 0
-                if q > 0:
-                    items[k] = q
-            if not items:
-                _json_response(h, 400, {"error": "An order needs at least one book"})
-                return
-            totals = bc.compute_totals(items)
-            deliv = fields.get("delivery_method") or order.get("delivery_method") or "courier"
-            courier = 0.0 if deliv == "xtraa_office" else totals["courier"]
-            fields["items"]       = items
-            fields["books_total"] = totals["books_total"]
-            fields["courier"]     = courier
-            fields["grand_total"] = totals["books_total"] + courier
-            fields["commission"]  = bc.commission_for(items)
-        elif fields.get("delivery_method"):
-            # Delivery changed without items — recompute courier from existing items.
-            items = order.get("items") or {}
-            totals = bc.compute_totals(items)
-            courier = 0.0 if fields["delivery_method"] == "xtraa_office" else totals["courier"]
-            fields["courier"]     = courier
-            fields["grand_total"] = totals["books_total"] + courier
-
-        if not fields:
-            _json_response(h, 400, {"error": "Nothing to update"})
-            return
-        update_book_order(order_code, **fields)
-        _json_response(h, 200, {"ok": True, "order": get_book_order(order_code)})
-    except Exception as exc:
-        logger.error("book-order edit error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_operator_queue_depth(h) -> None:
-    """GET /admin/operator-queue/depth — counts for the SLA gauge."""
-    if not _auth_admin_pw(_admin_pw_from_request(h)):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    try:
-        from db_cloud import get_operator_queue_depth
-        _json_response(h, 200, get_operator_queue_depth())
-    except Exception as exc:
-        logger.error("operator-queue depth error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_operator_queue_get(h, queue_id: str) -> None:
-    """GET /admin/operator-queue/<id> — full row including input_text and partials."""
-    if not _auth_admin_pw(_admin_pw_from_request(h)):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    try:
-        from db_cloud import get_operator_job
-        row = get_operator_job(queue_id)
-        if not row:
-            _json_response(h, 404, {"error": "Not found"})
-            return
-        _json_response(h, 200, row)
-    except Exception as exc:
-        logger.error("operator-queue get error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_operator_queue_claim(h, body: bytes, queue_id: str) -> None:
-    """POST /admin/operator-queue/<id>/claim
-    Body: {"admin_password": "...", "operator": "<email or name>"}
-    Marks the row claimed by the operator. Refuses if already claimed.
-    """
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError:
-        _json_response(h, 400, {"error": "Invalid JSON"})
-        return
-    pw = data.get("admin_password", "") or _admin_pw_from_request(h)
-    if not _auth_admin_pw(pw):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    operator = str(data.get("operator", "")).strip()[:120]
-    if not operator:
-        _json_response(h, 400, {"error": "operator field required"})
-        return
-    try:
-        from db_cloud import claim_operator_job
-        ok = claim_operator_job(queue_id, operator)
-        if not ok:
-            _json_response(h, 409, {
-                "error": "already_claimed_or_missing",
-                "message": "Job is no longer pending or does not exist."
-            })
-            return
-        _json_response(h, 200, {"ok": True, "queue_id": queue_id,
-                                  "assigned_to": operator})
-    except Exception as exc:
-        logger.error("operator-queue claim error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_operator_queue_deliver(h, body: bytes, queue_id: str) -> None:
-    """POST /admin/operator-queue/<id>/deliver
-    Body: {
-      "admin_password": "...",
-      "docx_b64":       "<base64 of finished docx bytes>",
-      "notify_customer": true   (optional, default true)
-    }
-    Uploads the finished DOCX, marks delivered, sends WhatsApp link.
-    """
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError:
-        _json_response(h, 400, {"error": "Invalid JSON"})
-        return
-    pw = data.get("admin_password", "") or _admin_pw_from_request(h)
-    if not _auth_admin_pw(pw):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-
-    docx_b64 = data.get("docx_b64", "")
-    if not docx_b64:
-        _json_response(h, 400, {"error": "docx_b64 required"})
-        return
-    try:
-        import base64 as _b64
-        docx_bytes = _b64.b64decode(docx_b64)
-    except Exception as exc:
-        _json_response(h, 400, {"error": f"docx_b64 decode failed: {exc}"})
-        return
-    if len(docx_bytes) < 1000:
-        _json_response(h, 400, {"error": "docx too small (<1KB) — likely invalid"})
-        return
-
-    notify = bool(data.get("notify_customer", True))
-
-    try:
-        from db_cloud import deliver_operator_job, get_operator_job
-        ok, url = deliver_operator_job(queue_id, docx_bytes)
-        if not ok:
-            _json_response(h, 500, {"error": "Storage upload failed"})
-            return
-
-        # Pull row back for the WhatsApp message (need phone)
-        row = get_operator_job(queue_id) or {}
-        wa_phone = row.get("customer_phone", "")
-        if notify and wa_phone and url:
-            try:
-                _send_pb_whatsapp(wa_phone, queue_id[:8], url)
-            except Exception as exc:
-                logger.warning("operator-deliver WhatsApp send failed: %s", exc)
-
-        _json_response(h, 200, {
-            "ok":           True,
-            "queue_id":     queue_id,
-            "download_url": url,
-            "notified":     bool(notify and wa_phone),
-        })
-    except Exception as exc:
-        logger.error("operator-queue deliver error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_contacts_seen(h, body: bytes) -> None:
-    """PATCH /admin/contacts/seen — mark contact thread as read."""
-    try:
-        payload = json.loads(body)
-    except Exception:
-        _json_response(h, 400, {"error": "Invalid JSON"})
-        return
-    if not _auth_admin_pw(payload.get("admin_password", "")):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    phone = payload.get("phone", "")
-    if not phone:
-        _json_response(h, 400, {"error": "phone required"})
-        return
-    try:
-        from db_cloud import mark_contact_seen
-        mark_contact_seen(phone)
-        _json_response(h, 200, {"ok": True})
-    except Exception as exc:
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_upload_token(h, body: bytes) -> None:
-    """POST /admin/upload-token — issue a Supabase signed upload URL (5 min).
-
-    Browser uploads the file directly to Supabase (bypasses Vercel 4.5MB limit).
-    Returns {upload_url, storage_path}.
-    """
-    try:
-        payload = json.loads(body)
-    except Exception:
-        _json_response(h, 400, {"error": "Invalid JSON"})
-        return
-    if not _auth_admin_pw(payload.get("admin_password", "")):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-    filename = payload.get("filename", "")
-    if not filename:
-        _json_response(h, 400, {"error": "filename required"})
-        return
-
-    import re as _re, time as _time
-    safe_name    = _re.sub(r"[^a-zA-Z0-9._\-]", "_", filename)
-    storage_path = f"outbound/{int(_time.time())}_{safe_name}"
-
-    try:
-        from db_cloud import _client as _dbc, INCOMING_BUCKET
-        resp = _dbc().storage.from_(INCOMING_BUCKET).create_signed_upload_url(storage_path)
-        _json_response(h, 200, {
-            "upload_url":   resp["signedURL"],
-            "storage_path": storage_path,
-        })
-    except Exception as exc:
-        logger.error("upload-token error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
-def _handle_admin_send_file(h, body: bytes) -> None:
-    """POST /admin/send-file — server downloads from storage, sends via Meta, logs."""
-    try:
-        payload = json.loads(body)
-    except Exception:
-        _json_response(h, 400, {"error": "Invalid JSON"})
-        return
-    if not _auth_admin_pw(payload.get("admin_password", "")):
-        _json_response(h, 403, {"error": "Unauthorized"})
-        return
-
-    phone        = payload.get("phone", "")
-    storage_path = payload.get("storage_path", "")
-    caption      = payload.get("caption", "")
-    mime_type    = payload.get("mime_type", "application/octet-stream")
-    filename     = payload.get("filename", "file")
-
-    if not phone or not storage_path:
-        _json_response(h, 400, {"error": "phone and storage_path required"})
-        return
-
-    try:
-        from db_cloud import _client as _dbc, INCOMING_BUCKET, log_message
-        from whatsapp_notify import send_file
-
-        # Download from Supabase Storage (server-to-server, no size limit)
-        file_bytes = _dbc().storage.from_(INCOMING_BUCKET).download(storage_path)
-
-        # Upload to Meta and send WhatsApp message
-        ok = send_file(phone, file_bytes, mime_type, filename, caption)
-        if not ok:
-            _json_response(h, 502, {"error": "WhatsApp send failed"})
-            return
-
-        # Log outbound message with storage path as media_url
-        log_message(phone, "outbound", caption or filename,
-                    message_type=mime_type, filename=filename,
-                    media_url=storage_path)
-
-        _json_response(h, 200, {"ok": True})
-    except Exception as exc:
-        logger.error("send-file error for %s: %s", phone, exc)
-        _json_response(h, 500, {"error": str(exc)})
 
 
 # ── Project Builder helpers ──────────────────────────────────────────────────
 
-def _parse_multipart(body: bytes, content_type: str) -> dict[str, any]:
-    """Parse multipart/form-data. Return dict with form fields and file data.
-
-    Returns {'field_name': 'value', ...file field as 'filename': bytes_data}
-    """
-    parts = {}
-
-    # Extract boundary from Content-Type header
-    if "boundary=" not in content_type:
-        return {}
-
-    boundary_str = content_type.split("boundary=")[-1].strip().strip('"')
-    boundary = b"--" + boundary_str.encode()
-    final_boundary = b"--" + boundary_str.encode() + b"--"
-
-    # Split by boundary
-    segments = body.split(boundary)
-
-    for segment in segments[1:-1]:  # Skip first (before first boundary) and last (after final)
-        if not segment.strip():
-            continue
-
-        # Split headers from content
-        try:
-            header_end = segment.find(b'\r\n\r\n')
-            if header_end == -1:
-                header_end = segment.find(b'\n\n')
-                if header_end == -1:
-                    continue
-                headers = segment[:header_end].decode('utf-8', errors='ignore')
-                content = segment[header_end+2:]
-            else:
-                headers = segment[:header_end].decode('utf-8', errors='ignore')
-                content = segment[header_end+4:]
-        except Exception:
-            continue
-
-        # Remove trailing CRLLF
-        if content.endswith(b'\r\n'):
-            content = content[:-2]
-        elif content.endswith(b'\n'):
-            content = content[:-1]
-
-        # Parse Content-Disposition to get name and filename
-        name = None
-        filename = None
-        for line in headers.split('\n'):
-            if 'name=' in line:
-                match = re.search(r'name="?([^";\r\n]+)"?', line)
-                if match:
-                    name = match.group(1)
-            if 'filename=' in line:
-                match = re.search(r'filename="?([^";\r\n]+)"?', line)
-                if match:
-                    filename = match.group(1)
-
-        if not name:
-            continue
-
-        if filename:
-            # Binary file field
-            parts[name] = {'filename': filename, 'data': content}
-        else:
-            # Text field
-            parts[name] = content.decode('utf-8', errors='ignore')
-
-    return parts
 
 
-def _handle_admin_format_fixer(h, body: bytes) -> None:
-    """POST /admin/format-fixer — admin uploads DOCX, returns fixed DOCX.
-
-    Accepts multipart/form-data with fields:
-    - admin_password: admin password for auth
-    - university_id: university config (optional, defaults to 'default')
-    - file: DOCX file to format
-
-    Returns fixed DOCX as attachment, no storage.
-    """
-    try:
-        # Parse multipart form data
-        content_type = h.headers.get('Content-Type', '')
-        form_data = _parse_multipart(body, content_type)
-
-        # Verify admin auth
-        admin_pw = form_data.get('admin_password', '')
-        if not _auth_admin_pw(admin_pw):
-            _json_response(h, 403, {'error': 'Unauthorized'})
-            return
-
-        # Extract file
-        if 'file' not in form_data or not isinstance(form_data['file'], dict):
-            _json_response(h, 400, {'error': 'No file uploaded'})
-            return
-
-        file_data = form_data['file']
-        file_bytes = file_data.get('data', b'')
-        filename = file_data.get('filename', 'document.docx')
-
-        if not file_bytes:
-            _json_response(h, 400, {'error': 'Empty file'})
-            return
-
-        # Get university_id (optional, defaults to 'default')
-        university_id = form_data.get('university_id', 'default').strip()
-
-        # Format the DOCX
-        import docx_engine
-        fixed_bytes = docx_engine.format_fix_docx_inplace(file_bytes, university_id)
-
-        # Return as attachment
-        h.send_response(200)
-        h.send_header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-        h.send_header('Content-Disposition', f'attachment; filename="{filename}"')
-        h.send_header('Content-Length', str(len(fixed_bytes)))
-        h.end_headers()
-        h.wfile.write(fixed_bytes)
-
-        logger.info(f"Admin formatted DOCX: {filename} via university={university_id}")
-
-    except Exception as exc:
-        logger.error(f"admin format-fixer error: {exc}", exc_info=True)
-        _json_response(h, 500, {'error': str(exc)})
 
 
 # ── Project-builder handlers (extracted to api/handlers_pb.py) ───────────────
@@ -2218,7 +1378,6 @@ from api.handlers_pb import (  # noqa: E402
     _handle_pb_template_download,
     _handle_pb_templates_get,
     _handle_pb_upload_sign,
-    _send_pb_whatsapp,
 )
 
 # ── Vercel request handler ────────────────────────────────────────────────────
