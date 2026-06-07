@@ -484,6 +484,156 @@ def _handle_admin_divya_ledger(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_admin_dispatch_sheet(h) -> None:
+    """GET /admin/book-orders/dispatch-sheet — printable pick list + packing slips.
+
+    Returns HTML. Auth via ?admin_password= query param or X-Admin-Password header.
+    Only shows confirmed orders that have not yet been dispatched.
+
+    Pick list distinguishes:
+      - Aksharamrutham (malayalam) → PULL FROM STOCK (pre-printed, 100 copies)
+      - Vidyamrut (hindi) / Easy English (english) → PRINT FIRST (POD)
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from db_cloud import list_book_orders
+        from datetime import datetime, timezone
+
+        orders = list_book_orders(status="confirmed", limit=200)
+        pending = [o for o in orders if not o.get("dispatched_at")]
+
+        BOOKS: dict[str, tuple[str, str]] = {
+            "malayalam": ("Aksharamrutham", "STOCK"),
+            "hindi":     ("Vidyamrut",      "POD"),
+            "english":   ("Easy English",   "POD"),
+        }
+
+        totals: dict[str, int] = {k: 0 for k in BOOKS}
+        for order in pending:
+            items = order.get("items") or {}
+            for key in totals:
+                totals[key] += int(items.get(key) or 0)
+
+        generated = datetime.now(timezone.utc).strftime("%d %b %Y, %I:%M %p UTC")
+
+        pick_rows = "".join(
+            f'<tr><td>{BOOKS[k][0]}</td>'
+            f'<td class="qty">{v}</td>'
+            f'<td class="tag {"stock" if BOOKS[k][1] == "STOCK" else "pod"}">'
+            f'{"&#9989; PULL FROM STOCK" if BOOKS[k][1] == "STOCK" else "&#128424; PRINT FIRST (POD)"}</td></tr>'
+            for k, v in totals.items() if v
+        )
+
+        pick_section = (
+            f'<section class="pick-list">'
+            f'<h2>Pick List &mdash; {len(pending)} order{"s" if len(pending) != 1 else ""}</h2>'
+            f'<table><thead><tr><th>Book</th><th>Qty</th><th>Action</th></tr></thead>'
+            f'<tbody>{pick_rows}</tbody></table></section>'
+        ) if pending else "<p>No confirmed orders pending dispatch.</p>"
+
+        def _slip(order: dict) -> str:
+            items = order.get("items") or {}
+            book_lines = "<br>".join(
+                f"{BOOKS[k][0]} &times; {qty}"
+                for k, qty in items.items()
+                if qty and k in BOOKS
+            )
+            is_pod = any(
+                BOOKS.get(k, ("", ""))[1] == "POD"
+                for k, v in items.items() if v
+            )
+            pod_banner = (
+                '<div class="pod-banner">&#128424; PRINT BOOKS FIRST &mdash; POD</div>'
+                if is_pod else ""
+            )
+            raw_phone = order.get("phone") or order.get("contact_phone") or "&mdash;"
+            phone = (
+                raw_phone[2:]
+                if isinstance(raw_phone, str) and raw_phone.startswith("91") and len(raw_phone) == 12
+                else raw_phone
+            )
+            address = (order.get("address") or "&mdash;").replace("\n", "<br>")
+            amount  = f"&#8377;{float(order.get('grand_total') or 0):,.0f}"
+            pmode   = (order.get("payment_mode") or "&mdash;").upper()
+            return (
+                f'<div class="slip">'
+                f'{pod_banner}'
+                f'<div class="slip-header">'
+                f'<span class="order-code">{order.get("order_code", "")}</span>'
+                f'<span class="amount">{amount} ({pmode})</span>'
+                f'</div>'
+                f'<div class="customer"><strong>{order.get("name", "&mdash;")}</strong>'
+                f'<br>&#128222; {phone}</div>'
+                f'<div class="address">&#128205; {address}</div>'
+                f'<div class="books">&#128218; {book_lines or "&mdash;"}</div>'
+                f'</div>'
+            )
+
+        slips_html = "".join(_slip(o) for o in pending)
+
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dispatch Sheet &mdash; Xtraa by Printosky</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:16px}}
+  h1{{font-size:18px;margin-bottom:4px}}
+  .meta{{color:#555;font-size:11px;margin-bottom:20px}}
+  .pick-list{{border:2px solid #111;padding:12px;margin-bottom:24px;max-width:600px}}
+  .pick-list h2{{font-size:15px;margin-bottom:10px}}
+  table{{width:100%;border-collapse:collapse}}
+  th,td{{padding:6px 10px;border:1px solid #ccc;text-align:left}}
+  th{{background:#f0f0f0}}
+  td.qty{{font-size:18px;font-weight:bold;text-align:center;width:60px}}
+  .tag{{font-size:11px;font-weight:bold}}
+  .tag.stock{{color:#1a7c1a}}
+  .tag.pod{{color:#b85c00}}
+  .slips{{display:grid;grid-template-columns:1fr 1fr;gap:16px}}
+  .slip{{border:1px solid #888;border-radius:4px;padding:12px;page-break-inside:avoid}}
+  .pod-banner{{background:#fff3cd;border:1px solid #f0ad4e;padding:4px 8px;
+    border-radius:3px;font-size:11px;font-weight:bold;margin-bottom:8px}}
+  .slip-header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}}
+  .order-code{{font-size:10px;color:#555;font-family:monospace}}
+  .amount{{font-size:13px;font-weight:bold;color:#1a7c1a}}
+  .customer{{margin-bottom:6px;line-height:1.6}}
+  .address{{color:#333;margin-bottom:6px;line-height:1.5}}
+  .books{{font-weight:bold;margin-top:6px;color:#222}}
+  @media print{{
+    .no-print{{display:none}}
+    body{{padding:0}}
+    .slips{{grid-template-columns:1fr 1fr}}
+  }}
+</style>
+</head>
+<body>
+<div class="no-print" style="margin-bottom:16px">
+  <button onclick="window.print()" style="padding:8px 20px;font-size:14px;cursor:pointer">
+    Print this sheet
+  </button>
+</div>
+<h1>Xtraa &mdash; Dispatch Sheet</h1>
+<p class="meta">Generated: {generated} &nbsp;|&nbsp; Confirmed, undispatched orders only</p>
+{pick_section}
+<div class="slips">{slips_html}</div>
+</body>
+</html>"""
+
+        encoded = html.encode("utf-8")
+        h.send_response(200)
+        h.send_header("Content-Type", "text/html; charset=utf-8")
+        h.send_header("Content-Length", str(len(encoded)))
+        h.end_headers()
+        h.wfile.write(encoded)
+
+    except Exception as exc:
+        logger.error("dispatch-sheet error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_admin_book_order_settle_divya(h, body, order_code: str) -> None:
     """POST /admin/book-orders/<code>/settle-divya — mark commission reconciled.
     Body: {settled: bool} (default true).

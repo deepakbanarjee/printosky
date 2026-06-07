@@ -1119,6 +1119,7 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_book_order_edit,
     _handle_admin_book_order_settle_divya,
     _handle_admin_book_orders_list,
+    _handle_admin_dispatch_sheet,
     _handle_admin_contacts_seen,
     _handle_admin_conversations,
     _handle_admin_divya_ledger,
@@ -1669,6 +1670,11 @@ class handler(BaseHTTPRequestHandler):
         # Divya teacher settlement statement (admin-only).
         if self.path == "/admin/book-orders/divya-ledger" or self.path.startswith("/admin/book-orders/divya-ledger?"):
             _handle_admin_divya_ledger(self)
+            return
+
+        # Printable dispatch sheet: pick list + packing slips for confirmed orders.
+        if self.path == "/admin/book-orders/dispatch-sheet" or self.path.startswith("/admin/book-orders/dispatch-sheet?"):
+            _handle_admin_dispatch_sheet(self)
             return
 
         # ── SLA watchdog (GitHub Actions cron, every 30 min) ──────────────────
