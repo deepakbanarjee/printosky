@@ -1,4 +1,4 @@
-"""
+﻿"""
 PRINTOSKY — Vercel Python Serverless Webhook
 =============================================
 Handles:
@@ -1339,7 +1339,7 @@ def _send_cors_headers(h) -> None:
     """Attach CORS headers. Endpoints are individually auth-gated so * is safe."""
     h.send_header("Access-Control-Allow-Origin",  "*")
     h.send_header("Access-Control-Allow-Methods", "POST, GET, PATCH, OPTIONS")
-    h.send_header("Access-Control-Allow-Headers", "Content-Type, X-Hub-Signature-256, X-Razorpay-Signature, X-Staff-Pin, X-Student-Phone, X-Admin-Password, X-Whatsapp-Phone")
+    h.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Hub-Signature-256, X-Razorpay-Signature, X-Staff-Pin, X-Student-Phone, X-Admin-Password, X-Whatsapp-Phone")
     h.send_header("Access-Control-Max-Age",       "86400")
 
 

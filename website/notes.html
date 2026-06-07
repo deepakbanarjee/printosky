@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -398,7 +398,7 @@
 /* ─── config ──────────────────────────────────────────────────────────────── */
 const SB_URL  = "https://mlhuwlnwwwxdnqafelko.supabase.co";
 const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI";
-const API     = "";  // relative — works on Vercel (same origin)
+const API     = "https://printosky.vercel.app";  // Netlify serves static, Vercel serves API
 
 const sb = supabase.createClient(SB_URL, SB_ANON);
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -527,7 +527,7 @@ async function doGoogle() {
   clrErr("google-err");
   const { error } = await sb.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo: window.location.href },
+    options: { redirectTo: "https://printosky.com/notes.html" },
   });
   if (error) showErr("google-err", error.message || "Google sign-in failed. Ensure it's enabled in Supabase.");
 }
@@ -541,7 +541,7 @@ async function doEmail() {
   }
   const btn = ge("emailBtn");
   btn.disabled = true; btn.textContent = "Sending…";
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } });
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: "https://printosky.com/notes.html" } });
   btn.disabled = false; btn.textContent = "✉️ Send magic link";
   if (error) { showErr("email-err", error.message||"Failed. Try again."); return; }
   ge("email-sent").classList.remove("hidden");
