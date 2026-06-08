@@ -3,7 +3,7 @@
     {
       "src": "api/index.py",
       "use": "@vercel/python",
-      "config": { "maxLambdaSize": "50mb", "memory": 1024, "maxDuration": 300, "includeFiles": "brand-kit/printosky-payment-qr.png" }
+      "config": { "maxLambdaSize": "50mb", "memory": 1024, "maxDuration": 300, "includeFiles": ["brand-kit/printosky-payment-qr.png", "api/*.py"] }
     },
     {
       "src": "api/inngest.py",

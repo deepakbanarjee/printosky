@@ -497,7 +497,7 @@ def _handle_notes_reserve(h, body: bytes) -> None:
     except Exception as exc:
         import traceback as _tb
         logger.error("notes/reserve error: %s\n%s", exc, _tb.format_exc())
-        _json_response(h, 500, {"error": "Internal error", "_debug": f"{type(exc).__name__}: {exc}"})
+        _json_response(h, 500, {"error": "Internal error"})
 
 
 def _handle_notes_submit(h, body: bytes) -> None:
