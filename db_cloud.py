@@ -549,6 +549,57 @@ def mark_sla_alerted(phone: str) -> None:
         logger.warning("mark_sla_alerted error for %s: %s", phone, exc)
 
 
+def activity_counts(hours: int = 24) -> dict:
+    """Count recent activity for the daily liveness check.
+
+    Returns {"inbound": N, "jobs": M, "hours": hours}. `inbound` is the number
+    of inbound rows in conversation_log within the window — the strongest
+    "is the WhatsApp webhook alive?" signal, since a live shop never goes a
+    full day with zero inbound messages even if no print jobs are created.
+    `jobs` is best-effort (jobs.received_at is naive IST text, so it's compared
+    lexically against an IST wall-clock cutoff). On error each count is -1 so
+    the caller can tell "query failed" apart from a genuine zero.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    out = {"inbound": -1, "jobs": -1, "hours": hours}
+    client = _client()
+
+    try:
+        cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        r = (
+            client.table("conversation_log")
+            .select("phone", count="exact")
+            .eq("direction", "inbound")
+            .gte("created_at", cutoff_iso)
+            .limit(1)
+            .execute()
+        )
+        cnt = getattr(r, "count", None)
+        out["inbound"] = cnt if cnt is not None else len(r.data or [])
+    except Exception as exc:
+        logger.warning("activity_counts inbound error: %s", exc)
+
+    try:
+        # jobs.received_at is naive IST wall-clock text "YYYY-MM-DD HH:MM:SS".
+        ist_cutoff = (
+            datetime.now(timezone.utc) + timedelta(hours=5, minutes=30) - timedelta(hours=hours)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        r = (
+            client.table("jobs")
+            .select("job_id", count="exact")
+            .gte("received_at", ist_cutoff)
+            .limit(1)
+            .execute()
+        )
+        cnt = getattr(r, "count", None)
+        out["jobs"] = cnt if cnt is not None else len(r.data or [])
+    except Exception as exc:
+        logger.warning("activity_counts jobs error: %s", exc)
+
+    return out
+
+
 def is_new_contact(phone: str) -> bool:
     """True if there is no prior conversation history for this phone.
 

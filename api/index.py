@@ -2017,6 +2017,56 @@ def _handle_cron_abandoned_carts(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_cron_daily_activity(h) -> None:
+    """GET /cron/daily-activity — once-daily 'is the pipeline alive?' check.
+
+    Counts inbound WhatsApp messages (and print jobs) in the last 24h. Zero
+    inbound messages on a normal day almost always means the Meta webhook has
+    silently stopped delivering — a failure the store-PC heartbeat and SLA
+    crons can't see. Alerts the owner on WhatsApp when inbound is zero.
+
+    Intended schedule: once per evening (e.g. 21:00 IST) via GitHub Actions.
+    Auth: optional `Authorization: Bearer ${CRON_SECRET}` when CRON_SECRET set.
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected and h.headers.get("Authorization", "") != f"Bearer {expected}":
+        _json_response(h, 401, {"error": "Unauthorized"})
+        return
+    try:
+        from db_cloud import activity_counts
+        from whatsapp_notify import _send
+
+        counts = activity_counts(hours=24)
+        inbound, jobs = counts["inbound"], counts["jobs"]
+
+        # Only alert on a confident zero (query succeeded and returned 0).
+        dead = inbound == 0
+        alerted = False
+        if dead:
+            msg = (
+                "🚨 *Printosky activity alert*\n\n"
+                "*Zero* inbound WhatsApp messages in the last 24 hours.\n"
+                "The Meta webhook may have stopped delivering — customers' "
+                "messages might not be reaching the bot.\n\n"
+                "Check: printosky.com/admin → Conversations, and the Meta "
+                "webhook status in Business Manager."
+            )
+            alerted = _send(OWNER_ALERT_PHONE, msg)
+            if not alerted:
+                logger.warning("daily-activity alert send failed (Meta 24h window?)")
+
+        _json_response(h, 200, {
+            "ok": True,
+            "inbound_24h": inbound,
+            "jobs_24h": jobs,
+            "dead": dead,
+            "alerted": alerted,
+        })
+    except Exception as exc:
+        logger.error("daily-activity cron error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 
 
 
@@ -2186,6 +2236,11 @@ class handler(BaseHTTPRequestHandler):
         # ── Store-PC clean-shutdown ping (curled by the store PC on shutdown) ──
         if self.path == "/cron/pc-shutdown" or self.path.startswith("/cron/pc-shutdown?"):
             _handle_cron_pc_shutdown(self)
+            return
+
+        # ── Daily activity liveness (GitHub Actions cron, once/day) ───────────
+        if self.path == "/cron/daily-activity" or self.path.startswith("/cron/daily-activity?"):
+            _handle_cron_daily_activity(self)
             return
 
         # ── Operator queue (P0 Day 2.5) ──────────────────────────────────────

@@ -1,0 +1,27 @@
+name: Printosky daily activity check
+
+# Once-daily "is the pipeline alive?" probe. Calls /cron/daily-activity, which
+# counts inbound WhatsApp messages in the last 24h and pings the owner if zero
+# (a silent Meta-webhook outage that the 30-min SLA/heartbeat crons can't see).
+#
+# Vercel Hobby caps crons at once-per-day, so this lives in GitHub Actions like
+# the other Printosky crons (see sla-cron.yml).
+on:
+  schedule:
+    - cron: "30 15 * * *"   # 15:30 UTC = 21:00 IST, every day
+  workflow_dispatch: {}        # allow manual run from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Daily activity check
+        run: |
+          echo "Calling daily-activity check..."
+          code=$(curl -s -o /tmp/activity.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://printosky.vercel.app/cron/daily-activity")
+          echo "HTTP $code"; cat /tmp/activity.json || true
+          exit 0
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
