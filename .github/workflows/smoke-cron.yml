@@ -1,0 +1,61 @@
+name: Smoke test (production)
+
+# TASK-017: prove the production deployment is up, routed, env-complete, and
+# correctly secured — every 6 hours and on demand. Runs the safe probe in
+# scripts/smoke.py (no WhatsApp messages, no rows, no payments).
+#
+# On failure it WhatsApp-alerts the owner via /api/internal/notify-owner, which
+# needs the UPTIME_NOTIFY_SECRET. Add it as a GitHub Actions secret to enable
+# the alert (the job still fails + emails you without it):
+#   repo -> Settings -> Secrets and variables -> Actions -> New secret
+#   Name: UPTIME_NOTIFY_SECRET  (same value as the Vercel env var)
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours (UTC)
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run smoke test
+        id: smoke
+        run: |
+          set +e
+          python scripts/smoke.py --url "https://printosky.vercel.app" | tee /tmp/smoke.txt
+          echo "code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: WhatsApp alert on failure
+        if: steps.smoke.outputs.code != '0' && env.UPTIME_NOTIFY_SECRET != ''
+        env:
+          UPTIME_NOTIFY_SECRET: ${{ secrets.UPTIME_NOTIFY_SECRET }}
+        run: |
+          summary=$(grep RESULT /tmp/smoke.txt || echo "smoke failed")
+          python - "$summary" <<'PY'
+          import json, os, sys, urllib.request
+          msg = ("\U0001F6A8 *Printosky smoke test FAILED*\n\n"
+                 + sys.argv[1] +
+                 "\nThe production API probe failed. Check Vercel + printosky.com/admin.")
+          data = json.dumps({"secret": os.environ["UPTIME_NOTIFY_SECRET"], "message": msg}).encode()
+          req = urllib.request.Request(
+              "https://printosky.vercel.app/api/internal/notify-owner",
+              data=data, headers={"Content-Type": "application/json"}, method="POST")
+          try:
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  print("alert sent:", r.status)
+          except Exception as e:
+              print("alert failed:", e)
+          PY
+
+      - name: Fail the job if smoke failed
+        if: steps.smoke.outputs.code != '0'
+        run: exit 1
