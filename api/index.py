@@ -792,15 +792,14 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
                             set_otp_code(_req_token, _code)
                         else:
                             _code = _otp_row.get("otp_code", "")
-                        _send(sender, {
-                            "messaging_product": "whatsapp",
-                            "to": sender,
-                            "type": "text",
-                            "text": {"body": (
-                                f"Your Printosky verification code is: *{_code}*\n\n"
-                                "Valid for 10 minutes. Do not share this code."
-                            )},
-                        })
+                        # _send (whatsapp_notify._send) takes a plain STRING and
+                        # builds the Meta payload itself. Passing a dict here made
+                        # the message body a dict → Meta 400 → OTP never delivered.
+                        _send(
+                            sender,
+                            f"Your Printosky verification code is: *{_code}*\n\n"
+                            "Valid for 10 minutes. Do not share this code.",
+                        )
             except Exception as _oe:
                 logger.error("GETOTP handler error %s: %s", sender, _oe)
         return
