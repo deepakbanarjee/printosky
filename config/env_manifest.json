@@ -1,0 +1,72 @@
+{
+  "_comment": "TASK-015 env var manifest. Used by scripts/check_env.py as a fail-fast pre-flight check. Patterns are intentionally permissive (presence + rough shape) to catch missing/obviously-wrong vars without false failures on valid rotations. 'required' vars abort startup if missing/malformed; 'optional' are validated only if present.",
+  "_patterns": {
+    "supabase_jwt": "^(eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+|sb_(secret|publishable)_[A-Za-z0-9_-]+)$",
+    "phone12": "^\\d{12}$",
+    "sha256_hex": "^[a-f0-9]{64}$"
+  },
+  "vercel": {
+    "required": [
+      {"name": "SUPABASE_URL", "pattern": "^https://[a-z0-9-]+\\.supabase\\.co$"},
+      {"name": "SUPABASE_KEY", "pattern": "^(eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+|sb_(secret|publishable)_[A-Za-z0-9_-]+)$"},
+      {"name": "SUPABASE_SERVICE_KEY", "pattern": "^(eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+|sb_(secret|publishable)_[A-Za-z0-9_-]+)$"},
+      {"name": "RAZORPAY_KEY_ID", "pattern": "^rzp_(live|test)_[A-Za-z0-9]+$"},
+      {"name": "RAZORPAY_KEY_SECRET", "pattern": "^.{8,}$"},
+      {"name": "RAZORPAY_WEBHOOK_SECRET", "pattern": "^.{6,}$"},
+      {"name": "META_PHONE_NUMBER_ID", "pattern": "^\\d+$"},
+      {"name": "META_SYSTEM_USER_TOKEN", "pattern": "^.{20,}$"},
+      {"name": "META_APP_SECRET", "pattern": "^[a-f0-9]{32}$"},
+      {"name": "ADMIN_PASSWORD_HASH", "pattern": "^[a-f0-9]{64}$"},
+      {"name": "CRON_SECRET", "pattern": "^.{8,}$"}
+    ],
+    "optional": [
+      {"name": "META_WEBHOOK_VERIFY_TOKEN", "pattern": "^.{4,}$"},
+      {"name": "OWNER_PHONE", "pattern": "^\\d{12}$"},
+      {"name": "OWNER_ALERT_PHONE", "pattern": "^\\d{12}$"},
+      {"name": "UPTIME_NOTIFY_SECRET", "pattern": "^.{6,}$"},
+      {"name": "PB_BYPASS_KEY", "pattern": "^.+$"},
+      {"name": "PB_OPERATOR_CAPACITY", "pattern": "^\\d+$"},
+      {"name": "STORE_PC_MONITOR_ID", "pattern": "^[A-Z]{2,8}$"},
+      {"name": "STORE_PC_OFFLINE_MIN", "pattern": "^\\d+$"},
+      {"name": "MULTISTORE_ROUTING_ENABLED", "pattern": "^(true|false|1|0)$"},
+      {"name": "INNGEST_SIGNING_KEY", "pattern": "^.+$"},
+      {"name": "INNGEST_EVENT_KEY", "pattern": "^.+$"}
+    ]
+  },
+  "store_pc": {
+    "required": [
+      {"name": "SUPABASE_URL", "pattern": "^https://[a-z0-9-]+\\.supabase\\.co$"},
+      {"name": "SUPABASE_KEY", "pattern": "^(eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+|sb_(secret|publishable)_[A-Za-z0-9_-]+)$"},
+      {"name": "SUPABASE_SERVICE_KEY", "pattern": "^(eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+|sb_(secret|publishable)_[A-Za-z0-9_-]+)$"},
+      {"name": "STORE_TOKEN", "pattern": "^.{8,}$"},
+      {"name": "STORE_WHATSAPP_PHONE", "pattern": "^\\d{10,12}$"},
+      {"name": "META_PHONE_NUMBER_ID", "pattern": "^\\d+$"},
+      {"name": "META_SYSTEM_USER_TOKEN", "pattern": "^.{20,}$"}
+    ],
+    "optional": [
+      {"name": "EPSON_USER", "pattern": "^.+$"},
+      {"name": "EPSON_PASS", "pattern": "^.+$"},
+      {"name": "SUPABASE_AUTH_EMAIL", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"},
+      {"name": "SUPABASE_AUTH_PASSWORD", "pattern": "^.+$"},
+      {"name": "STORE_OPEN_HOUR", "pattern": "^\\d{1,2}$"},
+      {"name": "STORE_CLOSE_HOUR", "pattern": "^\\d{1,2}$"},
+      {"name": "PRINTOSKY_DB", "pattern": "^.+$"},
+      {"name": "PRINTOSKY_BASE_URL", "pattern": "^https?://.+$"}
+    ]
+  },
+  "netlify": {
+    "required": [
+      {"name": "SUPABASE_URL", "pattern": "^https://[a-z0-9-]+\\.supabase\\.co$"},
+      {"name": "SUPABASE_KEY", "pattern": "^(eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+|sb_(secret|publishable)_[A-Za-z0-9_-]+)$"},
+      {"name": "ADMIN_PBKDF2_HASH", "pattern": "^[a-f0-9]{64}$"},
+      {"name": "ADMIN_PBKDF2_SALT", "pattern": "^[a-f0-9]{16,}$"},
+      {"name": "SUPERADMIN_SHA256_HASH", "pattern": "^[a-f0-9]{64}$"},
+      {"name": "STORE_SHA256_HASH", "pattern": "^[a-f0-9]{64}$"},
+      {"name": "MIS_SHA256_HASH", "pattern": "^[a-f0-9]{64}$"}
+    ],
+    "optional": [
+      {"name": "SUPABASE_AUTH_EMAIL", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"},
+      {"name": "SUPABASE_AUTH_PASSWORD", "pattern": "^.+$"}
+    ]
+  }
+}

@@ -23,6 +23,19 @@ if not exist "C:\Printosky\Data"          mkdir "C:\Printosky\Data"
 :: Wait for network on boot
 timeout /t 5 /nobreak >nul
 
+:: 0. Env pre-flight (TASK-015) -- abort early on missing/malformed secrets
+::    instead of failing deep inside a handler at runtime.
+echo  [0/4] Checking environment variables...
+python "%REPO_DIR%\scripts\check_env.py" store_pc --dotenv "%REPO_DIR%\.env"
+if errorlevel 1 (
+    echo.
+    echo  !! ENV CHECK FAILED -- fix .env above before starting. Aborting.
+    echo.
+    pause
+    exit /b 1
+)
+echo.
+
 :: 1. Watcher (Python) -- ports 3002/3003
 :: `start /D <dir>` sets the working directory for the new window cleanly,
 :: which avoids the nested-quote escape hell that `cd /d && python` causes.
