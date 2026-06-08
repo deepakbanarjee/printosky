@@ -66,6 +66,8 @@ html, body {
 #screen-list { background: #fff; transform: translateX(0); }
 #screen-chat { background: #fff; transform: translateX(100%); }
 #chat-thread { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* Placeholder is a desktop-only concept; hidden on mobile (media query re-enables it). */
+#no-chat-placeholder { display: none; }
 #screen-list.slide-left  { transform: translateX(-100%); }
 #screen-chat.slide-in    { transform: translateX(0); }
 
@@ -484,11 +486,12 @@ function openChat(phone, name) {
   document.getElementById('chat-phone').textContent = phone;
   document.getElementById('messages').innerHTML = '<div class="empty-state">Loading…</div>';
 
+  // Reveal the thread + hide the (desktop-only) placeholder on BOTH layouts.
+  // Without this the mobile chat screen slid in showing only the placeholder.
+  document.getElementById('no-chat-placeholder').style.display = 'none';
+  document.getElementById('chat-thread').style.display = 'flex';
+
   if (isDesktop()) {
-    // desktop: show thread panel inline, hide placeholder
-    document.getElementById('no-chat-placeholder').style.display = 'none';
-    const t = document.getElementById('chat-thread');
-    t.style.display = 'flex';
     // highlight selected contact
     document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('selected'));
     const items = document.querySelectorAll('.contact-item');
