@@ -2190,7 +2190,7 @@ class handler(BaseHTTPRequestHandler):
             _handle_admin_operator_queue_list(self)
             return
 
-        if self.path.startswith("/api/health"):
+        if self.path.startswith("/api/health") or self.path.startswith("/health"):
             _handle_health(self)
             return
 
