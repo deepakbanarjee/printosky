@@ -2,483 +2,2148 @@
 # TASK-016 (roadmap-2026-05): single source of truth for the expected Supabase
 # schema. Compared against the live database by scripts/check_schema.py.
 #
-# Source: live Supabase project mlhuwlnwwwxdnqafelko snapshotted 2026-05-11
-# after SCHEMA_v17_help_escape.sql and SCHEMA_v18_webhook_idempotency.sql.
+# Source: live Supabase project mlhuwlnwwwxdnqafelko, snapshotted 2026-06-08
+# (after SCHEMA_v29_processed_webhooks_rls.sql). Regenerated from the live
+# information_schema via the Supabase MCP.
 #
 # How to update this file:
 #   1. Write and apply a migration (api/migrations/SCHEMA_vNN_*.sql).
-#   2. Run `python scripts/check_schema.py --dump` to rewrite this file.
+#   2. Run `python scripts/check_schema.py --dump` to rewrite this file
+#      (requires SUPABASE_DB_URL), or regenerate from the live schema.
 #   3. Review the diff vs the previous version in the PR.
 #
-# DO NOT hand-edit to silence drift errors — fix the migration or the code,
+# DO NOT hand-edit to silence drift errors -- fix the migration or the code,
 # not the manifest.
 
-version: 18
-description: Live schema after SCHEMA_v17 (help escape) and SCHEMA_v18 (webhook idempotency)
+version: 29
+description: Live schema after SCHEMA_v29 (processed_webhooks RLS). 41 tables, all RLS-enabled.
 
-views:
-  # PostgreSQL views — read-only derived tables. Listed so the drift checker
-  # doesn't flag them as unexpected.
-  - epson_daily
-  - konica_daily
-
-# Tables with RLS DISABLED — flagged for security review (TASK-014 / security-agent).
-# The manifest pins the current state; future drift checker will alert if any
-# of these flip back to RLS-enabled or any RLS-enabled table flips to disabled.
-rls_disabled_known:
-  - project_builder_orders   # accepts Razorpay webhook + admin downloads; review needed
-  - referral_credits         # referral credit ledger; service-role-only access enforced in code
-  - referrers                # referrer registry; service-role-only access enforced in code
+# Tables with RLS DISABLED -- flagged for security review. As of 2026-06-08
+# every public table has RLS enabled (TASK-023 + TASK-024 closed the last gaps),
+# so this list is empty. If any table ever shows up here, investigate.
+rls_disabled_known: []
 
 tables:
-
   academic_orders:
-    rls: true
     columns:
-      project_id:            {type: text, nullable: false}
-      customer_name:         {type: text, nullable: false}
-      whatsapp_phone:        {type: text, nullable: false}
-      course:                {type: text, nullable: false}
-      topic:                 {type: text, nullable: false}
-      study_area:            {type: text, nullable: true}
-      sample_size:           {type: integer, nullable: true, default: "100"}
-      tables_json:           {type: text, nullable: true}
-      status:                {type: text, nullable: false, default: "'order_received'::text"}
-      advance_paid:          {type: boolean, nullable: true, default: "false"}
-      balance_paid:          {type: boolean, nullable: true, default: "false"}
-      advance_amount:        {type: numeric, nullable: true, default: "500"}
-      balance_amount:        {type: numeric, nullable: true, default: "500"}
-      razorpay_advance_link: {type: text, nullable: true}
-      razorpay_balance_link: {type: text, nullable: true}
-      phase1_docx_path:      {type: text, nullable: true}
-      phase2_docx_path:      {type: text, nullable: true}
-      drive_url:             {type: text, nullable: true}
-      payment_mode:          {type: text, nullable: true}
-      college:               {type: text, nullable: true}
-      department:            {type: text, nullable: true}
-      semester:              {type: text, nullable: true}
-      year:                  {type: text, nullable: true}
-      guide_name:            {type: text, nullable: true}
-      guide_designation:     {type: text, nullable: true}
-      hod_name:              {type: text, nullable: true}
-      register_number:       {type: text, nullable: true}
-      revision_note:         {type: text, nullable: true}
-      created_at:            {type: timestamp with time zone, nullable: true, default: "now()"}
-      updated_at:            {type: timestamp with time zone, nullable: true, default: "now()"}
-      store_id:              {type: text, nullable: false, default: "'OSP'::text"}
-
+      advance_amount:
+        default: '500'
+        nullable: true
+        type: numeric
+      advance_paid:
+        default: 'false'
+        nullable: true
+        type: boolean
+      balance_amount:
+        default: '500'
+        nullable: true
+        type: numeric
+      balance_paid:
+        default: 'false'
+        nullable: true
+        type: boolean
+      college:
+        default: null
+        nullable: true
+        type: text
+      course:
+        default: null
+        nullable: false
+        type: text
+      created_at:
+        default: now()
+        nullable: true
+        type: timestamp with time zone
+      customer_name:
+        default: null
+        nullable: false
+        type: text
+      department:
+        default: null
+        nullable: true
+        type: text
+      drive_url:
+        default: null
+        nullable: true
+        type: text
+      guide_designation:
+        default: null
+        nullable: true
+        type: text
+      guide_name:
+        default: null
+        nullable: true
+        type: text
+      hod_name:
+        default: null
+        nullable: true
+        type: text
+      payment_mode:
+        default: null
+        nullable: true
+        type: text
+      phase1_docx_path:
+        default: null
+        nullable: true
+        type: text
+      phase2_docx_path:
+        default: null
+        nullable: true
+        type: text
+      project_id:
+        default: null
+        nullable: false
+        type: text
+      razorpay_advance_link:
+        default: null
+        nullable: true
+        type: text
+      razorpay_balance_link:
+        default: null
+        nullable: true
+        type: text
+      register_number:
+        default: null
+        nullable: true
+        type: text
+      revision_note:
+        default: null
+        nullable: true
+        type: text
+      sample_size:
+        default: '100'
+        nullable: true
+        type: integer
+      semester:
+        default: null
+        nullable: true
+        type: text
+      status:
+        default: '''order_received''::text'
+        nullable: false
+        type: text
+      store_id:
+        default: '''OSP''::text'
+        nullable: false
+        type: text
+      study_area:
+        default: null
+        nullable: true
+        type: text
+      tables_json:
+        default: null
+        nullable: true
+        type: text
+      topic:
+        default: null
+        nullable: false
+        type: text
+      updated_at:
+        default: now()
+        nullable: true
+        type: timestamp with time zone
+      whatsapp_phone:
+        default: null
+        nullable: false
+        type: text
+      year:
+        default: null
+        nullable: true
+        type: text
+    rls: true
+  account_links:
+    columns:
+      email:
+        default: null
+        nullable: false
+        type: text
+      linked_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      name:
+        default: null
+        nullable: true
+        type: text
+      phone:
+        default: null
+        nullable: false
+        type: text
+    rls: true
   b2b_clients:
-    rls: true
     columns:
-      phone:         {type: text, nullable: false}
-      company_name:  {type: text, nullable: false}
-      contact_name:  {type: text, nullable: true}
-      email:         {type: text, nullable: true}
-      discount_pct:  {type: real, nullable: true, default: "0"}
-      credit_limit:  {type: real, nullable: true, default: "0"}
-      balance_due:   {type: real, nullable: true, default: "0"}
-      payment_mode:  {type: text, nullable: true, default: "'NEFT'::text"}
-      gst_number:    {type: text, nullable: true}
-      address:       {type: text, nullable: true}
-      notes:         {type: text, nullable: true}
-      registered_at: {type: text, nullable: true}
-      active:        {type: boolean, nullable: true, default: "true"}
-
+      active:
+        default: 'true'
+        nullable: true
+        type: boolean
+      address:
+        default: null
+        nullable: true
+        type: text
+      balance_due:
+        default: '0'
+        nullable: true
+        type: real
+      company_name:
+        default: null
+        nullable: false
+        type: text
+      contact_name:
+        default: null
+        nullable: true
+        type: text
+      credit_limit:
+        default: '0'
+        nullable: true
+        type: real
+      discount_pct:
+        default: '0'
+        nullable: true
+        type: real
+      email:
+        default: null
+        nullable: true
+        type: text
+      gst_number:
+        default: null
+        nullable: true
+        type: text
+      notes:
+        default: null
+        nullable: true
+        type: text
+      payment_mode:
+        default: '''NEFT''::text'
+        nullable: true
+        type: text
+      phone:
+        default: null
+        nullable: false
+        type: text
+      registered_at:
+        default: null
+        nullable: true
+        type: text
+    rls: true
   b2b_payments:
-    rls: true
     columns:
-      id:        {type: bigint, nullable: false, default: "nextval('b2b_payments_id_seq'::regclass)"}
-      phone:     {type: text, nullable: true}
-      amount:    {type: real, nullable: true}
-      mode:      {type: text, nullable: true}
-      reference: {type: text, nullable: true}
-      paid_at:   {type: text, nullable: true}
-      notes:     {type: text, nullable: true}
-
+      amount:
+        default: null
+        nullable: true
+        type: real
+      id:
+        default: nextval('b2b_payments_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      mode:
+        default: null
+        nullable: true
+        type: text
+      notes:
+        default: null
+        nullable: true
+        type: text
+      paid_at:
+        default: null
+        nullable: true
+        type: text
+      phone:
+        default: null
+        nullable: true
+        type: text
+      reference:
+        default: null
+        nullable: true
+        type: text
+    rls: true
+  book_orders:
+    columns:
+      abandoned_reminder_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      address:
+        default: null
+        nullable: true
+        type: text
+      amount_paid:
+        default: '0'
+        nullable: false
+        type: numeric
+      books_total:
+        default: '0'
+        nullable: false
+        type: numeric
+      commission:
+        default: '0'
+        nullable: false
+        type: numeric
+      confirmed_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      contact_phone:
+        default: null
+        nullable: true
+        type: text
+      courier:
+        default: '75'
+        nullable: false
+        type: numeric
+      courier_name:
+        default: null
+        nullable: true
+        type: text
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      delivered_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      delivery_method:
+        default: '''courier''::text'
+        nullable: false
+        type: text
+      dispatched_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      divya_settled:
+        default: 'false'
+        nullable: false
+        type: boolean
+      divya_settled_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      dtdc_center:
+        default: null
+        nullable: true
+        type: text
+      flow_cursor:
+        default: '''{}''::jsonb'
+        nullable: false
+        type: jsonb
+      grand_total:
+        default: '0'
+        nullable: false
+        type: numeric
+      id:
+        default: null
+        nullable: false
+        type: bigint
+      items:
+        default: '''{}''::jsonb'
+        nullable: false
+        type: jsonb
+      name:
+        default: null
+        nullable: true
+        type: text
+      order_code:
+        default: null
+        nullable: false
+        type: text
+      payment_collected_by:
+        default: '''oxygen''::text'
+        nullable: false
+        type: text
+      payment_mode:
+        default: null
+        nullable: true
+        type: text
+      payment_proof_url:
+        default: null
+        nullable: true
+        type: text
+      payment_ref:
+        default: null
+        nullable: true
+        type: text
+      phone:
+        default: null
+        nullable: false
+        type: text
+      source:
+        default: '''whatsapp''::text'
+        nullable: false
+        type: text
+      status:
+        default: '''collecting''::text'
+        nullable: false
+        type: text
+      tracking_no:
+        default: null
+        nullable: true
+        type: text
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      via_divya:
+        default: 'true'
+        nullable: false
+        type: boolean
+    rls: true
+  book_payments:
+    columns:
+      amount:
+        default: null
+        nullable: true
+        type: numeric
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      id:
+        default: null
+        nullable: false
+        type: bigint
+      order_code:
+        default: null
+        nullable: false
+        type: text
+      proof_url:
+        default: null
+        nullable: true
+        type: text
+      status:
+        default: '''pending''::text'
+        nullable: false
+        type: text
+      verified_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+    rls: true
   bot_sessions:
-    rls: true
     columns:
-      phone:                {type: text, nullable: false}
-      job_id:               {type: text, nullable: true}
-      step:                 {type: text, nullable: true}
-      size:                 {type: text, nullable: true}
-      colour:               {type: text, nullable: true}
-      layout:               {type: text, nullable: true}
-      multiup_per:          {type: text, nullable: true}
-      multiup_sided:        {type: text, nullable: true}
-      copies:               {type: integer, nullable: true}
-      finishing:            {type: text, nullable: true}
-      delivery:             {type: integer, nullable: true, default: "0"}
-      page_count:           {type: integer, nullable: true, default: "0"}
-      batch_id:             {type: text, nullable: true}
-      current_job_index:    {type: integer, nullable: true, default: "0"}
-      jobs_json:            {type: text, nullable: true}
-      saved_json:           {type: text, nullable: true}
-      job_settings_json:    {type: text, nullable: true, default: "'{}'::text"}
-      updated_at:           {type: text, nullable: true}
-      prev_step:            {type: text, nullable: true}
-      referral_code:        {type: text, nullable: true}
-      # Added by SCHEMA_v17_help_escape.sql (TASK-009)
-      needs_human:          {type: boolean, nullable: false, default: "false"}
-      last_help_request_at: {type: timestamp with time zone, nullable: true}
-
+      batch_id:
+        default: null
+        nullable: true
+        type: text
+      colour:
+        default: null
+        nullable: true
+        type: text
+      copies:
+        default: null
+        nullable: true
+        type: integer
+      current_job_index:
+        default: '0'
+        nullable: true
+        type: integer
+      delivery:
+        default: '0'
+        nullable: true
+        type: integer
+      finishing:
+        default: null
+        nullable: true
+        type: text
+      job_id:
+        default: null
+        nullable: true
+        type: text
+      job_settings_json:
+        default: '''{}''::text'
+        nullable: true
+        type: text
+      jobs_json:
+        default: null
+        nullable: true
+        type: text
+      last_help_request_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      layout:
+        default: null
+        nullable: true
+        type: text
+      multiup_per:
+        default: null
+        nullable: true
+        type: text
+      multiup_sided:
+        default: null
+        nullable: true
+        type: text
+      needs_human:
+        default: 'false'
+        nullable: false
+        type: boolean
+      page_count:
+        default: '0'
+        nullable: true
+        type: integer
+      phone:
+        default: null
+        nullable: false
+        type: text
+      prev_step:
+        default: null
+        nullable: true
+        type: text
+      referral_code:
+        default: null
+        nullable: true
+        type: text
+      saved_json:
+        default: null
+        nullable: true
+        type: text
+      size:
+        default: null
+        nullable: true
+        type: text
+      step:
+        default: null
+        nullable: true
+        type: text
+      updated_at:
+        default: null
+        nullable: true
+        type: text
+    rls: true
   conversation_log:
-    rls: true
     columns:
-      id:           {type: bigint, nullable: false, default: "nextval('conversation_log_id_seq'::regclass)"}
-      phone:        {type: text, nullable: false}
-      direction:    {type: text, nullable: false}
-      message_type: {type: text, nullable: false, default: "'text'::text"}
-      body:         {type: text, nullable: true}
-      filename:     {type: text, nullable: true}
-      job_id:       {type: text, nullable: true}
-      created_at:   {type: timestamp with time zone, nullable: false, default: "now()"}
-      media_url:    {type: text, nullable: true}
-
+      body:
+        default: null
+        nullable: true
+        type: text
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      direction:
+        default: null
+        nullable: false
+        type: text
+      filename:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('conversation_log_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      job_id:
+        default: null
+        nullable: true
+        type: text
+      media_url:
+        default: null
+        nullable: true
+        type: text
+      message_type:
+        default: '''text''::text'
+        nullable: false
+        type: text
+      phone:
+        default: null
+        nullable: false
+        type: text
+    rls: true
+  credit_wallet:
+    columns:
+      balance_paise:
+        default: '0'
+        nullable: false
+        type: integer
+      phone:
+        default: null
+        nullable: false
+        type: text
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+    rls: true
   customer_profiles:
-    rls: true
     columns:
-      phone:          {type: text, nullable: false}
-      last_size:      {type: text, nullable: true}
-      last_colour:    {type: text, nullable: true}
-      last_layout:    {type: text, nullable: true}
-      last_copies:    {type: integer, nullable: true}
-      last_finishing: {type: text, nullable: true}
-      last_delivery:  {type: integer, nullable: true, default: "0"}
-      updated_at:     {type: text, nullable: true}
-
+      last_colour:
+        default: null
+        nullable: true
+        type: text
+      last_copies:
+        default: null
+        nullable: true
+        type: integer
+      last_delivery:
+        default: '0'
+        nullable: true
+        type: integer
+      last_finishing:
+        default: null
+        nullable: true
+        type: text
+      last_layout:
+        default: null
+        nullable: true
+        type: text
+      last_size:
+        default: null
+        nullable: true
+        type: text
+      phone:
+        default: null
+        nullable: false
+        type: text
+      updated_at:
+        default: null
+        nullable: true
+        type: text
+    rls: true
   daily_summary:
-    rls: true
     columns:
-      store_id:    {type: text, nullable: false, default: "'OSP'::text"}
-      date:        {type: text, nullable: false}
-      total_jobs:  {type: integer, nullable: true}
-      completed:   {type: integer, nullable: true}
-      pending:     {type: integer, nullable: true}
-      revenue:     {type: real, nullable: true}
-      cash:        {type: real, nullable: true}
-      upi:         {type: real, nullable: true}
-      synced_at:   {type: text, nullable: true}
-
+      cash:
+        default: null
+        nullable: true
+        type: real
+      completed:
+        default: null
+        nullable: true
+        type: integer
+      date:
+        default: null
+        nullable: false
+        type: text
+      pending:
+        default: null
+        nullable: true
+        type: integer
+      revenue:
+        default: null
+        nullable: true
+        type: real
+      store_id:
+        default: '''OSP''::text'
+        nullable: false
+        type: text
+      synced_at:
+        default: null
+        nullable: true
+        type: text
+      total_jobs:
+        default: null
+        nullable: true
+        type: integer
+      upi:
+        default: null
+        nullable: true
+        type: real
+    rls: true
   discount_codes:
-    rls: true
     columns:
-      code:       {type: text, nullable: false}
-      phone:      {type: text, nullable: false}
-      pct_off:    {type: integer, nullable: true, default: "10"}
-      source:     {type: text, nullable: true, default: "'review'::text"}
-      used:       {type: integer, nullable: true, default: "0"}
-      created_at: {type: timestamp with time zone, nullable: true, default: "now()"}
-
+      code:
+        default: null
+        nullable: false
+        type: text
+      created_at:
+        default: now()
+        nullable: true
+        type: timestamp with time zone
+      pct_off:
+        default: '10'
+        nullable: true
+        type: integer
+      phone:
+        default: null
+        nullable: false
+        type: text
+      source:
+        default: '''review''::text'
+        nullable: true
+        type: text
+      used:
+        default: '0'
+        nullable: true
+        type: integer
+    rls: true
   epson_jobs:
-    rls: true
     columns:
-      id:                 {type: bigint, nullable: false, default: "nextval('epson_jobs_id_seq'::regclass)"}
-      store_id:           {type: text, nullable: false, default: "'OSP'::text"}
-      source:             {type: text, nullable: false, default: "'delta'::text"}
-      job_number:         {type: text, nullable: true}
-      job_type:           {type: text, nullable: true}
-      user_name:          {type: text, nullable: true}
-      file_name:          {type: text, nullable: true}
-      result:             {type: text, nullable: true}
-      pages_printed:      {type: integer, nullable: true}
-      mono_pages:         {type: integer, nullable: true}
-      color_pages:        {type: integer, nullable: true}
-      copies:             {type: integer, nullable: true}
-      paper_size:         {type: text, nullable: true}
-      job_date:           {type: text, nullable: true}
-      print_end_date:     {type: text, nullable: true}
-      snmp_total_before:  {type: bigint, nullable: true}
-      snmp_total_after:   {type: bigint, nullable: true}
-      delta_pages:        {type: integer, nullable: true}
-      attributed_job_id:  {type: text, nullable: true}
-      imported_at:        {type: text, nullable: true}
-
+      attributed_job_id:
+        default: null
+        nullable: true
+        type: text
+      color_pages:
+        default: null
+        nullable: true
+        type: integer
+      copies:
+        default: null
+        nullable: true
+        type: integer
+      delta_pages:
+        default: null
+        nullable: true
+        type: integer
+      file_name:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('epson_jobs_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      imported_at:
+        default: null
+        nullable: true
+        type: text
+      job_date:
+        default: null
+        nullable: true
+        type: text
+      job_number:
+        default: null
+        nullable: true
+        type: text
+      job_type:
+        default: null
+        nullable: true
+        type: text
+      mono_pages:
+        default: null
+        nullable: true
+        type: integer
+      pages_printed:
+        default: null
+        nullable: true
+        type: integer
+      paper_size:
+        default: null
+        nullable: true
+        type: text
+      print_end_date:
+        default: null
+        nullable: true
+        type: text
+      result:
+        default: null
+        nullable: true
+        type: text
+      snmp_total_after:
+        default: null
+        nullable: true
+        type: bigint
+      snmp_total_before:
+        default: null
+        nullable: true
+        type: bigint
+      source:
+        default: '''delta''::text'
+        nullable: false
+        type: text
+      store_id:
+        default: '''OSP''::text'
+        nullable: false
+        type: text
+      user_name:
+        default: null
+        nullable: true
+        type: text
+    rls: true
   job_batches:
-    rls: true
     columns:
-      batch_id:         {type: text, nullable: false}
-      phone:            {type: text, nullable: true}
-      job_ids:          {type: text, nullable: true}
-      status:           {type: text, nullable: true, default: "'pending'::text"}
-      total_amount:     {type: real, nullable: true}
-      razorpay_link_id: {type: text, nullable: true}
-      link_sent_at:     {type: text, nullable: true}
-
+      batch_id:
+        default: null
+        nullable: false
+        type: text
+      job_ids:
+        default: null
+        nullable: true
+        type: text
+      link_sent_at:
+        default: null
+        nullable: true
+        type: text
+      phone:
+        default: null
+        nullable: true
+        type: text
+      razorpay_link_id:
+        default: null
+        nullable: true
+        type: text
+      status:
+        default: '''pending''::text'
+        nullable: true
+        type: text
+      total_amount:
+        default: null
+        nullable: true
+        type: real
+    rls: true
   job_events:
-    rls: true
     columns:
-      id:           {type: bigint, nullable: false, default: "nextval('job_events_id_seq'::regclass)"}
-      job_id:       {type: text, nullable: false}
-      staff_id:     {type: text, nullable: true}
-      action:       {type: text, nullable: false}
-      from_status:  {type: text, nullable: true}
-      to_status:    {type: text, nullable: true}
-      notes:        {type: text, nullable: true}
-      duration_sec: {type: integer, nullable: true}
-      created_at:   {type: timestamp with time zone, nullable: true, default: "now()"}
-
+      action:
+        default: null
+        nullable: false
+        type: text
+      created_at:
+        default: now()
+        nullable: true
+        type: timestamp with time zone
+      duration_sec:
+        default: null
+        nullable: true
+        type: integer
+      from_status:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('job_events_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      job_id:
+        default: null
+        nullable: false
+        type: text
+      notes:
+        default: null
+        nullable: true
+        type: text
+      staff_id:
+        default: null
+        nullable: true
+        type: text
+      to_status:
+        default: null
+        nullable: true
+        type: text
+    rls: true
   job_reviews:
-    rls: true
     columns:
-      id:          {type: bigint, nullable: false, default: "nextval('job_reviews_id_seq'::regclass)"}
-      job_id:      {type: text, nullable: false}
-      phone:       {type: text, nullable: true}
-      rating:      {type: integer, nullable: true}
-      feedback:    {type: text, nullable: true}
-      review_sent: {type: integer, nullable: true, default: "0"}
-      created_at:  {type: timestamp with time zone, nullable: true, default: "now()"}
-
+      created_at:
+        default: now()
+        nullable: true
+        type: timestamp with time zone
+      feedback:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('job_reviews_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      job_id:
+        default: null
+        nullable: false
+        type: text
+      phone:
+        default: null
+        nullable: true
+        type: text
+      rating:
+        default: null
+        nullable: true
+        type: integer
+      review_sent:
+        default: '0'
+        nullable: true
+        type: integer
+    rls: true
   jobs:
-    rls: true
     columns:
-      job_id:              {type: text, nullable: false}
-      store_id:            {type: text, nullable: false, default: "'OSP'::text"}
-      received_at:         {type: text, nullable: true}
-      filename:            {type: text, nullable: true}
-      file_extension:      {type: text, nullable: true}
-      file_size_kb:        {type: real, nullable: true}
-      source:              {type: text, nullable: true}
-      sender:              {type: text, nullable: true}
-      status:              {type: text, nullable: true}
-      customer_name:       {type: text, nullable: true}
-      service_type:        {type: text, nullable: true}
-      amount_quoted:       {type: real, nullable: true}
-      amount_collected:    {type: real, nullable: true}
-      payment_mode:        {type: text, nullable: true}
-      completed_at:        {type: text, nullable: true}
-      page_count:          {type: integer, nullable: true, default: "0"}
-      filepath:            {type: text, nullable: true}
-      copies:              {type: integer, nullable: true, default: "1"}
-      finishing:           {type: text, nullable: true}
-      invoiced:            {type: boolean, nullable: true, default: "false"}
-      invoice_number:      {type: text, nullable: true}
-      notes:               {type: text, nullable: true}
-      razorpay_payment_id: {type: text, nullable: true}
-      printer:             {type: text, nullable: true}
-      colour:              {type: text, nullable: true}
-      size:                {type: text, nullable: true}
-      printed_by:          {type: text, nullable: true}
-      file_source:         {type: text, nullable: true}
-      colour_page_map:     {type: text, nullable: true}
-      colour_confirmed:    {type: integer, nullable: true, default: "0"}
-      parent_job_id:       {type: text, nullable: true}
-      is_sub_job:          {type: integer, nullable: true, default: "0"}
-      sub_job_type:        {type: text, nullable: true}
-      collation_warning:   {type: integer, nullable: true, default: "0"}
-      dtp_pages:           {type: integer, nullable: true, default: "0"}
-      graph_count:         {type: integer, nullable: true, default: "0"}
-      editing_minutes:     {type: integer, nullable: true, default: "0"}
-      file_url:            {type: text, nullable: true}
-      assigned_store_id:   {type: text, nullable: true}
-      pickup_code:         {type: text, nullable: true}
-      pickup_ready_at:     {type: timestamp with time zone, nullable: true}
-      delivered_at:        {type: timestamp with time zone, nullable: true}
-      take_rate_amount:    {type: real, nullable: true}
-      route_transfer_id:   {type: text, nullable: true}
-
+      amount_collected:
+        default: null
+        nullable: true
+        type: real
+      amount_quoted:
+        default: null
+        nullable: true
+        type: real
+      assigned_store_id:
+        default: null
+        nullable: true
+        type: text
+      collation_warning:
+        default: '0'
+        nullable: true
+        type: integer
+      colour:
+        default: null
+        nullable: true
+        type: text
+      colour_confirmed:
+        default: '0'
+        nullable: true
+        type: integer
+      colour_page_map:
+        default: null
+        nullable: true
+        type: text
+      completed_at:
+        default: null
+        nullable: true
+        type: text
+      copies:
+        default: '1'
+        nullable: true
+        type: integer
+      customer_name:
+        default: null
+        nullable: true
+        type: text
+      delivered_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      dtp_pages:
+        default: '0'
+        nullable: true
+        type: integer
+      editing_minutes:
+        default: '0'
+        nullable: true
+        type: integer
+      file_extension:
+        default: null
+        nullable: true
+        type: text
+      file_size_kb:
+        default: null
+        nullable: true
+        type: real
+      file_source:
+        default: null
+        nullable: true
+        type: text
+      file_url:
+        default: null
+        nullable: true
+        type: text
+      filename:
+        default: null
+        nullable: true
+        type: text
+      filepath:
+        default: null
+        nullable: true
+        type: text
+      finishing:
+        default: null
+        nullable: true
+        type: text
+      graph_count:
+        default: '0'
+        nullable: true
+        type: integer
+      invoice_number:
+        default: null
+        nullable: true
+        type: text
+      invoiced:
+        default: 'false'
+        nullable: true
+        type: boolean
+      is_sub_job:
+        default: '0'
+        nullable: true
+        type: integer
+      job_id:
+        default: null
+        nullable: false
+        type: text
+      notes:
+        default: null
+        nullable: true
+        type: text
+      page_count:
+        default: '0'
+        nullable: true
+        type: integer
+      parent_job_id:
+        default: null
+        nullable: true
+        type: text
+      payment_mode:
+        default: null
+        nullable: true
+        type: text
+      pickup_code:
+        default: null
+        nullable: true
+        type: text
+      pickup_ready_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      printed_by:
+        default: null
+        nullable: true
+        type: text
+      printer:
+        default: null
+        nullable: true
+        type: text
+      razorpay_payment_id:
+        default: null
+        nullable: true
+        type: text
+      received_at:
+        default: null
+        nullable: true
+        type: text
+      route_transfer_id:
+        default: null
+        nullable: true
+        type: text
+      sender:
+        default: null
+        nullable: true
+        type: text
+      service_type:
+        default: null
+        nullable: true
+        type: text
+      size:
+        default: null
+        nullable: true
+        type: text
+      source:
+        default: null
+        nullable: true
+        type: text
+      status:
+        default: null
+        nullable: true
+        type: text
+      store_id:
+        default: '''OSP''::text'
+        nullable: false
+        type: text
+      sub_job_type:
+        default: null
+        nullable: true
+        type: text
+      take_rate_amount:
+        default: null
+        nullable: true
+        type: real
+    rls: true
   konica_jobs:
-    rls: true
     columns:
-      id:             {type: bigint, nullable: false, default: "nextval('konica_jobs_id_seq'::regclass)"}
-      store_id:       {type: text, nullable: false, default: "'OSP'::text"}
-      job_number:     {type: integer, nullable: false}
-      job_type:       {type: text, nullable: true}
-      user_name:      {type: text, nullable: true}
-      file_name:      {type: text, nullable: true}
-      result:         {type: text, nullable: true}
-      num_pages:      {type: integer, nullable: true}
-      pages_printed:  {type: integer, nullable: true}
-      mono_pages:     {type: integer, nullable: true}
-      color_pages:    {type: integer, nullable: true}
-      copies:         {type: integer, nullable: true}
-      job_date:       {type: text, nullable: true}
-      print_end_date: {type: text, nullable: true}
-      paper_size:     {type: text, nullable: true}
-      paper_type:     {type: text, nullable: true}
-      attributed_to:  {type: text, nullable: true}
-
+      attributed_to:
+        default: null
+        nullable: true
+        type: text
+      color_pages:
+        default: null
+        nullable: true
+        type: integer
+      copies:
+        default: null
+        nullable: true
+        type: integer
+      file_name:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('konica_jobs_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      job_date:
+        default: null
+        nullable: true
+        type: text
+      job_number:
+        default: null
+        nullable: false
+        type: integer
+      job_type:
+        default: null
+        nullable: true
+        type: text
+      mono_pages:
+        default: null
+        nullable: true
+        type: integer
+      num_pages:
+        default: null
+        nullable: true
+        type: integer
+      pages_printed:
+        default: null
+        nullable: true
+        type: integer
+      paper_size:
+        default: null
+        nullable: true
+        type: text
+      paper_type:
+        default: null
+        nullable: true
+        type: text
+      print_end_date:
+        default: null
+        nullable: true
+        type: text
+      result:
+        default: null
+        nullable: true
+        type: text
+      store_id:
+        default: '''OSP''::text'
+        nullable: false
+        type: text
+      user_name:
+        default: null
+        nullable: true
+        type: text
+    rls: true
+  note_credits:
+    columns:
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      credit_paise:
+        default: null
+        nullable: false
+        type: integer
+      id:
+        default: nextval('note_credits_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      note:
+        default: null
+        nullable: true
+        type: text
+      note_code:
+        default: null
+        nullable: true
+        type: text
+      pages_printed:
+        default: '0'
+        nullable: false
+        type: integer
+      print_job_id:
+        default: null
+        nullable: true
+        type: text
+      uploader_phone:
+        default: null
+        nullable: false
+        type: text
+    rls: true
+  note_subscriptions:
+    columns:
+      expires_at:
+        default: null
+        nullable: false
+        type: timestamp with time zone
+      last_payment_id:
+        default: null
+        nullable: true
+        type: text
+      phone:
+        default: null
+        nullable: false
+        type: text
+      started_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      status:
+        default: '''active''::text'
+        nullable: false
+        type: text
+      tier:
+        default: null
+        nullable: false
+        type: text
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+    rls: true
+  notes:
+    columns:
+      category:
+        default: null
+        nullable: false
+        type: text
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      note_code:
+        default: null
+        nullable: false
+        type: text
+      page_count:
+        default: '0'
+        nullable: false
+        type: integer
+      preview_path:
+        default: null
+        nullable: true
+        type: text
+      print_count:
+        default: '0'
+        nullable: false
+        type: integer
+      reject_reason:
+        default: null
+        nullable: true
+        type: text
+      status:
+        default: '''pending''::text'
+        nullable: false
+        type: text
+      storage_path:
+        default: null
+        nullable: true
+        type: text
+      subject:
+        default: null
+        nullable: false
+        type: text
+      title:
+        default: null
+        nullable: false
+        type: text
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      uploader_attests:
+        default: 'false'
+        nullable: false
+        type: boolean
+      uploader_email:
+        default: null
+        nullable: true
+        type: text
+      uploader_phone:
+        default: null
+        nullable: true
+        type: text
+    rls: true
+  otp_sessions:
+    columns:
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      expires_at:
+        default: (now() + '00:10:00'::interval)
+        nullable: false
+        type: timestamp with time zone
+      id:
+        default: gen_random_uuid()
+        nullable: false
+        type: uuid
+      otp_code:
+        default: null
+        nullable: true
+        type: text
+      phone:
+        default: null
+        nullable: false
+        type: text
+      request_token:
+        default: null
+        nullable: false
+        type: text
+      status:
+        default: '''pending''::text'
+        nullable: false
+        type: text
+      verified_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      web_token:
+        default: null
+        nullable: true
+        type: text
+    rls: true
   partners:
-    rls: true
     columns:
-      store_id:              {type: text, nullable: false}
-      name:                  {type: text, nullable: false}
-      type:                  {type: text, nullable: true, default: "'Spoke'::text"}
-      contact:               {type: text, nullable: true}
-      phone:                 {type: text, nullable: true}
-      location:              {type: text, nullable: true}
-      territory:             {type: text, nullable: true}
-      equipment:             {type: text, nullable: true}
-      commission:            {type: real, nullable: true, default: "0"}
-      status:                {type: text, nullable: true, default: "'Active'::text"}
-      notes:                 {type: text, nullable: true}
-      joined_at:             {type: text, nullable: true}
-      kyc_status:            {type: text, nullable: true, default: "'pending'::text"}
-      capabilities_json:     {type: jsonb, nullable: true, default: "'{}'::jsonb"}
-      capacity_jobs_per_day: {type: integer, nullable: true, default: "0"}
-      pickup_address:        {type: text, nullable: true}
-      pickup_hours_json:     {type: jsonb, nullable: true, default: "'{}'::jsonb"}
-      geo_lat:               {type: double precision, nullable: true}
-      geo_lng:               {type: double precision, nullable: true}
-      take_rate_pct:         {type: real, nullable: true, default: "10.0"}
-      route_account_id:      {type: text, nullable: true}
-      dispatch_whatsapp:     {type: text, nullable: true}
-      display_pickup_label:  {type: text, nullable: true}
-
+      capabilities_json:
+        default: '''{}''::jsonb'
+        nullable: true
+        type: jsonb
+      capacity_jobs_per_day:
+        default: '0'
+        nullable: true
+        type: integer
+      commission:
+        default: '0'
+        nullable: true
+        type: real
+      contact:
+        default: null
+        nullable: true
+        type: text
+      dispatch_whatsapp:
+        default: null
+        nullable: true
+        type: text
+      display_pickup_label:
+        default: null
+        nullable: true
+        type: text
+      equipment:
+        default: null
+        nullable: true
+        type: text
+      geo_lat:
+        default: null
+        nullable: true
+        type: double precision
+      geo_lng:
+        default: null
+        nullable: true
+        type: double precision
+      joined_at:
+        default: null
+        nullable: true
+        type: text
+      kyc_status:
+        default: '''pending''::text'
+        nullable: true
+        type: text
+      location:
+        default: null
+        nullable: true
+        type: text
+      name:
+        default: null
+        nullable: false
+        type: text
+      notes:
+        default: null
+        nullable: true
+        type: text
+      phone:
+        default: null
+        nullable: true
+        type: text
+      pickup_address:
+        default: null
+        nullable: true
+        type: text
+      pickup_hours_json:
+        default: '''{}''::jsonb'
+        nullable: true
+        type: jsonb
+      route_account_id:
+        default: null
+        nullable: true
+        type: text
+      status:
+        default: '''Active''::text'
+        nullable: true
+        type: text
+      store_id:
+        default: null
+        nullable: false
+        type: text
+      take_rate_pct:
+        default: '10.0'
+        nullable: true
+        type: real
+      territory:
+        default: null
+        nullable: true
+        type: text
+      type:
+        default: '''Spoke''::text'
+        nullable: true
+        type: text
+    rls: true
+  pb_api_calls:
+    columns:
+      cache_read_tokens:
+        default: '0'
+        nullable: false
+        type: integer
+      cache_write_tokens:
+        default: '0'
+        nullable: false
+        type: integer
+      cost_inr:
+        default: '0'
+        nullable: false
+        type: numeric
+      cost_usd:
+        default: '0'
+        nullable: false
+        type: numeric
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      elapsed_ms:
+        default: null
+        nullable: true
+        type: integer
+      engine:
+        default: null
+        nullable: false
+        type: text
+      error:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('pb_api_calls_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      input_tokens:
+        default: '0'
+        nullable: false
+        type: integer
+      job_token:
+        default: null
+        nullable: false
+        type: uuid
+      model:
+        default: null
+        nullable: true
+        type: text
+      output_tokens:
+        default: '0'
+        nullable: false
+        type: integer
+      page_no:
+        default: null
+        nullable: true
+        type: integer
+      university:
+        default: null
+        nullable: true
+        type: text
+    rls: true
+  pb_jobs:
+    columns:
+      completed_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      contact_phone:
+        default: null
+        nullable: true
+        type: text
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      engine:
+        default: null
+        nullable: false
+        type: text
+      error_message:
+        default: null
+        nullable: true
+        type: text
+      error_type:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: gen_random_uuid()
+        nullable: false
+        type: uuid
+      original_filename:
+        default: null
+        nullable: true
+        type: text
+      progress_pages_done:
+        default: '0'
+        nullable: true
+        type: integer
+      progress_pages_total:
+        default: '0'
+        nullable: true
+        type: integer
+      progress_stage:
+        default: null
+        nullable: true
+        type: text
+      render_kwargs:
+        default: '''{}''::jsonb'
+        nullable: true
+        type: jsonb
+      result_download_url:
+        default: null
+        nullable: true
+        type: text
+      result_file_token:
+        default: null
+        nullable: true
+        type: uuid
+      result_meta:
+        default: null
+        nullable: true
+        type: jsonb
+      route:
+        default: null
+        nullable: true
+        type: text
+      started_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      status:
+        default: '''pending''::text'
+        nullable: false
+        type: text
+      storage_path:
+        default: null
+        nullable: true
+        type: text
+      university:
+        default: null
+        nullable: true
+        type: text
+    rls: true
+  pb_operator_queue:
+    columns:
+      ai_attempts:
+        default: '''[]''::jsonb'
+        nullable: true
+        type: jsonb
+      assigned_to:
+        default: null
+        nullable: true
+        type: text
+      claimed_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      customer_phone:
+        default: null
+        nullable: true
+        type: text
+      deadline_ts:
+        default: (now() + '06:00:00'::interval)
+        nullable: false
+        type: timestamp with time zone
+      delivered_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      delivered_docx_path:
+        default: null
+        nullable: true
+        type: text
+      delivered_download_url:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: gen_random_uuid()
+        nullable: false
+        type: uuid
+      input_size_bytes:
+        default: null
+        nullable: true
+        type: integer
+      input_text:
+        default: null
+        nullable: true
+        type: text
+      last_model_used:
+        default: null
+        nullable: true
+        type: text
+      opus_partial_structure:
+        default: null
+        nullable: true
+        type: jsonb
+      pb_order_id:
+        default: null
+        nullable: true
+        type: text
+      sonnet_partial_structure:
+        default: null
+        nullable: true
+        type: jsonb
+      status:
+        default: '''pending''::text'
+        nullable: false
+        type: text
+      student_name:
+        default: null
+        nullable: true
+        type: text
+      tier:
+        default: null
+        nullable: false
+        type: text
+      university:
+        default: null
+        nullable: false
+        type: text
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+    rls: true
   printer_counters:
-    rls: true
     columns:
-      id:           {type: bigint, nullable: false, default: "nextval('printer_counters_id_seq'::regclass)"}
-      store_id:     {type: text, nullable: false, default: "'OSP'::text"}
-      printer:      {type: text, nullable: false}
-      polled_at:    {type: text, nullable: false}
-      method:       {type: text, nullable: true}
-      total_pages:  {type: bigint, nullable: true}
-      print_bw:     {type: bigint, nullable: true}
-      copy_bw:      {type: bigint, nullable: true}
-      print_colour: {type: bigint, nullable: true}
-      copy_colour:  {type: bigint, nullable: true}
-
+      copy_bw:
+        default: null
+        nullable: true
+        type: bigint
+      copy_colour:
+        default: null
+        nullable: true
+        type: bigint
+      id:
+        default: nextval('printer_counters_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      method:
+        default: null
+        nullable: true
+        type: text
+      polled_at:
+        default: null
+        nullable: false
+        type: text
+      print_bw:
+        default: null
+        nullable: true
+        type: bigint
+      print_colour:
+        default: null
+        nullable: true
+        type: bigint
+      printer:
+        default: null
+        nullable: false
+        type: text
+      store_id:
+        default: '''OSP''::text'
+        nullable: false
+        type: text
+      total_pages:
+        default: null
+        nullable: true
+        type: bigint
+    rls: true
   printer_supplies:
-    rls: true
     columns:
-      id:            {type: bigint, nullable: false, default: "nextval('printer_supplies_id_seq'::regclass)"}
-      store_id:      {type: text, nullable: false, default: "'OSP'::text"}
-      polled_at:     {type: text, nullable: false}
-      printer:       {type: text, nullable: false}
-      supply_index:  {type: integer, nullable: false}
-      description:   {type: text, nullable: true}
-      max_capacity:  {type: integer, nullable: true}
-      current_level: {type: integer, nullable: true}
-      pct:           {type: real, nullable: true}
-
-  # Added by SCHEMA_v18_webhook_idempotency.sql (TASK-013)
+      current_level:
+        default: null
+        nullable: true
+        type: integer
+      description:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('printer_supplies_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      max_capacity:
+        default: null
+        nullable: true
+        type: integer
+      pct:
+        default: null
+        nullable: true
+        type: real
+      polled_at:
+        default: null
+        nullable: false
+        type: text
+      printer:
+        default: null
+        nullable: false
+        type: text
+      store_id:
+        default: '''OSP''::text'
+        nullable: false
+        type: text
+      supply_index:
+        default: null
+        nullable: false
+        type: integer
+    rls: true
   processed_webhooks:
-    rls: true
     columns:
-      event_id:    {type: text, nullable: false}
-      handler:     {type: text, nullable: false}
-      received_at: {type: timestamp with time zone, nullable: false, default: "now()"}
-      result:      {type: jsonb, nullable: true}
-
+      event_id:
+        default: null
+        nullable: false
+        type: text
+      handler:
+        default: null
+        nullable: false
+        type: text
+      received_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      result:
+        default: null
+        nullable: true
+        type: jsonb
+    rls: true
   project_builder_orders:
-    rls: false   # see rls_disabled_known
     columns:
-      id:                  {type: text, nullable: false}
-      created_at:          {type: timestamp with time zone, nullable: true, default: "now()"}
-      tier:                {type: text, nullable: true}
-      university:          {type: text, nullable: true}
-      whatsapp_phone:      {type: text, nullable: true}
-      student_name:        {type: text, nullable: true}
-      razorpay_order_id:   {type: text, nullable: true}
-      razorpay_payment_id: {type: text, nullable: true}
-      amount_inr:          {type: integer, nullable: true}
-      storage_path:        {type: text, nullable: true}
-      download_url:        {type: text, nullable: true}
-      status:              {type: text, nullable: true, default: "'paid'::text"}
-      expires_at:          {type: timestamp with time zone, nullable: true}
-
+      amount_inr:
+        default: null
+        nullable: true
+        type: integer
+      created_at:
+        default: now()
+        nullable: true
+        type: timestamp with time zone
+      download_url:
+        default: null
+        nullable: true
+        type: text
+      expires_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      id:
+        default: null
+        nullable: false
+        type: text
+      razorpay_order_id:
+        default: null
+        nullable: true
+        type: text
+      razorpay_payment_id:
+        default: null
+        nullable: true
+        type: text
+      status:
+        default: '''paid''::text'
+        nullable: true
+        type: text
+      storage_path:
+        default: null
+        nullable: true
+        type: text
+      student_name:
+        default: null
+        nullable: true
+        type: text
+      tier:
+        default: null
+        nullable: true
+        type: text
+      university:
+        default: null
+        nullable: true
+        type: text
+      whatsapp_phone:
+        default: null
+        nullable: true
+        type: text
+    rls: true
   rate_card:
-    rls: true
     columns:
-      key:         {type: text, nullable: false}
-      label:       {type: text, nullable: false}
-      price:       {type: real, nullable: false}
-      category:    {type: text, nullable: false, default: "'print'::text"}
-      staff_quote: {type: boolean, nullable: true, default: "false"}
-      updated_at:  {type: text, nullable: true}
-
+      category:
+        default: '''print''::text'
+        nullable: false
+        type: text
+      key:
+        default: null
+        nullable: false
+        type: text
+      label:
+        default: null
+        nullable: false
+        type: text
+      price:
+        default: null
+        nullable: false
+        type: real
+      staff_quote:
+        default: 'false'
+        nullable: true
+        type: boolean
+      updated_at:
+        default: null
+        nullable: true
+        type: text
+    rls: true
   referral_credits:
-    rls: false   # see rls_disabled_known
     columns:
-      id:                {type: bigint, nullable: false, default: "nextval('referral_credits_id_seq'::regclass)"}
-      referrer_code:     {type: text, nullable: false}
-      customer_phone:    {type: text, nullable: false}
-      order_id:          {type: text, nullable: false}
-      amount_inr:        {type: integer, nullable: false, default: "20"}
-      created_at:        {type: timestamp with time zone, nullable: true, default: "now()"}
-      redeemed_at:       {type: timestamp with time zone, nullable: true}
-      redeemed_order_id: {type: text, nullable: true}
-      redeemed_by:       {type: text, nullable: true}
-
+      amount_inr:
+        default: '20'
+        nullable: false
+        type: integer
+      created_at:
+        default: now()
+        nullable: true
+        type: timestamp with time zone
+      customer_phone:
+        default: null
+        nullable: false
+        type: text
+      id:
+        default: nextval('referral_credits_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      order_id:
+        default: null
+        nullable: false
+        type: text
+      redeemed_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      redeemed_by:
+        default: null
+        nullable: true
+        type: text
+      redeemed_order_id:
+        default: null
+        nullable: true
+        type: text
+      referrer_code:
+        default: null
+        nullable: false
+        type: text
+    rls: true
   referrers:
-    rls: false   # see rls_disabled_known
     columns:
-      code:           {type: text, nullable: false}
-      label:          {type: text, nullable: false}
-      platform:       {type: text, nullable: true, default: "'whatsapp'::text"}
-      total_orders:   {type: integer, nullable: true, default: "0"}
-      total_credited: {type: integer, nullable: true, default: "0"}
-      created_at:     {type: timestamp with time zone, nullable: true, default: "now()"}
-      credit_amount:  {type: integer, nullable: false, default: "20"}
-
+      code:
+        default: null
+        nullable: false
+        type: text
+      created_at:
+        default: now()
+        nullable: true
+        type: timestamp with time zone
+      credit_amount:
+        default: '20'
+        nullable: false
+        type: integer
+      label:
+        default: null
+        nullable: false
+        type: text
+      platform:
+        default: '''whatsapp''::text'
+        nullable: true
+        type: text
+      total_credited:
+        default: '0'
+        nullable: true
+        type: integer
+      total_orders:
+        default: '0'
+        nullable: true
+        type: integer
+    rls: true
   routing_decisions:
-    rls: true
     columns:
-      id:               {type: bigint, nullable: false, default: "nextval('routing_decisions_id_seq'::regclass)"}
-      job_id:           {type: text, nullable: false}
-      decided_at:       {type: timestamp with time zone, nullable: false, default: "now()"}
-      eligible_stores:  {type: jsonb, nullable: false}
-      scores_json:      {type: jsonb, nullable: false}
-      chosen_store_id:  {type: text, nullable: false}
-      reason:           {type: text, nullable: true}
-      reroute_count:    {type: integer, nullable: false, default: "0"}
-      notes:            {type: text, nullable: true}
-
+      chosen_store_id:
+        default: null
+        nullable: false
+        type: text
+      decided_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      eligible_stores:
+        default: null
+        nullable: false
+        type: jsonb
+      id:
+        default: nextval('routing_decisions_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      job_id:
+        default: null
+        nullable: false
+        type: text
+      notes:
+        default: null
+        nullable: true
+        type: text
+      reason:
+        default: null
+        nullable: true
+        type: text
+      reroute_count:
+        default: '0'
+        nullable: false
+        type: integer
+      scores_json:
+        default: null
+        nullable: false
+        type: jsonb
+    rls: true
   staff:
-    rls: true
     columns:
-      id:         {type: text, nullable: false}
-      name:       {type: text, nullable: false}
-      pin_hash:   {type: text, nullable: false}
-      active:     {type: integer, nullable: true, default: "1"}
-      created_at: {type: timestamp with time zone, nullable: true, default: "now()"}
-      pin_salt:   {type: text, nullable: true}
-
+      active:
+        default: '1'
+        nullable: true
+        type: integer
+      created_at:
+        default: now()
+        nullable: true
+        type: timestamp with time zone
+      id:
+        default: null
+        nullable: false
+        type: text
+      name:
+        default: null
+        nullable: false
+        type: text
+      pin_hash:
+        default: null
+        nullable: false
+        type: text
+      pin_salt:
+        default: null
+        nullable: true
+        type: text
+    rls: true
   staff_sessions:
-    rls: true
     columns:
-      id:           {type: bigint, nullable: false}
-      staff_id:     {type: text, nullable: true}
-      pc_id:        {type: text, nullable: true}
-      store_id:     {type: text, nullable: true}
-      login_at:     {type: timestamp with time zone, nullable: true}
-      logout_at:    {type: timestamp with time zone, nullable: true}
-      idle_logout:  {type: boolean, nullable: true, default: "false"}
-
+      id:
+        default: null
+        nullable: false
+        type: bigint
+      idle_logout:
+        default: 'false'
+        nullable: true
+        type: boolean
+      login_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      logout_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      pc_id:
+        default: null
+        nullable: true
+        type: text
+      staff_id:
+        default: null
+        nullable: true
+        type: text
+      store_id:
+        default: null
+        nullable: true
+        type: text
+    rls: true
+  store_pc_status:
+    columns:
+      clean_shutdown:
+        default: 'false'
+        nullable: false
+        type: boolean
+      closing_sent_date:
+        default: null
+        nullable: true
+        type: text
+      last_down_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      last_heartbeat_at:
+        default: null
+        nullable: true
+        type: text
+      last_up_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      opening_sent_date:
+        default: null
+        nullable: true
+        type: text
+      state:
+        default: '''unknown''::text'
+        nullable: false
+        type: text
+      store_id:
+        default: null
+        nullable: false
+        type: text
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+    rls: true
   supply_changes:
-    rls: true
     columns:
-      id:           {type: bigint, nullable: false, default: "nextval('supply_changes_id_seq'::regclass)"}
-      store_id:     {type: text, nullable: false, default: "'OSP'::text"}
-      changed_at:   {type: text, nullable: false}
-      printer:      {type: text, nullable: false}
-      supply_index: {type: integer, nullable: false}
-      description:  {type: text, nullable: true}
-      level_before: {type: integer, nullable: true}
-      level_after:  {type: integer, nullable: true}
-      pct_before:   {type: real, nullable: true}
-      pct_after:    {type: real, nullable: true}
-
+      changed_at:
+        default: null
+        nullable: false
+        type: text
+      description:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('supply_changes_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      level_after:
+        default: null
+        nullable: true
+        type: integer
+      level_before:
+        default: null
+        nullable: true
+        type: integer
+      pct_after:
+        default: null
+        nullable: true
+        type: real
+      pct_before:
+        default: null
+        nullable: true
+        type: real
+      printer:
+        default: null
+        nullable: false
+        type: text
+      store_id:
+        default: '''OSP''::text'
+        nullable: false
+        type: text
+      supply_index:
+        default: null
+        nullable: false
+        type: integer
+    rls: true
+  wa_message_costs:
+    columns:
+      billable:
+        default: null
+        nullable: true
+        type: boolean
+      category:
+        default: null
+        nullable: true
+        type: text
+      conversation_id:
+        default: null
+        nullable: true
+        type: text
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      est_cost_inr:
+        default: '0'
+        nullable: false
+        type: numeric
+      origin_type:
+        default: null
+        nullable: true
+        type: text
+      pricing_model:
+        default: null
+        nullable: true
+        type: text
+      recipient:
+        default: null
+        nullable: true
+        type: text
+      status:
+        default: null
+        nullable: true
+        type: text
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      wamid:
+        default: null
+        nullable: false
+        type: text
+    rls: true
   whatsapp_contacts:
-    rls: true
     columns:
-      phone:        {type: text, nullable: false}
-      name:         {type: text, nullable: true}
-      last_seen_at: {type: timestamp with time zone, nullable: true}
-      created_at:   {type: timestamp with time zone, nullable: false, default: "now()"}
-
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      last_seen_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      last_sla_alert_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      name:
+        default: null
+        nullable: true
+        type: text
+      phone:
+        default: null
+        nullable: false
+        type: text
+    rls: true
   work_sessions:
-    rls: true
     columns:
-      id:          {type: bigint, nullable: false, default: "nextval('work_sessions_id_seq'::regclass)"}
-      job_id:      {type: text, nullable: false}
-      staff_id:    {type: text, nullable: false}
-      started_at:  {type: text, nullable: false}
-      paused_at:   {type: text, nullable: true}
-      resumed_at:  {type: text, nullable: true}
-      ended_at:    {type: text, nullable: true}
-      total_sec:   {type: integer, nullable: true}
-      paused_sec:  {type: integer, nullable: true, default: "0"}
-      notes:       {type: text, nullable: true}
-      created_at:  {type: timestamp with time zone, nullable: true, default: "now()"}
+      created_at:
+        default: now()
+        nullable: true
+        type: timestamp with time zone
+      ended_at:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('work_sessions_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      job_id:
+        default: null
+        nullable: false
+        type: text
+      notes:
+        default: null
+        nullable: true
+        type: text
+      paused_at:
+        default: null
+        nullable: true
+        type: text
+      paused_sec:
+        default: '0'
+        nullable: true
+        type: integer
+      resumed_at:
+        default: null
+        nullable: true
+        type: text
+      staff_id:
+        default: null
+        nullable: false
+        type: text
+      started_at:
+        default: null
+        nullable: false
+        type: text
+      total_sec:
+        default: null
+        nullable: true
+        type: integer
+    rls: true
+views:
+- epson_daily
+- konica_daily
+- pb_api_calls_by_job

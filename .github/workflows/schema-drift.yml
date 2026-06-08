@@ -1,0 +1,56 @@
+name: Schema drift check
+
+# TASK-016: compare the live Supabase schema against config/schema_manifest.yaml
+# and fail if they diverge (missing/extra table or column, type/nullable/RLS
+# mismatch). Catches the silent "columns deployed before code" class of bug.
+#
+# This needs DB access, so it only runs when a SUPABASE_DB_URL secret is set.
+# Until then it skips cleanly (the manifest's structure is still validated by
+# the check_schema unit tests in the `test` workflow). To activate:
+#   GitHub repo -> Settings -> Secrets and variables -> Actions -> New secret
+#   Name: SUPABASE_DB_URL
+#   Value: postgresql://postgres.<ref>:<password>@<host>.pooler.supabase.com:5432/postgres
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+    steps:
+      - name: Gate on secret presence
+        id: gate
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SUPABASE_DB_URL secret not set — skipping live schema drift check. Add the secret to activate."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.present == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        if: steps.gate.outputs.present == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install deps
+        if: steps.gate.outputs.present == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml psycopg2-binary
+
+      - name: Check schema drift
+        if: steps.gate.outputs.present == 'true'
+        run: python scripts/check_schema.py
