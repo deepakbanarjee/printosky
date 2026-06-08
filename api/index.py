@@ -466,6 +466,21 @@ def _handle_wa_otp_verify(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "Internal error"})
 
 
+def _gen_note_code() -> str:
+    """Generate NOTE-YYYYMMDD-XXXX.
+
+    Inlined here (mirrors handlers_notes._gen_note_code) so the web upload path
+    has ZERO dependency on the handlers_notes sibling module — @vercel/python
+    does not reliably bundle lazily-imported siblings, which made reserve throw
+    ModuleNotFoundError in production.
+    """
+    import random as _r, string as _s
+    from datetime import timezone as _tz
+    date_part = datetime.now(_tz.utc).strftime("%Y%m%d")
+    suffix = "".join(_r.choices(_s.ascii_uppercase + _s.digits, k=4))
+    return f"NOTE-{date_part}-{suffix}"
+
+
 def _handle_notes_reserve(h, body: bytes) -> None:
     """POST /notes/reserve — generate note_code and Supabase signed upload URL.
 
@@ -480,7 +495,6 @@ def _handle_notes_reserve(h, body: bytes) -> None:
         _json_response(h, 403, {"error": "link_phone_required", "needs_phone_link": True})
         return
     try:
-        from handlers_notes import _gen_note_code
         from db_cloud import _client, NOTES_BUCKET
         note_code = _gen_note_code()
         storage_path = f"notes/{note_code}.pdf"
