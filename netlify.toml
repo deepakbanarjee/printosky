@@ -21,6 +21,16 @@
   to     = "/mis.html"
   status = 200
 
+[[redirects]]
+  from   = "/account"
+  to     = "/account.html"
+  status = 200
+
+[[redirects]]
+  from   = "/notes"
+  to     = "/account.html"
+  status = 200
+
 [[headers]]
   for = "/*.html"
   [headers.values]

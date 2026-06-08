@@ -735,6 +735,10 @@ WELCOME_MESSAGE = (
     "📄 *Printouts / photocopies* — just send your PDF or document here and "
     "we'll quote you instantly.\n"
     "📚 *Xtraa books* — reply *BOOKS* to order the Adithara Balappeduthu set.\n"
+    "📝 *Sell your notes* — upload at printosky.com/account and earn store "
+    "credit every time someone prints them.\n"
+    "🎁 *Refer & earn ₹20* — grab your share link at printosky.com/account; "
+    "you and your friend both get credit.\n"
     "🧑‍💼 *Talk to our staff* — reply *AGENT* anytime.\n\n"
     "Send your file or reply with one of the options above. 🙏"
 )
@@ -746,6 +750,8 @@ GREETING_MESSAGE = (
     "📄 *Printouts / photocopies* — send your PDF or document here and we'll "
     "quote you instantly.\n"
     "📚 *Xtraa books* — reply *BOOKS*.\n"
+    "📝 *Sell your notes & 🎁 refer friends* — earn store credit at "
+    "printosky.com/account.\n"
     "🧑‍💼 *Talk to staff* — reply *AGENT*.\n\n"
     "Send your file, or tell us what you need. 🙏"
 )
