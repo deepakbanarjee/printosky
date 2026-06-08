@@ -424,6 +424,71 @@ def _handle_account_link_phone(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "Internal error"})
 
 
+def _handle_account_referral(h, body: bytes) -> None:
+    """POST /account/referral — the logged-in user's Refer & Earn payload.
+
+    Get-or-creates the user's referrer code (keyed on their canonical phone),
+    then returns the share link, unredeemed credit balance, and how many
+    friends they've referred. Reuses the existing referrers/referral_credits
+    engine — just surfaces it to the account hub instead of WhatsApp-only.
+    """
+    acct = _resolve_account(h)
+    if not acct.get("ok"):
+        _json_response(h, 401, {"error": acct.get("error", "Unauthorized")})
+        return
+    if acct.get("needs_phone_link"):
+        _json_response(h, 403, {"error": "link_phone_required", "needs_phone_link": True})
+        return
+    phone = acct["phone"]
+    try:
+        import random as _r, string as _s
+        from db_cloud import _client
+        sb = _client()
+
+        # get-or-create the referrer code for this phone (label = canonical phone)
+        existing = sb.table("referrers").select("code").eq("label", phone).execute()
+        if existing.data:
+            code = existing.data[0]["code"]
+        else:
+            code = None
+            tail = phone[-4:] if len(phone) >= 4 else phone.rjust(4, "0")
+            for _ in range(10):
+                candidate = "REF" + tail + "".join(_r.choices(_s.ascii_uppercase, k=2))
+                hit = sb.table("referrers").select("code").eq("code", candidate).execute()
+                if not hit.data:
+                    sb.table("referrers").insert({
+                        "code": candidate,
+                        "label": phone,
+                        "platform": "web_account",
+                    }).execute()
+                    code = candidate
+                    break
+            if not code:
+                _json_response(h, 500, {"error": "Could not create referral code"})
+                return
+
+        # balance (unredeemed credits) + distinct friends referred
+        rows = (
+            sb.table("referral_credits")
+            .select("amount_inr,customer_phone,redeemed_at")
+            .eq("referrer_code", code)
+            .execute()
+        )
+        data = rows.data or []
+        balance = sum(int(c.get("amount_inr") or 0) for c in data if not c.get("redeemed_at"))
+        referred = len({c.get("customer_phone") for c in data if c.get("customer_phone")})
+
+        _json_response(h, 200, {
+            "code": code,
+            "share_link": f"https://wa.me/{WA_STORE_NUMBER}?text=ref_{code}",
+            "balance_inr": balance,
+            "referred_count": referred,
+        })
+    except Exception as exc:
+        logger.error("account/referral error: %s", exc)
+        _json_response(h, 500, {"error": "Internal error"})
+
+
 def _handle_wa_otp_request(h, body: bytes) -> None:
     """POST /auth/wa-otp/request — generate request token, return WhatsApp deep link."""
     import secrets as _sec
@@ -2476,6 +2541,9 @@ class handler(BaseHTTPRequestHandler):
         # ── Account: personal space summary + phone linking ─────────────────────
         if self.path == "/account/summary":
             _handle_account_summary(self, body)
+            return
+        if self.path == "/account/referral":
+            _handle_account_referral(self, body)
             return
         if self.path == "/account/link-phone/verify":
             _handle_account_link_phone(self, body)

@@ -103,6 +103,21 @@
 
   .section-title { font-size: .82rem; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: .4px; margin: 22px 0 10px; }
 
+  /* ── refer & earn ── */
+  .refer { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 14px; padding: 18px; margin-bottom: 18px; }
+  .refer-title { font-size: 1rem; font-weight: 800; color: #3730a3; }
+  .refer-sub { font-size: .8rem; color: #4f46e5; margin-top: 3px; line-height: 1.45; }
+  .refer-sub strong { color: #3730a3; }
+  .refer-stats { display: flex; gap: 10px; margin: 14px 0; }
+  .refer-stats > div { flex: 1; background: #fff; border-radius: 10px; padding: 10px 8px; text-align: center; }
+  .refer-stats span { display: block; font-size: 1.3rem; font-weight: 800; color: #3730a3; }
+  .refer-stats small { font-size: .68rem; color: #6b7280; text-transform: uppercase; letter-spacing: .3px; }
+  .refer-code-row { display: flex; gap: 8px; align-items: stretch; margin-bottom: 10px; }
+  .refer-code-row code { flex: 1; background: #fff; border: 1px dashed #a5b4fc; border-radius: 8px; padding: 11px 12px; font-family: monospace; font-weight: 700; font-size: 1rem; color: #3730a3; text-align: center; letter-spacing: 1px; }
+  .refer-copy { background: #fff; border: 1.5px solid #c7d2fe; color: #4f46e5; border-radius: 8px; padding: 0 14px; font-size: .82rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .refer-copy:active { background: #e0e7ff; }
+  .btn-wa-share { background: var(--wa); color: #fff; }
+
   .note-item { border: 1px solid var(--bdr); border-radius: 12px; padding: 13px 14px; margin-bottom: 10px; }
   .note-item .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
   .note-item .ttl { font-size: .92rem; font-weight: 600; line-height: 1.3; }
@@ -252,6 +267,21 @@
       <div class="lbl">Store credit</div>
       <div class="amt" id="walletAmt">₹0.00</div>
       <div class="hint">Use it on your next print — just tell us your number at the counter or on WhatsApp.</div>
+    </div>
+
+    <!-- Refer & Earn -->
+    <div class="refer">
+      <div class="refer-title">🎁 Refer &amp; Earn</div>
+      <div class="refer-sub">Share your link. Earn <strong>₹20 store credit</strong> each time a friend places their first order.</div>
+      <div class="refer-stats">
+        <div><span id="refEarned">₹0</span><small>earned</small></div>
+        <div><span id="refCount">0</span><small>friends</small></div>
+      </div>
+      <div class="refer-code-row">
+        <code id="refCode">…</code>
+        <button class="refer-copy" id="refCopyBtn" onclick="copyRefLink()">Copy link</button>
+      </div>
+      <a id="refShare" class="btn btn-wa-share" target="_blank" rel="noopener">📲 Share on WhatsApp</a>
     </div>
 
     <button class="btn btn-submit" onclick="goUpload()" style="margin-top:0">📤 Upload notes &amp; earn</button>
@@ -519,6 +549,8 @@ function renderHub(d) {
   ge("hubWho").textContent = d.phone_masked || "";
   ge("walletAmt").textContent = "₹" + (d.wallet_rs || 0).toFixed(2);
 
+  loadReferral();   // before the no-notes early return below, so it always runs
+
   const list = ge("notesList");
   if (!d.notes || d.notes.length === 0) {
     list.innerHTML = '<div class="empty"><div class="e-ico">📭</div>No notes yet. Upload your first one and start earning credit.</div>';
@@ -541,6 +573,37 @@ function renderHub(d) {
       </div>
     </div>`;
   }).join("");
+}
+
+/* ─── refer & earn ────────────────────────────────────────────────────────── */
+let _refShareLink = "";
+async function loadReferral() {
+  try {
+    const r = await fetch(API + "/account/referral", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+      body: "{}",
+    });
+    if (!r.ok) return;
+    const d = await r.json();
+    _refShareLink = d.share_link || "";
+    ge("refCode").textContent   = d.code || "—";
+    ge("refEarned").textContent = "₹" + (d.balance_inr || 0);
+    ge("refCount").textContent  = d.referred_count || 0;
+    const msg = "Get your printing done at Printosky 🖨️ — tap my link and we both get ₹20 store credit:\n" + _refShareLink;
+    ge("refShare").href = "https://wa.me/?text=" + encodeURIComponent(msg);
+  } catch { /* referral is non-critical; ignore */ }
+}
+async function copyRefLink() {
+  if (!_refShareLink) { ge("refShare").click(); return; }
+  try {
+    await navigator.clipboard.writeText(_refShareLink);
+    const b = ge("refCopyBtn"), t = b.textContent;
+    b.textContent = "Copied ✓";
+    setTimeout(() => { b.textContent = t; }, 1500);
+  } catch {
+    ge("refShare").click();   // fallback to the WhatsApp share sheet
+  }
 }
 
 /* ─── sign out ────────────────────────────────────────────────────────────── */
