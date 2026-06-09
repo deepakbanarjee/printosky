@@ -2191,6 +2191,12 @@ from api.handlers_pb import (  # noqa: E402
     _handle_pb_templates_get,
     _handle_pb_upload_sign,
 )
+from api.handlers_order import (
+    _handle_order_upload_sign,
+    _handle_order_quote,
+    _handle_order_create,
+    _handle_order_convert_docx,
+)
 
 # ── Vercel request handler ────────────────────────────────────────────────────
 
@@ -2603,6 +2609,19 @@ class handler(BaseHTTPRequestHandler):
         _pb_resend = re.match(r"^/project-builder/orders/([^/?]+)/resend$", self.path.split("?")[0])
         if _pb_resend:
             _handle_pb_order_resend(self, _pb_resend.group(1))
+            return
+
+        if self.path == "/order/upload-sign":
+            _handle_order_upload_sign(self, body)
+            return
+        if self.path == "/order/quote":
+            _handle_order_quote(self, body)
+            return
+        if self.path == "/order/create":
+            _handle_order_create(self, body)
+            return
+        if self.path == "/order/convert-docx":
+            _handle_order_convert_docx(self, body)
             return
 
         self.send_response(404)
