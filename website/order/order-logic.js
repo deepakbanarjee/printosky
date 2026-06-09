@@ -10,16 +10,16 @@ export function computeSheets({ pages, nup, duplex, copies }) {
 
 const LAYOUT_FOR_NUP = { 1: '1-up', 2: '2-up', 4: '4-up', 6: '4-up', 9: '4-up' };
 
-export function buildPrintItems({ includedCount, colourCount, nup, duplex, copies }) {
+export function buildPrintItems({ includedCount, colourCount, nup, duplex, copies, paperSize = 'A4' }) {
   const sides = duplex ? 'ds' : 'ss';
   const layout = LAYOUT_FOR_NUP[nup] || '1-up';
   const bw = includedCount - colourCount;
   const items = [];
   if (bw > 0 || colourCount === 0) {
-    items.push({ pages: bw, paper_type: 'A4_BW', sides, layout, copies });
+    items.push({ pages: bw, paper_type: `${paperSize}_BW`, sides, layout, copies });
   }
   if (colourCount > 0) {
-    items.push({ pages: colourCount, paper_type: 'A4_COL', sides, layout, copies });
+    items.push({ pages: colourCount, paper_type: `${paperSize}_col`, sides, layout, copies });
   }
   return items;
 }

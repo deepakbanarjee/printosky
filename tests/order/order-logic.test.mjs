@@ -23,17 +23,27 @@ test('computeSheets never returns < 1', () => {
 
 test('buildPrintItems: all B&W single 1-up', () => {
   assert.deepEqual(
-    buildPrintItems({ includedCount: 10, colourCount: 0, nup: 1, duplex: false, copies: 1 }),
+    buildPrintItems({ includedCount: 10, colourCount: 0, nup: 1, duplex: false, copies: 1, paperSize: 'A4' }),
     [{ pages: 10, paper_type: 'A4_BW', sides: 'ss', layout: '1-up', copies: 1 }]
   );
 });
 
 test('buildPrintItems: mixed splits into BW + COL items', () => {
   assert.deepEqual(
-    buildPrintItems({ includedCount: 10, colourCount: 3, nup: 2, duplex: true, copies: 2 }),
+    buildPrintItems({ includedCount: 10, colourCount: 3, nup: 2, duplex: true, copies: 2, paperSize: 'A4' }),
     [
       { pages: 7, paper_type: 'A4_BW',  sides: 'ds', layout: '2-up', copies: 2 },
-      { pages: 3, paper_type: 'A4_COL', sides: 'ds', layout: '2-up', copies: 2 },
+      { pages: 3, paper_type: 'A4_col', sides: 'ds', layout: '2-up', copies: 2 },
+    ]
+  );
+});
+
+test('buildPrintItems: A3 with mixed colour/BW', () => {
+  assert.deepEqual(
+    buildPrintItems({ includedCount: 8, colourCount: 3, nup: 1, duplex: false, copies: 1, paperSize: 'A3' }),
+    [
+      { pages: 5, paper_type: 'A3_BW', sides: 'ss', layout: '1-up', copies: 1 },
+      { pages: 3, paper_type: 'A3_col', sides: 'ss', layout: '1-up', copies: 1 },
     ]
   );
 });

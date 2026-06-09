@@ -463,6 +463,7 @@ async function fetchQuote() {
     nup: state.nup,
     duplex: state.sides === 'duplex',
     copies: state.copies,
+    paperSize: state.paperSize,
   });
   const seq = ++quoteSeq;
   try {
