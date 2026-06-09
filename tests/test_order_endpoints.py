@@ -49,8 +49,7 @@ def test_create_inserts_job_and_settings(monkeypatch):
     monkeypatch.setattr(ho, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
     calls = {}
     monkeypatch.setattr(ho, "_insert_job", lambda **kw: calls.setdefault("insert", kw))
-    monkeypatch.setattr(ho, "_apply_settings", lambda **kw: calls.setdefault("settings", kw))
-    monkeypatch.setattr(ho, "_update_extras", lambda *a, **k: calls.setdefault("extras", True))
+    monkeypatch.setattr(ho, "_persist_settings", lambda job_id, **kw: calls.setdefault("settings", kw))
     monkeypatch.setattr(ho, "_send_confirmation", lambda *a, **k: calls.setdefault("wa", True))
     monkeypatch.setattr(ho, "_quote_total", lambda items, fin, size: 91.5)
     payload = {
@@ -70,6 +69,9 @@ def test_create_inserts_job_and_settings(monkeypatch):
     assert calls["insert"]["sender"] == "919495706405"
     assert calls["settings"]["colour"] == "mixed"
     assert calls["settings"]["amount_quoted"] == 91.5
+    assert calls["settings"]["page_count"] == 4          # len(pages_included [1,3,4,5])
+    assert calls["settings"]["customer_name"] == "Asha"
+    assert "PICKUP" in calls["settings"]["operator_note"]  # delivery=0 folded into note
     assert calls.get("wa") is True
 
 

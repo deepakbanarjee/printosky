@@ -104,22 +104,27 @@ def _insert_job(job_id, sender, filename, file_url):
     insert_job_from_webhook(job_id, sender, filename, file_url)
 
 
-def _apply_settings(job_id, amount_quoted, copies, finishing, size, colour, layout):
-    from db_cloud import update_job_settings
-    update_job_settings(job_id, amount_quoted, copies, finishing, size, colour, layout)
+def _persist_settings(job_id, *, amount_quoted, copies, finishing, size, colour,
+                      page_count, operator_note, customer_name):
+    """Persist print settings + web-order metadata onto the job row.
 
-
-def _update_extras(job_id, operator_note, delivery):
-    """Persist web-order extras (operator note, delivery flag, source) onto the job row.
-
-    Best-effort: the columns may not all exist on every deployment, so a failure
-    here must not fail the order — the job row + settings are already committed.
+    Writes ONLY columns that exist on the live `jobs` schema. Notably there is
+    NO `layout`, `instructions`, or `delivery` column — N-up/sides/delivery info
+    is folded into the human-readable `notes` field, which is what the operator
+    reads. (Do NOT route this through db_cloud.update_job_settings: that writes a
+    non-existent `layout` column, which makes the whole PostgREST update fail.)
     """
     from db_cloud import _client
     _client().table("jobs").update({
-        "instructions": operator_note,
-        "delivery": int(delivery),
-        "source": "web",
+        "copies":        copies,
+        "finishing":     finishing,
+        "size":          size,
+        "colour":        colour,          # 'bw' | 'col' | 'mixed'
+        "amount_quoted": amount_quoted,
+        "page_count":    page_count,
+        "notes":         operator_note,   # carries colour/skipped pages + delivery
+        "source":        "web",
+        "customer_name": customer_name,
     }).eq("job_id", job_id).execute()
 
 
@@ -192,24 +197,29 @@ def _handle_order_create(h, body: bytes) -> None:
     except Exception:
         total = 0.0
 
+    # Fold delivery/pickup (no dedicated column) into the operator-facing note.
+    note = str(data.get("operator_note", "")).strip()
+    if int(cust.get("delivery", 0)):
+        addr = str(cust.get("address", "")).strip()
+        note = (note + " · DELIVERY" + (f": {addr}" if addr else "")).strip(" ·")
+    else:
+        note = (note + " · PICKUP").strip(" ·")
+    page_count = len(spec.get("pages_included") or []) or int(spec.get("total_pages", 0))
+
     job_id = f"OSP-{datetime.now().strftime('%Y%m%d')}-{phone[-4:]}-{_uuid.uuid4().hex[:4]}"
     try:
         _insert_job(job_id=job_id, sender=phone, filename=file_name, file_url=file_url)
-        _apply_settings(
+        _persist_settings(
             job_id=job_id, amount_quoted=total, copies=copies, finishing=finishing,
-            size=size, colour=colour, layout=f"{spec.get('nup', 1)}up-{sides}",
+            size=size, colour=colour, page_count=page_count,
+            operator_note=note, customer_name=str(cust.get("name", "")).strip(),
         )
     except Exception as exc:
         logger.error("order create db error %s: %r", type(exc).__name__, str(exc))
         _json_response(h, 500, {"error": "could not create order"})
         return
 
-    try:
-        _update_extras(job_id, data.get("operator_note", ""), cust.get("delivery", 0))
-    except Exception as exc:
-        logger.warning("order note/delivery update skipped for %s: %r", job_id, str(exc))
-
-    _send_confirmation(phone, job_id, total, data.get("operator_note", ""))
+    _send_confirmation(phone, job_id, total, note)
     _json_response(h, 200, {"job_id": job_id, "total": total})
 
 
