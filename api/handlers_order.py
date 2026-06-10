@@ -144,6 +144,31 @@ def _quote_total(items, finishing, size):
 
 
 _PHONE_RE = _re.compile(r"^91\d{10}$")
+
+
+def _norm_phone(raw) -> str:
+    """Normalise a phone to canonical 91XXXXXXXXXX, or '' if not a valid IN mobile."""
+    p = _re.sub(r"\D", "", str(raw or ""))
+    if p.startswith("0"):
+        p = p[1:]
+    if len(p) == 10:
+        p = "91" + p
+    return p if _PHONE_RE.match(p) else ""
+
+
+def _resolve_request_account(h) -> dict:
+    """Resolve the request's Authorization header to an account dict, or {}.
+
+    Thin seam over api.index._resolve_account (lazy import dodges the circular
+    import; failures degrade to a guest order). Returns the account dict
+    ({ok, kind, phone, name, ...}) or {} when unauthenticated/unavailable.
+    """
+    try:
+        from api.index import _resolve_account
+        return _resolve_account(h) or {}
+    except Exception as _e:
+        logger.debug("order account resolve skipped: %r", str(_e))
+        return {}
 _VALID_SIZE = {"A4", "A3", "A5", "Letter"}
 _VALID_COLOUR = {"bw", "col", "mixed"}
 
@@ -156,12 +181,20 @@ def _handle_order_create(h, body: bytes) -> None:
         _json_response(h, 400, {"error": "invalid JSON"})
         return
     cust = data.get("customer") or {}
-    phone = _re.sub(r"\D", "", str(cust.get("whatsapp", "")))
-    if phone.startswith("0"):
-        phone = "91" + phone[1:]
-    if len(phone) == 10:
-        phone = "91" + phone
-    if not _PHONE_RE.match(phone):
+
+    # Registered account? Resolve the Authorization: Bearer token to a verified
+    # phone (+ name) server-side. When present this is the trusted identity —
+    # the order page hides the WhatsApp field for logged-in users. Falls back to
+    # the typed details for guests (or email/Google logins without a linked phone).
+    account_name = ""
+    phone = ""
+    _acct = _resolve_request_account(h)
+    if _acct.get("ok"):
+        phone = _norm_phone(_acct.get("phone"))
+        account_name = (_acct.get("name") or "").strip()
+    if not phone:
+        phone = _norm_phone(cust.get("whatsapp"))
+    if not phone:
         _json_response(h, 400, {"error": "invalid WhatsApp number"})
         return
     spec = data.get("print_spec") or {}
@@ -212,7 +245,8 @@ def _handle_order_create(h, body: bytes) -> None:
         _persist_settings(
             job_id=job_id, amount_quoted=total, copies=copies, finishing=finishing,
             size=size, colour=colour, page_count=page_count,
-            operator_note=note, customer_name=str(cust.get("name", "")).strip(),
+            operator_note=note,
+            customer_name=account_name or str(cust.get("name", "")).strip(),
         )
     except Exception as exc:
         logger.error("order create db error %s: %r", type(exc).__name__, str(exc))

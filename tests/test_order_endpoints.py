@@ -52,6 +52,7 @@ def test_create_inserts_job_and_settings(monkeypatch):
     monkeypatch.setattr(ho, "_persist_settings", lambda job_id, **kw: calls.setdefault("settings", kw))
     monkeypatch.setattr(ho, "_send_confirmation", lambda *a, **k: calls.setdefault("wa", True))
     monkeypatch.setattr(ho, "_quote_total", lambda items, fin, size: 91.5)
+    monkeypatch.setattr(ho, "_resolve_request_account", lambda h: {})  # guest order
     payload = {
         "customer": {"name": "Asha", "whatsapp": "919495706405", "delivery": 0},
         "file_url": "https://x/orders/u/report.pdf", "file_name": "report.pdf",
@@ -90,3 +91,45 @@ def test_convert_docx_stub_returns_501(monkeypatch):
     ho._handle_order_convert_docx(_fake_h(), b"{}")
     assert captured["status"] == 501
     assert "not enabled" in captured["data"]["error"].lower()
+
+
+def test_create_uses_account_token_phone(monkeypatch):
+    """A logged-in account: identity (phone + name) comes from the resolved token,
+    NOT from the form — the order page hides the WhatsApp field for these users."""
+    import api.handlers_order as ho
+    captured = {}
+    monkeypatch.setattr(ho, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    calls = {}
+    monkeypatch.setattr(ho, "_insert_job", lambda **kw: calls.setdefault("insert", kw))
+    monkeypatch.setattr(ho, "_persist_settings", lambda job_id, **kw: calls.setdefault("settings", kw))
+    monkeypatch.setattr(ho, "_send_confirmation", lambda *a, **k: calls.setdefault("wa", True))
+    monkeypatch.setattr(ho, "_quote_total", lambda items, fin, size: 30.0)
+    monkeypatch.setattr(ho, "_resolve_request_account",
+                        lambda h: {"ok": True, "kind": "phone", "phone": "919495706405", "name": "Divya"})
+
+    payload = {
+        # No whatsapp in the form payload — must be supplied by the token.
+        "customer": {"delivery": 0},
+        "file_url": "https://x/orders/u/a.pdf", "file_name": "a.pdf",
+        "print_spec": {
+            "file_ext": "pdf", "total_pages": 3, "pages_included": [1, 2, 3],
+            "colour_mode": "bw", "colour_pages": [], "nup": 1, "copies": 1,
+            "paper_size": "A4", "sides": "single", "binding": "none",
+            "sheet_count": 3, "price_exact": True,
+        },
+        "operator_note": "3 of 3 pages · All B&W · No binding",
+    }
+    ho._handle_order_create(_fake_h(), json.dumps(payload).encode())
+    assert captured["status"] == 200
+    assert calls["insert"]["sender"] == "919495706405"      # from token, not form
+    assert calls["settings"]["customer_name"] == "Divya"    # account name
+
+
+def test_create_guest_without_phone_400(monkeypatch):
+    """Guest (no token) with no usable WhatsApp number is rejected."""
+    import api.handlers_order as ho
+    captured = {}
+    monkeypatch.setattr(ho, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(ho, "_resolve_request_account", lambda h: {})
+    ho._handle_order_create(_fake_h(), json.dumps({"customer": {"name": "x"}}).encode())
+    assert captured["status"] == 400
