@@ -10,12 +10,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
-<!-- pdf.js 4.0.379 — same config as project-builder.html (render thumbnails + exact page count) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
+<!-- pdf.js 3.11.174 (UMD) — sets window.pdfjsLib; classic worker renders
+     reliably cross-origin. NOTE: do NOT bump to 4.x — its pdf.min.js UMD build
+     is 404 on cdnjs and the .mjs module worker is unreliable cross-origin. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
   if (window['pdfjsLib']) {
     pdfjsLib.GlobalWorkerOptions.workerSrc =
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
 </script>
 <!-- pdf-lib — extract selected pages on submit -->

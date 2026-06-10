@@ -9,6 +9,11 @@ import {
   buildOperatorNote,
   estimateDocxPages,
 } from './order-logic.js';
+// pdf.js is loaded as a UMD global (window.pdfjsLib) by a <script> tag in
+// order-v2.html — pinned to 3.11.174, whose classic worker renders reliably
+// cross-origin (the 4.x .mjs module-worker build is 404 on cdnjs for pdf.min.js
+// and unreliable as a cross-origin module worker). `pdfjsLib` resolves to the
+// global set before any file is selected.
 
 const API = 'https://printosky.vercel.app';
 const SUPABASE_PUBLIC =
