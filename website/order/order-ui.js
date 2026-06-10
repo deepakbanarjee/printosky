@@ -9,6 +9,9 @@ import {
   buildOperatorNote,
   estimateDocxPages,
 } from './order-logic.js';
+// Logged-in account detection: prefills/hides the Step 2 identity fields and
+// supplies the Bearer token sent on /order/create. No-op for guests.
+import { initAccount, authToken } from './order-auth.js';
 // pdf.js is loaded as a UMD global (window.pdfjsLib) by a <script> tag in
 // order-v2.html — pinned to 3.11.174, whose classic worker renders reliably
 // cross-origin (the 4.x .mjs module-worker build is 404 on cdnjs for pdf.min.js
@@ -562,11 +565,18 @@ function plausiblePhone(raw) {
   return digits.length >= 10 && digits.length <= 13;
 }
 
+function isHidden(id) {
+  const el = $(id);
+  return !!el && el.classList.contains('ov2-hidden');
+}
+
 function validateStep2() {
-  const name = $('ov2-name').value.trim();
-  const phoneOk = plausiblePhone($('ov2-whatsapp').value);
+  // A logged-in account hides the name and/or WhatsApp field (the backend
+  // supplies that identity from the Bearer token) — a hidden field is satisfied.
+  const nameOk = isHidden('ov2-field-name') || $('ov2-name').value.trim().length > 0;
+  const phoneOk = isHidden('ov2-field-wa') || plausiblePhone($('ov2-whatsapp').value);
   const addrOk = runtime.delivery === 0 || $('ov2-address').value.trim().length > 0;
-  const ok = name.length > 0 && phoneOk && addrOk;
+  const ok = nameOk && phoneOk && addrOk;
   $('ov2-submit').disabled = !ok;
   return ok;
 }
@@ -685,9 +695,14 @@ async function submitOrder() {
     if (runtime.delivery === 1) customer.address = $('ov2-address').value.trim();
 
     const note = withExtraInstructions(buildOperatorNote(state));
+    // Attach the logged-in account's token so the backend uses its trusted
+    // phone identity; absent for guests (header simply omitted).
+    const createHeaders = { 'Content-Type': 'application/json' };
+    const tok = authToken();
+    if (tok) createHeaders['Authorization'] = 'Bearer ' + tok;
     const res = await fetch(API + '/order/create', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: createHeaders,
       body: JSON.stringify({
         customer,
         file_url: fileUrl,
@@ -773,6 +788,10 @@ function wire() {
   $('ov2-whatsapp').addEventListener('input', validateStep2);
   $('ov2-address').addEventListener('input', validateStep2);
   $('ov2-submit').addEventListener('click', submitOrder);
+
+  // Detect a logged-in account (async, non-blocking); re-validate Step 2 once
+  // the identity fields have been prefilled/hidden.
+  initAccount().then(() => validateStep2()).catch(() => {});
 }
 
 if (document.readyState === 'loading') {

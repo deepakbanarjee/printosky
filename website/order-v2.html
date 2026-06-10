@@ -24,6 +24,9 @@
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <!-- JSZip — read DOCX docProps/app.xml for page estimate -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- Supabase JS — detect a logged-in account (Google / email session) so a
+     registered customer skips re-entering name + WhatsApp at Step 2. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
 <style>
   /* ── Acrobat-style order page (scoped under .ov2) ── */
@@ -184,6 +187,9 @@
   .ov2-recap-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #047857; margin-bottom: 8px; }
   .ov2-recap-pills { display: flex; gap: 6px; flex-wrap: wrap; }
   .ov2-recap-pill { background: #fff; border: 1px solid #a7f3d0; color: #065f46; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; }
+  .ov2-identity { margin: 6px 20px 0; background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 10px; padding: 10px 14px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #1e3a8a; flex-wrap: wrap; }
+  .ov2-identity-tick { width: 18px; height: 18px; border-radius: 50%; background: #2563eb; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+  .ov2-identity-logout { margin-left: auto; background: none; border: none; color: #2563eb; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0; }
 
   .ov2-fields { padding: 6px 20px 0; display: flex; flex-direction: column; gap: 14px; }
   .ov2-field label { display: block; font-size: 12px; font-weight: 600; color: var(--ink); margin-bottom: 5px; }
@@ -272,7 +278,7 @@
         <span id="ov2-pagecount">— pages</span>
         <span class="ov2-change" id="ov2-change">change</span>
       </div>
-      <div class="ov2-amber" id="ov2-amber">Page count estimated — upload a PDF for exact pricing.</div>
+      <div class="ov2-amber" id="ov2-amber">Estimated page count — real page previews aren't available for this format. Upload a PDF for an exact preview &amp; price.</div>
       <div class="ov2-manual" id="ov2-manual">
         <label for="ov2-manual-pages">How many pages?</label>
         <input type="number" id="ov2-manual-pages" min="1" max="500" value="1" />
@@ -401,12 +407,19 @@
       </div>
 
       <div class="ov2-section-header"><div class="ov2-section-title">Your details</div><div class="ov2-section-line"></div></div>
+      <!-- Logged-in account: identity is auto-filled from the account; the name +
+           WhatsApp fields below are hidden and this banner is shown instead. -->
+      <div id="ov2-identity" class="ov2-identity ov2-hidden">
+        <span class="ov2-identity-tick">✓</span>
+        <span>Ordering as <b id="ov2-identity-name"></b></span>
+        <button type="button" class="ov2-identity-logout" id="ov2-logout">Not you? Log out</button>
+      </div>
       <div class="ov2-fields">
-        <div class="ov2-field">
+        <div class="ov2-field" id="ov2-field-name">
           <label for="ov2-name">Name <span class="ov2-req">*</span></label>
           <input type="text" id="ov2-name" autocomplete="name" placeholder="Your name" />
         </div>
-        <div class="ov2-field">
+        <div class="ov2-field" id="ov2-field-wa">
           <label for="ov2-whatsapp">WhatsApp number <span class="ov2-req">*</span></label>
           <input type="tel" id="ov2-whatsapp" inputmode="tel" autocomplete="tel" placeholder="10-digit mobile number" />
         </div>
