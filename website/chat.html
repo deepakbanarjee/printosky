@@ -363,6 +363,9 @@ html, body {
         <div class="topbar-title" id="chat-name">—</div>
         <div class="topbar-sub"  id="chat-phone">—</div>
       </div>
+      <button id="resume-btn" onclick="handBackToBot()"
+              title="Resume the bot for this customer and clear the SOS flag"
+              style="display:none;margin-left:auto;background:var(--green);color:#fff;border:none;border-radius:16px;padding:6px 12px;font-size:13px;cursor:pointer;white-space:nowrap">↩︎ Hand back to bot</button>
     </div>
     <div id="messages"></div>
     <div id="reply-bar">
@@ -486,6 +489,10 @@ function openChat(phone, name) {
   document.getElementById('chat-phone').textContent = phone;
   document.getElementById('messages').innerHTML = '<div class="empty-state">Loading…</div>';
 
+  // Show "Hand back to bot" only while this conversation is flagged SOS (on hold).
+  const _c = _contacts.find(x => x.phone === phone);
+  document.getElementById('resume-btn').style.display = (_c && _c.needs_human) ? '' : 'none';
+
   // Reveal the thread + hide the (desktop-only) placeholder on BOTH layouts.
   // Without this the mobile chat screen slid in showing only the placeholder.
   document.getElementById('no-chat-placeholder').style.display = 'none';
@@ -602,6 +609,21 @@ async function sendMsg() {
     });
     await fetchThread();
   } catch(e) { alert('Send failed: ' + e.message); }
+}
+
+/* ── HAND BACK TO BOT ───────────────────────────────────────── */
+async function handBackToBot() {
+  if (!_phone) return;
+  if (!confirm('Hand this conversation back to the bot? It will start auto-replying to this customer again.')) return;
+  try {
+    const r = await fetch(`${API}/staff/resume`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password:_pw, phone:_phone})
+    });
+    if (!r.ok) throw new Error('resume ' + r.status);
+    document.getElementById('resume-btn').style.display = 'none';
+    fetchContacts();   // refresh SOS pill + count
+  } catch(e) { alert('Resume failed: ' + e.message); }
 }
 
 /* ── FILE ATTACH ────────────────────────────────────────────── */

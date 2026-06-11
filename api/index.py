@@ -1658,12 +1658,21 @@ def _handle_staff_set_pin(h, body: bytes) -> None:
 
 
 def _handle_staff_resume(h, body: bytes) -> None:
-    """POST /staff/resume — resume bot for a customer held by staff."""
+    """POST /staff/resume — resume bot for a customer held by staff.
+
+    Lifts the ``staff_hold`` (restores the prior step) and clears the
+    ``needs_human`` SOS flag. Requires the admin password.
+    """
     try:
-        payload = json.loads(body)
-        phone   = payload.get("phone", "").strip()
+        payload  = json.loads(body)
+        phone    = payload.get("phone", "").strip()
+        admin_pw = payload.get("admin_password", "").strip()
     except Exception:
         _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+
+    if not _auth_admin_pw(admin_pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
         return
 
     if not phone:
@@ -1677,7 +1686,7 @@ def _handle_staff_resume(h, body: bytes) -> None:
             _json_response(h, 404, {"error": "No session found for this phone"})
             return
         prev_step = result.data[0].get("prev_step") or "size"
-        save_session("supabase", phone, step=prev_step)
+        save_session("supabase", phone, step=prev_step, needs_human=False)
         _json_response(h, 200, {"ok": True, "message": f"Bot resumed for {phone} at step={prev_step}"})
         logger.info(f"Staff resumed bot for {phone} at step={prev_step}")
     except Exception as e:

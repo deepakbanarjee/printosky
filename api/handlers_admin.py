@@ -65,6 +65,20 @@ def _handle_admin_reset_pin(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "Server error"})
 
 
+def _clear_needs_human(phone: str) -> None:
+    """Clear the 'needs human' (SOS) flag once staff have replied.
+
+    Leaves the session's ``step`` untouched so an active ``staff_hold`` keeps the
+    bot silent until staff hand the conversation back via /staff/resume. Best
+    effort: a session-write failure must never break an already-sent reply.
+    """
+    try:
+        from db_cloud import save_session
+        save_session("supabase", phone, needs_human=False)
+    except Exception as exc:
+        logger.warning(f"_clear_needs_human({phone}) failed: {exc}")
+
+
 def _handle_admin_send(h, body: bytes) -> None:
     """POST /admin/send — staff manually sends a WhatsApp message to a customer."""
     try:
@@ -95,6 +109,7 @@ def _handle_admin_send(h, body: bytes) -> None:
                 log_message(phone, "outbound", message, message_type="text")
             except Exception:
                 pass
+            _clear_needs_human(phone)   # staff replied → drop the SOS pill
             _json_response(h, 200, {"ok": True})
             logger.info(f"Admin manually sent message to {phone}")
         else:
@@ -976,6 +991,7 @@ def _handle_admin_send_file(h, body: bytes) -> None:
                     message_type=mime_type, filename=filename,
                     media_url=storage_path)
 
+        _clear_needs_human(phone)   # staff replied with a file → drop the SOS pill
         _json_response(h, 200, {"ok": True})
     except Exception as exc:
         logger.error("send-file error for %s: %s", phone, exc)
