@@ -133,3 +133,66 @@ def test_create_guest_without_phone_400(monkeypatch):
     monkeypatch.setattr(ho, "_resolve_request_account", lambda h: {})
     ho._handle_order_create(_fake_h(), json.dumps({"customer": {"name": "x"}}).encode())
     assert captured["status"] == 400
+
+
+# ── /order/reorder ────────────────────────────────────────────────────────────
+
+_OWNER = {"ok": True, "kind": "phone", "phone": "919495706405", "name": "Divya"}
+_SRC_JOB = {
+    "job_id": "OSP-20260610-0031", "sender": "919495706405",
+    "file_url": "https://x/orders/u/report.pdf", "filename": "report.pdf",
+    "copies": 2, "finishing": "spiral", "size": "A4", "colour": "mixed",
+    "page_count": 5, "amount_quoted": 91.5, "notes": "COLOUR pages: 3 · PICKUP",
+    "customer_name": "Divya",
+}
+
+
+def test_reorder_clones_owned_job(monkeypatch):
+    import api.handlers_order as ho
+    import db_cloud
+    captured, calls = {}, {}
+    monkeypatch.setattr(ho, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(ho, "_resolve_request_account", lambda h: _OWNER)
+    monkeypatch.setattr(db_cloud, "get_job", lambda jid: dict(_SRC_JOB))
+    monkeypatch.setattr(ho, "_insert_job", lambda **kw: calls.setdefault("insert", kw))
+    monkeypatch.setattr(ho, "_persist_settings", lambda job_id, **kw: calls.setdefault("settings", kw))
+    monkeypatch.setattr(ho, "_send_confirmation", lambda *a, **k: calls.setdefault("wa", True))
+
+    ho._handle_order_reorder(_fake_h(), json.dumps({"job_id": "OSP-20260610-0031"}).encode())
+
+    assert captured["status"] == 200
+    new_id = captured["data"]["job_id"]
+    assert new_id.startswith("OSP-") and new_id != "OSP-20260610-0031"   # a fresh job
+    assert calls["insert"]["sender"] == "919495706405"
+    assert calls["insert"]["file_url"] == "https://x/orders/u/report.pdf"  # reuses stored file
+    assert calls["settings"]["copies"] == 2 and calls["settings"]["colour"] == "mixed"
+    assert calls["settings"]["finishing"] == "spiral"
+    assert calls["settings"]["amount_quoted"] == 91.5
+    assert "Reorder of OSP-20260610-0031" in calls["settings"]["operator_note"]
+    assert calls.get("wa") is True
+
+
+def test_reorder_rejects_unowned_job(monkeypatch):
+    """A job whose sender isn't the caller's phone is invisible (404)."""
+    import api.handlers_order as ho
+    import db_cloud
+    captured = {}
+    monkeypatch.setattr(ho, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(ho, "_resolve_request_account", lambda h: _OWNER)
+    other = dict(_SRC_JOB, sender="919999999999")
+    monkeypatch.setattr(db_cloud, "get_job", lambda jid: other)
+
+    ho._handle_order_reorder(_fake_h(), json.dumps({"job_id": "OSP-20260610-0031"}).encode())
+
+    assert captured["status"] == 404
+
+
+def test_reorder_requires_login(monkeypatch):
+    import api.handlers_order as ho
+    captured = {}
+    monkeypatch.setattr(ho, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(ho, "_resolve_request_account", lambda h: {})   # guest
+
+    ho._handle_order_reorder(_fake_h(), json.dumps({"job_id": "OSP-20260610-0031"}).encode())
+
+    assert captured["status"] == 401

@@ -593,8 +593,31 @@ function renderOrders(orders) {
         ${pick}
         <span class="earn">${amt}</span>
       </div>
+      <div style="margin-top:10px;text-align:right">
+        <button onclick="reorder('${esc(o.job_id)}', this)" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer">🔁 Order again</button>
+      </div>
     </div>`;
   }).join("");
+}
+
+async function reorder(jobId, btn) {
+  if (!token) { location.href = "account.html"; return; }
+  if (!confirm("Reorder " + jobId + "?\nWe'll print it again with the same file and settings, and confirm on WhatsApp.")) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = "Placing…";
+  try {
+    const r = await fetch(API + "/order/reorder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+      body: JSON.stringify({ job_id: jobId }),
+    });
+    const d = await r.json();
+    if (!r.ok) { alert(d.error || "Couldn't place the reorder."); btn.disabled = false; btn.textContent = orig; return; }
+    await loadSummary();   // refresh the hub so the new order appears at the top
+  } catch {
+    alert("Network error. Please try again.");
+    btn.disabled = false; btn.textContent = orig;
+  }
 }
 
 function renderHub(d) {

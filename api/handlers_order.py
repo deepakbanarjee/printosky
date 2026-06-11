@@ -257,6 +257,72 @@ def _handle_order_create(h, body: bytes) -> None:
     _json_response(h, 200, {"job_id": job_id, "total": total})
 
 
+def _handle_order_reorder(h, body: bytes) -> None:
+    """POST /order/reorder — clone a past job into a new Pending order.
+
+    One-tap reorder from the account hub. The original file is already in
+    storage, so this re-uses its file_url + stored print settings — no upload,
+    no re-quote. Login is required and the caller must own the source order
+    (jobs.sender == the resolved account phone).
+    """
+    try:
+        data = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    acct = _resolve_request_account(h)
+    if not acct.get("ok"):
+        _json_response(h, 401, {"error": "login required to reorder"})
+        return
+    phone = _norm_phone(acct.get("phone"))
+    if not phone:
+        _json_response(h, 400, {"error": "no phone linked to this account"})
+        return
+
+    src_id = str(data.get("job_id") or "").strip()
+    if not src_id:
+        _json_response(h, 400, {"error": "job_id required"})
+        return
+
+    from db_cloud import get_job
+    src = get_job(src_id) or {}
+    # Ownership: only reorder your own job.
+    if not src or _norm_phone(src.get("sender")) != phone:
+        _json_response(h, 404, {"error": "order not found"})
+        return
+    file_url = str(src.get("file_url") or "")
+    if not file_url:
+        _json_response(h, 400, {"error": "original file is no longer available"})
+        return
+
+    total = float(src.get("amount_quoted") or 0)
+    base_note = str(src.get("notes") or "").strip()
+    note = ("Reorder of " + src_id + (" · " + base_note if base_note else "")).strip()
+
+    job_id = f"OSP-{datetime.now().strftime('%Y%m%d')}-{phone[-4:]}-{_uuid.uuid4().hex[:4]}"
+    try:
+        _insert_job(job_id=job_id, sender=phone,
+                    filename=str(src.get("filename") or "order"), file_url=file_url)
+        _persist_settings(
+            job_id=job_id, amount_quoted=total,
+            copies=int(src.get("copies") or 1),
+            finishing=str(src.get("finishing") or "none"),
+            size=str(src.get("size") or "A4"),
+            colour=str(src.get("colour") or "bw"),
+            page_count=int(src.get("page_count") or 0),
+            operator_note=note,
+            customer_name=str(src.get("customer_name") or acct.get("name") or "").strip(),
+        )
+    except Exception as exc:
+        logger.error("order reorder db error %s: %r", type(exc).__name__, str(exc))
+        _json_response(h, 500, {"error": "could not place reorder"})
+        return
+
+    _send_confirmation(phone, job_id, total, note)
+    _json_response(h, 200, {"job_id": job_id, "total": total})
+
+
 # ── /order/convert-docx ──────────────────────────────────────────────────────
 
 def _handle_order_convert_docx(h, body: bytes) -> None:

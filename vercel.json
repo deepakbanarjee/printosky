@@ -36,6 +36,7 @@
     { "src": "/order/upload-sign",                    "dest": "/api/index.py" },
     { "src": "/order/quote",                          "dest": "/api/index.py" },
     { "src": "/order/create",                         "dest": "/api/index.py" },
+    { "src": "/order/reorder",                        "dest": "/api/index.py" },
     { "src": "/order/convert-docx",                   "dest": "/api/index.py" },
     { "src": "/referrals/(.*)",                       "dest": "/api/index.py" },
     { "src": "/auth/(.*)",                             "dest": "/api/index.py" },
