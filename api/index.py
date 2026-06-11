@@ -354,10 +354,14 @@ def _handle_account_summary(h, body: bytes) -> None:
 
     phone = acct["phone"]
     try:
-        from db_cloud import wallet_balance, list_notes_by_uploader, note_subscription_status
+        from db_cloud import (
+            wallet_balance, list_notes_by_uploader, note_subscription_status,
+            list_jobs_by_sender,
+        )
         balance_paise = wallet_balance(phone)
         notes = list_notes_by_uploader(phone)
         sub = note_subscription_status(phone)
+        orders = list_jobs_by_sender(phone, limit=20)
 
         out_notes = []
         for n in notes:
@@ -374,6 +378,22 @@ def _handle_account_summary(h, body: bytes) -> None:
                 "earned_rs":   round(prints * pages * 10 / 100, 2),
             })
 
+        out_orders = []
+        for j in orders:
+            out_orders.append({
+                "job_id":      j.get("job_id"),
+                "placed_at":   j.get("received_at"),
+                "filename":    j.get("filename"),
+                "status":      j.get("status") or "Pending",
+                "pages":       int(j.get("page_count") or 0),
+                "copies":      int(j.get("copies") or 1),
+                "colour":      j.get("colour") or "",
+                "finishing":   j.get("finishing") or "",
+                "amount_rs":   round(float(j.get("amount_collected") or j.get("amount_quoted") or 0), 2),
+                "pickup_code": j.get("pickup_code") or "",
+                "delivery":    int(j.get("delivery") or 0),
+            })
+
         _json_response(h, 200, {
             "needs_phone_link": False,
             "kind":         acct["kind"],
@@ -381,6 +401,7 @@ def _handle_account_summary(h, body: bytes) -> None:
             "name":         acct.get("name") or "",
             "wallet_rs":    round(balance_paise / 100, 2),
             "notes":        out_notes,
+            "orders":       out_orders,
             "subscription": sub or {},
         })
     except Exception as exc:

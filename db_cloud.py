@@ -110,6 +110,28 @@ def get_job_sender(job_id: str) -> str | None:
     return get_job(job_id).get("sender")
 
 
+def list_jobs_by_sender(phone: str, limit: int = 20) -> list:
+    """A customer's own print orders, newest first — for account order history.
+
+    Keyed on jobs.sender (the customer phone), capped to the most recent `limit`.
+    """
+    try:
+        result = (
+            _client().table("jobs")
+            .select("job_id,received_at,filename,status,page_count,copies,"
+                    "colour,finishing,amount_quoted,amount_collected,"
+                    "pickup_code,delivery")
+            .eq("sender", phone)
+            .order("received_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+    except Exception as exc:
+        logger.error("list_jobs_by_sender error %s: %s", phone, exc)
+        return []
+
+
 def update_job_settings(job_id: str, amount_quoted: float, copies: int,
                         finishing: str, size: str, colour: str, layout: str) -> None:
     """Persist quoted price and print settings onto a job row."""

@@ -272,6 +272,9 @@
     <!-- Place an order (logged-in identity flows to order-v2 via the Supabase session) -->
     <a class="btn btn-submit" href="order-v2.html" style="margin:0 0 14px;display:block;text-align:center;text-decoration:none;box-sizing:border-box">🖨️ Place a print order</a>
 
+    <div class="section-title">Your orders</div>
+    <div id="ordersList"></div>
+
     <!-- Refer & Earn -->
     <div class="refer">
       <div class="refer-title">🎁 Refer &amp; Earn</div>
@@ -552,6 +555,48 @@ async function loadSummary() {
   }
 }
 
+function renderOrders(orders) {
+  const box = ge("ordersList");
+  if (!box) return;
+  if (!orders.length) {
+    box.innerHTML = '<div class="empty"><div class="e-ico">🖨️</div>No orders yet. Place your first print order above.</div>';
+    return;
+  }
+  const badgeFor = (st) => {
+    const s = (st || "").toLowerCase();
+    if (s === "delivered") return "published";
+    if (s === "paid" || s === "printed") return "approved";
+    return "pending";
+  };
+  const colourLabel = (c) => c === "bw" ? "B&W" : c === "colour" ? "Colour" : c === "mixed" ? "Mixed" : "";
+  box.innerHTML = orders.map(o => {
+    const spec = [
+      o.pages ? o.pages + (o.pages === 1 ? " page" : " pages") : null,
+      o.copies > 1 ? "×" + o.copies : null,
+      colourLabel(o.colour),
+      (o.finishing && o.finishing !== "none") ? o.finishing : null,
+      o.delivery ? "Delivery" : null,
+    ].filter(Boolean).join(" · ");
+    let when = "";
+    if (o.placed_at) { const dt = new Date(o.placed_at); if (!isNaN(dt)) when = dt.toLocaleDateString("en-IN", { day: "numeric", month: "short" }); }
+    const pick = o.pickup_code ? `<span class="prints">Pickup code ${esc(o.pickup_code)}</span>` : '<span class="prints"></span>';
+    const amt = o.amount_rs ? "₹" + o.amount_rs.toFixed(2) : "—";
+    return `<div class="note-item">
+      <div class="top">
+        <div>
+          <div class="ttl">${esc(o.filename || o.job_id || "Order")}</div>
+          <div class="meta">${esc(o.job_id || "")}${when ? " · " + when : ""}${spec ? " · " + spec : ""}</div>
+        </div>
+        <span class="badge ${badgeFor(o.status)}">${esc(o.status || "Pending")}</span>
+      </div>
+      <div class="foot">
+        ${pick}
+        <span class="earn">${amt}</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
 function renderHub(d) {
   show("s-hub");
   const name = (d.name || "").trim();
@@ -560,6 +605,7 @@ function renderHub(d) {
   ge("walletAmt").textContent = "₹" + (d.wallet_rs || 0).toFixed(2);
 
   loadReferral();   // before the no-notes early return below, so it always runs
+  renderOrders(d.orders || []);
 
   const list = ge("notesList");
   if (!d.notes || d.notes.length === 0) {
