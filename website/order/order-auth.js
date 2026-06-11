@@ -19,10 +19,19 @@ const SB_ANON =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI';
 const API     = 'https://printosky.vercel.app';
 
-let _token = null;     // Supabase JWT to send on /order/create, or null (guest)
+let _token = null;     // Bearer for /order/create (web_token or Supabase JWT), or null
+
+// WhatsApp-OTP session persisted by account.html — a verified-phone identity
+// that, unlike the Supabase session, survives reloads via our own storage key.
+const WEB_TOKEN_KEY = 'psky_web_token';
 
 // The Bearer token order-ui.js attaches to /order/create, or null when signed out.
 export function authToken() { return _token; }
+
+function clearToken() {
+  _token = null;
+  try { localStorage.removeItem(WEB_TOKEN_KEY); } catch { /* storage blocked */ }
+}
 
 const $ = (id) => document.getElementById(id);
 const hide = (el) => el && el.classList.add('ov2-hidden');
@@ -33,25 +42,34 @@ const show = (el) => el && el.classList.remove('ov2-hidden');
 // form intact. Returns true when an account banner was shown.
 export async function initAccount() {
   const sdk = window.supabase;
-  if (!sdk || !sdk.createClient) return false;   // supabase-js CDN unavailable
+  const sb = (sdk && sdk.createClient) ? sdk.createClient(SB_URL, SB_ANON) : null;
 
-  const sb = sdk.createClient(SB_URL, SB_ANON);
-  let session;
-  try {
-    ({ data: { session } } = await sb.auth.getSession());
-  } catch {
-    return false;
+  // Identity sources, strongest first:
+  //  1. WhatsApp-OTP web_token (verified phone) persisted by account.html.
+  //  2. Supabase session JWT (Google / email magic-link).
+  let metaName = '';
+  let token = null;
+  try { token = localStorage.getItem(WEB_TOKEN_KEY) || null; } catch { /* storage blocked */ }
+
+  if (!token && sb) {
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      if (session && session.access_token) {
+        token = session.access_token;
+        const user = session.user || {};
+        const meta = user.user_metadata || {};
+        metaName = (meta.full_name || meta.name || '').trim()
+                || (user.email ? user.email.split('@')[0] : '');
+      }
+    } catch { /* ignore — fall through to guest */ }
   }
-  if (!session || !session.access_token) return false;
+  if (!token) return false;
+  _token = token;
 
-  _token = session.access_token;
-  const user = session.user || {};
-  const meta = user.user_metadata || {};
-  const name = (meta.full_name || meta.name || '').trim()
-            || (user.email ? user.email.split('@')[0] : '');
-
-  // Does this account have a trusted phone on file? /account/summary returns
-  // needs_phone_link=true for a Google/email login that hasn't linked one.
+  // Resolve the trusted phone + display name from the account. A WhatsApp
+  // web_token always carries a verified phone (needs_phone_link=false); a
+  // Google/email login only when they've linked one.
+  let name = metaName;
   let hasPhone = false;
   try {
     const r = await fetch(API + '/account/summary', {
@@ -59,9 +77,12 @@ export async function initAccount() {
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _token },
       body: '{}',
     });
-    if (r.status === 401) { _token = null; return false; }   // expired → guest
+    if (r.status === 401) { clearToken(); return false; }   // expired → guest
     const d = await r.json().catch(() => ({}));
-    hasPhone = r.ok && !d.needs_phone_link;
+    if (r.ok) {
+      hasPhone = !d.needs_phone_link;
+      if (d.name && d.name.trim()) name = d.name.trim();    // stored account name wins
+    }
   } catch {
     // Network hiccup — keep the token (backend can still resolve it) but leave
     // the WhatsApp field visible so the order can't get stuck without a phone.
@@ -79,8 +100,8 @@ function renderIdentity(sb, name, hasPhone) {
     const out = $('ov2-logout');
     if (out) {
       out.addEventListener('click', async () => {
-        try { await sb.auth.signOut(); } catch { /* ignore */ }
-        _token = null;
+        try { if (sb) await sb.auth.signOut(); } catch { /* ignore */ }
+        clearToken();
         window.location.reload();
       });
     }

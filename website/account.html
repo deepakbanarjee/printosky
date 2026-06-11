@@ -386,10 +386,16 @@ let pageCount = 0;
 
 /* ─── boot ────────────────────────────────────────────────────────────────── */
 (async () => {
+  // Restore a persisted WhatsApp-OTP session first — it's a verified-phone
+  // identity, and unlike the Supabase session we persist it ourselves so it
+  // survives reloads and carries to the order page (read by order-auth.js).
+  const savedWa = localStorage.getItem("psky_web_token");
+  if (savedWa) { token = savedWa; tokenKind = "phone"; await loadSummary(); }
+
   const { data: { session } } = await sb.auth.getSession();
-  if (session) { token = session.access_token; tokenKind = "email"; await loadSummary(); }
+  if (session && tokenKind !== "phone") { token = session.access_token; tokenKind = "email"; await loadSummary(); }
   sb.auth.onAuthStateChange(async (_e, s) => {
-    if (s && tokenKind !== "email") { token = s.access_token; tokenKind = "email"; await loadSummary(); }
+    if (s && tokenKind !== "email" && tokenKind !== "phone") { token = s.access_token; tokenKind = "email"; await loadSummary(); }
   });
 })();
 
@@ -501,6 +507,7 @@ async function verifyOtp() {
       if (!r.ok) { showErr("otp-err", d.error || "Incorrect code."); btn.disabled=false; btn.textContent="Verify Code"; return; }
       clearTimeout(cdTimer);
       token = d.web_token; tokenKind = "phone";
+      try { localStorage.setItem("psky_web_token", d.web_token); } catch { /* storage blocked */ }
       await loadSummary();
     }
   } catch { showErr("otp-err", "Network error."); btn.disabled=false; btn.textContent="Verify Code"; }
@@ -612,6 +619,7 @@ async function copyRefLink() {
 /* ─── sign out ────────────────────────────────────────────────────────────── */
 function signOut() {
   token = tokenKind = null;
+  try { localStorage.removeItem("psky_web_token"); } catch { /* storage blocked */ }
   sb.auth.signOut();
   clearFile();
   show("s-auth");
