@@ -752,7 +752,15 @@ def _handle_admin_book_order_edit(h, body, order_code: str) -> None:
             _json_response(h, 400, {"error": "Nothing to update"})
             return
         update_book_order(order_code, **fields)
-        _json_response(h, 200, {"ok": True, "order": get_book_order(order_code)})
+        # If the operator just set a payment field on a not-yet-confirmed order,
+        # hint the UI to offer moving it to Ready to Dispatch — a manual payment
+        # edit otherwise leaves the order stuck pre-confirm (the Rasmi case).
+        paid_touch = bool(fields.get("payment_mode")) or \
+            fields.get("payment_collected_by") in ("oxygen", "divya")
+        suggest_confirm = paid_touch and order.get("status") not in (
+            "confirmed", "dispatched", "delivered", "cancelled")
+        _json_response(h, 200, {"ok": True, "order": get_book_order(order_code),
+                                "suggest_confirm": suggest_confirm})
     except Exception as exc:
         logger.error("book-order edit error: %s", exc)
         _json_response(h, 500, {"error": str(exc)})
