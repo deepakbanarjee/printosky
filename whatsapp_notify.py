@@ -22,6 +22,10 @@ META_PHONE_ID = os.environ.get("META_PHONE_NUMBER_ID", "")
 META_TOKEN    = os.environ.get("META_SYSTEM_USER_TOKEN", "")
 GRAPH_URL     = "https://graph.facebook.com/v21.0"
 STORE_PHONE   = os.environ.get("STORE_WHATSAPP_PHONE", "919495706405")  # Oxygen WABA number (with country code)
+# Staff/operational alerts route to Anu when ANU_ALERT_PHONE is set (owner
+# decision 2026-06-13: escalations go to Anu, not the shop's own number).
+# Customer-facing "call the shop" text below keeps using STORE_PHONE.
+ALERT_PHONE   = os.environ.get("ANU_ALERT_PHONE") or STORE_PHONE
 
 
 def _send_meta(phone: str, message: str) -> bool:
@@ -295,8 +299,8 @@ def send_pickup_completed(sender: str, pickup_code: str,
 
 
 def send_staff_alert(message: str) -> bool:
-    """Send an alert to the store staff number."""
-    return _send(STORE_PHONE, f"⚠️ *Staff Alert*\n\n{message}")
+    """Send an alert to the staff/escalation number (Anu when configured)."""
+    return _send(ALERT_PHONE, f"⚠️ *Staff Alert*\n\n{message}")
 
 
 def send_timeout_alert(job_id: str, step: str) -> bool:
@@ -308,7 +312,7 @@ def send_timeout_alert(job_id: str, step: str) -> bool:
         "Customer may need a manual quote.\n"
         f"Type: `quote {job_id} AMOUNT`"
     )
-    return _send(STORE_PHONE, msg)
+    return _send(ALERT_PHONE, msg)
 
 
 # ── File sending via Meta media upload API ────────────────────────────────────

@@ -807,6 +807,12 @@ STALE_SESSION_HOURS = 1
 OWNER_ALERT_PHONE = os.environ.get("OWNER_ALERT_PHONE", "918089699436")
 
 
+def _alert_phone() -> str:
+    """Recipient for owner/ops alerts. Routes to Anu when ANU_ALERT_PHONE is set
+    (owner decision 2026-06-13: 'everything to Anu'), else the owner number."""
+    return os.environ.get("ANU_ALERT_PHONE") or OWNER_ALERT_PHONE
+
+
 def _session_is_stale(session: dict) -> bool:
     """True if the session's last update is older than STALE_SESSION_HOURS."""
     ts = session.get("updated_at")
@@ -1896,6 +1902,62 @@ def _handle_track(h, code: str) -> None:
 
 
 
+def _handle_cron_chat_audit(h) -> None:
+    """GET /cron/chat-audit — twice-daily (10:00 & 18:00 IST) chat-health digest.
+
+    Reports the human-handoff queue — chats the bot already auto-acked and handed
+    to a person, which the SLA cron CANNOT see (the auto-ack counts as a reply) —
+    plus any inbound still unanswered > 1h. Sends one digest to the alert
+    recipient (Anu when ANU_ALERT_PHONE is set). Read-only; safe to run anytime.
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected and h.headers.get("Authorization", "") != f"Bearer {expected}":
+        _json_response(h, 401, {"error": "Unauthorized"})
+        return
+    try:
+        from db_cloud import chat_audit_snapshot
+        from whatsapp_notify import _send
+
+        snap = chat_audit_snapshot()
+        handoffs = snap.get("open_handoffs", [])
+        unanswered = snap.get("unanswered", [])
+        inbound_24h = (snap.get("counts") or {}).get("inbound", "?")
+
+        lines = ["🗒️ *Printosky chat audit*", ""]
+        if handoffs:
+            lines.append(f"🧑 *Waiting for a human: {len(handoffs)}*")
+            for hf in handoffs[:10]:
+                age = hf.get("age_hours")
+                age_s = f"{age:.0f}h" if isinstance(age, (int, float)) else "?"
+                step = f" ({hf['step']})" if hf.get("step") else ""
+                lines.append(f"• {_fmt_phone(hf['phone'])} — {age_s}{step}")
+            if len(handoffs) > 10:
+                lines.append(f"  …and {len(handoffs) - 10} more")
+        else:
+            lines.append("🧑 Handoff queue: clear ✅")
+        lines.append("")
+        if unanswered:
+            sample = ", ".join("…" + (b.get("phone") or "")[-4:] for b in unanswered[:5])
+            lines.append(f"⏰ *Unanswered > 1h: {len(unanswered)}* ({sample})")
+        else:
+            lines.append("⏰ Unanswered > 1h: none ✅")
+        lines.append("")
+        lines.append(f"📥 Inbound (24h): {inbound_24h}")
+        lines.append("Open printosky.com/admin → *Conversations* → 'Needs human'.")
+        msg = "\n".join(lines)
+
+        sent = _send(_alert_phone(), msg)
+        _json_response(h, 200, {
+            "ok": True,
+            "handoffs": len(handoffs),
+            "unanswered": len(unanswered),
+            "alerted": bool(sent),
+        })
+    except Exception as exc:
+        logger.error("chat-audit cron error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_cron_sla_check(h) -> None:
     """GET /cron/sla-check — Vercel cron entry point.
 
@@ -1928,7 +1990,7 @@ def _handle_cron_sla_check(h) -> None:
                 "Please check oxygen admin → *Conversations* tab and reply, "
                 "or visit printosky.com/admin."
             )
-            sent = _send(OWNER_ALERT_PHONE, msg)
+            sent = _send(_alert_phone(), msg)
             if sent:
                 for b in breaches:
                     mark_sla_alerted(b["phone"])
@@ -2032,7 +2094,7 @@ def _handle_cron_store_pc_check(h) -> None:
 
         sent = []
         if decision["send_opening"]:
-            if _send(OWNER_ALERT_PHONE, sd.compose_opening_message(now_ist.date())):
+            if _send(_alert_phone(), sd.compose_opening_message(now_ist.date())):
                 sent.append("opening")
         if decision["send_closing"]:
             close_str = close_d.strftime("%Y-%m-%d")
@@ -2042,7 +2104,7 @@ def _handle_cron_store_pc_check(h) -> None:
             monthly = (_sd_summary_range(c, store_id, close_str[:7] + "-01", close_str)
                        if sd.is_last_working_day_of_month(close_d) else None)
             msg = sd.compose_closing_message(close_d, daily, weekly, monthly, clean=clean)
-            if _send(OWNER_ALERT_PHONE, msg):
+            if _send(_alert_phone(), msg):
                 sent.append("closing")
 
         update = {
@@ -2151,7 +2213,7 @@ def _handle_cron_daily_activity(h) -> None:
                 "Check: printosky.com/admin → Conversations, and the Meta "
                 "webhook status in Business Manager."
             )
-            alerted = _send(OWNER_ALERT_PHONE, msg)
+            alerted = _send(_alert_phone(), msg)
             if not alerted:
                 logger.warning("daily-activity alert send failed (Meta 24h window?)")
 
@@ -2348,6 +2410,10 @@ class handler(BaseHTTPRequestHandler):
         # ── Daily activity liveness (GitHub Actions cron, once/day) ───────────
         if self.path == "/cron/daily-activity" or self.path.startswith("/cron/daily-activity?"):
             _handle_cron_daily_activity(self)
+            return
+
+        if self.path == "/cron/chat-audit" or self.path.startswith("/cron/chat-audit?"):
+            _handle_cron_chat_audit(self)
             return
 
         # ── Operator queue (P0 Day 2.5) ──────────────────────────────────────

@@ -1,0 +1,28 @@
+name: Printosky chat audit (AM/PM handoff-queue digest → Anu)
+
+# Twice-daily customer-chat health check. Reports the human-handoff queue
+# (chats the bot handed to a person — invisible to the 30-min SLA cron because
+# the bot's auto-ack counts as a reply) plus any inbound unanswered > 1h, and
+# messages the alert recipient (ANU_ALERT_PHONE). Vercel Hobby caps crons at
+# once/day, so this runs from GitHub Actions like the other Printosky crons.
+#
+# 10:00 & 18:00 IST  ==  04:30 & 12:30 UTC.
+on:
+  schedule:
+    - cron: "30 4,12 * * *"
+  workflow_dispatch: {}        # allow manual run from the Actions tab
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chat audit digest
+        run: |
+          echo "Calling chat-audit..."
+          code=$(curl -s -o /tmp/audit.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://printosky.vercel.app/cron/chat-audit")
+          echo "HTTP $code"; cat /tmp/audit.json || true
+          exit 0
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}

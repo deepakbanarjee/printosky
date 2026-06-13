@@ -571,6 +571,70 @@ def mark_sla_alerted(phone: str) -> None:
         logger.warning("mark_sla_alerted error for %s: %s", phone, exc)
 
 
+def chat_audit_snapshot(unanswered_threshold_hours: int = 1) -> dict:
+    """Read-only snapshot for the twice-daily chat audit (AM/PM).
+
+    Returns a dict:
+      open_handoffs: customers with needs_human/staff_hold, oldest first — each
+        {phone, step, age_hours, since}. This is the queue the SLA cron CANNOT
+        see, because the bot's auto-ack ('a team member will reply') counts as a
+        reply and clears the SLA-breach test.
+      unanswered:   customers whose newest inbound has no reply (race-tolerant),
+        reusing find_sla_breaches with no cooldown for the full picture.
+      counts:       {inbound, jobs, hours} from activity_counts(24h).
+    """
+    def _parse(ts):
+        try:
+            return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    out = {"open_handoffs": [], "unanswered": [], "counts": {}}
+    now = datetime.now(timezone.utc)
+
+    try:
+        rows = (
+            _client().table("bot_sessions")
+            .select("phone,step,needs_human,last_help_request_at,updated_at")
+            .eq("needs_human", True)
+            .execute()
+            .data
+            or []
+        )
+        handoffs = []
+        for r in rows:
+            since = _parse(r.get("last_help_request_at")) or _parse(r.get("updated_at"))
+            age_h = round((now - since).total_seconds() / 3600.0, 1) if since else None
+            handoffs.append({
+                "phone": r.get("phone"),
+                "step": r.get("step"),
+                "age_hours": age_h,
+                "since": since.isoformat() if since else None,
+            })
+        # Oldest first; unknown-age (no timestamp) sorted last.
+        handoffs.sort(
+            key=lambda x: (x["age_hours"] is not None, x["age_hours"] or 0.0),
+            reverse=True,
+        )
+        out["open_handoffs"] = handoffs
+    except Exception as exc:
+        logger.error("chat_audit_snapshot handoffs error: %s", exc)
+
+    try:
+        out["unanswered"] = find_sla_breaches(
+            threshold_hours=unanswered_threshold_hours, alert_cooldown_hours=0
+        )
+    except Exception as exc:
+        logger.error("chat_audit_snapshot unanswered error: %s", exc)
+
+    try:
+        out["counts"] = activity_counts(hours=24)
+    except Exception as exc:
+        logger.error("chat_audit_snapshot counts error: %s", exc)
+
+    return out
+
+
 def activity_counts(hours: int = 24) -> dict:
     """Count recent activity for the daily liveness check.
 
