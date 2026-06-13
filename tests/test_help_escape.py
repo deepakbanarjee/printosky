@@ -377,3 +377,52 @@ class TestAdminConversationsNeedsHumanField:
             "_handle_admin_conversations must build a needs_human_phones set "
             "from bot_sessions before joining onto inbox rows"
         )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Known B2B vendor routing (toner/supply buyers bypass the order bot → human)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestVendorRouting:
+    def test_known_vendor_recognised(self) -> None:
+        label = api_mod._vendor_name("918547727272")
+        assert label is not None and "CopyTech" in label
+
+    def test_plus_prefix_is_normalised(self) -> None:
+        assert api_mod._vendor_name("+918547727272") is not None
+
+    def test_unknown_number_is_none(self) -> None:
+        assert api_mod._vendor_name("919999999999") is None
+
+    def test_env_vendor_phones_extends_registry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VENDOR_PHONES", "919812345678=Acme Supplies")
+        assert api_mod._vendor_name("919812345678") == "Acme Supplies"
+
+    def test_vendor_message_flags_alerts_and_acks(self) -> None:
+        sender = "918547727272"
+        with patch.object(api_mod, "_mark_session_needs_human") as mark_mock, \
+             patch.object(sys.modules["whatsapp_notify"], "send_staff_alert") as alert_mock, \
+             patch.object(sys.modules["whatsapp_notify"], "_send") as send_mock:
+            api_mod._handle_vendor_message(sender, "toner order pls", "CopyTech India (CTI)")
+        mark_mock.assert_called_once_with(sender)
+        alert_mock.assert_called_once()
+        assert "CopyTech" in alert_mock.call_args.args[0]
+        send_mock.assert_called_once()
+        assert send_mock.call_args.args[0] == sender
+
+    def test_vendor_short_circuits_before_state_machine(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A vendor message must never reach the print/book bot state machine."""
+        bot_calls = []
+        monkeypatch.setattr(
+            sys.modules["whatsapp_bot"], "handle_message",
+            lambda *a, **kw: bot_calls.append(a), raising=False,
+        )
+        with patch.object(api_mod, "_mark_session_needs_human"), \
+             patch.object(sys.modules["whatsapp_notify"], "send_staff_alert"), \
+             patch.object(sys.modules["whatsapp_notify"], "_send"):
+            api_mod._handle_text("918547727272", "Xerox OEM toner ×3")
+        assert bot_calls == [], "vendor message leaked into the bot state machine"

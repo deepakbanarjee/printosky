@@ -852,6 +852,50 @@ def _should_handoff_text(text: str) -> bool:
     return sum(1 for ch in t if ch.isalpha()) >= 2
 
 
+# ── Known B2B vendors (toner / supply buyers) ────────────────────────────────
+# Messages from these numbers are NEVER print orders. Hand straight to a human
+# (Anu) on every message; do not run the print/book bot. Extend without a
+# redeploy via the VENDOR_PHONES env: comma-separated "phone=Label" pairs.
+KNOWN_VENDORS = {
+    "918547727272": "CopyTech India (CTI) — Xerox OEM toner, DTDC courier",
+}
+
+
+def _vendor_name(phone: str):
+    """Return the vendor label if this phone is a known B2B vendor, else None."""
+    p = (phone or "").lstrip("+")
+    if p in KNOWN_VENDORS:
+        return KNOWN_VENDORS[p]
+    for pair in os.environ.get("VENDOR_PHONES", "").split(","):
+        num, sep, label = pair.partition("=")
+        if sep and num.strip().lstrip("+") == p:
+            return label.strip() or "Vendor"
+    return None
+
+
+def _handle_vendor_message(sender: str, text: str, vendor: str) -> None:
+    """Vendor (B2B toner/supply) message: bypass the order bot, flag for a human,
+    alert Anu immediately, ack the vendor. Best-effort; never raises."""
+    from whatsapp_notify import _send, send_staff_alert
+
+    _mark_session_needs_human(sender)
+    try:
+        send_staff_alert(
+            f"🏷️ *Vendor message* — {vendor}\n"
+            f"From: {_fmt_phone(sender)}\n"
+            f"“{(text or '').strip()[:300]}”\n\n"
+            "This is a supply/toner order, not a print job. "
+            "Open Conversations → 'Needs human' to reply."
+        )
+    except Exception as exc:
+        logger.warning(f"vendor send_staff_alert failed for {sender}: {exc}")
+    try:
+        _send(sender, "🙏 Thanks — I've passed this to our team. "
+                      "Someone will confirm your order shortly.")
+    except Exception as exc:
+        logger.warning(f"vendor ack failed for {sender}: {exc}")
+
+
 def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     """Route a customer text through the bot state machine and send replies."""
     from whatsapp_bot import handle_message
@@ -900,6 +944,13 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
                         )
             except Exception as _oe:
                 logger.error("GETOTP handler error %s: %s", sender, _oe)
+        return
+
+    # Known B2B vendor (toner/supply buyer) — never a print order. Hand to a
+    # human on every message instead of running the order bot.
+    _vendor = _vendor_name(sender)
+    if _vendor:
+        _handle_vendor_message(sender, text, _vendor)
         return
 
     if _is_help_keyword(text):
