@@ -4529,8 +4529,8 @@ function renderBookOrders(rows) {
   }).join('');
 }
 
-async function confirmBookOrder(code) {
-  if (!confirm(`Confirm payment received for ${code}?\n\nThe customer will be messaged "order confirmed".`)) return;
+async function confirmBookOrder(code, skipPrompt) {
+  if (!skipPrompt && !confirm(`Confirm payment received for ${code}?\n\nThe customer will be messaged "order confirmed".`)) return;
   try {
     const r = await fetch(`${ACAD_API}/admin/book-orders/${encodeURIComponent(code)}/confirm`, {
       method: 'POST',
@@ -4960,6 +4960,13 @@ async function submitEditBookOrder() {
     const data = await r.json().catch(() => ({}));
     if (!r.ok || !data.ok) { err.textContent = `Failed: ${data.error || ('HTTP ' + r.status)}`; return; }
     closeEditBookOrder();
+    // Manual payment edit on a not-yet-confirmed order — offer to move it
+    // straight to Ready to Dispatch so it doesn't get stuck (the Rasmi case).
+    if (data.suggest_confirm &&
+        confirm(`Payment updated for ${code}.\n\nMove this order to Ready to Dispatch now?\n(The customer will be messaged "order confirmed".)`)) {
+      await confirmBookOrder(code, true);
+      return;
+    }
     loadBookOrders();
   } catch (e) { err.textContent = `Network error: ${e.message}`; }
 }

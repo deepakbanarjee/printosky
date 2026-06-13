@@ -182,6 +182,51 @@ def _make_awaiting_order(db, items, code="XTR-TEST-0001"):
     return code
 
 
+# ── pasted payment text → routed to Anu, never the screenshot loop ────────────
+
+RASMI_SMS = ("Rs.275.00 paid thru A/C XX7606 on 13-6-26 13:21:36 to OXYGEN "
+             "STUDENTS, UPI Ref 616443327414. If not done, SMS BLOCKUPI to "
+             "9901771222.-Canara Bank")
+
+
+@pytest.mark.integration
+def test_pasted_payment_text_routes_to_anu(fake):
+    db, sent = fake
+    code = _make_awaiting_order(db, {"malayalam": 1})
+    db.sessions[PHONE] = {"step": "book_pay"}
+
+    res = book_bot.maybe_handle_book(PHONE, RASMI_SMS)
+    assert res == []
+
+    # Order moves to payment_review with the reference captured.
+    assert db.orders[code]["status"] == "payment_review"
+    assert db.orders[code]["payment_ref"] == "616443327414"
+
+    # A pending payment row exists and Anu got Full/Part/Not-received buttons.
+    assert any(p["order_code"] == code for p in db.payments.values())
+    assert sent["buttons"][-1][0].startswith("pf_")
+
+    # Customer is acknowledged — NOT looped with "send a screenshot".
+    assert any("confirming it now" in m for m in sent["text"])
+    assert not any("send a screenshot" in m.lower() for m in sent["text"])
+
+
+@pytest.mark.unit
+def test_start_does_not_wipe_awaiting_payment_order(fake):
+    # Re-entering the flow (typing "books") on a confirmed-but-unpaid order used
+    # to reset items/address to empty — the bug that lost Rasmi's order.
+    db, sent = fake
+    code = _make_awaiting_order(db, {"malayalam": 1})
+    db.orders[code].update(grand_total=275, books_total=200)
+
+    res = book_bot._start(PHONE, "Priya")
+
+    assert db.orders[code]["items"] == {"malayalam": 1}      # preserved, not wiped
+    assert db.orders[code]["status"] == "awaiting_payment"
+    assert res and any("awaiting payment" in m.lower() for m in res)
+    assert sent["list"] == []                                # no fresh selection list
+
+
 @pytest.mark.integration
 def test_part_then_full_two_screenshots_confirms(fake):
     db, sent = fake
