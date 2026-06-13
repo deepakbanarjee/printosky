@@ -584,8 +584,12 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1) -> dict:
       counts:       {inbound, jobs, hours} from activity_counts(24h).
     """
     def _parse(ts):
+        # last_help_request_at is timestamptz (aware); updated_at is TEXT and
+        # often naive ("2026-06-13 06:37:10"). Force UTC so the subtraction from
+        # now(UTC) never mixes naive/aware datetimes.
         try:
-            return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
         except Exception:
             return None
 
