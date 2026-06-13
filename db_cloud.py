@@ -571,18 +571,37 @@ def mark_sla_alerted(phone: str) -> None:
         logger.warning("mark_sla_alerted error for %s: %s", phone, exc)
 
 
-def chat_audit_snapshot(unanswered_threshold_hours: int = 1) -> dict:
+_HANDOFF_ACK_MARKERS = (
+    "alerted the team",          # _handle_help_request ack
+    "passed this to our team",   # _handle_vendor_message ack
+    "a team member will reply",  # generic staff_hold ack
+)
+
+
+def _is_handoff_ack(body: str) -> bool:
+    """True if an outbound message is one of the bot's automated handoff acks.
+    An ack is NOT a human reply, so a chat whose last message is only an ack is
+    still waiting on a person."""
+    b = (body or "").lower()
+    return any(m in b for m in _HANDOFF_ACK_MARKERS)
+
+
+def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
+                        lookback_hours: int = 336) -> dict:
     """Read-only snapshot for the twice-daily chat audit (AM/PM).
 
     Returns a dict:
-      open_handoffs: customers with needs_human/staff_hold, oldest first — each
-        {phone, step, age_hours, since}. This is the queue the SLA cron CANNOT
-        see, because the bot's auto-ack ('a team member will reply') counts as a
-        reply and clears the SLA-breach test.
-      unanswered:   customers whose newest inbound has no reply (race-tolerant),
-        reusing find_sla_breaches with no cooldown for the full picture.
-      counts:       {inbound, jobs, hours} from activity_counts(24h).
+      open_handoffs: needs_human chats STILL waiting on a person — newest message
+        is inbound, an ack, or absent. Oldest first. Each
+        {phone, step, age_hours, since, last_dir}.
+      handled_stale: needs_human chats where a human already sent a real reply
+        (newest outbound is not an ack) → the flag is stale. The cron clears
+        these; the digest does NOT escalate them.
+      unanswered:    newest inbound > threshold with no reply (race-tolerant).
+      counts:        {inbound, jobs, hours} from activity_counts(24h).
     """
+    from datetime import timedelta
+
     def _parse(ts):
         # last_help_request_at is timestamptz (aware); updated_at is TEXT and
         # often naive ("2026-06-13 06:37:10"). Force UTC so the subtraction from
@@ -593,7 +612,7 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1) -> dict:
         except Exception:
             return None
 
-    out = {"open_handoffs": [], "unanswered": [], "counts": {}}
+    out = {"open_handoffs": [], "handled_stale": [], "unanswered": [], "counts": {}}
     now = datetime.now(timezone.utc)
 
     try:
@@ -605,22 +624,54 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1) -> dict:
             .data
             or []
         )
-        handoffs = []
+
+        # Newest message per flagged phone → tells "still waiting" from
+        # "already replied (stale flag)".
+        last_by_phone: dict = {}
+        try:
+            cutoff = (now - timedelta(hours=lookback_hours)).isoformat()
+            log_rows = (
+                _client().table("conversation_log")
+                .select("phone,direction,body,created_at")
+                .gte("created_at", cutoff)
+                .order("created_at", desc=True)
+                .limit(4000)
+                .execute()
+                .data
+                or []
+            )
+            for lr in log_rows:               # desc order → first seen is newest
+                last_by_phone.setdefault(lr.get("phone"), lr)
+        except Exception as exc:
+            logger.error("chat_audit_snapshot last-message error: %s", exc)
+
+        waiting, handled = [], []
         for r in rows:
+            phone = r.get("phone")
             since = _parse(r.get("last_help_request_at")) or _parse(r.get("updated_at"))
             age_h = round((now - since).total_seconds() / 3600.0, 1) if since else None
-            handoffs.append({
-                "phone": r.get("phone"),
+            last = last_by_phone.get(phone)
+            last_dir = (last or {}).get("direction")
+            # Handled only when a human's real reply is the last word.
+            is_handled = bool(
+                last and last_dir == "outbound"
+                and not _is_handoff_ack(last.get("body"))
+            )
+            entry = {
+                "phone": phone,
                 "step": r.get("step"),
                 "age_hours": age_h,
                 "since": since.isoformat() if since else None,
-            })
-        # Oldest first; unknown-age (no timestamp) sorted last.
-        handoffs.sort(
+                "last_dir": last_dir,
+            }
+            (handled if is_handled else waiting).append(entry)
+
+        waiting.sort(
             key=lambda x: (x["age_hours"] is not None, x["age_hours"] or 0.0),
             reverse=True,
         )
-        out["open_handoffs"] = handoffs
+        out["open_handoffs"] = waiting
+        out["handled_stale"] = handled
     except Exception as exc:
         logger.error("chat_audit_snapshot handoffs error: %s", exc)
 
@@ -637,6 +688,19 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1) -> dict:
         logger.error("chat_audit_snapshot counts error: %s", exc)
 
     return out
+
+
+def clear_needs_human(phone: str) -> bool:
+    """Clear the needs_human flag for a phone (best-effort). Used by the chat
+    audit to self-heal stale flags where a human has already replied."""
+    try:
+        _client().table("bot_sessions").update(
+            {"needs_human": False}
+        ).eq("phone", phone).execute()
+        return True
+    except Exception as exc:
+        logger.warning("clear_needs_human(%s) failed: %s", phone, exc)
+        return False
 
 
 def activity_counts(hours: int = 24) -> dict:

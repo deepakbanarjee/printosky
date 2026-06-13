@@ -1969,10 +1969,20 @@ def _handle_cron_chat_audit(h) -> None:
         from db_cloud import chat_audit_snapshot
         from whatsapp_notify import _send
 
+        from db_cloud import clear_needs_human
+
         snap = chat_audit_snapshot()
         handoffs = snap.get("open_handoffs", [])
+        stale = snap.get("handled_stale", [])
         unanswered = snap.get("unanswered", [])
         inbound_24h = (snap.get("counts") or {}).get("inbound", "?")
+
+        # Self-heal: a human already replied to these (last outbound isn't an
+        # ack), so the needs_human flag is stale — clear it.
+        resolved = 0
+        for s in stale:
+            if clear_needs_human(s.get("phone")):
+                resolved += 1
 
         lines = ["🗒️ *Printosky chat audit*", ""]
         if handoffs:
@@ -1986,6 +1996,8 @@ def _handle_cron_chat_audit(h) -> None:
                 lines.append(f"  …and {len(handoffs) - 10} more")
         else:
             lines.append("🧑 Handoff queue: clear ✅")
+        if resolved:
+            lines.append(f"♻️ Auto-resolved {resolved} already-replied")
         lines.append("")
         if unanswered:
             sample = ", ".join("…" + (b.get("phone") or "")[-4:] for b in unanswered[:5])
@@ -2001,6 +2013,7 @@ def _handle_cron_chat_audit(h) -> None:
         _json_response(h, 200, {
             "ok": True,
             "handoffs": len(handoffs),
+            "resolved": resolved,
             "unanswered": len(unanswered),
             "alerted": bool(sent),
         })
