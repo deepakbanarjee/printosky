@@ -142,3 +142,48 @@ def test_line_items_skips_zero():
     lines = bc.line_items({"malayalam": 1, "hindi": 0})
     assert len(lines) == 1
     assert lines[0]["key"] == "malayalam"
+
+
+# ── parse_payment_text ────────────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_parse_payment_text_canara_bank_sms():
+    # The exact message Rasmi pasted instead of a screenshot.
+    sms = ("Rs.275.00 paid thru A/C XX7606 on 13-6-26 13:21:36 to OXYGEN "
+           "STUDENTS, UPI Ref 616443327414. If not done, SMS BLOCKUPI to "
+           "9901771222.-Canara Bank")
+    r = bc.parse_payment_text(sms)
+    assert r is not None
+    assert r["ref"] == "616443327414"
+    assert r["amount"] == 275.0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("text,ref", [
+    ("Paid ₹664 to Oxygen, UPI transaction ID 410112233445", "410112233445"),
+    ("₹275 sent. UTR: ABCD12345678", "ABCD12345678"),
+    ("Transaction successful Ref no 998877665544 amount Rs 225", "998877665544"),
+    ("credited Rs.150 txn 123456789012", "123456789012"),
+    ("Payment received. UPI Reference 555000111222", "555000111222"),
+])
+def test_parse_payment_text_recognises_references(text, ref):
+    r = bc.parse_payment_text(text)
+    assert r is not None
+    assert r["ref"] == ref
+
+
+@pytest.mark.unit
+def test_parse_payment_text_paid_claim_without_reference():
+    # A 'paid' claim with an amount but no reference still routes (ref None).
+    r = bc.parse_payment_text("I have paid Rs 275 just now")
+    assert r is not None
+    assert r["amount"] == 275.0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("text", [
+    "", "  ", "ok", "1", "books", "Aksharamrutham", "how many days will it take",
+    "9876543210", "thanks", "no preference", "yes confirm", "275",
+])
+def test_parse_payment_text_ignores_ordinary_chat(text):
+    assert bc.parse_payment_text(text) is None

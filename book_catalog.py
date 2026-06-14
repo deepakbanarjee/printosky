@@ -287,3 +287,64 @@ def line_items(items: dict[str, int]) -> list[dict]:
             "line_total": float(unit * q),
         })
     return out
+
+
+# ── payment-confirmation text detection ───────────────────────────────────────
+# Customers sometimes paste their bank/UPI confirmation text instead of sending a
+# screenshot, e.g. "Rs.275.00 paid ... to OXYGEN STUDENTS, UPI Ref 616443327414
+# ... -Canara Bank". parse_payment_text recognises such a message so the bot can
+# route it to staff (Anu) for verification instead of looping "send a screenshot".
+
+_PAY_REF_RE = re.compile(
+    r"\b(?:upi\s*ref(?:erence)?|ref(?:erence)?(?:\s*(?:no|number|id))?|utr|"
+    r"txn(?:\s*(?:no|id))?|transaction\s*(?:id|no|number|ref))"
+    r"\s*[:#.\-]?\s*((?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]{6,})",
+    re.IGNORECASE,
+)
+_PAY_AMOUNT_RE = re.compile(
+    r"(?:rs\.?|inr|₹)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)", re.IGNORECASE)
+_PAY_WORD_RE = re.compile(
+    r"\b(paid|credited|debited|received|sent|success(?:ful)?|transferred)\b",
+    re.IGNORECASE,
+)
+_PAY_LONGNUM_RE = re.compile(r"\b(\d{10,})\b")
+
+
+def parse_payment_text(text: str) -> dict | None:
+    """Detect a pasted payment/UPI confirmation. Returns {"ref", "amount"} or None.
+
+    Heuristic — a message is treated as a payment confirmation when it has an
+    explicit transaction-reference label (UPI Ref / UTR / Txn ID / …), OR a
+    'paid/credited/…' verb together with a money amount or a long (>=10 digit)
+    number. Conservative enough that ordinary chat ("ok", "how many copies", a
+    bare phone number, a single digit) returns None.
+    """
+    if not text:
+        return None
+    t = text.strip()
+    if len(t) < 8:
+        return None
+
+    ref = None
+    m = _PAY_REF_RE.search(t)
+    if m:
+        ref = m.group(1)
+
+    amount = None
+    am = _PAY_AMOUNT_RE.search(t)
+    if am:
+        try:
+            amount = float(am.group(1).replace(",", ""))
+        except ValueError:
+            amount = None
+
+    has_word = bool(_PAY_WORD_RE.search(t))
+    longnum = _PAY_LONGNUM_RE.search(t)
+
+    is_payment = bool(ref) or (has_word and (amount is not None or longnum is not None))
+    if not is_payment:
+        return None
+
+    if ref is None and longnum is not None:
+        ref = longnum.group(1)
+    return {"ref": ref, "amount": amount}

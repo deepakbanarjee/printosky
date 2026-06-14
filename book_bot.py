@@ -356,6 +356,42 @@ def _forward_to_verifier(order: dict, payment: dict, content: bytes, mime_type: 
     )
 
 
+def _forward_payment_text_to_verifier(order: dict, payment: dict,
+                                      raw_text: str, parsed: dict) -> None:
+    """Forward a *pasted* payment confirmation (no screenshot) to Anu.
+
+    Mirrors _forward_to_verifier but sends the customer's text instead of an
+    image, reusing the same Full / Part / Not-received buttons so Anu's tap
+    drives the existing verify -> confirm path.
+    """
+    code    = order.get("order_code")
+    payid   = payment.get("id")
+    grand   = bc.compute_totals(order.get("items") or {})["grand_total"]
+    paid    = _dbc.book_amount_paid(code)
+    balance = grand - paid
+    ref     = (parsed or {}).get("ref")
+    dtdc    = order.get("dtdc_center")
+    dtdc_line = f"\n🏢 DTDC: {dtdc}" if dtdc else ""
+    ref_line  = f"\n🔖 Ref: {ref}" if ref else ""
+    caption = (
+        "💳 *Payment to verify* — customer pasted details (no screenshot)\n"
+        f"Order: {code}\n"
+        f"Total ₹{grand:.0f} · Paid ₹{paid:.0f} · *Balance ₹{balance:.0f}*{ref_line}\n"
+        f"Customer: {order.get('name') or '—'} "
+        f"+{re.sub(r'[^0-9]', '', order.get('phone', ''))}\n"
+        f"Items: {_cart_line(order.get('items') or {})}\n"
+        f"📍 {order.get('address', '')}{dtdc_line}\n\n"
+        f"— pasted message —\n{(raw_text or '').strip()[:600]}"
+    )
+    _send_text(VERIFIER_PHONE, caption)
+    _send_buttons(
+        VERIFIER_PHONE, f"Full or part payment for *{code}*?",
+        [(f"pf_{payid}", f"✅ Full ₹{balance:.0f}"),
+         (f"pp_{payid}", "➗ Part payment"),
+         (f"pr_{payid}", "❌ Not received")],
+    )
+
+
 # ── flow ──────────────────────────────────────────────────────────────────────
 
 def _address_prompt() -> str:
@@ -397,15 +433,20 @@ def _begin_counting(phone: str, order_code: str, keys: list, editing: bool) -> N
 
 def _start(phone: str, name: str | None, force_new: bool = False) -> list[str]:
     active = {} if force_new else _dbc.get_active_book_order(phone)
-    if active and active.get("status") in ("collecting", "awaiting_payment"):
+    if active and active.get("status") == "collecting":
         code = active["order_code"]
         _dbc.update_book_order(code, items={}, flow_cursor={}, status="collecting",
                                books_total=0, courier=0, grand_total=0,
                                address=None, contact_phone=None, payment_proof_url=None)
-    elif active and active.get("status") == "payment_review":
+    elif active and active.get("status") in ("awaiting_payment", "payment_review",
+                                             "partially_paid"):
+        # Do NOT wipe an order the customer already confirmed (and may have paid) —
+        # re-typing "books" must not destroy items/address. Point them at payment
+        # or an explicit fresh start.
         return [
-            f"Your previous order *{active['order_code']}* is being confirmed. "
-            "We'll message you shortly. To place a *new* order, reply *NEW*."
+            f"Your order *{active['order_code']}* is awaiting payment confirmation. "
+            "Send your payment screenshot (or the payment details) here, or reply "
+            "*NEW* to start a fresh order. 🙏"
         ]
     else:
         code = _new_order_code()
@@ -698,6 +739,24 @@ def _handle_pay(phone: str, text: str, order: dict) -> list[str]:
             pass
         _send_text(phone, "❌ Your order has been *cancelled*. Reply *books* "
                           "anytime to start a new order. 🙏")
+        return []
+    pay = bc.parse_payment_text(text)
+    if pay:
+        # Customer pasted their bank/UPI confirmation instead of a screenshot.
+        # Record a pending payment row and route it to Anu to confirm, exactly
+        # like a screenshot — never loop "send a screenshot" on a paid customer.
+        payment = _dbc.add_book_payment(code, None)
+        _dbc.update_book_order(code, status="payment_review",
+                               payment_ref=pay.get("ref") or None)
+        _dbc.save_session(DB, phone, step="book_pay", needs_human=True)
+        try:
+            _forward_payment_text_to_verifier(_dbc.get_book_order(code) or order,
+                                              payment, text, pay)
+        except Exception as exc:
+            logger.error("forward payment text to verifier failed for %s: %s", code, exc)
+        _send_text(phone,
+                   f"✅ Got your payment details for *{code}*.\n\n"
+                   "We're confirming it now — you'll get an update shortly. Thank you! 🙏")
         return []
     _send_text(phone, "Please complete the UPI payment and *send a screenshot* of "
                       "the confirmation here. 🙏")
