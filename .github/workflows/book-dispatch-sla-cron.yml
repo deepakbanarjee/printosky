@@ -1,0 +1,27 @@
+name: Printosky book dispatch SLA (3-day order→dispatch watch → Anu)
+
+# Once-daily check for book orders that are confirmed/paid but still not
+# dispatched after the 3-day (72h) SLA, measured from confirmed_at. Alerts the
+# ops recipient (ANU_ALERT_PHONE) with the breaching order codes. Vercel Hobby
+# caps crons at once/day, so this runs from GitHub Actions like the other crons.
+#
+# 09:00 IST == 03:30 UTC (morning, before the day's despatch run).
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch: {}        # allow manual run from the Actions tab
+
+jobs:
+  dispatch-sla:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Book dispatch SLA check
+        run: |
+          echo "Calling book-dispatch-sla..."
+          code=$(curl -s -o /tmp/sla.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://printosky.vercel.app/cron/book-dispatch-sla")
+          echo "HTTP $code"; cat /tmp/sla.json || true
+          exit 0
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}

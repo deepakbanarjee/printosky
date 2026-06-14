@@ -76,3 +76,44 @@ def test_create_walk_in_order_does_not_raise(monkeypatch):
         {"malayalam": 1}, 200.0, 0.0, 200.0, "cash", "delivered")
     assert row == {"order_code": "XTR-W"}
     chain.table.assert_called_with("book_orders")
+
+
+# ── 3-day dispatch SLA (find_book_dispatch_sla_breaches) ──────────────────────
+
+def _book_confirmed_row(code, hours_ago):
+    from datetime import datetime, timezone, timedelta
+    ts = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+    return {"order_code": code, "name": code, "phone": "919000000000",
+            "contact_phone": None, "confirmed_at": ts}
+
+
+def _sla_chain(monkeypatch, rows):
+    chain = MagicMock()
+    (chain.table.return_value.select.return_value.eq.return_value.is_.return_value
+        .order.return_value.limit.return_value.execute.return_value.data) = rows
+    monkeypatch.setattr(db_cloud, "_client", lambda: chain)
+    return chain
+
+
+@pytest.mark.unit
+def test_sla_breaches_filters_past_window_and_sorts_oldest_first(monkeypatch):
+    # 100h and 80h are past the 72h SLA; 10h is within it.
+    _sla_chain(monkeypatch, [_book_confirmed_row("XTR-A", 100),
+                             _book_confirmed_row("XTR-FRESH", 10),
+                             _book_confirmed_row("XTR-B", 80)])
+    out = db_cloud.find_book_dispatch_sla_breaches(72)
+    assert [o["order_code"] for o in out] == ["XTR-A", "XTR-B"]  # oldest breach first
+    assert out[0]["age_hours"] >= out[1]["age_hours"] >= 72
+
+
+@pytest.mark.unit
+def test_sla_breaches_empty_when_all_within_window(monkeypatch):
+    _sla_chain(monkeypatch, [_book_confirmed_row("XTR-NEW", 5),
+                             _book_confirmed_row("XTR-NEW2", 1)])
+    assert db_cloud.find_book_dispatch_sla_breaches(72) == []
+
+
+@pytest.mark.unit
+def test_sla_breaches_skips_rows_missing_confirmed_at(monkeypatch):
+    _sla_chain(monkeypatch, [{"order_code": "XTR-NOTS", "confirmed_at": None}])
+    assert db_cloud.find_book_dispatch_sla_breaches(72) == []

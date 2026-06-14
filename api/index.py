@@ -2243,6 +2243,52 @@ def _handle_cron_abandoned_carts(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_cron_book_dispatch_sla(h) -> None:
+    """GET /cron/book-dispatch-sla — flag book orders that are confirmed/paid but
+    not dispatched within the 3-day (72h) SLA, and alert the ops recipient (Anu).
+
+    Clock runs from ``confirmed_at`` (when the order became ours to ship), so
+    orders still awaiting the customer's payment never count against us. Tune the
+    window with BOOK_DISPATCH_SLA_HOURS. Read-only; safe to run anytime.
+    Auth: optional `Authorization: Bearer ${CRON_SECRET}` when CRON_SECRET is set.
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected and h.headers.get("Authorization", "") != f"Bearer {expected}":
+        _json_response(h, 401, {"error": "Unauthorized"})
+        return
+    try:
+        from db_cloud import find_book_dispatch_sla_breaches
+        sla_hours = int(os.environ.get("BOOK_DISPATCH_SLA_HOURS", "72"))
+        breaches = find_book_dispatch_sla_breaches(sla_hours)
+        sent = None
+        if breaches:
+            days = sla_hours / 24.0
+            lines = [f"📦 *Book dispatch SLA* — {len(breaches)} past {days:.0f} days", ""]
+            for b in breaches[:15]:
+                who = b.get("name") or _fmt_phone(b.get("phone") or "")
+                lines.append(f"• {b['order_code']} — {who} — {b['age_hours'] / 24:.1f}d")
+            if len(breaches) > 15:
+                lines.append(f"  …and {len(breaches) - 15} more")
+            lines.append("")
+            lines.append("Dispatch these + mark them in admin → Book orders.")
+            msg = "\n".join(lines)
+            from datetime import datetime, timezone, timedelta
+            when = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %H:%M IST")
+            summary = (f"{len(breaches)} book orders past the {days:.0f}-day dispatch SLA "
+                       f"(oldest {breaches[0]['age_hours'] / 24:.1f}d)")
+            try:
+                # Window-proof template path (Track B); auto-used once available.
+                from whatsapp_notify import send_ops_alert
+                sent = send_ops_alert(_alert_phone(), summary, when, fallback=msg)
+            except ImportError:
+                from whatsapp_notify import _send
+                sent = _send(_alert_phone(), msg)
+        _json_response(h, 200, {"ok": True, "breaches": len(breaches), "alerted": bool(sent)})
+    except Exception as exc:
+        logger.error("book-dispatch-sla cron error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_cron_daily_activity(h) -> None:
     """GET /cron/daily-activity — once-daily 'is the pipeline alive?' check.
 
@@ -2478,6 +2524,10 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/cron/chat-audit" or self.path.startswith("/cron/chat-audit?"):
             _handle_cron_chat_audit(self)
+            return
+
+        if self.path == "/cron/book-dispatch-sla" or self.path.startswith("/cron/book-dispatch-sla?"):
+            _handle_cron_book_dispatch_sla(self)
             return
 
         # ── Operator queue (P0 Day 2.5) ──────────────────────────────────────

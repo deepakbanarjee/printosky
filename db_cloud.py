@@ -1207,6 +1207,57 @@ def list_book_orders(status: str | None = None, limit: int = 100) -> list:
         return []
 
 
+def find_book_dispatch_sla_breaches(sla_hours: int = 72) -> list[dict]:
+    """Book orders that are paid/confirmed but still not dispatched after the
+    dispatch SLA (default 72h = 3 days, measured from ``confirmed_at`` — i.e.
+    from when the order became ours to ship, not from when the customer started).
+
+    Returns ``[{order_code, name, phone, confirmed_at, age_hours}]`` oldest-first
+    (worst breach first). Orders awaiting the customer's own payment are excluded
+    because their status isn't 'confirmed' yet.
+    """
+    from datetime import datetime, timezone
+    try:
+        rows = (
+            _client().table("book_orders")
+            .select("order_code,name,phone,contact_phone,confirmed_at")
+            .eq("status", "confirmed")
+            .is_("dispatched_at", "null")
+            .order("confirmed_at", desc=False)
+            .limit(300)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as exc:
+        logger.error("find_book_dispatch_sla_breaches error: %s", exc)
+        return []
+
+    now = datetime.now(timezone.utc)
+    out = []
+    for r in rows:
+        ca = r.get("confirmed_at")
+        if not ca:
+            continue  # 'confirmed' without a timestamp — can't age it; skip
+        try:
+            dt = datetime.fromisoformat(str(ca).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        age_hours = (now - dt).total_seconds() / 3600.0
+        if age_hours >= sla_hours:
+            out.append({
+                "order_code":   r.get("order_code"),
+                "name":         r.get("name"),
+                "phone":        r.get("contact_phone") or r.get("phone"),
+                "confirmed_at": ca,
+                "age_hours":    age_hours,
+            })
+    out.sort(key=lambda x: x["age_hours"], reverse=True)
+    return out
+
+
 def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
                          address: str | None, items: dict,
                          books_total: float, courier: float, grand_total: float,
