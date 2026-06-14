@@ -22,6 +22,12 @@ def _stub_module(name: str, **attrs):
     return mod
 
 
+# Preserve the real modules first. Every test file is imported at collection
+# time, so an unconditional sys.modules swap below would replace db_cloud with a
+# stub for the ENTIRE run and break every other file's db_cloud-dependent tests.
+# We let handlers_notes bind to the stubs, then restore the real modules.
+_REAL_MODULES = {n: sys.modules.get(n) for n in ("pdfplumber", "db_cloud")}
+
 # pdfplumber stub
 _pdf_stub = _stub_module("pdfplumber")
 _pdf_stub.open = MagicMock()
@@ -56,6 +62,27 @@ from api.handlers_notes import (  # noqa: E402
     _count_pdf_pages,
     _match_category,
 )
+
+# handlers_notes has now captured the stubs above (its db_cloud / pdfplumber
+# bindings stay stubbed for THIS file's tests). Restore the real modules in
+# sys.modules so no other test file inherits the stub — this was corrupting
+# db_cloud for the whole suite (39 failures + 17 errors in CI).
+for _name, _mod in _REAL_MODULES.items():
+    if _mod is not None:
+        sys.modules[_name] = _mod
+    else:
+        sys.modules.pop(_name, None)
+
+
+@pytest.fixture(autouse=True)
+def _stub_db_cloud_for_notes(monkeypatch):
+    """handlers_notes lazily imports db_cloud inside its functions, so re-install
+    the stubs in sys.modules for the duration of each test in THIS file only.
+    monkeypatch restores the real modules afterwards, so other test files keep
+    the genuine db_cloud (this file used to leak its stub across the whole run)."""
+    monkeypatch.setitem(sys.modules, "db_cloud", _db_stub)
+    monkeypatch.setitem(sys.modules, "pdfplumber", _pdf_stub)
+    yield
 
 
 # ── is_notes_trigger ──────────────────────────────────────────────────────────
