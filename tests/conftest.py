@@ -12,6 +12,16 @@ from dotenv import load_dotenv
 
 os.environ.setdefault("PRINTOSKY_DB", ":memory:")
 
+# razorpay_integration.py reads these at *import* time (os.environ["..."]) and
+# raises KeyError if unset. Without them the pre-import loop below fails silently,
+# leaving razorpay_integration absent from sys.modules — so the first test file
+# using the `if mod not in sys.modules: ModuleType(mod)` guard installs an empty
+# stub that pollutes razorpay/webhook/wa-cost tests for the whole run. Set
+# dummies first so the real module imports and every guard becomes a no-op.
+os.environ.setdefault("RAZORPAY_KEY_ID", "test_key")
+os.environ.setdefault("RAZORPAY_KEY_SECRET", "test_secret")
+os.environ.setdefault("RAZORPAY_WEBHOOK_SECRET", "test_webhook_secret")
+
 # Force the SQLite path in whatsapp_bot.py for unit tests. whatsapp_bot.py
 # does an import-time check on SUPABASE_URL and rebinds its module-level
 # save_session/get_session/clear_session to db_cloud.* if set. Tests that
