@@ -298,9 +298,21 @@ def send_pickup_completed(sender: str, pickup_code: str,
     return _send(sender, msg)
 
 
+def _now_ist() -> str:
+    """Current wall-clock time as a one-line IST stamp for the ops template ({{2}})."""
+    from datetime import datetime, timezone, timedelta
+    return datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %H:%M IST")
+
+
 def send_staff_alert(message: str) -> bool:
-    """Send an alert to the staff/escalation number (Anu when configured)."""
-    return _send(ALERT_PHONE, f"⚠️ *Staff Alert*\n\n{message}")
+    """Alert the staff/escalation number (Anu when configured).
+
+    Routes through the approved ops template so it delivers regardless of Meta's
+    24h customer-service window; falls back to free-form text if the template is
+    unavailable or the send errors.
+    """
+    return send_ops_alert(ALERT_PHONE, message, _now_ist(),
+                          fallback=f"⚠️ *Staff Alert*\n\n{message}")
 
 
 def send_timeout_alert(job_id: str, step: str) -> bool:
@@ -312,7 +324,8 @@ def send_timeout_alert(job_id: str, step: str) -> bool:
         "Customer may need a manual quote.\n"
         f"Type: `quote {job_id} AMOUNT`"
     )
-    return _send(ALERT_PHONE, msg)
+    summary = f"Bot timeout on {job_id} at '{step}' — may need a manual quote"
+    return send_ops_alert(ALERT_PHONE, summary, _now_ist(), fallback=msg)
 
 
 # ── Operational alerts via approved template (delivers outside the 24h window) ─

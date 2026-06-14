@@ -150,15 +150,21 @@ def test_send_job_ready(monkeypatch):
 
 
 def test_send_staff_alert(monkeypatch):
-    m = _patch_send(monkeypatch)
+    # Now delivered template-first (survives Meta's 24h window); the message
+    # becomes the {{1}} summary param. Fallback path is covered in test_ops_alert.
+    tmpl = MagicMock(return_value=True)
+    monkeypatch.setattr(wn, "_send_meta_template", tmpl)
     result = wn.send_staff_alert("Printer jam on floor 1")
     assert result is True
-    assert "Printer jam" in m.call_args[0][1]
+    assert tmpl.call_args[0][1] == wn.OPS_ALERT_TEMPLATE
+    assert tmpl.call_args[0][2][0] == "Printer jam on floor 1"
 
 
 def test_send_timeout_alert(monkeypatch):
-    m = _patch_send(monkeypatch)
+    tmpl = MagicMock(return_value=True)
+    monkeypatch.setattr(wn, "_send_meta_template", tmpl)
     result = wn.send_timeout_alert("JOB-006", "colour")
     assert result is True
-    assert "JOB-006" in m.call_args[0][1]
-    assert "colour" in m.call_args[0][1]
+    summary = tmpl.call_args[0][2][0]
+    assert "JOB-006" in summary
+    assert "colour" in summary
