@@ -813,6 +813,18 @@ def _alert_phone() -> str:
     return os.environ.get("ANU_ALERT_PHONE") or OWNER_ALERT_PHONE
 
 
+def _alert_ops(summary: str, fallback: str) -> bool:
+    """Send a scheduled ops alert to the alert recipient via the approved
+    template (delivers regardless of Meta's 24h window), with free-form fallback.
+
+    ``summary`` is the one-line headline ({{1}}); ``fallback`` is the full
+    free-form message used when the template is unavailable or the send errors."""
+    from datetime import datetime, timezone, timedelta
+    from whatsapp_notify import send_ops_alert
+    when = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %H:%M IST")
+    return send_ops_alert(_alert_phone(), summary, when, fallback=fallback)
+
+
 def _session_is_stale(session: dict) -> bool:
     """True if the session's last update is older than STALE_SESSION_HOURS."""
     ts = session.get("updated_at")
@@ -2009,7 +2021,19 @@ def _handle_cron_chat_audit(h) -> None:
         lines.append("Open printosky.com/admin → *Conversations* → 'Needs human'.")
         msg = "\n".join(lines)
 
-        sent = _send(_alert_phone(), msg)
+        # Concise one-liner for the template ({{1}}); the full digest above is
+        # the free-form fallback and also lives in the admin panel.
+        oldest_h = max((hf.get("age_hours") or 0) for hf in handoffs) if handoffs else 0
+        summary = (
+            (f"{len(handoffs)} waiting for a human"
+             + (f" (oldest {oldest_h:.0f}h)" if handoffs else ""))
+            + f"; {len(unanswered)} unanswered >1h; {inbound_24h} inbound/24h"
+            + (f"; auto-resolved {resolved}" if resolved else "")
+        )
+        from datetime import datetime, timezone, timedelta
+        when = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %H:%M IST")
+        from whatsapp_notify import send_ops_alert
+        sent = send_ops_alert(_alert_phone(), summary, when, fallback=msg)
         _json_response(h, 200, {
             "ok": True,
             "handoffs": len(handoffs),
@@ -2054,12 +2078,14 @@ def _handle_cron_sla_check(h) -> None:
                 "Please check oxygen admin → *Conversations* tab and reply, "
                 "or visit printosky.com/admin."
             )
-            sent = _send(_alert_phone(), msg)
+            summary = (f"{count} customer{'s' if count != 1 else ''} waiting >1h "
+                       f"for a reply (last4: {sample})")
+            sent = _alert_ops(summary, msg)
             if sent:
                 for b in breaches:
                     mark_sla_alerted(b["phone"])
             else:
-                logger.warning("SLA alert send failed (Meta 24h window? template needed?)")
+                logger.warning("SLA alert send failed (template + free-form both failed)")
         _json_response(h, 200, {
             "ok": True,
             "breaches": len(breaches),
@@ -2158,7 +2184,8 @@ def _handle_cron_store_pc_check(h) -> None:
 
         sent = []
         if decision["send_opening"]:
-            if _send(_alert_phone(), sd.compose_opening_message(now_ist.date())):
+            _open_msg = sd.compose_opening_message(now_ist.date())
+            if _alert_ops("Store is open — printers online", _open_msg):
                 sent.append("opening")
         if decision["send_closing"]:
             close_str = close_d.strftime("%Y-%m-%d")
@@ -2168,7 +2195,7 @@ def _handle_cron_store_pc_check(h) -> None:
             monthly = (_sd_summary_range(c, store_id, close_str[:7] + "-01", close_str)
                        if sd.is_last_working_day_of_month(close_d) else None)
             msg = sd.compose_closing_message(close_d, daily, weekly, monthly, clean=clean)
-            if _send(_alert_phone(), msg):
+            if _alert_ops(f"Store closed {close_str} — daily summary ready", msg):
                 sent.append("closing")
 
         update = {
@@ -2277,9 +2304,9 @@ def _handle_cron_daily_activity(h) -> None:
                 "Check: printosky.com/admin → Conversations, and the Meta "
                 "webhook status in Business Manager."
             )
-            alerted = _send(_alert_phone(), msg)
+            alerted = _alert_ops("Zero inbound WhatsApp in 24h — webhook may be down", msg)
             if not alerted:
-                logger.warning("daily-activity alert send failed (Meta 24h window?)")
+                logger.warning("daily-activity alert send failed (template + free-form both failed)")
 
         _json_response(h, 200, {
             "ok": True,

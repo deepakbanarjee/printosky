@@ -298,9 +298,21 @@ def send_pickup_completed(sender: str, pickup_code: str,
     return _send(sender, msg)
 
 
+def _now_ist() -> str:
+    """Current wall-clock time as a one-line IST stamp for the ops template ({{2}})."""
+    from datetime import datetime, timezone, timedelta
+    return datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %H:%M IST")
+
+
 def send_staff_alert(message: str) -> bool:
-    """Send an alert to the staff/escalation number (Anu when configured)."""
-    return _send(ALERT_PHONE, f"⚠️ *Staff Alert*\n\n{message}")
+    """Alert the staff/escalation number (Anu when configured).
+
+    Routes through the approved ops template so it delivers regardless of Meta's
+    24h customer-service window; falls back to free-form text if the template is
+    unavailable or the send errors.
+    """
+    return send_ops_alert(ALERT_PHONE, message, _now_ist(),
+                          fallback=f"⚠️ *Staff Alert*\n\n{message}")
 
 
 def send_timeout_alert(job_id: str, step: str) -> bool:
@@ -312,7 +324,83 @@ def send_timeout_alert(job_id: str, step: str) -> bool:
         "Customer may need a manual quote.\n"
         f"Type: `quote {job_id} AMOUNT`"
     )
-    return _send(ALERT_PHONE, msg)
+    summary = f"Bot timeout on {job_id} at '{step}' — may need a manual quote"
+    return send_ops_alert(ALERT_PHONE, summary, _now_ist(), fallback=msg)
+
+
+# ── Operational alerts via approved template (delivers outside the 24h window) ─
+
+# The Meta 24h customer-service window blocks free-form business-initiated text
+# unless the recipient messaged us in the last 24h. Scheduled ops alerts (the
+# chat-audit digest, SLA/owner crons) therefore go via an APPROVED utility
+# template, which delivers regardless of the window. Falls back to free-form
+# text when the template isn't approved yet or the send errors.
+OPS_ALERT_TEMPLATE = os.environ.get("OPS_ALERT_TEMPLATE", "ops_alert")
+OPS_ALERT_LANG     = os.environ.get("OPS_ALERT_TEMPLATE_LANG", "en")
+
+
+def _send_meta_template(phone: str, template_name: str,
+                        body_params: list, lang: str = "en") -> bool:
+    """Send an approved WhatsApp message template. body_params fill {{1}}, {{2}}…
+    in order. Returns True only on a 200 from Meta."""
+    if not phone or not META_PHONE_ID or not META_TOKEN:
+        return False
+    digits  = _normalise_phone(phone)
+    url     = f"{GRAPH_URL}/{META_PHONE_ID}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "to":   digits,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": lang},
+            "components": [{
+                "type": "body",
+                "parameters": [{"type": "text", "text": str(p)} for p in body_params],
+            }],
+        },
+    }
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {META_TOKEN}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            if r.status == 200:
+                try:
+                    from db_cloud import log_message
+                    log_message(digits, "outbound",
+                                (f"[template:{template_name}] " + " · ".join(str(p) for p in body_params))[:480],
+                                message_type="text")
+                except Exception:
+                    pass
+                return True
+            logger.warning(f"Meta template send failed: {r.status} {r.read().decode()[:200]}")
+            return False
+    except Exception as e:
+        try:
+            err_body = e.read().decode()[:300]  # type: ignore[attr-defined]
+        except Exception:
+            err_body = ""
+        logger.warning(f"Meta template error: {e} {err_body}")
+        return False
+
+
+def send_ops_alert(phone: str, summary: str, when: str,
+                   fallback: str | None = None) -> bool:
+    """Operational alert to ``phone`` (Anu). Tries the approved ``ops_alert``
+    template first (delivers regardless of the 24h window); falls back to
+    free-form text (window-dependent) if the template isn't approved yet or the
+    send errors. ``summary`` is flattened to one line — Meta rejects newlines in
+    template body parameters."""
+    one_line = " ".join((summary or "").split())
+    if _send_meta_template(phone, OPS_ALERT_TEMPLATE, [one_line, when], OPS_ALERT_LANG):
+        return True
+    body = fallback or f"🔔 Printosky ops alert\n\n{one_line}\n\nAs of {when} — check printosky.com/admin"
+    return _send_meta(phone, body)
 
 
 # ── File sending via Meta media upload API ────────────────────────────────────
