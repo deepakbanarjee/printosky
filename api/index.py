@@ -896,10 +896,44 @@ def _handle_vendor_message(sender: str, text: str, vendor: str) -> None:
         logger.warning(f"vendor ack failed for {sender}: {exc}")
 
 
+def _handle_tag_command(sender: str, text: str) -> None:
+    """Owner/Anu 'TAG <label>' → generate a tracked campaign link to forward to
+    Divya. Orders that arrive via the link are auto-attributed (acq_source /
+    acq_campaign), so ad performance is measurable without asking customers."""
+    from whatsapp_notify import _send
+    from book_catalog import build_tag_links
+    label = text[3:].strip()  # drop the leading 'TAG'
+    if not label:
+        _send(sender, "🏷️ *Tag generator*\nSend  `TAG <label>`  — e.g.  `TAG ig reel jan`  — "
+                      "and I'll make a tracked link to share with Divya. "
+                      "Tip: start the label with the channel (ig / fb / yt / divya) so it groups right.")
+        return
+    links = build_tag_links(label)
+    if not links:
+        _send(sender, "Couldn't build a tag from that. Try  `TAG ig reel jan`.")
+        return
+    _send(sender,
+          f"🏷️ *Tag:* `{links['tag']}`  · channel: {links['channel']}\n\n"
+          f"Forward this to Divya — every order from it is auto-tagged:\n{links['wa_link']}\n\n"
+          f"Website version:\n{links['web_link']}")
+
+
 def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     """Route a customer text through the bot state machine and send replies."""
     from whatsapp_bot import handle_message
     from whatsapp_notify import _send, send_staff_alert
+
+    # ── Campaign TAG generator (owner / Anu only) ─────────────────────────────
+    # "TAG <label>" → a tracked link to forward to Divya. Checked BEFORE the
+    # verifier handler, which otherwise consumes every message from Anu's number.
+    _tt = (text or "").strip()
+    if _tt.lower() == "tag" or _tt[:4].lower() == "tag ":
+        _auth = {re.sub(r"\D", "", p) for p in (
+            OWNER_ALERT_PHONE, _alert_phone(),
+            os.environ.get("PAYMENT_VERIFIER_PHONE", "919072034907"))}
+        if re.sub(r"\D", "", sender or "") in _auth:
+            _handle_tag_command(sender, _tt)
+            return
 
     # Payment verifier (Anu) tapping Confirm/Reject on a forwarded screenshot —
     # handle before any customer-flow routing.

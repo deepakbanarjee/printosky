@@ -20,10 +20,13 @@
 -- swallows errors — so ordering keeps working even if this migration lags the
 -- code deploy. No backfill (historical orders = unknown).
 
-ALTER TABLE book_orders ADD COLUMN IF NOT EXISTS acq_source text;
-ALTER TABLE book_orders ADD COLUMN IF NOT EXISTS acq_entry  text;
+ALTER TABLE book_orders ADD COLUMN IF NOT EXISTS acq_source   text;
+ALTER TABLE book_orders ADD COLUMN IF NOT EXISTS acq_campaign text;
+ALTER TABLE book_orders ADD COLUMN IF NOT EXISTS acq_entry    text;
 
 COMMENT ON COLUMN book_orders.acq_source IS
-  'Discovery/ad channel: instagram|facebook|youtube|divya|referral|friend|other|NULL. From a tracked link or the "how did you hear?" prompt.';
+  'Discovery/ad channel (roll-up): instagram|facebook|youtube|divya|referral|friend|other|NULL. From a tracked link or the "how did you hear?" prompt.';
+COMMENT ON COLUMN book_orders.acq_campaign IS
+  'Specific campaign tag from the tracked link, e.g. ig-reel-jan / fb-adset-2 (the per-ad granularity under acq_source). NULL if untagged.';
 COMMENT ON COLUMN book_orders.acq_entry IS
   'Order entry platform: whatsapp|website.';

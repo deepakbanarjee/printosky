@@ -187,3 +187,27 @@ def test_parse_payment_text_paid_claim_without_reference():
 ])
 def test_parse_payment_text_ignores_ordinary_chat(text):
     assert bc.parse_payment_text(text) is None
+
+
+# ── Campaign tag generator ────────────────────────────────────────────────────
+
+def test_normalize_tag_slugifies():
+    assert bc.normalize_tag("IG Reel — Jan!") == "ig-reel-jan"
+    assert bc.normalize_tag("  FB AdSet 2  ") == "fb-adset-2"
+    assert bc.normalize_tag("") == ""
+
+
+def test_tag_channel_rolls_up_by_first_segment():
+    assert bc.tag_channel("ig-reel-jan") == "instagram"
+    assert bc.tag_channel("fb-adset-2") == "facebook"
+    assert bc.tag_channel("divya-class7") == "divya"
+    assert bc.tag_channel("flyer-temple") == "other"   # unknown segment
+
+
+def test_build_tag_links_makes_wa_and_web_links():
+    out = bc.build_tag_links("IG Reel Jan")
+    assert out["tag"] == "ig-reel-jan"
+    assert out["channel"] == "instagram"
+    assert out["wa_link"] == "https://wa.me/919495706405?text=BOOKS%20%23ig-reel-jan"
+    assert out["web_link"].endswith("/books?src=ig-reel-jan")
+    assert bc.build_tag_links("") == {}

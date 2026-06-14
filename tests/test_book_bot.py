@@ -733,3 +733,11 @@ def test_parse_acq_source_reads_tracked_link_codes():
     assert book_bot._parse_acq_source("books please") is None
     assert book_bot._parse_acq_source("books") is None
     assert book_bot._parse_acq_source("") is None
+
+
+def test_parse_acq_reads_campaign_tag_and_channel():
+    # Generated '#tag' links carry per-campaign granularity, rolled up by channel.
+    assert book_bot._parse_acq("BOOKS #ig-reel-jan") == ("instagram", "ig-reel-jan")
+    assert book_bot._parse_acq("books #fb-adset-2") == ("facebook", "fb-adset-2")
+    assert book_bot._parse_acq("BOOKS ig") == ("instagram", None)   # fixed code, no campaign
+    assert book_bot._parse_acq("books please") == (None, None)

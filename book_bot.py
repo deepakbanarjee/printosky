@@ -114,20 +114,36 @@ _ACQ_CODES = {
 }
 
 
-def _parse_acq_source(text: str) -> str | None:
-    """Extract the ad/discovery channel from a 'BOOKS <code>' deep-link message.
+def _parse_acq(text: str) -> tuple:
+    """Return ``(channel, campaign)`` from a tracked 'BOOKS …' message.
 
-    Returns the canonical channel (e.g. 'instagram') for a recognised code, else
-    None — so untagged orders fall through to the 'how did you hear?' fallback
-    instead of being mis-attributed.
+    - 'BOOKS #ig-reel-jan' → ('instagram', 'ig-reel-jan')  — per-campaign tag
+    - 'BOOKS ig'           → ('instagram', None)           — fixed channel link
+    - 'books please'       → (None, None)                  — untagged → ask later
+
+    A '#tag' (emitted by the tag generator) is captured verbatim as the campaign
+    and rolled up to a channel via its first segment; only known short codes are
+    honoured otherwise, so ordinary chatter never mis-tags.
     """
     if not text:
-        return None
-    for w in re.split(r"[^\w]+", text.strip().lower()):
+        return (None, None)
+    low = text.strip().lower()
+    m = re.search(r"#([a-z0-9][a-z0-9\-]{0,39})", low)
+    if m:
+        tag = m.group(1).strip("-")
+        if tag:
+            from book_catalog import tag_channel
+            return (tag_channel(tag), tag)
+    for w in re.split(r"[^\w]+", low):
         chan = _ACQ_CODES.get(w)
         if chan:
-            return chan
-    return None
+            return (chan, None)
+    return (None, None)
+
+
+def _parse_acq_source(text: str) -> str | None:
+    """Back-compat: the discovery channel only (see _parse_acq for the campaign)."""
+    return _parse_acq(text)[0]
 
 
 def _in_print_flow(session: dict) -> bool:
@@ -463,7 +479,7 @@ def _begin_counting(phone: str, order_code: str, keys: list, editing: bool) -> N
 
 
 def _start(phone: str, name: str | None, force_new: bool = False,
-           acq_source: str | None = None) -> list[str]:
+           acq_source: str | None = None, acq_campaign: str | None = None) -> list[str]:
     active = {} if force_new else _dbc.get_active_book_order(phone)
     if active and active.get("status") == "collecting":
         code = active["order_code"]
@@ -492,6 +508,8 @@ def _start(phone: str, name: str | None, force_new: bool = False,
         _acq = {"acq_entry": "whatsapp"}
         if acq_source:
             _acq["acq_source"] = acq_source
+        if acq_campaign:
+            _acq["acq_campaign"] = acq_campaign
         _dbc.update_book_order(code, **_acq)
 
     _dbc.save_session(DB, phone, step="book_select", needs_human=False)
@@ -915,7 +933,8 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
             if track is not None:
                 return track
         if is_book_trigger(text) and not _in_print_flow(session):
-            return _start(phone, name, acq_source=_parse_acq_source(text))
+            _chan, _camp = _parse_acq(text)
+            return _start(phone, name, acq_source=_chan, acq_campaign=_camp)
         return None
 
     if step == "post_order":

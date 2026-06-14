@@ -348,3 +348,51 @@ def parse_payment_text(text: str) -> dict | None:
     if ref is None and longnum is not None:
         ref = longnum.group(1)
     return {"ref": ref, "amount": amount}
+
+
+# ── Campaign tag / tracked-link generator ─────────────────────────────────────
+# A "tag" is a campaign code embedded in a tracked deep link so an order's
+# discovery channel is known WITHOUT asking. The bot reads it from the inbound
+# message ("BOOKS #ig-reel-jan") and stamps acq_source (channel) + acq_campaign
+# (full tag). The channel is the tag's first segment, for roll-up reporting.
+BOOK_WA_NUMBER = "919495706405"   # customer-facing business WhatsApp
+
+# First-segment of a tag → canonical channel (for grouping spend by platform).
+_TAG_CHANNELS: dict[str, str] = {
+    "ig": "instagram", "insta": "instagram", "instagram": "instagram",
+    "fb": "facebook", "facebook": "facebook",
+    "yt": "youtube", "youtube": "youtube",
+    "divya": "divya", "teacher": "divya",
+    "wa": "whatsapp", "ref": "referral", "friend": "friend",
+}
+
+
+def normalize_tag(label: str) -> str:
+    """Slugify a free label into a safe campaign tag: lowercase, non-alnum → '-',
+    collapse repeats, trim, cap length. 'IG Reel — Jan!' → 'ig-reel-jan'."""
+    s = re.sub(r"[^a-z0-9]+", "-", (label or "").strip().lower()).strip("-")
+    return s[:40]
+
+
+def tag_channel(tag: str) -> str:
+    """Roll a tag up to its broad channel via the first segment; else 'other'."""
+    first = (tag or "").split("-", 1)[0]
+    return _TAG_CHANNELS.get(first, "other")
+
+
+def build_tag_links(label: str, web_base: str = "https://printosky.com") -> dict:
+    """Turn a free label into a campaign tag + ready-to-share tracked links.
+
+    Returns ``{tag, channel, wa_link, web_link}`` (the WhatsApp deep link pre-fills
+    ``BOOKS #<tag>``; the web link carries ``?src=<tag>``), or ``{}`` for an empty
+    or unusable label.
+    """
+    import urllib.parse
+    tag = normalize_tag(label)
+    if not tag:
+        return {}
+    wa_link = (f"https://wa.me/{BOOK_WA_NUMBER}"
+               f"?text={urllib.parse.quote('BOOKS #' + tag)}")
+    web_link = f"{web_base}/books?src={urllib.parse.quote(tag)}"
+    return {"tag": tag, "channel": tag_channel(tag),
+            "wa_link": wa_link, "web_link": web_link}
