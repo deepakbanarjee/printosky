@@ -99,6 +99,37 @@ def is_book_trigger(text: str) -> bool:
     return bool(words & _TRIGGER_WORDS)
 
 
+# Ad-channel codes embedded in a tracked WhatsApp deep link, e.g.
+#   wa.me/919495706405?text=BOOKS%20ig   (Instagram ad)
+#   wa.me/919495706405?text=BOOKS%20fb   (Facebook ad)
+# The customer taps the link, the pre-filled text arrives, and we learn the
+# discovery channel WITHOUT asking. Only known codes are honoured, so ordinary
+# text ("books please") never mis-tags.
+_ACQ_CODES = {
+    "ig": "instagram", "insta": "instagram", "instagram": "instagram",
+    "fb": "facebook", "facebook": "facebook",
+    "yt": "youtube", "youtube": "youtube",
+    "divya": "divya", "teacher": "divya",
+    "ref": "referral", "friend": "friend",
+}
+
+
+def _parse_acq_source(text: str) -> str | None:
+    """Extract the ad/discovery channel from a 'BOOKS <code>' deep-link message.
+
+    Returns the canonical channel (e.g. 'instagram') for a recognised code, else
+    None — so untagged orders fall through to the 'how did you hear?' fallback
+    instead of being mis-attributed.
+    """
+    if not text:
+        return None
+    for w in re.split(r"[^\w]+", text.strip().lower()):
+        chan = _ACQ_CODES.get(w)
+        if chan:
+            return chan
+    return None
+
+
 def _in_print_flow(session: dict) -> bool:
     if not session:
         return False
@@ -431,7 +462,8 @@ def _begin_counting(phone: str, order_code: str, keys: list, editing: bool) -> N
     _send_qty_buttons(phone, bc.BOOKS[keys[0]]["label"])
 
 
-def _start(phone: str, name: str | None, force_new: bool = False) -> list[str]:
+def _start(phone: str, name: str | None, force_new: bool = False,
+           acq_source: str | None = None) -> list[str]:
     active = {} if force_new else _dbc.get_active_book_order(phone)
     if active and active.get("status") == "collecting":
         code = active["order_code"]
@@ -454,6 +486,13 @@ def _start(phone: str, name: str | None, force_new: bool = False) -> list[str]:
         if not created:
             code = _new_order_code()
             _dbc.create_book_order(code, phone, name)
+        # Best-effort acquisition stamp on a NEW order only (the resets above keep
+        # the original attribution). No-op until the acq_source migration is
+        # applied; update_book_order swallows errors so ordering never breaks here.
+        _acq = {"acq_entry": "whatsapp"}
+        if acq_source:
+            _acq["acq_source"] = acq_source
+        _dbc.update_book_order(code, **_acq)
 
     _dbc.save_session(DB, phone, step="book_select", needs_human=False)
     _send_select_list(phone)
@@ -876,7 +915,7 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
             if track is not None:
                 return track
         if is_book_trigger(text) and not _in_print_flow(session):
-            return _start(phone, name)
+            return _start(phone, name, acq_source=_parse_acq_source(text))
         return None
 
     if step == "post_order":

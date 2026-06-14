@@ -117,3 +117,21 @@ def test_sla_breaches_empty_when_all_within_window(monkeypatch):
 def test_sla_breaches_skips_rows_missing_confirmed_at(monkeypatch):
     _sla_chain(monkeypatch, [{"order_code": "XTR-NOTS", "confirmed_at": None}])
     assert db_cloud.find_book_dispatch_sla_breaches(72) == []
+
+
+# ── Acquisition breakdown (book_acq_breakdown) ────────────────────────────────
+
+@pytest.mark.unit
+def test_acq_breakdown_counts_sold_by_channel(monkeypatch):
+    rows = [
+        {"acq_source": "instagram", "source": "whatsapp", "status": "delivered"},
+        {"acq_source": "instagram", "source": "whatsapp", "status": "confirmed"},
+        {"acq_source": "facebook",  "source": "whatsapp", "status": "dispatched"},
+        {"acq_source": None,        "source": "divya",    "status": "confirmed"},    # divya fallback
+        {"acq_source": None,        "source": "whatsapp", "status": "confirmed"},    # unknown
+        {"acq_source": "instagram", "source": "whatsapp", "status": "collecting"},   # not sold → excluded
+    ]
+    chain = MagicMock()
+    chain.table.return_value.select.return_value.limit.return_value.execute.return_value.data = rows
+    monkeypatch.setattr(db_cloud, "_client", lambda: chain)
+    assert db_cloud.book_acq_breakdown() == {"instagram": 2, "facebook": 1, "divya": 1, "unknown": 1}

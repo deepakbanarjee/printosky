@@ -721,3 +721,15 @@ def test_confirm_failure_does_not_send_false_confirmation(fake, monkeypatch):
     assert res.get("error") == "status_not_persisted"
     assert db.orders["XTR-FAIL"]["status"] == "payment_review"     # unchanged
     assert not any("Order confirmed" in m for m in sent["text"])
+
+
+def test_parse_acq_source_reads_tracked_link_codes():
+    # Passive attribution: a 'BOOKS <code>' deep link reveals the ad channel.
+    assert book_bot._parse_acq_source("BOOKS ig") == "instagram"
+    assert book_bot._parse_acq_source("books fb") == "facebook"
+    assert book_bot._parse_acq_source("BOOKS yt") == "youtube"
+    assert book_bot._parse_acq_source("books divya") == "divya"
+    # Plain triggers / chatter must NOT mis-tag → fall through to the ask.
+    assert book_bot._parse_acq_source("books please") is None
+    assert book_bot._parse_acq_source("books") is None
+    assert book_bot._parse_acq_source("") is None

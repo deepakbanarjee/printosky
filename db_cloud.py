@@ -1258,6 +1258,36 @@ def find_book_dispatch_sla_breaches(sla_hours: int = 72) -> list[dict]:
     return out
 
 
+def book_acq_breakdown(date_from: str | None = None,
+                       date_to: str | None = None) -> dict:
+    """Count SOLD book orders grouped by acquisition channel (acq_source), for
+    ad-ROI reporting. 'Sold' = status in confirmed/dispatched/delivered; untagged
+    orders bucket under 'unknown'. Optional ISO date_from/date_to filter
+    created_at. Returns {channel: count} sorted high→low. Empty until the
+    acq_source migration is applied (selecting a missing column errors → {}).
+    """
+    sold = ("confirmed", "dispatched", "delivered")
+    try:
+        q = _client().table("book_orders").select("acq_source,source,status,created_at")
+        if date_from:
+            q = q.gte("created_at", date_from)
+        if date_to:
+            q = q.lte("created_at", date_to)
+        rows = q.limit(5000).execute().data or []
+    except Exception as exc:
+        logger.error("book_acq_breakdown error: %s", exc)
+        return {}
+    counts: dict = {}
+    for r in rows:
+        if r.get("status") not in sold:
+            continue
+        # Prefer the explicit ad channel; fall back to Divya-forwarded orders
+        # (source='divya'), else 'unknown' until the customer is asked.
+        chan = r.get("acq_source") or ("divya" if r.get("source") == "divya" else "unknown")
+        counts[chan] = counts.get(chan, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: kv[1], reverse=True))
+
+
 def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
                          address: str | None, items: dict,
                          books_total: float, courier: float, grand_total: float,
