@@ -903,9 +903,21 @@ def _handle_tag_command(sender: str, text: str) -> None:
     from whatsapp_notify import _send
     from book_catalog import build_tag_links
     label = text[3:].strip()  # drop the leading 'TAG'
+    if label.lower() in ("stats", "report", "breakdown"):
+        from db_cloud import book_acq_breakdown
+        chans = book_acq_breakdown(group_by="channel")
+        if not chans:
+            _send(sender, "📊 No tagged book sales yet (or the acq columns migration isn't applied).")
+            return
+        camps = list(book_acq_breakdown(group_by="campaign").items())[:8]
+        lines = ["📊 *Book sales by channel*"] + [f"• {k}: {v}" for k, v in chans.items()]
+        if camps:
+            lines += ["", "*Top campaigns*"] + [f"• {k}: {v}" for k, v in camps]
+        _send(sender, "\n".join(lines))
+        return
     if not label:
         _send(sender, "🏷️ *Tag generator*\nSend  `TAG <label>`  — e.g.  `TAG ig reel jan`  — "
-                      "and I'll make a tracked link to share with Divya. "
+                      "and I'll make a tracked link to share with Divya, or  `TAG STATS`  for the channel report. "
                       "Tip: start the label with the channel (ig / fb / yt / divya) so it groups right.")
         return
     links = build_tag_links(label)

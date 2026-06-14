@@ -135,3 +135,17 @@ def test_acq_breakdown_counts_sold_by_channel(monkeypatch):
     chain.table.return_value.select.return_value.limit.return_value.execute.return_value.data = rows
     monkeypatch.setattr(db_cloud, "_client", lambda: chain)
     assert db_cloud.book_acq_breakdown() == {"instagram": 2, "facebook": 1, "divya": 1, "unknown": 1}
+
+
+@pytest.mark.unit
+def test_acq_breakdown_group_by_campaign(monkeypatch):
+    rows = [
+        {"acq_source": "instagram", "acq_campaign": "ig-reel-jan", "source": "whatsapp", "status": "confirmed"},
+        {"acq_source": "instagram", "acq_campaign": "ig-reel-jan", "source": "whatsapp", "status": "delivered"},
+        {"acq_source": "facebook",  "acq_campaign": "fb-adset-2",  "source": "whatsapp", "status": "confirmed"},
+        {"acq_source": None,        "acq_campaign": None,          "source": "divya",    "status": "confirmed"},  # untagged
+    ]
+    chain = MagicMock()
+    chain.table.return_value.select.return_value.limit.return_value.execute.return_value.data = rows
+    monkeypatch.setattr(db_cloud, "_client", lambda: chain)
+    assert db_cloud.book_acq_breakdown(group_by="campaign") == {"ig-reel-jan": 2, "fb-adset-2": 1, "untagged": 1}
