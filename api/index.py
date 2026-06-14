@@ -2009,7 +2009,19 @@ def _handle_cron_chat_audit(h) -> None:
         lines.append("Open printosky.com/admin → *Conversations* → 'Needs human'.")
         msg = "\n".join(lines)
 
-        sent = _send(_alert_phone(), msg)
+        # Concise one-liner for the template ({{1}}); the full digest above is
+        # the free-form fallback and also lives in the admin panel.
+        oldest_h = max((hf.get("age_hours") or 0) for hf in handoffs) if handoffs else 0
+        summary = (
+            (f"{len(handoffs)} waiting for a human"
+             + (f" (oldest {oldest_h:.0f}h)" if handoffs else ""))
+            + f"; {len(unanswered)} unanswered >1h; {inbound_24h} inbound/24h"
+            + (f"; auto-resolved {resolved}" if resolved else "")
+        )
+        from datetime import datetime, timezone, timedelta
+        when = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %H:%M IST")
+        from whatsapp_notify import send_ops_alert
+        sent = send_ops_alert(_alert_phone(), summary, when, fallback=msg)
         _json_response(h, 200, {
             "ok": True,
             "handoffs": len(handoffs),
