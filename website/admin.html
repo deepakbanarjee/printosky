@@ -1520,6 +1520,20 @@
         <button class="ctrl-btn" onclick="loadBookOrders()">↻ Refresh</button>
       </div>
     </div>
+
+    <details id="campaign-panel" style="margin:0 0 12px;border:1px solid var(--border,#3a3a3a);border-radius:8px;padding:10px 12px;background:rgba(255,255,255,.02)">
+      <summary style="cursor:pointer;font-weight:600">🏷️ Campaign tags &amp; ad performance</summary>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="tag-label" placeholder="e.g. ig reel jan" style="flex:1;min-width:180px;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:.85rem"
+               onkeydown="if(event.key==='Enter')genBookTag()">
+        <button class="ctrl-btn" onclick="genBookTag()">Generate link</button>
+        <button class="ctrl-btn" onclick="loadBookCampaigns()">↻ Performance</button>
+      </div>
+      <div style="font-size:.75rem;color:var(--muted);margin-top:4px">Start the label with the channel (ig / fb / yt / divya) so it groups correctly. Share the link with Divya — orders from it are auto-tagged.</div>
+      <div id="tag-result" style="margin-top:10px"></div>
+      <div id="campaign-stats" style="margin-top:12px"></div>
+    </details>
+
     <div id="book-orders-list"></div>
   </div>
 
@@ -4654,6 +4668,52 @@ function _divyaRange() {
   }
   const labels = { today: 'Today', week: 'This week', month: 'This month', all: 'All time' };
   return { from: from ? from.toISOString() : null, label: labels[p] || 'All time' };
+}
+
+async function genBookTag() {
+  const label = (document.getElementById('tag-label').value || '').trim();
+  const out = document.getElementById('tag-result');
+  if (!label) { out.innerHTML = '<span style="color:#b91c1c">Type a label first.</span>'; return; }
+  out.innerHTML = '<span style="color:#888">Generating…</span>';
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-campaigns?label=${encodeURIComponent(label)}`, {
+      headers: { 'X-Admin-Password': _convPw() }
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); out.innerHTML = `<span style="color:#b91c1c">Error ${r.status} — ${e.error || 'failed'}</span>`; return; }
+    const d = await r.json();
+    const t = d.tag || {};
+    if (!t.wa_link) { out.innerHTML = '<span style="color:#b91c1c">Could not build a tag from that label.</span>'; return; }
+    out.innerHTML = `<div style="font-size:.85rem"><b>Tag:</b> <code>${t.tag}</code> · channel: ${t.channel}</div>`
+      + _tagLinkRow('WhatsApp link', t.wa_link) + _tagLinkRow('Website link', t.web_link);
+  } catch (e) { out.innerHTML = `<span style="color:#b91c1c">Network error: ${e.message}</span>`; }
+}
+
+function _tagLinkRow(label, url) {
+  const id = 'lnk-' + Math.random().toString(36).slice(2, 8);
+  const safe = String(url).replace(/"/g, '&quot;');
+  return `<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">`
+    + `<span style="font-size:.75rem;color:var(--muted);min-width:84px">${label}</span>`
+    + `<input id="${id}" readonly value="${safe}" style="flex:1;min-width:200px;padding:5px 7px;border:1px solid #ccc;border-radius:6px;font-size:.78rem">`
+    + `<button class="ctrl-btn" onclick="var el=document.getElementById('${id}');el.select();navigator.clipboard&&navigator.clipboard.writeText(el.value)">Copy</button>`
+    + `</div>`;
+}
+
+async function loadBookCampaigns() {
+  const box = document.getElementById('campaign-stats');
+  box.innerHTML = '<div style="color:#888">Loading…</div>';
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-campaigns`, { headers: { 'X-Admin-Password': _convPw() } });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); box.innerHTML = `<div style="color:#b91c1c">Error ${r.status} — ${e.error || 'failed'}</div>`; return; }
+    const d = await r.json();
+    box.innerHTML = _tagStatTable('By channel', d.by_channel) + _tagStatTable('Top campaigns', d.by_campaign);
+  } catch (e) { box.innerHTML = `<div style="color:#b91c1c">Network error: ${e.message}</div>`; }
+}
+
+function _tagStatTable(title, obj) {
+  const entries = Object.entries(obj || {});
+  if (!entries.length) return `<div style="font-size:.8rem;color:var(--muted);margin-top:8px">${title}: no sales yet</div>`;
+  const rows = entries.map(([k, v]) => `<tr><td style="padding:2px 14px 2px 0">${k}</td><td style="text-align:right">${v}</td></tr>`).join('');
+  return `<div style="margin-top:8px"><div style="font-size:.8rem;font-weight:600">${title}</div><table style="font-size:.8rem;margin-top:2px">${rows}</table></div>`;
 }
 
 async function loadDivyaLedger() {

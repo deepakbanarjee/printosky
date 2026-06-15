@@ -499,6 +499,36 @@ def _handle_admin_divya_ledger(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_admin_book_campaigns(h) -> None:
+    """GET /admin/book-campaigns[?label=&from=ISO&to=ISO] — ad-channel attribution.
+
+    Returns SOLD book-order counts by acquisition channel and by campaign tag
+    (for ad-ROI). When ``?label=`` is supplied, also returns a freshly generated
+    tracked link (wa.me + web) to share with Divya for that campaign.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(h.path).query)
+        date_from = (qs.get("from") or [None])[0]
+        date_to   = (qs.get("to") or [None])[0]
+        label     = (qs.get("label") or [""])[0]
+        from db_cloud import book_acq_breakdown
+        out = {
+            "by_channel":  book_acq_breakdown(date_from=date_from, date_to=date_to, group_by="channel"),
+            "by_campaign": book_acq_breakdown(date_from=date_from, date_to=date_to, group_by="campaign"),
+        }
+        if label.strip():
+            from book_catalog import build_tag_links
+            out["tag"] = build_tag_links(label)
+        _json_response(h, 200, out)
+    except Exception as exc:
+        logger.error("book-campaigns error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_admin_dispatch_sheet(h) -> None:
     """GET /admin/book-orders/dispatch-sheet — printable pick list + packing slips.
 

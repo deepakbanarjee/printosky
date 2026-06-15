@@ -1810,6 +1810,7 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_contacts_seen,
     _handle_admin_conversations,
     _handle_admin_divya_ledger,
+    _handle_admin_book_campaigns,
     _handle_admin_format_fixer,
     _handle_admin_health_models,
     _handle_admin_operator_queue_claim,
@@ -2531,6 +2532,11 @@ class handler(BaseHTTPRequestHandler):
         # Divya teacher settlement statement (admin-only).
         if self.path == "/admin/book-orders/divya-ledger" or self.path.startswith("/admin/book-orders/divya-ledger?"):
             _handle_admin_divya_ledger(self)
+            return
+
+        # Campaign / ad-channel attribution + tag generator (admin-only).
+        if self.path == "/admin/book-campaigns" or self.path.startswith("/admin/book-campaigns?"):
+            _handle_admin_book_campaigns(self)
             return
 
         # Printable dispatch sheet: pick list + packing slips for confirmed orders.
