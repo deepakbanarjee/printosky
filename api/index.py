@@ -1774,6 +1774,10 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_book_orders_list,
     _handle_admin_dispatch_sheet,
     _handle_admin_contacts_seen,
+    _handle_admin_contact_note,
+    _handle_admin_contact_note_delete,
+    _handle_admin_contact_notes,
+    _handle_admin_contact_pin,
     _handle_admin_conversations,
     _handle_admin_divya_ledger,
     _handle_admin_format_fixer,
@@ -1987,6 +1991,7 @@ def _handle_cron_chat_audit(h) -> None:
         handoffs = snap.get("open_handoffs", [])
         stale = snap.get("handled_stale", [])
         unanswered = snap.get("unanswered", [])
+        pinned = snap.get("pinned", [])
         inbound_24h = (snap.get("counts") or {}).get("inbound", "?")
 
         # Self-heal: a human already replied to these (last outbound isn't an
@@ -2016,6 +2021,23 @@ def _handle_cron_chat_audit(h) -> None:
             lines.append(f"⏰ *Unanswered > 1h: {len(unanswered)}* ({sample})")
         else:
             lines.append("⏰ Unanswered > 1h: none ✅")
+        # Pinned chats staff flagged for manual follow-up — surfaced so a
+        # promised "I'll sort this out later" isn't forgotten.
+        if pinned:
+            lines.append("")
+            lines.append(f"📌 *Pinned for follow-up: {len(pinned)}*")
+            for p in pinned[:10]:
+                age = p.get("age_hours")
+                if isinstance(age, (int, float)):
+                    age_s = f"{age / 24:.0f}d" if age >= 24 else f"{age:.0f}h"
+                else:
+                    age_s = "?"
+                # Strip WhatsApp markdown chars so a note can't mangle the digest.
+                note = (p.get("last_note") or "").translate({ord(c): " " for c in "*_~`"})
+                note_s = f" — {note[:40]}" if note.strip() else ""
+                lines.append(f"• {_fmt_phone(p['phone'])} ({age_s}){note_s}")
+            if len(pinned) > 10:
+                lines.append(f"  …and {len(pinned) - 10} more")
         lines.append("")
         lines.append(f"📥 Inbound (24h): {inbound_24h}")
         lines.append("Open printosky.com/admin → *Conversations* → 'Needs human'.")
@@ -2028,6 +2050,7 @@ def _handle_cron_chat_audit(h) -> None:
             (f"{len(handoffs)} waiting for a human"
              + (f" (oldest {oldest_h:.0f}h)" if handoffs else ""))
             + f"; {len(unanswered)} unanswered >1h; {inbound_24h} inbound/24h"
+            + (f"; {len(pinned)} pinned" if pinned else "")
             + (f"; auto-resolved {resolved}" if resolved else "")
         )
         from datetime import datetime, timezone, timedelta
@@ -2039,6 +2062,7 @@ def _handle_cron_chat_audit(h) -> None:
             "handoffs": len(handoffs),
             "resolved": resolved,
             "unanswered": len(unanswered),
+            "pinned": len(pinned),
             "alerted": bool(sent),
         })
     except Exception as exc:
@@ -2452,6 +2476,9 @@ class handler(BaseHTTPRequestHandler):
         if self.path.startswith("/admin/thread"):
             _handle_admin_thread(self)
             return
+        if self.path.startswith("/admin/contacts/notes"):
+            _handle_admin_contact_notes(self)
+            return
         if self.path.startswith("/admin/health/models"):
             _handle_admin_health_models(self)
             return
@@ -2670,6 +2697,17 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/admin/format-fixer":
             _handle_admin_format_fixer(self, body)
+            return
+
+        # ── Chat triage: pin + follow-up notes ───────────────────────────────
+        if self.path == "/admin/contacts/pin":
+            _handle_admin_contact_pin(self, body)
+            return
+        if self.path == "/admin/contacts/note":
+            _handle_admin_contact_note(self, body)
+            return
+        if self.path == "/admin/contacts/note/delete":
+            _handle_admin_contact_note_delete(self, body)
             return
 
         # ── Operator queue claim / deliver (P0 Day 2.5) ──────────────────────
