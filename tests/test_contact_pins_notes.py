@@ -207,3 +207,49 @@ def test_chat_audit_snapshot_exposes_pinned(monkeypatch):
     snap = db_cloud.chat_audit_snapshot()
     assert "pinned" in snap
     assert snap["pinned"][0]["phone"] == "p"
+
+
+# ── search_contacts ──────────────────────────────────────────────────────────
+
+def test_search_contacts_short_query_returns_empty(mock_client):
+    from db_cloud import search_contacts
+    assert search_contacts("a") == []
+    mock_client.table.assert_not_called()
+
+
+def test_search_contacts_by_name_returns_inbox_shaped_rows(mock_client):
+    from db_cloud import search_contacts
+    sel = mock_client.table.return_value.select.return_value
+    # whatsapp_contacts name/phone ilike -> limit -> execute (shared chain)
+    sel.ilike.return_value.limit.return_value.execute.return_value = MagicMock(data=[
+        {"phone": "9190000001", "name": "Alice", "pinned": False, "pinned_at": None}])
+    # last-message lookup: select.in_().order().limit().execute()
+    sel.in_.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(data=[
+        {"phone": "9190000001", "direction": "inbound", "message_type": "text",
+         "body": "hi there", "created_at": "2026-06-12T06:00:00+00:00"}])
+    # contact_note_counts: select.limit().execute()
+    sel.limit.return_value.execute.return_value = MagicMock(data=[])
+
+    out = search_contacts("Alice")
+    assert len(out) == 1
+    row = out[0]
+    assert row["phone"] == "9190000001"
+    assert row["name"] == "Alice"
+    assert row["last_message"] == "hi there"
+    assert row["ts"] == "2026-06-12T06:00:00+00:00"
+    assert row["pinned"] is False
+    assert row["note_count"] == 0
+
+
+def test_search_contacts_no_matches_returns_empty(mock_client):
+    from db_cloud import search_contacts
+    sel = mock_client.table.return_value.select.return_value
+    sel.ilike.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+    sel.limit.return_value.execute.return_value = MagicMock(data=[])
+    assert search_contacts("Zzzz") == []
+
+
+def test_search_contacts_empty_on_error(mock_client):
+    from db_cloud import search_contacts
+    mock_client.table.side_effect = RuntimeError("db down")
+    assert search_contacts("Alice") == []

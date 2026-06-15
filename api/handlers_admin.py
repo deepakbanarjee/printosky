@@ -174,6 +174,30 @@ def _handle_admin_conversations(h) -> None:
         except Exception as exc:
             logger.debug("bot_sessions.needs_human read skipped: %s", exc)
 
+        # Pinned contacts must stay reachable in the inbox even if their last
+        # message is older than the recent 500 — otherwise pinning is leaky.
+        # Backfill their latest rows so the loop below picks them up.
+        present_phones = {r["phone"] for r in log_rows}
+        missing_pinned = [
+            ph for ph, c in contacts_map.items()
+            if c.get("pinned") and ph not in present_phones
+        ]
+        if missing_pinned:
+            try:
+                backfill = (
+                    client.table("conversation_log")
+                    .select("phone,direction,message_type,body,filename,created_at")
+                    .in_("phone", missing_pinned)
+                    .order("created_at", desc=True)
+                    .limit(500)
+                    .execute()
+                    .data
+                    or []
+                )
+                log_rows = log_rows + backfill
+            except Exception as exc:
+                logger.debug("pinned inbox backfill skipped: %s", exc)
+
         # One entry per phone — first occurrence in log_rows is the newest message
         seen_phones: set = set()
         inbox = []
@@ -1022,6 +1046,27 @@ def _handle_admin_contact_note_delete(h, body: bytes) -> None:
         from db_cloud import delete_contact_note
         ok = delete_contact_note(note_id)
         _json_response(h, 200 if ok else 500, {"ok": ok})
+    except Exception as exc:
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_contacts_search(h) -> None:
+    """GET /admin/contacts/search?q=X — find ANY contact by name or number,
+    including chats that have scrolled off the recent inbox window. Returns
+    inbox-shaped rows so the UI renders + opens them like normal contacts."""
+    from urllib.parse import parse_qs, urlparse
+    params   = parse_qs(urlparse(h.path).query)
+    admin_pw = h.headers.get("X-Admin-Password", "").strip() or params.get("admin_password", [""])[0]
+    if not _auth_admin_pw(admin_pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    q = (params.get("q", [""])[0] or "").strip()
+    if len(q) < 2:
+        _json_response(h, 200, [])
+        return
+    try:
+        from db_cloud import search_contacts
+        _json_response(h, 200, search_contacts(q))
     except Exception as exc:
         _json_response(h, 500, {"error": str(exc)})
 

@@ -1774,6 +1774,7 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_book_orders_list,
     _handle_admin_dispatch_sheet,
     _handle_admin_contacts_seen,
+    _handle_admin_contacts_search,
     _handle_admin_contact_note,
     _handle_admin_contact_note_delete,
     _handle_admin_contact_notes,
@@ -2478,6 +2479,9 @@ class handler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/admin/contacts/notes"):
             _handle_admin_contact_notes(self)
+            return
+        if self.path.startswith("/admin/contacts/search"):
+            _handle_admin_contacts_search(self)
             return
         if self.path.startswith("/admin/health/models"):
             _handle_admin_health_models(self)

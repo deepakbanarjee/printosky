@@ -1254,6 +1254,122 @@ def list_pinned_contacts() -> list:
     return out
 
 
+def _inbox_preview(row: dict) -> str:
+    """Short inbox preview for a conversation_log row — mirrors the formatting in
+    _handle_admin_conversations so search results render identically."""
+    mt = row.get("message_type") or "text"
+    if mt.startswith("image"):
+        return "Image"
+    if mt.startswith("audio"):
+        return "Voice note"
+    if mt.startswith("video"):
+        return "Video"
+    if "pdf" in mt or mt.startswith("application"):
+        return f"File: {row.get('filename') or 'file'}"
+    return (row.get("body") or "")[:60]
+
+
+def search_contacts(q: str, limit: int = 30) -> list:
+    """Find contacts by name or phone substring (case-insensitive) across the
+    FULL history — not just the recent inbox window — so staff can reach a chat
+    that has scrolled off the list. Returns inbox-shaped rows (same keys as
+    _handle_admin_conversations) newest-message first. [] on short query/error.
+    """
+    q = (q or "").strip()
+    if len(q) < 2:
+        return []
+    client = _client()
+    pat = f"%{q}%"
+
+    contacts: dict = {}
+    try:
+        by_name = (
+            client.table("whatsapp_contacts")
+            .select("phone,name,pinned,pinned_at")
+            .ilike("name", pat)
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+        by_phone = (
+            client.table("whatsapp_contacts")
+            .select("phone,name,pinned,pinned_at")
+            .ilike("phone", pat)
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+        for c in by_name + by_phone:
+            contacts.setdefault(c["phone"], c)
+    except Exception as exc:
+        logger.warning("search_contacts contacts query failed: %s", exc)
+
+    # Catch phones that have messages but no whatsapp_contacts row (e.g. no
+    # captured profile name) when the term looks like part of a number.
+    digits = "".join(ch for ch in q if ch.isdigit())
+    if len(digits) >= 3:
+        try:
+            log_hits = (
+                client.table("conversation_log")
+                .select("phone")
+                .ilike("phone", f"%{digits}%")
+                .limit(200)
+                .execute()
+                .data
+                or []
+            )
+            for r in log_hits:
+                if r.get("phone"):
+                    contacts.setdefault(r["phone"], {"phone": r["phone"]})
+        except Exception as exc:
+            logger.debug("search_contacts log lookup skipped: %s", exc)
+
+    if not contacts:
+        return []
+
+    phones = list(contacts.keys())[:limit]
+
+    # Latest message per matched phone for the preview + sort timestamp.
+    last_by_phone: dict = {}
+    try:
+        rows = (
+            client.table("conversation_log")
+            .select("phone,direction,message_type,body,filename,created_at")
+            .in_("phone", phones)
+            .order("created_at", desc=True)
+            .limit(2000)
+            .execute()
+            .data
+            or []
+        )
+        for r in rows:                          # desc → first seen is newest
+            last_by_phone.setdefault(r["phone"], r)
+    except Exception as exc:
+        logger.debug("search_contacts last-message lookup skipped: %s", exc)
+
+    note_counts = contact_note_counts()
+    out = []
+    for ph in phones:
+        c = contacts[ph]
+        last = last_by_phone.get(ph) or {}
+        out.append({
+            "phone":             ph,
+            "name":              c.get("name") or ph,
+            "last_message":      _inbox_preview(last) if last else "",
+            "last_message_type": last.get("message_type") or "text",
+            "unread_count":      0,
+            "ts":                last.get("created_at"),
+            "needs_human":       False,
+            "pinned":            bool(c.get("pinned")),
+            "pinned_at":         c.get("pinned_at"),
+            "note_count":        note_counts.get(ph, 0),
+        })
+    out.sort(key=lambda x: (x.get("ts") or ""), reverse=True)
+    return out
+
+
 # ── book_orders (Xtraa book campaign) ─────────────────────────────────────────
 
 # Statuses considered "in progress" — a new enquiry resumes/uses these rather
