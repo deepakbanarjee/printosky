@@ -144,14 +144,20 @@ def _handle_admin_conversations(h) -> None:
             .data
         )
 
-        # Fetch contacts for names + last_seen_at
+        # Fetch contacts for names + last_seen_at + pin state. select("*") so a
+        # pre-v30 schema (no pinned/pinned_at columns) still returns rows.
         contacts_data = (
             client.table("whatsapp_contacts")
-            .select("phone,name,last_seen_at")
+            .select("*")
             .execute()
             .data
         )
         contacts_map = {c["phone"]: c for c in contacts_data}
+
+        # Follow-up note counts per phone (for the inbox note badge). Tolerant of
+        # the pre-v30 schema: missing table → {} → every count reads 0.
+        from db_cloud import contact_note_counts
+        note_counts = contact_note_counts()
 
         # Fetch sessions flagged as needing human attention (TASK-009)
         # Tolerant of pre-v17 schema: missing column returns empty set, no crash.
@@ -167,6 +173,30 @@ def _handle_admin_conversations(h) -> None:
             needs_human_phones = {r["phone"] for r in (help_rows or [])}
         except Exception as exc:
             logger.debug("bot_sessions.needs_human read skipped: %s", exc)
+
+        # Pinned contacts must stay reachable in the inbox even if their last
+        # message is older than the recent 500 — otherwise pinning is leaky.
+        # Backfill their latest rows so the loop below picks them up.
+        present_phones = {r["phone"] for r in log_rows}
+        missing_pinned = [
+            ph for ph, c in contacts_map.items()
+            if c.get("pinned") and ph not in present_phones
+        ]
+        if missing_pinned:
+            try:
+                backfill = (
+                    client.table("conversation_log")
+                    .select("phone,direction,message_type,body,filename,created_at")
+                    .in_("phone", missing_pinned)
+                    .order("created_at", desc=True)
+                    .limit(500)
+                    .execute()
+                    .data
+                    or []
+                )
+                log_rows = log_rows + backfill
+            except Exception as exc:
+                logger.debug("pinned inbox backfill skipped: %s", exc)
 
         # One entry per phone — first occurrence in log_rows is the newest message
         seen_phones: set = set()
@@ -209,9 +239,14 @@ def _handle_admin_conversations(h) -> None:
                 "unread_count":      unread,
                 "ts":                row["created_at"],
                 "needs_human":       ph in needs_human_phones,
+                "pinned":            bool(contact.get("pinned")),
+                "pinned_at":         contact.get("pinned_at"),
+                "note_count":        note_counts.get(ph, 0),
             })
 
-        _json_response(h, 200, sorted(inbox, key=lambda x: x["ts"], reverse=True))
+        # Pinned chats first, then everyone else by message recency.
+        inbox.sort(key=lambda x: (x["pinned"], x["ts"]), reverse=True)
+        _json_response(h, 200, inbox)
     except Exception as exc:
         logger.error("GET /admin/conversations error: %s", exc)
         _json_response(h, 500, {"error": str(exc)})
@@ -910,6 +945,128 @@ def _handle_admin_contacts_seen(h, body: bytes) -> None:
         from db_cloud import mark_contact_seen
         mark_contact_seen(phone)
         _json_response(h, 200, {"ok": True})
+    except Exception as exc:
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_contact_pin(h, body: bytes) -> None:
+    """POST /admin/contacts/pin — pin or unpin a conversation for follow-up.
+
+    Body: {admin_password, phone, pinned: bool}. Pinned chats sort to the top of
+    the inbox and appear in the twice-daily chat-audit digest.
+    """
+    try:
+        payload = json.loads(body)
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+    if not _auth_admin_pw(payload.get("admin_password", "")):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    phone = (payload.get("phone") or "").strip()
+    if not phone or len(phone) > 30:
+        _json_response(h, 400, {"error": "valid phone required"})
+        return
+    pinned = bool(payload.get("pinned"))
+    try:
+        from db_cloud import set_contact_pin
+        ok = set_contact_pin(phone, pinned)
+        _json_response(h, 200 if ok else 500, {"ok": ok, "pinned": pinned})
+    except Exception as exc:
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_contact_note(h, body: bytes) -> None:
+    """POST /admin/contacts/note — append a follow-up note to a conversation.
+
+    Body: {admin_password, phone, note, by?}. Notes are append-only.
+    """
+    try:
+        payload = json.loads(body)
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+    if not _auth_admin_pw(payload.get("admin_password", "")):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    phone = (payload.get("phone") or "").strip()
+    note  = (payload.get("note") or "").strip()
+    if not phone or len(phone) > 30 or not note:
+        _json_response(h, 400, {"error": "phone and note required"})
+        return
+    try:
+        from db_cloud import add_contact_note
+        row = add_contact_note(phone, note, payload.get("by"))
+        if not row:
+            _json_response(h, 500, {"error": "note not saved"})
+            return
+        _json_response(h, 200, {"ok": True, "note": row})
+    except Exception as exc:
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_contact_notes(h) -> None:
+    """GET /admin/contacts/notes?phone=X — list a contact's follow-up notes."""
+    from urllib.parse import parse_qs, urlparse
+    params   = parse_qs(urlparse(h.path).query)
+    admin_pw = h.headers.get("X-Admin-Password", "").strip() or params.get("admin_password", [""])[0]
+    if not _auth_admin_pw(admin_pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    phone = params.get("phone", [""])[0]
+    if not phone:
+        _json_response(h, 400, {"error": "phone required"})
+        return
+    try:
+        from db_cloud import list_contact_notes
+        _json_response(h, 200, list_contact_notes(phone))
+    except Exception as exc:
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_contact_note_delete(h, body: bytes) -> None:
+    """POST /admin/contacts/note/delete — remove one follow-up note by id.
+
+    Body: {admin_password, id}.
+    """
+    try:
+        payload = json.loads(body)
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+    if not _auth_admin_pw(payload.get("admin_password", "")):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        note_id = int(payload.get("id"))
+    except (TypeError, ValueError):
+        _json_response(h, 400, {"error": "id must be an integer"})
+        return
+    try:
+        from db_cloud import delete_contact_note
+        ok = delete_contact_note(note_id)
+        _json_response(h, 200 if ok else 500, {"ok": ok})
+    except Exception as exc:
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_contacts_search(h) -> None:
+    """GET /admin/contacts/search?q=X — find ANY contact by name or number,
+    including chats that have scrolled off the recent inbox window. Returns
+    inbox-shaped rows so the UI renders + opens them like normal contacts."""
+    from urllib.parse import parse_qs, urlparse
+    params   = parse_qs(urlparse(h.path).query)
+    admin_pw = h.headers.get("X-Admin-Password", "").strip() or params.get("admin_password", [""])[0]
+    if not _auth_admin_pw(admin_pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    q = (params.get("q", [""])[0] or "").strip()
+    if len(q) < 2:
+        _json_response(h, 200, [])
+        return
+    try:
+        from db_cloud import search_contacts
+        _json_response(h, 200, search_contacts(q))
     except Exception as exc:
         _json_response(h, 500, {"error": str(exc)})
 

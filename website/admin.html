@@ -789,6 +789,22 @@
   .conv-filter-chip.active { background:#ff7043; border-color:#e64a19; color:#fff; font-weight:600; }
   .conv-filter-count { display:inline-block; min-width:18px; padding:0 6px; border-radius:9px; background:rgba(0,0,0,.15); font-size:11px; line-height:16px; text-align:center; }
   .conv-filter-chip.active .conv-filter-count { background:rgba(255,255,255,.25); }
+
+  /* ── Pin + follow-up notes ──────────────────────────────────────────────── */
+  .conv-note-badge { display:inline-block; min-width:16px; padding:0 5px; border-radius:8px; background:#ffb300; color:#3a2c00; font-size:10px; font-weight:700; line-height:16px; text-align:center; margin-right:4px; }
+  .conv-header-btn { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:6px; padding:5px 10px; font-size:13px; cursor:pointer; white-space:nowrap; }
+  .conv-header-btn:hover { background:rgba(255,255,255,.28); }
+  .conv-header-btn.active { background:#ffb300; border-color:#e09c00; color:#3a2c00; font-weight:600; }
+  .conv-notes-panel { border-top:1px solid #e6dcb8; background:#fffdf5; padding:8px 12px; max-height:34vh; overflow-y:auto; }
+  .conv-note-row { display:flex; gap:8px; align-items:flex-start; padding:6px 0; border-bottom:1px solid #f0e9d0; }
+  .conv-note-row:last-child { border-bottom:none; }
+  .conv-note-text { white-space:pre-wrap; word-break:break-word; color:#222; font-size:13px; }
+  .conv-note-meta { font-size:11px; color:#999; margin-top:2px; }
+  .conv-note-del { cursor:pointer; color:#c0392b; font-size:12px; opacity:.55; padding:0 2px; }
+  .conv-note-del:hover { opacity:1; }
+  .conv-note-add { display:flex; gap:6px; margin-top:8px; }
+  .conv-note-input { flex:1; border:1px solid #d0c79a; border-radius:6px; padding:6px 8px; font-size:13px; font-family:inherit; resize:vertical; min-height:34px; }
+  .conv-note-save { background:#ffb300; color:#3a2c00; border:none; border-radius:6px; padding:0 14px; font-weight:700; cursor:pointer; font-size:13px; }
   .conv-needs-human-pill { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:8px; background:#ff7043; color:#fff; font-size:10px; font-weight:600; vertical-align:middle; }
 /* ── Conversations tab (rebuilt) ──────────────────────────────────────────── */
 .conv-layout {
@@ -1353,6 +1369,18 @@
                   style="background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);color:#fff;font-size:11px;padding:4px 10px;">
             🆘 <span id="conv-needs-human-count" class="conv-filter-count">0</span>
           </button>
+          <button id="conv-filter-pinned" type="button"
+                  class="conv-filter-chip"
+                  onclick="convTogglePinnedFilter()"
+                  title="Show only chats you pinned for follow-up"
+                  style="background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);color:#fff;font-size:11px;padding:4px 10px;">
+            📌 <span id="conv-pinned-count" class="conv-filter-count">0</span>
+          </button>
+        </div>
+        <div style="padding:8px 10px;border-bottom:1px solid #e0e0e0;background:#fff;">
+          <input id="conv-search-input" type="search" placeholder="🔍 Search name or number…"
+                 oninput="convOnSearchInput(this.value)" autocomplete="off"
+                 style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;outline:none;">
         </div>
         <div id="conv-contact-list">
           <div style="padding:20px;color:#999;font-size:13px;">Loading...</div>
@@ -1367,8 +1395,23 @@
             <div class="conv-header-name" id="conv-active-name">Select a conversation</div>
             <div class="conv-header-sub" id="conv-active-sub">WhatsApp</div>
           </div>
+          <div id="conv-header-actions" style="display:none;gap:6px;align-items:center;">
+            <button id="conv-pin-btn" type="button" class="conv-header-btn"
+                    onclick="convTogglePin()" title="Pin this chat to the top for follow-up">📌 Pin</button>
+            <button id="conv-notes-btn" type="button" class="conv-header-btn"
+                    onclick="convToggleNotesPanel()" title="Follow-up notes for this chat">📝 Notes <span id="conv-notes-btn-count"></span></button>
+          </div>
         </div>
         <div id="conv-message-area" class="conv-message-area" style="text-align:center;color:#999;padding:40px;">
+        </div>
+        <div id="conv-notes-panel" class="conv-notes-panel" style="display:none;">
+          <div id="conv-notes-list"></div>
+          <div class="conv-note-add">
+            <textarea id="conv-note-input" class="conv-note-input" rows="1"
+                      placeholder="Add a follow-up note… (e.g. owes ₹5370, call tomorrow)"
+                      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();convAddNote();}"></textarea>
+            <button class="conv-note-save" onclick="convAddNote()">Save</button>
+          </div>
         </div>
         <div class="conv-reply-bar">
           <button class="conv-attach-btn" title="Attach file"
@@ -3764,12 +3807,136 @@ let _convPollThread  = null;
 let _convNotified    = new Set();
 let _convInboxCache  = [];
 let _convNeedsHumanOnly = false;
+let _convPinnedOnly     = false;
+let _convNotesOpen      = false;
+let _convSearchActive   = false;
+let _convLastSearchResults = [];
 
 function convToggleNeedsHumanFilter() {
   _convNeedsHumanOnly = !_convNeedsHumanOnly;
   const btn = document.getElementById('conv-filter-needs-human');
   if (btn) btn.classList.toggle('active', _convNeedsHumanOnly);
   convRenderInbox(_convInboxCache);
+}
+
+function convTogglePinnedFilter() {
+  _convPinnedOnly = !_convPinnedOnly;
+  const btn = document.getElementById('conv-filter-pinned');
+  if (btn) btn.classList.toggle('active', _convPinnedOnly);
+  convRenderInbox(_convInboxCache);
+}
+
+// ── Pin + follow-up notes ───────────────────────────────────────────────────
+function convReflectPinState(pinned) {
+  const btn = document.getElementById('conv-pin-btn');
+  if (!btn) return;
+  btn.classList.toggle('active', pinned);
+  btn.innerHTML = pinned ? '📌 Pinned' : '📌 Pin';
+  btn.dataset.pinned = pinned ? '1' : '0';
+}
+
+async function convTogglePin() {
+  if (!_convActivePhone) return;
+  const targetPhone = _convActivePhone;               // capture before await
+  const btn = document.getElementById('conv-pin-btn');
+  const next = !(btn && btn.dataset.pinned === '1');
+  convReflectPinState(next);                          // optimistic
+  try {
+    const r = await fetch(`${ACAD_API}/admin/contacts/pin`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ admin_password: _convPw(), phone: targetPhone, pinned: next }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const c = _convInboxCache.find(x => x.phone === targetPhone);
+    if (c) c.pinned = next;
+    await convFetchInbox();                            // re-sort + update pin badge
+  } catch (e) {
+    // Revert only if the user is still viewing the same chat.
+    if (_convActivePhone === targetPhone) convReflectPinState(!next);
+    alert('Could not update pin — ' + e.message);
+  }
+}
+
+function convToggleNotesPanel() {
+  _convNotesOpen = !_convNotesOpen;
+  const panel = document.getElementById('conv-notes-panel');
+  if (panel) panel.style.display = _convNotesOpen ? 'block' : 'none';
+  const btn = document.getElementById('conv-notes-btn');
+  if (btn) btn.classList.toggle('active', _convNotesOpen);
+  if (_convNotesOpen && _convActivePhone) {
+    convLoadNotes(_convActivePhone);
+    const input = document.getElementById('conv-note-input');
+    if (input) input.focus();
+  }
+}
+
+async function convLoadNotes(phone) {
+  try {
+    const r = await fetch(`${ACAD_API}/admin/contacts/notes?phone=${encodeURIComponent(phone)}`, {
+      headers: { 'X-Admin-Password': _convPw() },
+    });
+    if (!r.ok) return;
+    const notes = await r.json();
+    convRenderNotes(Array.isArray(notes) ? notes : []);
+  } catch (e) { /* non-fatal */ }
+}
+
+function convRenderNotes(notes) {
+  const cnt = document.getElementById('conv-notes-btn-count');
+  if (cnt) cnt.textContent = notes.length ? `(${notes.length})` : '';
+  const list = document.getElementById('conv-notes-list');
+  if (!list) return;
+  if (!notes.length) {
+    list.innerHTML = '<div style="color:#999;font-size:12px;padding:4px 0;">No notes yet. Jot down what needs resolving.</div>';
+    return;
+  }
+  list.innerHTML = notes.map(n => `
+    <div class="conv-note-row">
+      <div style="flex:1">
+        <div class="conv-note-text">${convEsc(n.note || '')}</div>
+        <div class="conv-note-meta">${convFmtTs(n.created_at)}${n.created_by ? ' · ' + convEsc(n.created_by) : ''}</div>
+      </div>
+      <span class="conv-note-del" title="Delete note"
+            onclick="convDeleteNote(${JSON.stringify(n.id)})">✕</span>
+    </div>`).join('');
+}
+
+async function convAddNote() {
+  const input = document.getElementById('conv-note-input');
+  if (!input || !_convActivePhone) return;
+  const note = input.value.trim();
+  if (!note) return;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/contacts/note`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ admin_password: _convPw(), phone: _convActivePhone, note }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    input.value = '';
+    await convLoadNotes(_convActivePhone);
+    await convFetchInbox();                            // refresh inbox note badge
+  } catch (e) {
+    alert('Could not save note — ' + e.message);
+  }
+}
+
+async function convDeleteNote(id) {
+  if (!_convActivePhone) return;
+  if (!confirm('Delete this note?')) return;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/contacts/note/delete`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ admin_password: _convPw(), id }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    await convLoadNotes(_convActivePhone);
+    await convFetchInbox();
+  } catch (e) {
+    alert('Could not delete note — ' + e.message);
+  }
 }
 
 function _convPw() { return sessionStorage.getItem('admin_pw_cache') || ''; }
@@ -3837,6 +4004,34 @@ function convAvatarColor(name) {
   return colors[h % colors.length];
 }
 
+function convContactRowHtml(c) {
+  const letter = convAvatarLetter(c.name);
+  const color  = convAvatarColor(c.name);
+  const preview = c.last_message
+    ? (c.last_message.startsWith('📷') || c.last_message.startsWith('🎵') ? c.last_message : convEsc(c.last_message))
+    : '<em style="color:#bbb">No messages</em>';
+  const pin = c.pinned ? '<span title="Pinned for follow-up">📌</span> ' : '';
+  const noteBadge = c.note_count > 0
+    ? `<span class="conv-note-badge" title="${c.note_count} follow-up note(s)">📝${c.note_count}</span>`
+    : '';
+  return `
+    <div class="conv-contact${c.phone === _convActivePhone ? ' active' : ''}"
+         data-phone="${convEscAttr(c.phone)}" data-name="${convEscAttr(c.name || '')}"
+         onclick="convOpenContact(this.dataset.phone, this.dataset.name)">
+      <div class="conv-avatar" style="background:${color}">${letter}</div>
+      <div class="conv-contact-body">
+        <div class="conv-contact-row1">
+          <span class="conv-contact-name">${pin}${convEsc(c.name)}${c.needs_human ? '<span class="conv-needs-human-pill">SOS</span>' : ''}</span>
+          <span class="conv-contact-time">${convFmtTs(c.ts)}</span>
+        </div>
+        <div class="conv-contact-row2">
+          <span class="conv-contact-preview">${preview}</span>
+          <span class="conv-contact-meta">${noteBadge}${c.unread_count > 0 ? `<span class="conv-unread-badge">${c.unread_count}</span>` : ''}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
 function convRenderInbox(contacts) {
   _convInboxCache = contacts;
 
@@ -3844,38 +4039,69 @@ function convRenderInbox(contacts) {
   const countEl = document.getElementById('conv-needs-human-count');
   if (countEl) countEl.textContent = needsHumanCount;
 
-  const visible = _convNeedsHumanOnly ? contacts.filter(c => c.needs_human) : contacts;
+  const pinnedCount = contacts.reduce((n, c) => n + (c.pinned ? 1 : 0), 0);
+  const pinnedCountEl = document.getElementById('conv-pinned-count');
+  if (pinnedCountEl) pinnedCountEl.textContent = pinnedCount;
+
+  // While a search is active, keep caches/counts fresh but leave the visible
+  // search results alone (the 30s inbox poll would otherwise overwrite them).
+  if (_convSearchActive) return;
+
+  let visible = contacts;
+  if (_convNeedsHumanOnly) visible = visible.filter(c => c.needs_human);
+  if (_convPinnedOnly)     visible = visible.filter(c => c.pinned);
 
   const list = document.getElementById('conv-contact-list');
   if (!list) return;
   if (!visible.length) {
-    const empty = _convNeedsHumanOnly ? 'No sessions awaiting a human.' : 'No conversations yet.';
+    const empty = _convPinnedOnly      ? 'No pinned chats yet.'
+                : _convNeedsHumanOnly  ? 'No sessions awaiting a human.'
+                : 'No conversations yet.';
     list.innerHTML = `<div style="padding:20px;color:#999;font-size:13px;">${empty}</div>`;
     return;
   }
-  list.innerHTML = visible.map(c => {
-    const letter = convAvatarLetter(c.name);
-    const color  = convAvatarColor(c.name);
-    const preview = c.last_message
-      ? (c.last_message.startsWith('📷') || c.last_message.startsWith('🎵') ? c.last_message : convEsc(c.last_message))
-      : '<em style="color:#bbb">No messages</em>';
-    return `
-    <div class="conv-contact${c.phone === _convActivePhone ? ' active' : ''}"
-         data-phone="${convEscAttr(c.phone)}" data-name="${convEscAttr(c.name || '')}"
-         onclick="convOpenContact(this.dataset.phone, this.dataset.name)">
-      <div class="conv-avatar" style="background:${color}">${letter}</div>
-      <div class="conv-contact-body">
-        <div class="conv-contact-row1">
-          <span class="conv-contact-name">${convEsc(c.name)}${c.needs_human ? '<span class="conv-needs-human-pill">SOS</span>' : ''}</span>
-          <span class="conv-contact-time">${convFmtTs(c.ts)}</span>
-        </div>
-        <div class="conv-contact-row2">
-          <span class="conv-contact-preview">${preview}</span>
-          <span class="conv-contact-meta">${c.unread_count > 0 ? `<span class="conv-unread-badge">${c.unread_count}</span>` : ''}</span>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+  list.innerHTML = visible.map(convContactRowHtml).join('');
+}
+
+function convRenderSearchResults(results, q) {
+  const list = document.getElementById('conv-contact-list');
+  if (!list) return;
+  if (!results.length) {
+    list.innerHTML = `<div style="padding:20px;color:#999;font-size:13px;">No contact matches “${convEsc(q)}”.</div>`;
+    return;
+  }
+  list.innerHTML =
+    `<div style="padding:6px 12px;font-size:11px;color:#888;background:#f0f0f0;">${results.length} result(s) for “${convEsc(q)}” — full history</div>`
+    + results.map(convContactRowHtml).join('');
+}
+
+let _convSearchTimer = null;
+function convOnSearchInput(v) {
+  clearTimeout(_convSearchTimer);
+  _convSearchTimer = setTimeout(() => convDoSearch(v), 250);   // debounce
+}
+
+async function convDoSearch(q) {
+  q = (q || '').trim();
+  if (q.length < 2) {
+    _convSearchActive = false;
+    _convLastSearchResults = [];
+    convRenderInbox(_convInboxCache);                 // restore the normal inbox
+    return;
+  }
+  _convSearchActive = true;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/contacts/search?q=${encodeURIComponent(q)}`, {
+      headers: { 'X-Admin-Password': _convPw() },
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const results = await r.json();
+    _convLastSearchResults = Array.isArray(results) ? results : [];
+    convRenderSearchResults(_convLastSearchResults, q);
+  } catch (e) {
+    const list = document.getElementById('conv-contact-list');
+    if (list) list.innerHTML = `<div style="padding:20px;color:#dc2626;font-size:13px;">Search error — ${convEsc(e.message)}</div>`;
+  }
 }
 
 function convUpdateTabTitle(contacts) {
@@ -4008,6 +4234,22 @@ async function convOpenContact(phone, name) {
     avatarEl.textContent         = convAvatarLetter(name);
     avatarEl.style.background    = convAvatarColor(name);
   }
+
+  // Show pin + notes controls and reflect the current pin state from the cache.
+  const actions = document.getElementById('conv-header-actions');
+  if (actions) actions.style.display = 'flex';
+  const cached = _convInboxCache.find(c => c.phone === phone)
+              || _convLastSearchResults.find(c => c.phone === phone) || {};
+  convReflectPinState(!!cached.pinned);
+  _convNotesOpen = false;
+  const notesPanel = document.getElementById('conv-notes-panel');
+  if (notesPanel) notesPanel.style.display = 'none';
+  const notesBtn = document.getElementById('conv-notes-btn');
+  if (notesBtn) notesBtn.classList.remove('active');
+  // Prime the notes-count badge from the inbox cache; the panel lazy-loads the
+  // full thread on open (convToggleNotesPanel), avoiding a fetch on every open.
+  const cntEl = document.getElementById('conv-notes-btn-count');
+  if (cntEl) cntEl.textContent = cached.note_count ? `(${cached.note_count})` : '';
 
   // Mobile: slide to thread view
   if (window.innerWidth <= 600) {

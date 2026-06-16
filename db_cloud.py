@@ -599,6 +599,7 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
         these; the digest does NOT escalate them.
       unanswered:    newest inbound > threshold with no reply (race-tolerant).
       counts:        {inbound, jobs, hours} from activity_counts(24h).
+      pinned:        chats staff pinned for manual follow-up (list_pinned_contacts).
     """
     from datetime import timedelta
 
@@ -612,7 +613,8 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
         except Exception:
             return None
 
-    out = {"open_handoffs": [], "handled_stale": [], "unanswered": [], "counts": {}}
+    out = {"open_handoffs": [], "handled_stale": [], "unanswered": [],
+           "counts": {}, "pinned": []}
     now = datetime.now(timezone.utc)
 
     try:
@@ -686,6 +688,11 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
         out["counts"] = activity_counts(hours=24)
     except Exception as exc:
         logger.error("chat_audit_snapshot counts error: %s", exc)
+
+    try:
+        out["pinned"] = list_pinned_contacts()
+    except Exception as exc:
+        logger.error("chat_audit_snapshot pinned error: %s", exc)
 
     return out
 
@@ -1091,6 +1098,276 @@ def mark_contact_seen(phone: str) -> None:
         ).execute()
     except Exception as exc:
         logger.warning("mark_contact_seen failed: %s", exc)
+
+
+# ── Chat triage: pin + follow-up notes (SCHEMA v30) ───────────────────────────
+# Staff pin a chat and attach timestamped notes from the admin Conversations
+# tab so a promised "I'll sort this out later" isn't forgotten. All functions
+# are best-effort and tolerate the pre-v30 schema (missing column / table) by
+# returning a neutral value rather than raising, so the inbox keeps working
+# before the migration is applied.
+
+def set_contact_pin(phone: str, pinned: bool) -> bool:
+    """Pin or unpin a contact's chat. Pinned chats sort to the top of the admin
+    inbox and surface in the twice-daily chat-audit digest. Upserts the row so a
+    contact with no prior row can still be pinned. Returns False on error."""
+    try:
+        data = {
+            "phone": phone,
+            "pinned": bool(pinned),
+            "pinned_at": datetime.now(timezone.utc).isoformat() if pinned else None,
+        }
+        _client().table("whatsapp_contacts").upsert(data, on_conflict="phone").execute()
+        return True
+    except Exception as exc:
+        logger.warning("set_contact_pin(%s) failed: %s", phone, exc)
+        return False
+
+
+def add_contact_note(phone: str, note: str, created_by: str | None = None) -> dict:
+    """Append a timestamped follow-up note to a contact (append-only — notes are
+    never overwritten). Returns the inserted row, or {} on empty note / error."""
+    note = (note or "").strip()
+    if not note:
+        return {}
+    try:
+        row = {"phone": phone, "note": note[:2000]}
+        if created_by:
+            row["created_by"] = str(created_by)[:60]
+        res = _client().table("contact_notes").insert(row).execute()
+        return (res.data or [{}])[0]
+    except Exception as exc:
+        logger.warning("add_contact_note(%s) failed: %s", phone, exc)
+        return {}
+
+
+def list_contact_notes(phone: str, limit: int = 50) -> list:
+    """Return a contact's follow-up notes, newest first. [] on error/missing table."""
+    try:
+        return (
+            _client().table("contact_notes")
+            .select("id,note,created_by,created_at")
+            .eq("phone", phone)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as exc:
+        logger.warning("list_contact_notes(%s) failed: %s", phone, exc)
+        return []
+
+
+def delete_contact_note(note_id) -> bool:
+    """Delete one note by id (lets staff remove a mistaken entry). Best-effort."""
+    try:
+        _client().table("contact_notes").delete().eq("id", note_id).execute()
+        return True
+    except Exception as exc:
+        logger.warning("delete_contact_note(%s) failed: %s", note_id, exc)
+        return False
+
+
+def contact_note_counts() -> dict:
+    """{phone: count} of follow-up notes, for the inbox note badge. {} on error."""
+    try:
+        rows = (
+            _client().table("contact_notes")
+            .select("phone")
+            .limit(5000)              # safety ceiling on the hot inbox-poll path
+            .execute()
+            .data
+            or []
+        )
+    except Exception as exc:
+        logger.warning("contact_note_counts failed: %s", exc)
+        return {}
+    counts: dict = {}
+    for r in rows:
+        p = r.get("phone")
+        if p:
+            counts[p] = counts.get(p, 0) + 1
+    return counts
+
+
+def list_pinned_contacts() -> list:
+    """Pinned chats for the chat-audit digest, oldest-pin first. Each is
+    {phone, name, pinned_at, age_hours, last_note}. [] on error/missing column."""
+    try:
+        rows = (
+            _client().table("whatsapp_contacts")
+            .select("phone,name,pinned,pinned_at")
+            .eq("pinned", True)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as exc:
+        logger.warning("list_pinned_contacts failed: %s", exc)
+        return []
+    if not rows:
+        return []
+
+    pinned_phones = [r.get("phone") for r in rows if r.get("phone")]
+    notes_by_phone: dict = {}
+    try:
+        nrows = (
+            _client().table("contact_notes")
+            .select("phone,note,created_at")
+            .in_("phone", pinned_phones)     # only the pinned set, not the whole table
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        )
+        for nr in nrows:                       # desc order → first seen is newest
+            notes_by_phone.setdefault(nr.get("phone"), nr.get("note"))
+    except Exception as exc:
+        logger.debug("list_pinned_contacts notes lookup skipped: %s", exc)
+
+    now = datetime.now(timezone.utc)
+    out = []
+    for r in rows:
+        pa = r.get("pinned_at")
+        age_h = None
+        if pa:
+            try:
+                dt = datetime.fromisoformat(str(pa).replace("Z", "+00:00"))
+                if not dt.tzinfo:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                age_h = round((now - dt).total_seconds() / 3600.0, 1)
+            except Exception:
+                age_h = None
+        out.append({
+            "phone": r.get("phone"),
+            "name": r.get("name"),
+            "pinned_at": pa,
+            "age_hours": age_h,
+            "last_note": notes_by_phone.get(r.get("phone")),
+        })
+    # Oldest pin first — the chats most at risk of being forgotten lead the digest.
+    out.sort(
+        key=lambda x: (x["age_hours"] is not None, x["age_hours"] or 0.0),
+        reverse=True,
+    )
+    return out
+
+
+def _inbox_preview(row: dict) -> str:
+    """Short inbox preview for a conversation_log row — mirrors the formatting in
+    _handle_admin_conversations so search results render identically."""
+    mt = row.get("message_type") or "text"
+    if mt.startswith("image"):
+        return "Image"
+    if mt.startswith("audio"):
+        return "Voice note"
+    if mt.startswith("video"):
+        return "Video"
+    if "pdf" in mt or mt.startswith("application"):
+        return f"File: {row.get('filename') or 'file'}"
+    return (row.get("body") or "")[:60]
+
+
+def search_contacts(q: str, limit: int = 30) -> list:
+    """Find contacts by name or phone substring (case-insensitive) across the
+    FULL history — not just the recent inbox window — so staff can reach a chat
+    that has scrolled off the list. Returns inbox-shaped rows (same keys as
+    _handle_admin_conversations) newest-message first. [] on short query/error.
+    """
+    q = (q or "").strip()
+    if len(q) < 2:
+        return []
+    client = _client()
+    pat = f"%{q}%"
+
+    contacts: dict = {}
+    try:
+        by_name = (
+            client.table("whatsapp_contacts")
+            .select("phone,name,pinned,pinned_at")
+            .ilike("name", pat)
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+        by_phone = (
+            client.table("whatsapp_contacts")
+            .select("phone,name,pinned,pinned_at")
+            .ilike("phone", pat)
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+        for c in by_name + by_phone:
+            contacts.setdefault(c["phone"], c)
+    except Exception as exc:
+        logger.warning("search_contacts contacts query failed: %s", exc)
+
+    # Catch phones that have messages but no whatsapp_contacts row (e.g. no
+    # captured profile name) when the term looks like part of a number.
+    digits = "".join(ch for ch in q if ch.isdigit())
+    if len(digits) >= 3:
+        try:
+            log_hits = (
+                client.table("conversation_log")
+                .select("phone")
+                .ilike("phone", f"%{digits}%")
+                .limit(200)
+                .execute()
+                .data
+                or []
+            )
+            for r in log_hits:
+                if r.get("phone"):
+                    contacts.setdefault(r["phone"], {"phone": r["phone"]})
+        except Exception as exc:
+            logger.debug("search_contacts log lookup skipped: %s", exc)
+
+    if not contacts:
+        return []
+
+    phones = list(contacts.keys())[:limit]
+
+    # Latest message per matched phone for the preview + sort timestamp.
+    last_by_phone: dict = {}
+    try:
+        rows = (
+            client.table("conversation_log")
+            .select("phone,direction,message_type,body,filename,created_at")
+            .in_("phone", phones)
+            .order("created_at", desc=True)
+            .limit(2000)
+            .execute()
+            .data
+            or []
+        )
+        for r in rows:                          # desc → first seen is newest
+            last_by_phone.setdefault(r["phone"], r)
+    except Exception as exc:
+        logger.debug("search_contacts last-message lookup skipped: %s", exc)
+
+    note_counts = contact_note_counts()
+    out = []
+    for ph in phones:
+        c = contacts[ph]
+        last = last_by_phone.get(ph) or {}
+        out.append({
+            "phone":             ph,
+            "name":              c.get("name") or ph,
+            "last_message":      _inbox_preview(last) if last else "",
+            "last_message_type": last.get("message_type") or "text",
+            "unread_count":      0,
+            "ts":                last.get("created_at"),
+            "needs_human":       False,
+            "pinned":            bool(c.get("pinned")),
+            "pinned_at":         c.get("pinned_at"),
+            "note_count":        note_counts.get(ph, 0),
+        })
+    out.sort(key=lambda x: (x.get("ts") or ""), reverse=True)
+    return out
 
 
 # ── book_orders (Xtraa book campaign) ─────────────────────────────────────────
