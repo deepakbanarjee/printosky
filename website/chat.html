@@ -109,6 +109,54 @@ html, body {
 }
 #sos-btn.active { background: #ff7043; border-color: #e64a19; }
 
+/* ── PIN + NOTES + SEARCH ──────────────────────────────────────── */
+#pin-filter-btn {
+  background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.3);
+  color: #fff; border-radius: 14px; padding: 5px 11px;
+  font-size: 12px; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; gap: 4px; line-height: 1;
+}
+#pin-filter-btn.active { background: #ffb300; border-color: #e09c00; color: #3a2c00; }
+#search-bar { padding: 7px 10px; background: #f5f5f5; border-bottom: 1px solid var(--border); }
+#search-input {
+  width: 100%; box-sizing: border-box; padding: 8px 11px;
+  border: 1px solid #ccc; border-radius: 8px; font-size: 14px; outline: none;
+}
+.search-note { padding: 6px 12px; font-size: 11px; color: #888; background: #f0f0f0; }
+.note-badge {
+  display: inline-block; min-width: 16px; padding: 0 5px; border-radius: 8px;
+  background: #ffb300; color: #3a2c00; font-size: 10px; font-weight: 700;
+  line-height: 16px; text-align: center; flex-shrink: 0;
+}
+.hdr-btn {
+  background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+  color: #fff; border-radius: 16px; padding: 6px 11px; font-size: 13px;
+  cursor: pointer; white-space: nowrap;
+}
+.hdr-btn.active { background: #ffb300; border-color: #e09c00; color: #3a2c00; font-weight: 600; }
+#notes-panel {
+  display: flex; flex-direction: column; gap: 8px;
+  background: #fffdf5; border-top: 1px solid #e6dcb8;
+  padding: 8px 12px; max-height: 42%; overflow-y: auto;
+}
+#notes-list { display: flex; flex-direction: column; }
+.notes-empty { color: #999; font-size: 12px; padding: 4px 0; }
+.note-row { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid #f0e9d0; }
+.note-row:last-child { border-bottom: none; }
+.note-text { white-space: pre-wrap; word-break: break-word; color: #222; font-size: 14px; }
+.note-meta { font-size: 11px; color: #999; margin-top: 2px; }
+.note-del { cursor: pointer; color: #c0392b; font-size: 13px; opacity: .6; padding: 0 2px; }
+.note-del:active { opacity: 1; }
+.note-add { display: flex; gap: 6px; }
+#note-input {
+  flex: 1; box-sizing: border-box; border: 1px solid #d0c79a; border-radius: 8px;
+  padding: 7px 9px; font-size: 14px; font-family: inherit; resize: none;
+}
+.note-save {
+  background: #ffb300; color: #3a2c00; border: none; border-radius: 8px;
+  padding: 0 16px; font-weight: 700; cursor: pointer; font-size: 14px;
+}
+
 /* ── CONTACT LIST ──────────────────────────────────────────────── */
 #contact-list { flex: 1; overflow-y: auto; background: #fff; }
 .contact-item {
@@ -343,6 +391,11 @@ html, body {
       <div class="avatar" style="background:var(--green); font-size:18px;">💬</div>
       <span class="topbar-title">Chats</span>
       <button id="sos-btn" onclick="toggleSos()">🆘&nbsp;<span id="sos-count">0</span></button>
+      <button id="pin-filter-btn" onclick="togglePinnedFilter()" title="Show only pinned chats">📌&nbsp;<span id="pin-count">0</span></button>
+    </div>
+    <div id="search-bar">
+      <input id="search-input" type="search" placeholder="🔍 Search name or number…"
+             autocomplete="off" oninput="onSearchInput(this.value)">
     </div>
     <div id="contact-list"><div class="empty-state">Loading…</div></div>
   </div>
@@ -363,11 +416,23 @@ html, body {
         <div class="topbar-title" id="chat-name">—</div>
         <div class="topbar-sub"  id="chat-phone">—</div>
       </div>
-      <button id="resume-btn" onclick="handBackToBot()"
-              title="Resume the bot for this customer and clear the SOS flag"
-              style="display:none;margin-left:auto;background:var(--green);color:#fff;border:none;border-radius:16px;padding:6px 12px;font-size:13px;cursor:pointer;white-space:nowrap">↩︎ Hand back to bot</button>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
+        <button id="pin-btn" class="hdr-btn" onclick="togglePin()" title="Pin this chat to the top for follow-up">📌 Pin</button>
+        <button id="notes-btn" class="hdr-btn" onclick="toggleNotes()" title="Follow-up notes for this chat">📝 Notes<span id="notes-btn-count"></span></button>
+        <button id="resume-btn" onclick="handBackToBot()"
+                title="Resume the bot for this customer and clear the SOS flag"
+                style="display:none;background:var(--green);color:#fff;border:none;border-radius:16px;padding:6px 12px;font-size:13px;cursor:pointer;white-space:nowrap">↩︎ Hand back to bot</button>
+      </div>
     </div>
     <div id="messages"></div>
+    <div id="notes-panel" style="display:none">
+      <div id="notes-list"></div>
+      <div class="note-add">
+        <textarea id="note-input" rows="1" placeholder="Add a follow-up note… (e.g. owes ₹5370, call tomorrow)"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addNote();}"></textarea>
+        <button class="note-save" onclick="addNote()">Save</button>
+      </div>
+    </div>
     <div id="reply-bar">
       <button class="attach-btn" onclick="document.getElementById('file-input').click()">📎</button>
       <input type="file" id="file-input" style="display:none" onchange="handleAttach(this)">
@@ -393,6 +458,7 @@ html, body {
 const API = 'https://printosky.vercel.app';
 let _pw = '', _phone = '', _name = '', _contacts = [];
 let _sosOnly = false, _pollList = null, _pollThread = null;
+let _pinnedOnly = false, _notesOpen = false, _searchActive = false, _searchTimer = null, _lastSearch = [];
 
 function isDesktop() { return window.innerWidth >= 700; }
 
@@ -445,38 +511,180 @@ async function fetchContacts() {
   } catch(_) {}
 }
 
-function renderContacts(contacts) {
-  _contacts = contacts;
-  const sosCount = contacts.filter(c => c.needs_human).length;
-  document.getElementById('sos-count').textContent = sosCount;
-  const visible = _sosOnly ? contacts.filter(c => c.needs_human) : contacts;
-  const el = document.getElementById('contact-list');
-  if (!visible.length) {
-    el.innerHTML = `<div class="empty-state">${_sosOnly ? 'No sessions need human help.' : 'No conversations yet.'}</div>`;
-    return;
-  }
-  el.innerHTML = visible.map(c => {
-    const color = avatarColor(c.name);
-    return `<div class="contact-item" onclick="openChat('${esc(c.phone)}','${esc(c.name||'')}')">
+function contactRowHtml(c) {
+  const color = avatarColor(c.name);
+  const pin = c.pinned ? '<span title="Pinned for follow-up">📌</span> ' : '';
+  const noteBadge = c.note_count > 0
+    ? `<span class="note-badge" title="${c.note_count} follow-up note(s)">📝${c.note_count}</span>` : '';
+  return `<div class="contact-item${c.phone===_phone?' selected':''}" onclick="openChat('${esc(c.phone)}','${esc(c.name||'')}')">
       <div class="avatar" style="background:${color}">${avatarLetter(c.name)}</div>
       <div class="contact-body">
         <div class="contact-row1">
-          <span class="contact-name">${esc(c.name)}${c.needs_human?'<span class="sos-pill">SOS</span>':''}</span>
+          <span class="contact-name">${pin}${esc(c.name)}${c.needs_human?'<span class="sos-pill">SOS</span>':''}</span>
           <span class="contact-time">${fmtTime(c.ts)}</span>
         </div>
         <div class="contact-row2">
           <span class="contact-preview">${esc(c.last_message||'')}</span>
-          ${c.unread_count > 0 ? `<span class="unread-badge">${c.unread_count}</span>` : ''}
+          ${noteBadge}${c.unread_count > 0 ? `<span class="unread-badge">${c.unread_count}</span>` : ''}
         </div>
       </div>
     </div>`;
-  }).join('');
+}
+
+function renderContacts(contacts) {
+  _contacts = contacts;
+  document.getElementById('sos-count').textContent = contacts.filter(c => c.needs_human).length;
+  const pcEl = document.getElementById('pin-count');
+  if (pcEl) pcEl.textContent = contacts.filter(c => c.pinned).length;
+
+  // Don't overwrite live search results when the 30s list poll fires.
+  if (_searchActive) return;
+
+  let visible = contacts;
+  if (_sosOnly)    visible = visible.filter(c => c.needs_human);
+  if (_pinnedOnly) visible = visible.filter(c => c.pinned);
+  const el = document.getElementById('contact-list');
+  if (!visible.length) {
+    const m = _pinnedOnly ? 'No pinned chats yet.'
+            : _sosOnly    ? 'No sessions need human help.'
+            : 'No conversations yet.';
+    el.innerHTML = `<div class="empty-state">${m}</div>`;
+    return;
+  }
+  el.innerHTML = visible.map(contactRowHtml).join('');
 }
 
 function toggleSos() {
   _sosOnly = !_sosOnly;
   document.getElementById('sos-btn').classList.toggle('active', _sosOnly);
   renderContacts(_contacts);
+}
+
+function togglePinnedFilter() {
+  _pinnedOnly = !_pinnedOnly;
+  document.getElementById('pin-filter-btn').classList.toggle('active', _pinnedOnly);
+  renderContacts(_contacts);
+}
+
+/* ── SEARCH (full history, incl. chats off the recent list) ───── */
+function renderSearch(results, q) {
+  const el = document.getElementById('contact-list');
+  if (!results.length) { el.innerHTML = `<div class="empty-state">No contact matches “${esc(q)}”.</div>`; return; }
+  el.innerHTML = `<div class="search-note">${results.length} result(s) for “${esc(q)}” — full history</div>`
+    + results.map(contactRowHtml).join('');
+}
+
+function onSearchInput(v) {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => doSearch(v), 250);   // debounce
+}
+
+async function doSearch(q) {
+  q = (q || '').trim();
+  if (q.length < 2) { _searchActive = false; _lastSearch = []; renderContacts(_contacts); return; }
+  _searchActive = true;
+  try {
+    const r = await fetch(`${API}/admin/contacts/search?q=${encodeURIComponent(q)}`, {headers:{'X-Admin-Password':_pw}});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const res = await r.json();
+    _lastSearch = Array.isArray(res) ? res : [];
+    renderSearch(_lastSearch, q);
+  } catch(e) {
+    document.getElementById('contact-list').innerHTML =
+      `<div class="empty-state" style="color:#dc2626">Search error — ${esc(e.message)}</div>`;
+  }
+}
+
+/* ── PIN + NOTES ──────────────────────────────────────────────── */
+function reflectPin(pinned) {
+  const b = document.getElementById('pin-btn');
+  if (!b) return;
+  b.classList.toggle('active', pinned);
+  b.innerHTML = pinned ? '📌 Pinned' : '📌 Pin';
+  b.dataset.pinned = pinned ? '1' : '0';
+}
+
+async function togglePin() {
+  if (!_phone) return;
+  const target = _phone;
+  const b = document.getElementById('pin-btn');
+  const next = !(b && b.dataset.pinned === '1');
+  reflectPin(next);                                    // optimistic
+  try {
+    const r = await fetch(`${API}/admin/contacts/pin`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password:_pw, phone:target, pinned:next})
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const c = _contacts.find(x => x.phone === target); if (c) c.pinned = next;
+    fetchContacts();                                   // re-sort + pin badge
+  } catch(e) {
+    if (_phone === target) reflectPin(!next);          // revert if still here
+    alert('Could not update pin — ' + e.message);
+  }
+}
+
+function toggleNotes() {
+  _notesOpen = !_notesOpen;
+  document.getElementById('notes-panel').style.display = _notesOpen ? 'flex' : 'none';
+  document.getElementById('notes-btn').classList.toggle('active', _notesOpen);
+  if (_notesOpen && _phone) {
+    loadNotes(_phone);
+    const i = document.getElementById('note-input'); if (i) i.focus();
+  }
+}
+
+async function loadNotes(phone) {
+  try {
+    const r = await fetch(`${API}/admin/contacts/notes?phone=${encodeURIComponent(phone)}`, {headers:{'X-Admin-Password':_pw}});
+    if (!r.ok) return;
+    renderNotes(await r.json());
+  } catch(_) {}
+}
+
+function renderNotes(notes) {
+  notes = Array.isArray(notes) ? notes : [];
+  const cnt = document.getElementById('notes-btn-count');
+  if (cnt) cnt.textContent = notes.length ? ` (${notes.length})` : '';
+  const list = document.getElementById('notes-list');
+  if (!list) return;
+  if (!notes.length) { list.innerHTML = '<div class="notes-empty">No notes yet. Jot down what needs resolving.</div>'; return; }
+  list.innerHTML = notes.map(n => `<div class="note-row">
+      <div style="flex:1">
+        <div class="note-text">${esc(n.note||'')}</div>
+        <div class="note-meta">${fmtTime(n.created_at)}${n.created_by ? ' · ' + esc(n.created_by) : ''}</div>
+      </div>
+      <span class="note-del" title="Delete note" onclick="deleteNote(${Number(n.id)})">✕</span>
+    </div>`).join('');
+}
+
+async function addNote() {
+  const i = document.getElementById('note-input');
+  if (!i || !_phone) return;
+  const note = i.value.trim(); if (!note) return;
+  try {
+    const r = await fetch(`${API}/admin/contacts/note`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password:_pw, phone:_phone, note})
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    i.value = '';
+    await loadNotes(_phone);
+    fetchContacts();                                   // refresh note badge
+  } catch(e) { alert('Could not save note — ' + e.message); }
+}
+
+async function deleteNote(id) {
+  if (!_phone || !confirm('Delete this note?')) return;
+  try {
+    const r = await fetch(`${API}/admin/contacts/note/delete`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password:_pw, id})
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    await loadNotes(_phone);
+    fetchContacts();
+  } catch(e) { alert('Could not delete note — ' + e.message); }
 }
 
 /* ── OPEN / CLOSE CHAT ──────────────────────────────────────── */
@@ -492,6 +700,16 @@ function openChat(phone, name) {
   // Show "Hand back to bot" only while this conversation is flagged SOS (on hold).
   const _c = _contacts.find(x => x.phone === phone);
   document.getElementById('resume-btn').style.display = (_c && _c.needs_human) ? '' : 'none';
+
+  // Pin + notes state for this chat (fall back to a search-result row if the
+  // chat was opened from search and isn't in the recent list).
+  const _cc = _c || _lastSearch.find(x => x.phone === phone) || {};
+  reflectPin(!!_cc.pinned);
+  _notesOpen = false;
+  document.getElementById('notes-panel').style.display = 'none';
+  document.getElementById('notes-btn').classList.remove('active');
+  const _nbc = document.getElementById('notes-btn-count');
+  if (_nbc) _nbc.textContent = _cc.note_count ? ` (${_cc.note_count})` : '';
 
   // Reveal the thread + hide the (desktop-only) placeholder on BOTH layouts.
   // Without this the mobile chat screen slid in showing only the placeholder.
