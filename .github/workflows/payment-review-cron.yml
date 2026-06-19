@@ -1,0 +1,30 @@
+name: Printosky payment-review reminders
+
+# Re-surface Xtraa book payments that Anu hasn't verified yet. Calls
+# /cron/payment-review-reminders, which re-sends the Full / Part / Not-received
+# prompt for any order stuck in payment_review. The original prompt is
+# fire-and-forget, so a single missed tap would otherwise strand the order
+# forever (customer was told "we're verifying", but nothing re-pings Anu).
+#
+# Runs hourly during IST daytime only — Anu is active then, so her 24h WhatsApp
+# window is open and the re-send actually reaches her. Lives in GitHub Actions
+# like the other Printosky crons (see daily-activity-cron.yml, sla-cron.yml).
+on:
+  schedule:
+    - cron: "0 3-16 * * *"   # 03:00–16:00 UTC = 08:30–21:30 IST, hourly
+  workflow_dispatch: {}        # allow manual run from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Payment-review reminder sweep
+        run: |
+          echo "Calling payment-review reminder sweep..."
+          code=$(curl -s -o /tmp/pr.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://printosky.vercel.app/cron/payment-review-reminders")
+          echo "HTTP $code"; cat /tmp/pr.json || true
+          exit 0
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}

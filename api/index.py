@@ -2243,6 +2243,28 @@ def _handle_cron_abandoned_carts(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_cron_payment_review_reminders(h) -> None:
+    """GET /cron/payment-review-reminders — re-surface payment screenshots that
+    Anu hasn't verified yet, so orders don't strand in payment_review.
+
+    The original verification prompt is fire-and-forget; if Anu misses it (lands
+    at night, or stacks behind another prompt) nothing re-pings her. This sweep
+    re-sends the actionable prompt, once per cooldown.
+    Auth: optional `Authorization: Bearer ${CRON_SECRET}` when CRON_SECRET is set.
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected and h.headers.get("Authorization", "") != f"Bearer {expected}":
+        _json_response(h, 401, {"error": "Unauthorized"})
+        return
+    try:
+        from book_bot import send_verifier_reminders
+        result = send_verifier_reminders()
+        _json_response(h, 200, {"ok": True, **result})
+    except Exception as exc:
+        logger.error("payment-review-reminders cron error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_cron_daily_activity(h) -> None:
     """GET /cron/daily-activity — once-daily 'is the pipeline alive?' check.
 
@@ -2459,6 +2481,11 @@ class handler(BaseHTTPRequestHandler):
         # ── Abandoned book-cart reminders (GitHub Actions cron) ───────────────
         if self.path == "/cron/abandoned-carts" or self.path.startswith("/cron/abandoned-carts?"):
             _handle_cron_abandoned_carts(self)
+            return
+
+        # ── Payment-review reminders to Anu (GitHub Actions cron) ─────────────
+        if self.path == "/cron/payment-review-reminders" or self.path.startswith("/cron/payment-review-reminders?"):
+            _handle_cron_payment_review_reminders(self)
             return
 
         # ── Store-PC liveness watcher (GitHub Actions cron) ───────────────────

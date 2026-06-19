@@ -84,6 +84,18 @@ class FakeDB:
         return float(sum((p.get("amount") or 0) for p in self.payments.values()
                          if p["order_code"] == order_code and p["status"] == "verified"))
 
+    # stale payment_review reconciliation (verifier reminder sweep)
+    def find_stale_payment_reviews(self, idle_minutes=30, cooldown_hours=3, limit=100):
+        rows = [dict(o) for o in self.orders.values()
+                if o.get("status") == "payment_review"
+                and not o.get("verifier_reminder_at")]
+        return rows[:limit]
+
+    def mark_verifier_reminded(self, order_code):
+        o = self.orders.get(order_code)
+        if o:
+            o["verifier_reminder_at"] = "2026-06-19T00:00:00+00:00"
+
 
 @pytest.fixture
 def fake(monkeypatch):
@@ -721,3 +733,36 @@ def test_confirm_failure_does_not_send_false_confirmation(fake, monkeypatch):
     assert res.get("error") == "status_not_persisted"
     assert db.orders["XTR-FAIL"]["status"] == "payment_review"     # unchanged
     assert not any("Order confirmed" in m for m in sent["text"])
+
+
+# ── verifier reminder sweep: don't let payment_review orders strand ───────────
+# Root cause (Sudhin/Mayaja): the verification prompt to Anu is fire-and-forget.
+# When she misses it (sent at night, or stacked behind another prompt) the order
+# sits in payment_review forever — nothing re-surfaces it. This sweep re-pings.
+
+@pytest.mark.integration
+def test_stale_payment_review_is_re_sent_to_anu_then_idempotent(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(_dbc, "find_stale_payment_reviews",
+                        db.find_stale_payment_reviews, raising=False)
+    monkeypatch.setattr(_dbc, "mark_verifier_reminded",
+                        db.mark_verifier_reminded, raising=False)
+
+    code = _make_awaiting_order(db, {"malayalam": 1})            # grand 275
+    book_bot.handle_payment_proof(PHONE, b"img", "image/jpeg")  # -> payment_review + pending pay
+    assert db.orders[code]["status"] == "payment_review"
+    payid = max(db.payments)
+    sent["buttons"].clear(); sent["text"].clear()
+
+    # First sweep: Anu re-pinged with the SAME actionable buttons; order stamped.
+    res1 = book_bot.send_verifier_reminders()
+    assert res1 == {"found": 1, "reminded": 1}
+    assert any(f"pf_{payid}" in ids for ids in sent["buttons"])  # Full/Part/Not-received re-sent
+    assert any(code in m for m in sent["text"])                  # reminder names the order
+    assert db.orders[code].get("verifier_reminder_at")          # stamped → no re-spam
+
+    # Second sweep within cooldown: nothing re-sent.
+    sent["buttons"].clear()
+    res2 = book_bot.send_verifier_reminders()
+    assert res2 == {"found": 0, "reminded": 0}
+    assert sent["buttons"] == []
