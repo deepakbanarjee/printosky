@@ -2265,6 +2265,38 @@ def _handle_cron_payment_review_reminders(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_admin_courier_slips(h) -> None:
+    """GET /admin/book-orders/courier-slips — branded A4-landscape courier slips
+    + Thank-You insert for confirmed, undispatched orders (one per page, ready to
+    print and stick on parcels). Auth via X-Admin-Password header or
+    ?admin_password= query (so it can be opened directly in a browser tab).
+    """
+    pw = h.headers.get("X-Admin-Password", "").strip()
+    if not pw:
+        from urllib.parse import parse_qs, urlparse
+        pw = parse_qs(urlparse(h.path).query).get("admin_password", [""])[0]
+    if not _auth_admin_pw(pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from datetime import datetime, timezone
+        from db_cloud import list_book_orders
+        from dispatch_render import build_courier_slips
+        orders  = list_book_orders(status="confirmed", limit=200)
+        pending = [o for o in orders if not o.get("dispatched_at")]
+        generated = datetime.now(timezone.utc).strftime("%d %b %Y, %I:%M %p UTC")
+        html = build_courier_slips(pending, generated=generated)
+        encoded = html.encode("utf-8")
+        h.send_response(200)
+        h.send_header("Content-Type", "text/html; charset=utf-8")
+        h.send_header("Content-Length", str(len(encoded)))
+        h.end_headers()
+        h.wfile.write(encoded)
+    except Exception as exc:
+        logger.error("courier-slips error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_cron_daily_activity(h) -> None:
     """GET /cron/daily-activity — once-daily 'is the pipeline alive?' check.
 
@@ -2466,6 +2498,11 @@ class handler(BaseHTTPRequestHandler):
         # Printable dispatch sheet: pick list + packing slips for confirmed orders.
         if self.path == "/admin/book-orders/dispatch-sheet" or self.path.startswith("/admin/book-orders/dispatch-sheet?"):
             _handle_admin_dispatch_sheet(self)
+            return
+
+        # Branded courier slips (A4 landscape + Thank-You insert) for parcels.
+        if self.path == "/admin/book-orders/courier-slips" or self.path.startswith("/admin/book-orders/courier-slips?"):
+            _handle_admin_courier_slips(self)
             return
 
         # ── SLA watchdog (GitHub Actions cron, every 30 min) ──────────────────
