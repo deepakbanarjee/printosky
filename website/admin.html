@@ -1521,6 +1521,7 @@
           <option value="cancelled">Cancelled</option>
           <option value="all">All</option>
         </select>
+        <button class="ctrl-btn" onclick="openDispatchSheet()" title="Pick list (how many of each book to prepare today) + packing slips — opens a printable sheet for confirmed, undispatched orders">🚚 Dispatch sheet</button>
         <button class="ctrl-btn" onclick="openWalkInForm()">➕ New order</button>
         <button class="ctrl-btn" onclick="openDivyaStatement()">📊 Divya statement</button>
         <button class="ctrl-btn" onclick="loadBookOrders()">↻ Refresh</button>
@@ -4436,6 +4437,35 @@ function _fmtDeadline(deadlineIso) {
 
 // ── Book Orders (Xtraa campaign) ─────────────────────────────────────────────
 let _bookOrdersCache = [];
+
+// Staff self-serve: open the printable dispatch sheet (book-wise pick list of
+// how many of each book to prepare today + packing slips) for confirmed,
+// undispatched orders. Fetches with the admin header (keeps the password out of
+// the URL, matching every other admin call) and opens it in a new tab.
+async function openDispatchSheet() {
+  const pw = _convPw();
+  if (!pw) { alert('Enter the admin password first.'); return; }
+  const w = window.open('', '_blank');   // open synchronously so it is not pop-up-blocked
+  if (!w) { alert('Pop-up blocked — allow pop-ups for this site, then try again.'); return; }
+  w.document.write('<p style="font:14px Arial;padding:16px">Loading dispatch sheet…</p>');
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/dispatch-sheet`, {
+      headers: { 'X-Admin-Password': pw }
+    });
+    if (!r.ok) {
+      w.document.body.innerHTML =
+        '<p style="font:14px Arial;padding:16px;color:#c00">Could not load dispatch sheet (HTTP ' + r.status + ').</p>';
+      return;
+    }
+    const html = await r.text();
+    w.document.open(); w.document.write(html); w.document.close();
+  } catch (e) {
+    try {
+      w.document.body.innerHTML =
+        '<p style="font:14px Arial;padding:16px;color:#c00">Dispatch sheet failed: ' + e.message + '</p>';
+    } catch (_) {}
+  }
+}
 
 async function loadBookOrders() {
   if (!_convPw()) {
