@@ -19,6 +19,7 @@ logger = logging.getLogger("api.webhook")
 
 from api.index import (  # noqa: E402
     _json_response,
+    _send_cors_headers,
     _auth_admin_pw,
     _hash_pin,
     _fmt_phone,
@@ -681,6 +682,7 @@ def _handle_admin_dispatch_sheet(h) -> None:
         h.send_response(200)
         h.send_header("Content-Type", "text/html; charset=utf-8")
         h.send_header("Content-Length", str(len(encoded)))
+        _send_cors_headers(h)   # opened cross-origin (admin.html on printosky.com) -> need ACAO
         h.end_headers()
         h.wfile.write(encoded)
 
