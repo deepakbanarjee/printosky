@@ -1466,6 +1466,73 @@ def mark_verifier_reminded(order_code: str) -> None:
         logger.error("mark_verifier_reminded error for %s: %s", order_code, exc)
 
 
+def find_dispatched_by_tracking(ref: str) -> dict:
+    """A dispatched order whose tracking_no matches the DTDC reference `ref`, or {}."""
+    if not ref:
+        return {}
+    try:
+        rows = (
+            _client().table("book_orders").select("*")
+            .eq("status", "dispatched").eq("tracking_no", ref)
+            .limit(1).execute().data or []
+        )
+        return rows[0] if rows else {}
+    except Exception as exc:
+        logger.error("find_dispatched_by_tracking error for %s: %s", ref, exc)
+        return {}
+
+
+def mark_book_delivered(order_code: str) -> bool:
+    """Flip an order to delivered + stamp delivered_at. Returns True on success."""
+    return update_book_order(
+        order_code, status="delivered",
+        delivered_at=datetime.now(timezone.utc).isoformat())
+
+
+def latest_delivered_order(phone: str) -> dict:
+    """Most-recently delivered order for a phone (matched on last 10 digits), or {}."""
+    digits = "".join(c for c in (phone or "") if c.isdigit())
+    if not digits:
+        return {}
+    try:
+        rows = (
+            _client().table("book_orders").select("*")
+            .eq("status", "delivered")
+            .order("delivered_at", desc=True).limit(20).execute().data or []
+        )
+        for r in rows:
+            rp = "".join(c for c in (r.get("phone") or "") if c.isdigit())
+            if rp[-10:] == digits[-10:]:
+                return r
+        return {}
+    except Exception as exc:
+        logger.error("latest_delivered_order error for %s: %s", phone, exc)
+        return {}
+
+
+def save_book_feedback(order_code: str, phone: str,
+                       rating: int | None = None, comment: str | None = None) -> dict:
+    """Upsert one book_feedback row per order_code (rating first, comment may follow)."""
+    try:
+        existing = (
+            _client().table("book_feedback").select("order_code")
+            .eq("order_code", order_code).limit(1).execute().data or []
+        )
+        fields: dict = {"order_code": order_code, "phone": phone}
+        if rating is not None:
+            fields["rating"] = rating
+        if comment is not None:
+            fields["comment"] = comment
+        if existing:
+            _client().table("book_feedback").update(fields).eq("order_code", order_code).execute()
+        else:
+            _client().table("book_feedback").insert(fields).execute()
+        return fields
+    except Exception as exc:
+        logger.error("save_book_feedback error for %s: %s", order_code, exc)
+        return {}
+
+
 def mark_abandoned_reminded(order_code: str) -> None:
     """Stamp abandoned_reminder_at=now (without bumping updated_at). Silent on error."""
     try:

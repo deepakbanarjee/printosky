@@ -17,6 +17,7 @@ class FakeDB:
         self.payments: dict[int, dict] = {}
         self._seq = 0
         self._payseq = 0
+        self.feedback: dict[str, dict] = {}
 
     def get_session(self, db, phone):
         return dict(self.sessions.get(phone, {}))
@@ -95,6 +96,35 @@ class FakeDB:
         o = self.orders.get(order_code)
         if o:
             o["verifier_reminder_at"] = "2026-06-19T00:00:00+00:00"
+
+    # delivery confirmation + book feedback
+    def find_dispatched_by_tracking(self, ref):
+        for o in self.orders.values():
+            if o.get("status") == "dispatched" and (o.get("tracking_no") or "") == ref:
+                return dict(o)
+        return {}
+
+    def mark_book_delivered(self, code):
+        o = self.orders.get(code)
+        if o:
+            o["status"] = "delivered"
+            o["delivered_at"] = "2026-06-21T00:00:00+00:00"
+        return bool(o)
+
+    def latest_delivered_order(self, phone):
+        ds = [o for o in self.orders.values()
+              if o.get("phone") == phone and o.get("status") == "delivered"]
+        ds.sort(key=lambda o: o.get("_seq", 0), reverse=True)
+        return dict(ds[0]) if ds else {}
+
+    def save_book_feedback(self, code, phone, rating=None, comment=None):
+        row = self.feedback.setdefault(
+            code, {"order_code": code, "phone": phone, "rating": None, "comment": None})
+        if rating is not None:
+            row["rating"] = rating
+        if comment is not None:
+            row["comment"] = comment
+        return dict(row)
 
 
 @pytest.fixture
@@ -766,3 +796,50 @@ def test_stale_payment_review_is_re_sent_to_anu_then_idempotent(fake, monkeypatc
     res2 = book_bot.send_verifier_reminders()
     assert res2 == {"found": 0, "reminded": 0}
     assert sent["buttons"] == []
+
+
+# ── delivery confirmation (Anu forwards DTDC) + book feedback ─────────────────
+
+DTDC_DELIVERED = ("R5001087357 is delivered on 20/6/2026 to SREEYA P G "
+                  "Share feedback https://1jx.in/DTDCCR/e2bbd040 DTDC won't ask for any payment OTP")
+
+
+@pytest.mark.integration
+def test_dtdc_delivered_marks_order_delivered_and_acks_anu(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(_dbc, "find_dispatched_by_tracking", db.find_dispatched_by_tracking, raising=False)
+    monkeypatch.setattr(_dbc, "mark_book_delivered", db.mark_book_delivered, raising=False)
+    monkeypatch.setattr(_dbc, "save_book_feedback", db.save_book_feedback, raising=False)
+    db._seq += 1
+    db.orders["XTR-DLV1"] = {"order_code": "XTR-DLV1", "phone": PHONE, "name": "Sreeya P G",
+                             "items": {"malayalam": 1}, "status": "dispatched",
+                             "tracking_no": "R5001087357", "_seq": db._seq}
+    handled = book_bot.handle_verifier_reply(V, DTDC_DELIVERED)
+    assert handled is True
+    assert db.orders["XTR-DLV1"]["status"] == "delivered"
+    assert any("XTR-DLV1" in m for m in sent["text"])      # Anu acked, naming the order
+
+
+@pytest.mark.unit
+def test_dtdc_delivered_unknown_ref_warns_anu(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(_dbc, "find_dispatched_by_tracking", db.find_dispatched_by_tracking, raising=False)
+    handled = book_bot.handle_verifier_reply(
+        V, "R9999999999 is delivered on 20/6/2026 to NOBODY Share feedback https://x")
+    assert handled is True      # consumed here, NOT passed to the LLM order parser
+    assert any("R9999999999" in m for m in sent["text"])
+
+
+@pytest.mark.integration
+def test_customer_feedback_reply_saved_and_forwarded(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(_dbc, "save_book_feedback", db.save_book_feedback, raising=False)
+    monkeypatch.setattr(_dbc, "latest_delivered_order", db.latest_delivered_order, raising=False)
+    db._seq += 1
+    db.orders["XTR-DLV2"] = {"order_code": "XTR-DLV2", "phone": PHONE, "name": "Asha",
+                             "items": {"malayalam": 1}, "status": "delivered", "_seq": db._seq}
+    db.sessions[PHONE] = {"step": "book_feedback"}
+    book_bot.maybe_handle_book(PHONE, "5 nalla pusthakam adipoli")
+    assert db.feedback["XTR-DLV2"]["rating"] == 5
+    assert "nalla" in (db.feedback["XTR-DLV2"]["comment"] or "")
+    assert any("XTR-DLV2" in m or "5/5" in m for m in sent["text"])   # forwarded to Anu
