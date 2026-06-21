@@ -1499,6 +1499,15 @@ def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
     `commission` is the ₹50/book owed to Divya teacher; `payment_collected_by`
     is 'oxygen' | 'divya' | 'pending' and drives the settlement ledger.
     """
+    # Hard rule (single source of truth: book_catalog.is_divya_phone): Divya's own
+    # order is courier-free + commission-free — she pays the book cost alone and
+    # earns no commission on herself. Every other order keeps courier + ₹50/book.
+    from book_catalog import is_divya_phone
+    if is_divya_phone(phone):
+        courier = 0.0
+        grand_total = books_total
+        commission = 0.0
+        via_divya = False
     now = datetime.now(timezone.utc).isoformat()
     row = {
         "order_code":   order_code,
@@ -1687,6 +1696,51 @@ def find_abandoned_book_carts(idle_hours: int = 2, window_hours: int = 24,
     except Exception as exc:
         logger.error("find_abandoned_book_carts error: %s", exc)
         return []
+
+
+def find_stale_payment_reviews(idle_minutes: int = 30, cooldown_hours: int = 3,
+                               limit: int = 100) -> list:
+    """Return payment_review orders Anu hasn't actioned that are due a reminder.
+
+    Qualifies when status='payment_review', the order has been idle at least
+    `idle_minutes` (giving the original prompt time to be tapped), and it was
+    either never reminded or last reminded over `cooldown_hours` ago. Unlike
+    find_abandoned_book_carts this is NOT window-guarded on the order's age — the
+    recipient is Anu (the verifier), whose 24h window is independent of the
+    order; she re-engages daily, so a reminder that can't send simply retries
+    next sweep.
+    """
+    try:
+        now          = datetime.now(timezone.utc)
+        idle_cut     = (now - timedelta(minutes=idle_minutes)).isoformat()
+        cooldown_cut = (now - timedelta(hours=cooldown_hours)).isoformat()
+        rows = (
+            _client().table("book_orders")
+            .select("order_code,phone,name,address,items,status,"
+                    "payment_proof_url,verifier_reminder_at,updated_at")
+            .eq("status", "payment_review")
+            .lt("updated_at", idle_cut)
+            .or_(f"verifier_reminder_at.is.null,verifier_reminder_at.lt.{cooldown_cut}")
+            .order("updated_at", desc=False)
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+        return rows
+    except Exception as exc:
+        logger.error("find_stale_payment_reviews error: %s", exc)
+        return []
+
+
+def mark_verifier_reminded(order_code: str) -> None:
+    """Stamp verifier_reminder_at=now (without bumping updated_at). Silent on error."""
+    try:
+        _client().table("book_orders").update(
+            {"verifier_reminder_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("order_code", order_code).execute()
+    except Exception as exc:
+        logger.error("mark_verifier_reminded error for %s: %s", order_code, exc)
 
 
 def mark_abandoned_reminded(order_code: str) -> None:

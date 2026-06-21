@@ -973,6 +973,72 @@ def send_abandoned_reminders(idle_hours: int = 2) -> dict:
     return {"carts": len(carts), "reminded": reminded}
 
 
+def _remind_verifier(order: dict) -> bool:
+    """Re-send ONE payment_review order's verification prompt to Anu.
+
+    Mirrors _forward_to_verifier but without the screenshot bytes (the sweep only
+    has the stored proof URL). Re-uses the SAME button ids (pf_/pp_/pr_<payid>)
+    so a tap still routes through handle_verifier_reply unchanged. Returns False
+    only when there is nothing actionable to send.
+    """
+    code = order.get("order_code")
+    pays = _dbc.get_book_payments(code) or []
+    pending = [p for p in pays if p.get("status") == "pending"]
+    pay = pending[-1] if pending else (pays[-1] if pays else None)
+    totals  = bc.compute_totals(order.get("items") or {})
+    grand   = totals["grand_total"]
+    paid    = _dbc.book_amount_paid(code)
+    balance = grand - paid
+    proof   = order.get("payment_proof_url") or ""
+    caption = (
+        "⏰ *Reminder — payment still awaiting your check*\n"
+        f"Order: {code}\n"
+        f"Total ₹{grand:.0f} · Paid ₹{paid:.0f} · *Balance ₹{balance:.0f}*\n"
+        f"Customer: {order.get('name') or '—'} "
+        f"+{re.sub(r'[^0-9]', '', order.get('phone', '') or '')}\n"
+        f"Items: {_cart_line(order.get('items') or {})}\n"
+        f"📍 {order.get('address', '') or ''}"
+        + (f"\n🧾 {proof}" if proof else "")
+    )
+    _send_text(VERIFIER_PHONE, caption)
+    if pay:
+        payid = pay.get("id")
+        _send_buttons(
+            VERIFIER_PHONE, f"Full or part payment for *{code}*?",
+            [(f"pf_{payid}", f"✅ Full ₹{balance:.0f}"),
+             (f"pp_{payid}", "➗ Part payment"),
+             (f"pr_{payid}", "❌ Not received")],
+        )
+    else:
+        _send_buttons(
+            VERIFIER_PHONE, f"Payment received for *{code}*?",
+            [(f"vconf_{code}", "✅ Confirm"), (f"vrej_{code}", "❌ Reject")],
+        )
+    return True
+
+
+def send_verifier_reminders(idle_minutes: int = 30, cooldown_hours: int = 3) -> dict:
+    """Re-surface payment_review orders Anu hasn't actioned yet.
+
+    The original "Payment to verify" prompt is fire-and-forget: if Anu misses it
+    (it lands at night, or stacks behind another prompt) the order strands in
+    payment_review forever — the customer was told "we're verifying" and nothing
+    ever closes the loop. This sweep re-pings Anu and stamps verifier_reminder_at
+    so it nudges at most once per `cooldown_hours`. Returns {found, reminded}.
+    """
+    stale = _dbc.find_stale_payment_reviews(idle_minutes=idle_minutes,
+                                            cooldown_hours=cooldown_hours)
+    reminded = 0
+    for o in stale:
+        try:
+            if _remind_verifier(o):
+                _dbc.mark_verifier_reminded(o["order_code"])
+                reminded += 1
+        except Exception as exc:
+            logger.error("verifier reminder failed for %s: %s", o.get("order_code"), exc)
+    return {"found": len(stale), "reminded": reminded}
+
+
 def _handle_anu_order(parsed: dict) -> None:
     """Create a Divya-forwarded order from a parsed ORDER template, reply to Anu.
 
@@ -1430,9 +1496,17 @@ def confirm_book_order(order_code: str) -> dict:
         return {"ok": True, "already_confirmed": True, "order": order}
 
     from datetime import datetime, timezone
-    ok = _dbc.update_book_order(order_code, status="confirmed",
-                                commission=bc.commission_for(order.get("items") or {}),
-                                confirmed_at=datetime.now(timezone.utc).isoformat())
+    items = order.get("items") or {}
+    confirm_fields = {
+        "status":       "confirmed",
+        "commission":   bc.commission_for(items),
+        "confirmed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Hard rule: Divya's own order is courier-free + commission-free.
+    if bc.is_divya_phone(order.get("phone")):
+        confirm_fields.update(commission=0.0, via_divya=False, courier=0.0,
+                              grand_total=order.get("books_total") or 0.0)
+    ok = _dbc.update_book_order(order_code, **confirm_fields)
 
     # Verify the status actually persisted BEFORE telling the customer it is
     # confirmed. A swallowed/transient DB write failure must NOT produce a false

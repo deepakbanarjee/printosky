@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- printosky-favicons -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+  <link rel="apple-touch-icon" href="/apple-touch-180.png">
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Printosky Admin</title>
@@ -1172,7 +1178,7 @@
 <!-- ══ LOGIN ══════════════════════════════════════════════════════════════ -->
 <div id="login-screen">
   <div class="login-box">
-    <div class="login-logo">PRINTOSKY</div>
+    <div class="login-logo"><img src="assets/printosky-wordmark-reverse.svg" alt="Printosky" style="height:34px;width:auto;display:inline-block;vertical-align:middle"></div>
     <div class="login-sub">ADMIN CONSOLE // OXYGEN GLOBALLY</div>
     <label>Enter PIN</label>
     <div class="pin-dots">
@@ -1201,7 +1207,7 @@
 <div id="dashboard">
   <header>
     <div>
-      <div class="hdr-logo">PRINTOSKY ADMIN</div>
+      <div class="hdr-logo"><img src="assets/printosky-wordmark-reverse.svg" alt="Printosky" style="height:18px;width:auto;display:inline-block;vertical-align:middle"> ADMIN</div>
       <div class="hdr-sub" id="hdr-store">Oxygen Students Paradise · Thriprayar</div>
     </div>
     <div class="hdr-right">
@@ -1558,6 +1564,8 @@
           <option value="cancelled">Cancelled</option>
           <option value="all">All</option>
         </select>
+        <button class="ctrl-btn" onclick="openDispatchSheet()" title="Pick list (how many of each book to prepare today) + packing slips — opens a printable sheet for confirmed, undispatched orders">🚚 Dispatch sheet</button>
+        <button class="ctrl-btn" onclick="openCourierSlips()" title="Branded A4 courier slips + Thank-You insert — one per parcel, ready to print and stick on the package">🏷️ Courier slips</button>
         <button class="ctrl-btn" onclick="openWalkInForm()">➕ New order</button>
         <button class="ctrl-btn" onclick="openDivyaStatement()">📊 Divya statement</button>
         <button class="ctrl-btn" onclick="loadBookOrders()">↻ Refresh</button>
@@ -4672,6 +4680,62 @@ function _fmtDeadline(deadlineIso) {
 
 // ── Book Orders (Xtraa campaign) ─────────────────────────────────────────────
 let _bookOrdersCache = [];
+
+// Branded A4-landscape courier slips + Thank-You insert (one per parcel) for
+// confirmed, undispatched orders — ready to print and stick on packages.
+async function openCourierSlips() {
+  const pw = _convPw();
+  if (!pw) { alert('Enter the admin password first.'); return; }
+  const w = window.open('', '_blank');
+  if (!w) { alert('Pop-up blocked — allow pop-ups for this site, then try again.'); return; }
+  w.document.write('<p style="font:14px Arial;padding:16px">Loading courier slips…</p>');
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/courier-slips`, {
+      headers: { 'X-Admin-Password': pw }
+    });
+    if (!r.ok) {
+      w.document.body.innerHTML =
+        '<p style="font:14px Arial;padding:16px;color:#c00">Could not load courier slips (HTTP ' + r.status + ').</p>';
+      return;
+    }
+    const html = await r.text();
+    w.document.open(); w.document.write(html); w.document.close();
+  } catch (e) {
+    try {
+      w.document.body.innerHTML =
+        '<p style="font:14px Arial;padding:16px;color:#c00">Courier slips failed: ' + e.message + '</p>';
+    } catch (_) {}
+  }
+}
+
+// Staff self-serve: open the printable dispatch sheet (book-wise pick list of
+// how many of each book to prepare today + packing slips) for confirmed,
+// undispatched orders. Fetches with the admin header (keeps the password out of
+// the URL, matching every other admin call) and opens it in a new tab.
+async function openDispatchSheet() {
+  const pw = _convPw();
+  if (!pw) { alert('Enter the admin password first.'); return; }
+  const w = window.open('', '_blank');   // open synchronously so it is not pop-up-blocked
+  if (!w) { alert('Pop-up blocked — allow pop-ups for this site, then try again.'); return; }
+  w.document.write('<p style="font:14px Arial;padding:16px">Loading dispatch sheet…</p>');
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/dispatch-sheet`, {
+      headers: { 'X-Admin-Password': pw }
+    });
+    if (!r.ok) {
+      w.document.body.innerHTML =
+        '<p style="font:14px Arial;padding:16px;color:#c00">Could not load dispatch sheet (HTTP ' + r.status + ').</p>';
+      return;
+    }
+    const html = await r.text();
+    w.document.open(); w.document.write(html); w.document.close();
+  } catch (e) {
+    try {
+      w.document.body.innerHTML =
+        '<p style="font:14px Arial;padding:16px;color:#c00">Dispatch sheet failed: ' + e.message + '</p>';
+    } catch (_) {}
+  }
+}
 
 async function loadBookOrders() {
   if (!_convPw()) {
