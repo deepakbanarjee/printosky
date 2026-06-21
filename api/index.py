@@ -2290,6 +2290,7 @@ def _handle_admin_courier_slips(h) -> None:
         h.send_response(200)
         h.send_header("Content-Type", "text/html; charset=utf-8")
         h.send_header("Content-Length", str(len(encoded)))
+        _send_cors_headers(h)   # opened cross-origin (admin.html on printosky.com) -> need ACAO
         h.end_headers()
         h.wfile.write(encoded)
     except Exception as exc:
