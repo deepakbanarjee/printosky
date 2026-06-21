@@ -864,6 +864,10 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
     session = _dbc.get_session(DB, phone) or {}
     step = session.get("step") or ""
 
+    # Post-delivery review: customer replied to the feedback template.
+    if step == "book_feedback":
+        return _handle_feedback_reply(phone, text)
+
     if step not in _BOOK_STEPS:
         if not _in_print_flow(session):
             web = _try_website_order(phone, text, name)
@@ -1415,6 +1419,91 @@ def _handle_payment_verdict(action: str, code: str) -> None:
     _send_text(VERIFIER_PHONE, f"❌ Rejected *{code}* — customer asked to resend.")
 
 
+BOOK_FEEDBACK_TEMPLATE = os.environ.get("BOOK_FEEDBACK_TEMPLATE", "")
+
+
+def _request_book_feedback(order: dict) -> bool:
+    """Ask the customer to review the book — via the Meta-approved template (the
+    only way to reach them after delivery, when their 24h window is closed).
+
+    Sent only when BOOK_FEEDBACK_TEMPLATE is set (template approved in Meta).
+    On success, arm reply capture by parking the session at step 'book_feedback'.
+    Returns True only if the request was actually sent.
+    """
+    phone = order.get("phone")
+    if not BOOK_FEEDBACK_TEMPLATE or not phone:
+        return False
+    try:
+        import whatsapp_notify as _wn
+        sender = getattr(_wn, "_send_meta_template", None)
+        if sender is None:
+            return False
+        ok = sender(phone, BOOK_FEEDBACK_TEMPLATE, [order.get("name") or "Customer"], "ml")
+    except Exception as exc:
+        logger.error("book feedback template send failed for %s: %s",
+                     order.get("order_code"), exc)
+        return False
+    if ok:
+        try:
+            _dbc.save_session(DB, phone, step="book_feedback", needs_human=False)
+        except Exception:
+            pass
+    return bool(ok)
+
+
+def _handle_dtdc_delivered(t: str) -> bool:
+    """Anu forwards a DTDC 'delivered' SMS → mark the matching order delivered and
+    request a book review. Returns True when the message IS a DTDC delivery note
+    (so it is consumed here, never falling through to the LLM order parser).
+
+    Format: 'R5001087357 is delivered on 20/6/2026 to NAME Share feedback ...'.
+    """
+    m = re.search(r"\b(R\d{6,})\b", t or "")
+    if not m or "deliver" not in (t or "").lower():
+        return False
+    ref = m.group(1)
+    order = _dbc.find_dispatched_by_tracking(ref)
+    if not order:
+        _send_text(VERIFIER_PHONE,
+                   f"⚠️ DTDC {ref}: no dispatched order found with that tracking number. "
+                   "If it's ours, mark it delivered manually.")
+        return True
+    code = order["order_code"]
+    _dbc.mark_book_delivered(code)
+    requested = False
+    try:
+        requested = _request_book_feedback(order)
+    except Exception as exc:
+        logger.error("feedback request failed for %s: %s", code, exc)
+    tail = (" Review request sent to the customer."
+            if requested else
+            " (Customer review request pending — feedback template not live yet.)")
+    _send_text(VERIFIER_PHONE, f"✅ {code} marked *delivered* ({ref}).{tail}")
+    return True
+
+
+def _handle_feedback_reply(phone: str, text: str) -> list[str]:
+    """A delivered customer replied to the review request: parse a 1-5 rating +
+    optional comment, save it, forward to Anu, thank them. Their reply reopened
+    the 24h window, so the thank-you sends fine."""
+    t = (text or "").strip()
+    order = _dbc.latest_delivered_order(phone) or {}
+    code = order.get("order_code")
+    m = re.match(r"^\s*([1-5])\b[\s.\-:)]*(.*)$", t, re.S)
+    rating = int(m.group(1)) if m else None
+    comment = ((m.group(2).strip() if m else t) or None)
+    if code:
+        _dbc.save_book_feedback(code, phone, rating=rating, comment=comment)
+        stars = ("⭐" * rating) if rating else "—"
+        _send_text(
+            VERIFIER_PHONE,
+            f"📣 *Book feedback* — {order.get('name') or phone} ({code})\n"
+            f"Rating: {rating if rating else '—'}/5 {stars}\n"
+            f"Comment: {comment or '—'}")
+    _dbc.save_session(DB, phone, step="post_order", needs_human=False)
+    return ["നിങ്ങളുടെ വിലയേറിയ അഭിപ്രായത്തിന് നന്ദി! 📚✨"]
+
+
 def handle_verifier_reply(sender: str, text: str) -> bool:
     """Route a message from Anu (payment verifier + Divya order forwarder).
 
@@ -1475,6 +1564,10 @@ def handle_verifier_reply(sender: str, text: str) -> bool:
     cm = re.match(r"^acanc_(\S+)$", t) or re.match(r"(?i)^cancel\s+(XTR-\S+)", t)
     if cm:
         _cancel_divya_order(cm.group(1).upper())
+        return True
+
+    # 3.5 DTDC delivery confirmation forwarded by Anu → mark delivered + ask review.
+    if _handle_dtdc_delivered(t):
         return True
 
     # 4. Rigid ORDER template (backward-compatible).
