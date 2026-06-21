@@ -60,6 +60,20 @@ def courier_charge(items: dict[str, int]) -> float:
 # drives the settlement ledger — change it here and nowhere else.
 COMMISSION_PER_BOOK = 50
 
+# Divya teacher's own WhatsApp number (digits only, with country code). The rule
+# is hard-coded: EVERY book order — any channel — earns Divya her per-book
+# commission. The ONLY exception is when Divya orders for HERSELF from this
+# number: she pays the book cost alone — no courier, no commission. Matched on
+# the last 10 digits so +91 / 0 / spacing variants all resolve to the same person.
+DIVYA_PHONE = "919526738641"
+
+
+def is_divya_phone(phone: str | None) -> bool:
+    """True when `phone` is Divya's own number (the no-courier / no-commission case)."""
+    digits = re.sub(r"\D", "", phone or "")
+    return len(digits) >= 10 and digits[-10:] == DIVYA_PHONE[-10:]
+
+
 MAX_QTY = 99
 
 # Numbered selection map shown to the customer.
@@ -265,6 +279,30 @@ def commission_for(items: dict[str, int]) -> float:
     feeds the settlement ledger — never recompute it inline elsewhere.
     """
     return float(COMMISSION_PER_BOOK * total_book_count(items))
+
+
+def divya_order_terms(phone: str | None, items: dict[str, int],
+                      delivery_method: str = "courier") -> dict:
+    """Final money terms for a book order, applying the hard-coded Divya rule.
+
+    Every order earns Divya ₹50/book and is billed courier as usual — EXCEPT
+    Divya's own direct order (her number), which is courier-free and
+    commission-free (she pays the book cost alone). This is the single source of
+    truth: every create / confirm / edit path must derive these fields from here
+    so the customer total and the settlement ledger can never drift apart.
+
+    Returns: {books_total, courier, grand_total, commission, via_divya}.
+    """
+    totals = compute_totals(items)
+    books_total = totals["books_total"]
+    if is_divya_phone(phone):
+        return {"books_total": books_total, "courier": 0.0,
+                "grand_total": books_total, "commission": 0.0,
+                "via_divya": False}
+    courier = 0.0 if delivery_method == "xtraa_office" else totals["courier"]
+    return {"books_total": books_total, "courier": courier,
+            "grand_total": books_total + courier,
+            "commission": commission_for(items), "via_divya": True}
 
 
 def line_items(items: dict[str, int]) -> list[dict]:
