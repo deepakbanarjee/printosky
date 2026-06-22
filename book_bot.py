@@ -1419,7 +1419,7 @@ def _handle_payment_verdict(action: str, code: str) -> None:
     _send_text(VERIFIER_PHONE, f"❌ Rejected *{code}* — customer asked to resend.")
 
 
-BOOK_FEEDBACK_TEMPLATE = os.environ.get("BOOK_FEEDBACK_TEMPLATE", "")
+BOOK_FEEDBACK_TEMPLATE = os.environ.get("BOOK_FEEDBACK_TEMPLATE", "book_feedback_request")
 
 
 def _request_book_feedback(order: dict) -> bool:
