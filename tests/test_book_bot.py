@@ -810,6 +810,7 @@ def test_dtdc_delivered_marks_order_delivered_and_acks_anu(fake, monkeypatch):
     monkeypatch.setattr(_dbc, "find_dispatched_by_tracking", db.find_dispatched_by_tracking, raising=False)
     monkeypatch.setattr(_dbc, "mark_book_delivered", db.mark_book_delivered, raising=False)
     monkeypatch.setattr(_dbc, "save_book_feedback", db.save_book_feedback, raising=False)
+    monkeypatch.setattr(book_bot, "_request_book_feedback", lambda order: True)  # no live Meta call
     db._seq += 1
     db.orders["XTR-DLV1"] = {"order_code": "XTR-DLV1", "phone": PHONE, "name": "Sreeya P G",
                              "items": {"malayalam": 1}, "status": "dispatched",
