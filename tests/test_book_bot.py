@@ -4,10 +4,15 @@ db_cloud is faked in-memory; the interactive senders are stubbed. The flow sends
 messages as side effects and returns [] (or None when not a book message).
 """
 
+import re as _re
+
 import pytest
 
 import book_bot
 import db_cloud as _dbc
+
+_ML = _re.compile(r"[ഀ-ൿ]")   # Malayalam block
+_HI = _re.compile(r"[ऀ-ॿ]")   # Devanagari block
 
 
 class FakeDB:
@@ -886,3 +891,44 @@ def test_start_order_relays_awaiting_payment_guard(fake):
     res = book_bot.start_order(PHONE)
     assert len(res) == 1
     assert "XTR-TEST-1" in res[0]                 # guard text returned to caller
+
+
+@pytest.mark.unit
+def test_opening_list_is_trilingual(monkeypatch):
+    bodies = []
+    monkeypatch.setattr(book_bot, "_send_list",
+                        lambda phone, body, btn, rows, header=None, section_title="": bodies.append(body))
+    book_bot._send_select_list(PHONE)
+    body = bodies[-1]
+    assert _ML.search(body), "opening list must contain Malayalam"
+    assert "हिंदी" in body, "opening list must name Hindi in Devanagari"
+    assert _HI.search(body)
+    assert "English" in body
+
+
+@pytest.mark.unit
+def test_select_rows_have_malayalam(monkeypatch):
+    rows_seen = []
+    monkeypatch.setattr(book_bot, "_send_list",
+                        lambda phone, body, btn, rows, header=None, section_title="": rows_seen.append(rows))
+    book_bot._send_select_list(PHONE)
+    rows = rows_seen[-1]
+    blob = " ".join(r["title"] + " " + r.get("description", "") for r in rows)
+    assert _ML.search(blob), "selection rows must contain Malayalam"
+
+
+@pytest.mark.unit
+def test_address_prompt_is_bilingual():
+    p = book_bot._address_prompt()
+    assert _ML.search(p) and "PIN" in p
+
+
+@pytest.mark.unit
+def test_qty_prompt_after_full_set_is_malayalam(fake):
+    db, sent = fake
+    book_bot.maybe_handle_book(PHONE, "book")
+    book_bot.maybe_handle_book(PHONE, "bk_all")          # choose all 3
+    book_bot.maybe_handle_book(PHONE, "1")               # qty for book 1
+    book_bot.maybe_handle_book(PHONE, "1")               # qty for book 2
+    book_bot.maybe_handle_book(PHONE, "1")               # qty for book 3 -> name prompt
+    assert any(_ML.search(m) for m in sent["text"]), "name prompt must be Malayalam"
