@@ -140,6 +140,9 @@ def _handle_admin_start_book_order(h, body: bytes) -> None:
     if not phone:
         _json_response(h, 400, {"error": "phone required"})
         return
+    if not phone.isdigit() or not (10 <= len(phone) <= 13):
+        _json_response(h, 400, {"error": "valid phone required"})
+        return
 
     try:
         import book_bot

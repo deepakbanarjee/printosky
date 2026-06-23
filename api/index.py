@@ -2794,11 +2794,12 @@ class handler(BaseHTTPRequestHandler):
             _handle_admin_operator_queue_deliver(self, body, _opq_deliver.group(1))
             return
 
-        # ── Xtraa book order: owner confirms payment ─────────────────────────
+        # ── Xtraa book order: staff start the bilingual order flow ───────────
         if self.path == "/admin/book-orders/start":
             _handle_admin_start_book_order(self, body)
             return
 
+        # ── Xtraa book order: owner confirms payment ─────────────────────────
         if self.path == "/admin/book-orders/create":
             _handle_admin_book_order_create(self, body)
             return

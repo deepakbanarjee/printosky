@@ -32,6 +32,12 @@ def test_start_requires_valid_password(patched):
     assert h.status == 403
 
 
+def test_start_rejects_malformed_phone(patched):
+    h = _FakeHandler()
+    ha._handle_admin_start_book_order(h, b'{"admin_password":"secret123","phone":"not-a-number"}')
+    assert h.status == 400
+
+
 def test_start_requires_phone(patched):
     h = _FakeHandler()
     ha._handle_admin_start_book_order(h, b'{"admin_password":"secret123","phone":""}')
