@@ -632,29 +632,55 @@ def verify_models_available() -> dict:
     mapping model_id -> "ok" or "FAIL: <reason>". Use after every deploy
     via the GET /admin/health/models endpoint to surface 404s/auth issues
     BEFORE the first paying customer hits them.
-
-    Cost: ~₹0.01 per call (one trivial message per model). Safe to call
-    on a manual admin route; do not put on a cron unless you want spam.
     """
     import anthropic
+    import requests
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {"_status": "no_api_key"}
-
-    client = anthropic.Anthropic(api_key=api_key)
     out: dict[str, str] = {"_status": "checked"}
-    for mid in (_MODEL_SONNET, _MODEL_OPUS):
+
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    if anthropic_key:
         try:
-            client.messages.create(
-                model=mid,
-                max_tokens=1,
-                messages=[{"role": "user", "content": "1"}],
-            )
-            out[mid] = "ok"
+            client = anthropic.Anthropic(api_key=anthropic_key)
+            for mid in (_MODEL_SONNET, _MODEL_OPUS):
+                try:
+                    client.messages.create(
+                        model=mid,
+                        max_tokens=1,
+                        messages=[{"role": "user", "content": "1"}],
+                    )
+                    out[mid] = "ok"
+                except Exception as exc:
+                    out[mid] = f"FAIL: {exc}"
+                    logger.error("Model unavailable at health-check: %s -> %s", mid, exc)
         except Exception as exc:
-            out[mid] = f"FAIL: {exc}"
-            logger.error("Model unavailable at health-check: %s -> %s", mid, exc)
+            out["anthropic_client_error"] = str(exc)
+    else:
+        out["anthropic"] = "no_key"
+
+    nvidia_key = os.environ.get("NVIDIA_API_KEY")
+    if nvidia_key:
+        for mid in ("meta/llama-3.1-70b-instruct", "meta/llama-3.1-8b-instruct"):
+            try:
+                url = "https://integrate.api.nvidia.com/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {nvidia_key}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "model": mid,
+                    "messages": [{"role": "user", "content": "1"}],
+                    "max_tokens": 1
+                }
+                res = requests.post(url, headers=headers, json=payload)
+                res.raise_for_status()
+                out[mid] = "ok"
+            except Exception as exc:
+                out[mid] = f"FAIL: {exc}"
+                logger.error("NVIDIA Model unavailable at health-check: %s -> %s", mid, exc)
+    else:
+        out["nvidia"] = "no_key"
+
     return out
 
 # Strict tool schema — forcing tool_use guarantees the model returns this
@@ -877,6 +903,106 @@ def _clean_extracted_text(text: str) -> str:
     return "\n".join(result)
 
 
+def _call_nvidia_structure(
+    model: str,
+    user_text: str,
+    prior_attempt: dict | None = None,
+) -> dict:
+    """Low-level call to an NVIDIA NIM model with the structure tool.
+
+    Returns the tool input dict on success, or {"error": "<reason>"} on any failure.
+    """
+    import requests
+
+    api_key = os.environ.get("NVIDIA_API_KEY")
+    if not api_key:
+        return {"error": "no_nvidia_api_key"}
+
+    cleaned = _clean_extracted_text(user_text)
+    truncated = cleaned[:60_000]
+    truncated_note = (
+        f"\n\n[NOTE: input cleaned + truncated from {len(cleaned)} to 60000 chars]"
+        if len(cleaned) > 60_000 else ""
+    )
+
+    prompt_content = f"Document text:\n{truncated}{truncated_note}"
+
+    messages = [
+        {"role": "system", "content": _structure_system_prompt()},
+        {"role": "user", "content": prompt_content}
+    ]
+
+    if prior_attempt:
+        diag = prior_attempt.get("validation_errors") or ["unspecified"]
+        diag_str = "; ".join(diag)
+        messages.append({
+            "role": "user",
+            "content": (
+                "A previous attempt by a smaller model failed validation: "
+                f"{diag_str}. Their partial JSON is below — use it as a hint "
+                "but rebuild correctly:\n```json\n"
+                f"{json.dumps(prior_attempt.get('structure', {}), indent=2)}\n```"
+            )
+        })
+
+    url = "https://integrate.api.nvidia.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    # Translate Anthropic's _STRUCTURE_TOOL_SCHEMA to OpenAI tool format
+    nvidia_tools = [{
+        "type": "function",
+        "function": {
+            "name": _STRUCTURE_TOOL_SCHEMA["name"],
+            "description": _STRUCTURE_TOOL_SCHEMA["description"],
+            "parameters": _STRUCTURE_TOOL_SCHEMA["input_schema"]
+        }
+    }]
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "tools": nvidia_tools,
+        "tool_choice": {"type": "function", "function": {"name": "submit_structure"}},
+        "temperature": 0.1,
+        "max_tokens": 4096
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
+
+        choice = data["choices"][0]
+        message_dict = choice["message"]
+        tool_calls = message_dict.get("tool_calls")
+        if tool_calls:
+            for tc in tool_calls:
+                if tc.get("type") == "function" and tc["function"].get("name") == "submit_structure":
+                    args_str = tc["function"].get("arguments") or "{}"
+                    res_data = json.loads(args_str)
+                    res_data["model_used"] = model
+                    return res_data
+
+        content = message_dict.get("content")
+        if content:
+            import re
+            cleaned_content = re.sub(r"^```(?:json)?\s*", "", content.strip())
+            cleaned_content = re.sub(r"\s*```$", "", cleaned_content)
+            res_data = json.loads(cleaned_content)
+            res_data["model_used"] = model
+            return res_data
+
+        return {"error": "no_tool_use_in_response"}
+    except Exception as exc:
+        logger.error("nvidia structure call (%s) failed: %s", model, exc)
+        if 'response' in locals() and response is not None:
+            logger.error("nvidia api response: %s", response.text)
+        return {"error": f"api_error: {exc}"}
+
+
 def _call_claude_structure(
     model: str,
     thinking_budget: int,
@@ -892,6 +1018,15 @@ def _call_claude_structure(
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
+        nvidia_key = os.environ.get("NVIDIA_API_KEY")
+        if nvidia_key:
+            nvidia_model = "meta/llama-3.1-70b-instruct"
+            logger.info("ANTHROPIC_API_KEY missing, using NVIDIA NIM model: %s", nvidia_model)
+            return _call_nvidia_structure(
+                model=nvidia_model,
+                user_text=user_text,
+                prior_attempt=prior_attempt,
+            )
         return {"error": "no_api_key"}
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -948,6 +1083,18 @@ def _call_claude_structure(
         )
     except Exception as exc:
         logger.error("claude structure call (%s) failed: %s", model, exc)
+        nvidia_key = os.environ.get("NVIDIA_API_KEY")
+        if nvidia_key:
+            nvidia_model = "meta/llama-3.1-70b-instruct"
+            logger.info("Claude failed, falling back to NVIDIA NIM: %s", nvidia_model)
+            try:
+                return _call_nvidia_structure(
+                    model=nvidia_model,
+                    user_text=user_text,
+                    prior_attempt=prior_attempt,
+                )
+            except Exception as e2:
+                logger.error("NVIDIA fallback failed: %s", e2)
         return {"error": f"api_error: {exc}"}
 
     # Find the tool_use block in the response
@@ -2184,6 +2331,69 @@ def generate_from_form(form_data: dict, university_id: str) -> bytes:
 # In-place DOCX reformatter — preserves images, tables, all existing content
 # ---------------------------------------------------------------------------
 
+def _classify_with_nvidia_metadata(paras: list, api_key: str) -> list:
+    """Ask NVIDIA NIM to classify paragraphs from metadata only."""
+    import requests
+
+    lines = []
+    for i, p in enumerate(paras):
+        if p["is_blank"]:
+            lines.append(f"{i}: BLANK")
+        else:
+            snippet = p["text"][:60].replace("\n", " ")
+            lines.append(
+                f"{i}: text={repr(snippet)}, size={p['max_size']:.0f}pt, "
+                f"bold={p['bold']}, len={p['length']}"
+            )
+
+    prompt = (
+        "Classify each paragraph in an Indian university student project report.\n"
+        f"You are given metadata for exactly {len(paras)} paragraphs. You MUST return a JSON array containing exactly {len(paras)} string elements, one per paragraph index.\n"
+        "Output ONLY a JSON array of strings, using these labels:\n"
+        "  title = project/report title\n"
+        "  h1    = chapter heading (e.g. CHAPTER 1, INTRODUCTION)\n"
+        "  h2    = section heading (e.g. 1.1 Background)\n"
+        "  h3    = sub-section heading\n"
+        "  body  = regular paragraph\n"
+        "  blank = empty line\n\n"
+        "Paragraph metadata:\n"
+        + "\n".join(lines)
+        + "\n\nReturn ONLY the JSON array of strings, no markdown, no explanation. Do not add any extra elements beyond the requested list."
+    )
+
+    url = "https://integrate.api.nvidia.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "meta/llama-3.1-8b-instruct",
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.1,
+        "max_tokens": 1024
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        raw = data["choices"][0]["message"]["content"].strip()
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        result = json.loads(raw)
+        if isinstance(result, list) and len(result) == len(paras):
+            return result
+    except Exception as exc:
+        logger.error("nvidia metadata classification failed: %s", exc)
+        if 'response' in locals() and response is not None:
+            logger.error("nvidia api response: %s", response.text)
+        pass
+
+    return ["blank" if p["is_blank"] else "body" for p in paras]
+
+
 def _classify_with_claude_metadata(paras: list) -> list:
     """Ask Claude Haiku to classify paragraphs from metadata only — no full text sent.
 
@@ -2195,6 +2405,10 @@ def _classify_with_claude_metadata(paras: list) -> list:
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
+        nvidia_key = os.environ.get("NVIDIA_API_KEY")
+        if nvidia_key:
+            logger.info("ANTHROPIC_API_KEY missing, using NVIDIA NIM for paragraph classification")
+            return _classify_with_nvidia_metadata(paras, nvidia_key)
         return ["blank" if p["is_blank"] else "body" for p in paras]
 
     lines = []
@@ -2235,8 +2449,15 @@ def _classify_with_claude_metadata(paras: list) -> list:
         result = json.loads(raw)
         if len(result) == len(paras):
             return result
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error("claude metadata classification failed: %s", exc)
+        nvidia_key = os.environ.get("NVIDIA_API_KEY")
+        if nvidia_key:
+            logger.info("Claude failed, falling back to NVIDIA NIM for paragraph classification")
+            try:
+                return _classify_with_nvidia_metadata(paras, nvidia_key)
+            except Exception as e2:
+                logger.error("NVIDIA fallback classification failed: %s", e2)
 
     return ["blank" if p["is_blank"] else "body" for p in paras]
 
