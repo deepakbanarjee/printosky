@@ -788,12 +788,16 @@ def _try_website_order(phone: str, text: str, name: str | None) -> list[str] | N
             code = _new_order_code()
             _dbc.create_book_order(code, phone, parsed["name"] or name)
 
+    totals = bc.compute_totals(parsed["items"])
     _dbc.update_book_order(
         code,
         items=parsed["items"],
         name=parsed["name"] or name,
         address=parsed["address"],
         contact_phone=parsed["phone"],
+        books_total=totals["books_total"],
+        courier=totals["courier"],
+        grand_total=totals["grand_total"],
         flow_cursor={},
         status="collecting",
     )

@@ -183,6 +183,12 @@ def test_website_order_ingested_without_reasking(fake):
     assert o["name"] == "Priya Krishnan"
     assert o["address"] == "12 MG Road, Thrissur 680001"
     assert o["contact_phone"] == "9876543210"
+    # Stored totals must include courier — bug: website orders stored grand_total=0.
+    import book_catalog as _bc
+    _t = _bc.compute_totals(o["items"])
+    assert o["courier"] == _t["courier"] and o["courier"] > 0
+    assert o["books_total"] == _t["books_total"] > 0
+    assert o["grand_total"] == _t["grand_total"] == o["books_total"] + o["courier"]
     assert db.sessions[PHONE]["step"] == "book_summary"
     # Jumped straight to the summary (Confirm / Edit / Cancel) — never re-asked.
     assert sent["buttons"][-1] == ["ord_yes", "ord_edit", "ord_no"]
