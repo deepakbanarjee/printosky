@@ -1429,6 +1429,8 @@
                     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendConvMessage();}"
                     oninput="this.style.height='';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
           <span id="conv-upload-status"></span>
+          <button class="conv-attach-btn" title="ഓർഡർ തുടങ്ങുക / Start book order"
+                  onclick="convStartBookOrder()">📚</button>
           <button class="conv-send-btn" onclick="sendConvMessage()" title="Send">&#10148;</button>
         </div>
       </div>
@@ -4328,6 +4330,30 @@ async function sendConvMessage() {
     });
   } catch (e) { console.error('[conv] send failed', e); }
   await convFetchThread(_convActivePhone);
+}
+
+async function convStartBookOrder() {
+  if (!_convActivePhone) { alert('Select a conversation first.'); return; }
+  const ok = confirm('Start the book order flow for this customer?\n' +
+                     'They will get the order menu in Malayalam.');
+  if (!ok) return;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/start`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ admin_password: _convPw(), phone: _convActivePhone }),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      alert('Could not start order — ' + (e.error || ('HTTP ' + r.status)));
+      return;
+    }
+  } catch (e) {
+    console.error('[conv] start book order failed', e);
+    alert('Could not start order — ' + e.message);
+    return;
+  }
+  await convFetchThread(_convActivePhone);   // show the outbound menu in the thread
 }
 
 async function handleFileAttach(input) {
