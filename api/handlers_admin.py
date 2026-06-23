@@ -120,6 +120,47 @@ def _handle_admin_send(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "Server error"})
 
 
+def _handle_admin_start_book_order(h, body: bytes) -> None:
+    """POST /admin/book-orders/start — staff start the book order flow for a
+    customer (sends the opening Malayalam book list to their WhatsApp)."""
+    try:
+        payload  = json.loads(body)
+        admin_pw = payload.get("admin_password", "").strip()
+        phone    = payload.get("phone", "").strip()
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+
+    if not ADMIN_PASSWORD_HASH:
+        _json_response(h, 503, {"error": "Admin auth not configured"})
+        return
+    if not hmac.compare_digest(_sha256(admin_pw), ADMIN_PASSWORD_HASH):
+        _json_response(h, 403, {"error": "Invalid admin password"})
+        return
+    if not phone:
+        _json_response(h, 400, {"error": "phone required"})
+        return
+
+    try:
+        import book_bot
+        # name=None: the flow asks the customer for the recipient name itself.
+        relay = book_bot.start_order(phone, None)
+        from whatsapp_notify import _send
+        from db_cloud import log_message
+        for msg in (relay or []):
+            try:
+                if _send(phone, msg):
+                    log_message(phone, "outbound", msg, message_type="text")
+            except Exception:
+                pass
+        _clear_needs_human(phone)   # staff acted -> drop the SOS pill
+        _json_response(h, 200, {"ok": True})
+        logger.info(f"Admin started book order flow for {phone}")
+    except Exception as e:
+        logger.error(f"admin-start-book-order error: {e}")
+        _json_response(h, 500, {"error": "Server error"})
+
+
 def _handle_admin_conversations(h) -> None:
     """GET /admin/conversations — inbox: one row per contact, last msg + unread count."""
     from urllib.parse import parse_qs, urlparse

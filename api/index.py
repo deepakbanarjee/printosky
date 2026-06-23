@@ -1,4 +1,4 @@
-﻿"""
+"""
 PRINTOSKY — Vercel Python Serverless Webhook
 =============================================
 Handles:
@@ -1790,6 +1790,7 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_operator_queue_list,
     _handle_admin_reset_pin,
     _handle_admin_send,
+    _handle_admin_start_book_order,
     _handle_admin_send_file,
     _handle_admin_thread,
     _handle_admin_upload_token,
@@ -2794,6 +2795,10 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # ── Xtraa book order: owner confirms payment ─────────────────────────
+        if self.path == "/admin/book-orders/start":
+            _handle_admin_start_book_order(self, body)
+            return
+
         if self.path == "/admin/book-orders/create":
             _handle_admin_book_order_create(self, body)
             return
