@@ -411,8 +411,10 @@ except Exception as _e:
 
 # SumatraPDF path — portable version in project folder or installed
 SUMATRA_PATHS = [
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "SumatraPDF.exe"),
     r"C:\printosky_watcher\SumatraPDF.exe",
     r"C:\PY\printosky\SumatraPDF.exe",
+    r"D:\PY\printosky\SumatraPDF.exe",
     r"C:\Users\ABC\AppData\Local\SumatraPDF\SumatraPDF.exe",
     r"C:\Program Files\SumatraPDF\SumatraPDF.exe",
     r"C:\Program Files (x86)\SumatraPDF\SumatraPDF.exe",
