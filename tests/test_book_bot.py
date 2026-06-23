@@ -208,6 +208,21 @@ def test_website_order_ignored_mid_print(fake):
     assert book_bot.maybe_handle_book(PHONE, WEB_ORDER) is None
 
 
+@pytest.mark.integration
+def test_website_order_ingested_during_staff_hold(fake):
+    # Bug (Pinky): a customer in staff_hold who sends a valid ORDER had it
+    # black-holed — _in_print_flow(staff_hold) was True so _try_website_order was
+    # skipped. A complete ORDER template must still be ingested in staff_hold.
+    db, sent = fake
+    db.sessions[PHONE] = {"step": "staff_hold", "needs_human": True}
+    res = book_bot.maybe_handle_book(PHONE, WEB_ORDER)
+    assert res == []                                     # ingested, not dropped
+    code = _code(db)
+    assert db.orders[code]["items"] == {"malayalam": 2, "hindi": 1}
+    assert db.orders[code]["courier"] > 0                # totals computed
+    assert db.sessions[PHONE]["step"] == "book_summary"  # hold released into order flow
+
+
 @pytest.mark.unit
 def test_incomplete_order_template_not_ingested(fake):
     db, _ = fake
