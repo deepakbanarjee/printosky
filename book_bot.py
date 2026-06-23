@@ -873,10 +873,15 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
         return _handle_feedback_reply(phone, text)
 
     if step not in _BOOK_STEPS:
-        if not _in_print_flow(session):
+        # A complete ORDER template is unambiguous — ingest it even when a
+        # staff_hold is parked on the chat, so a stale hold never black-holes a
+        # real order (e.g. customer re-sends after staff took over). A genuine
+        # in-progress print job (job_id / non-book step) still takes precedence.
+        if step == "staff_hold" or not _in_print_flow(session):
             web = _try_website_order(phone, text, name)
             if web is not None:
                 return web
+        if not _in_print_flow(session):
             # A customer asking about an already-shipped order → re-share tracking
             # (must come BEFORE is_book_trigger, since "how do I get the book" etc.
             # would otherwise re-open the catalog).

@@ -1601,7 +1601,7 @@
           <option value="courier">Courier (₹75)</option>
           <option value="xtraa_office">Drop at Xtraa office (no courier)</option>
         </select>
-        <label style="display:flex;gap:8px;align-items:center"><input id="wi-handed" type="checkbox" checked> Handed over now (in-store — no courier)</label>
+        <label style="display:flex;gap:8px;align-items:center"><input id="wi-handed" type="checkbox" onchange="onWiHanded()"> Handed over now (in-store — no courier)</label>
       </div>
       <div id="wi-error" style="color:#dc2626;font-size:.8rem;margin-top:8px"></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
@@ -4889,9 +4889,21 @@ function openWalkInForm() {
   document.getElementById('wi-payment').value = 'cash';
   document.getElementById('wi-collected').value = 'oxygen';
   document.getElementById('wi-delivery').value = 'courier';
-  document.getElementById('wi-handed').checked = true;
+  document.getElementById('wi-handed').checked = false;   // default = courier order (ship); tick only for in-store handover
+  onWiHanded();
   document.getElementById('wi-error').textContent = '';
   document.getElementById('walkin-modal').style.display = 'flex';
+}
+
+function onWiHanded() {
+  // Handed-over-in-store ⇒ no courier + delivered. Grey the delivery select so it
+  // is clearly ignored when handed is ticked. Default is UNCHECKED = a courier
+  // order to be shipped, so picking Courier is no longer overridden into a
+  // walk-in/delivered order (the bug that lost the courier charge).
+  var handed = document.getElementById('wi-handed').checked;
+  var d = document.getElementById('wi-delivery');
+  d.disabled = handed;
+  d.style.opacity = handed ? '0.5' : '1';
 }
 
 function closeWalkInForm() { document.getElementById('walkin-modal').style.display = 'none'; }
