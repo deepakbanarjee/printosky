@@ -460,6 +460,16 @@ def _start(phone: str, name: str | None, force_new: bool = False) -> list[str]:
     return []
 
 
+def start_order(phone: str, name: str | None = None) -> list[str]:
+    """Public entry to begin/reset the book order flow for `phone`.
+
+    Used by the typed trigger path and by the admin "Start Order" button.
+    Sends the opening book list as a side effect; returns any text the caller
+    must relay to the customer (e.g. the awaiting-payment guard message).
+    """
+    return _start(phone, name)
+
+
 def _handle_select(phone: str, text: str, order: dict) -> list[str]:
     keys = _parse_choice(text)
     if not keys:

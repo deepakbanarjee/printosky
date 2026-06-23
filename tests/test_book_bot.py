@@ -865,3 +865,24 @@ def test_customer_feedback_reply_saved_and_forwarded(fake, monkeypatch):
     assert db.feedback["XTR-DLV2"]["rating"] == 5
     assert "nalla" in (db.feedback["XTR-DLV2"]["comment"] or "")
     assert any("XTR-DLV2" in m or "5/5" in m for m in sent["text"])   # forwarded to Anu
+
+
+@pytest.mark.unit
+def test_start_order_public_wrapper_sends_select_list(fake):
+    db, sent = fake
+    res = book_bot.start_order(PHONE)
+    assert res == []                              # nothing to relay on a fresh start
+    assert db.sessions[PHONE]["step"] == "book_select"
+    assert sent["list"][-1] == ["bk_ml", "bk_hi", "bk_en",
+                                "bk_ml_hi", "bk_ml_en", "bk_hi_en", "bk_all"]
+
+
+@pytest.mark.unit
+def test_start_order_relays_awaiting_payment_guard(fake):
+    db, sent = fake
+    # Seed an order already awaiting payment.
+    db.create_book_order("XTR-TEST-1", PHONE, None)
+    db.update_book_order("XTR-TEST-1", status="awaiting_payment")
+    res = book_bot.start_order(PHONE)
+    assert len(res) == 1
+    assert "XTR-TEST-1" in res[0]                 # guard text returned to caller
