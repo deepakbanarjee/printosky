@@ -187,3 +187,60 @@ def test_parse_payment_text_paid_claim_without_reference():
 ])
 def test_parse_payment_text_ignores_ordinary_chat(text):
     assert bc.parse_payment_text(text) is None
+
+
+# ── Divya rule: is_divya_phone / divya_order_terms ────────────────────────────
+
+@pytest.mark.unit
+@pytest.mark.parametrize("phone", [
+    "919526738641",        # canonical stored form (with country code)
+    "9526738641",          # bare 10-digit
+    "+91 95267 38641",     # +91 prefix and spacing (how the owner typed it)
+    "09526738641",         # leading 0
+    "91-9526738641",       # punctuation
+])
+def test_is_divya_phone_matches_her_number(phone):
+    assert bc.is_divya_phone(phone) is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("phone", [
+    "919947184088",        # a real customer (Rajeena)
+    "9947184088",
+    "", "   ", None, "12345", "9526738642",   # off-by-one digit must NOT match
+])
+def test_is_divya_phone_rejects_everyone_else(phone):
+    assert bc.is_divya_phone(phone) is False
+
+
+@pytest.mark.unit
+def test_divya_order_terms_customer_pays_courier_and_earns_commission():
+    # Any normal customer, any channel: courier billed, Divya earns ₹50/book.
+    t = bc.divya_order_terms("919947184088", {"malayalam": 1, "english": 1})
+    assert t["books_total"] == 400.0
+    assert t["courier"] == 75.0
+    assert t["grand_total"] == 475.0
+    assert t["commission"] == 100.0        # 2 books * ₹50
+    assert t["via_divya"] is True
+
+
+@pytest.mark.unit
+def test_divya_order_terms_divya_self_order_is_free_of_courier_and_commission():
+    # Divya orders for herself: pays the book cost alone — no courier, no commission.
+    t = bc.divya_order_terms("919526738641", {"malayalam": 1, "english": 1})
+    assert t["books_total"] == 400.0
+    assert t["courier"] == 0.0
+    assert t["grand_total"] == 400.0       # books only
+    assert t["commission"] == 0.0
+    assert t["via_divya"] is False
+
+
+@pytest.mark.unit
+def test_divya_order_terms_office_pickup_no_courier_but_commission_stands():
+    # xtraa_office pickup → no courier, but a customer order still earns commission.
+    t = bc.divya_order_terms("919947184088", {"malayalam": 1},
+                             delivery_method="xtraa_office")
+    assert t["courier"] == 0.0
+    assert t["grand_total"] == 200.0
+    assert t["commission"] == 50.0
+    assert t["via_divya"] is True

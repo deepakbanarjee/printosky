@@ -788,6 +788,12 @@ def _handle_admin_book_order_edit(h, body, order_code: str) -> None:
         if not fields:
             _json_response(h, 400, {"error": "Nothing to update"})
             return
+        # Hard rule: Divya's own order is courier-free + commission-free (she
+        # pays the book cost alone, earns no commission on herself).
+        if bc.is_divya_phone(fields.get("phone") or order.get("phone")):
+            _bt = fields.get("books_total", order.get("books_total") or 0.0)
+            fields.update(commission=0.0, via_divya=False, courier=0.0,
+                          grand_total=_bt)
         update_book_order(order_code, **fields)
         # If the operator just set a payment field on a not-yet-confirmed order,
         # hint the UI to offer moving it to Ready to Dispatch — a manual payment
