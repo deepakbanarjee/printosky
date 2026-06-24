@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Printosky — Logo System v3 (research-grounded)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{ --ink:#0D1117; --paper:#F5F1EB; --blue:#1B3F8B; --accent:#E8500A; --mid:#6B7280; }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#d9d4cb;font-family:'DM Sans',sans-serif;color:var(--ink);padding:52px 48px 96px;}
+  h1{font-family:'Syne',sans-serif;font-weight:800;font-size:38px;letter-spacing:-1.5px;margin-bottom:6px;}
+  .lede{color:var(--mid);font-size:14px;margin-bottom:14px;max-width:760px;line-height:1.5;}
+  h2{font-family:'Syne',sans-serif;font-weight:800;font-size:22px;letter-spacing:-.6px;margin:54px 0 6px;}
+  .why{color:var(--mid);font-size:13px;margin-bottom:20px;max-width:720px;line-height:1.5;}
+  .rec{display:inline-block;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:var(--accent);color:#fff;padding:4px 10px;border-radius:99px;margin-left:8px;vertical-align:middle;}
+
+  .iconrow{display:flex;gap:22px;align-items:center;flex-wrap:wrap;margin-bottom:26px;}
+  .iconrow .cap{font-size:11px;color:var(--mid);text-align:center;margin-top:8px;}
+  .iconrow .item{display:flex;flex-direction:column;align-items:center;}
+
+  .card{width:780px;max-width:100%;border-radius:10px;padding:56px 64px;margin-bottom:22px;}
+  .card .lk{display:flex;align-items:center;gap:24px;}
+  .wordmark{font-family:'Syne',sans-serif;font-weight:800;font-size:66px;letter-spacing:-3.2px;line-height:.9;}
+  .wordmark .dot{color:var(--accent);}
+  .sub{margin-top:13px;font-weight:500;font-size:13px;letter-spacing:5px;text-transform:uppercase;color:var(--mid);}
+  .on-paper{background:var(--paper);} .on-paper .wordmark{color:var(--ink);}
+  .on-ink{background:var(--ink);} .on-ink .wordmark{color:var(--paper);} .on-ink .sub{color:#9aa3ad;}
+
+  .smalltest{display:flex;gap:18px;align-items:flex-end;background:#fff;padding:18px 22px;border-radius:12px;width:fit-content;}
+  .smalltest .item{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:10px;color:var(--mid);}
+</style>
+</head>
+<body>
+  <h1>Printosky — Logo System v3</h1>
+  <div class="lede">Grounded in a survey of ~130 printing &amp; printer logos. Lessons applied: <strong>lead with the wordmark</strong>, <strong>own the orange</strong> (the uncrowded "creative" lane vs the blue sea), <strong>avoid the cliché icon tile</strong>, and <strong>survive 32px / single colour</strong>.</div>
+
+  <!-- ============ DIRECTION A ============ -->
+  <h2>Direction A — "The Full Stop" <span class="rec">recommended</span></h2>
+  <div class="why">The orange dot <em>is</em> the brand. Period = delivered. Sun = sky. Ink-dot = print. Wordmark-led like Printo / MOO / Vistaprint; the only colour is the one accent you already own. The icon is a <strong>lowercase "p" + the dot</strong> — a real monogram, not a stock picture.</div>
+
+  <div class="iconrow">
+    <div class="item">
+      <svg width="100" height="100" viewBox="0 0 200 200" aria-label="p-dot ink">
+        <rect width="200" height="200" rx="44" fill="#0D1117"/>
+        <rect x="64" y="56" width="22" height="104" rx="11" fill="#F5F1EB"/>
+        <circle cx="104" cy="92" r="34" fill="#F5F1EB"/>
+        <circle cx="104" cy="92" r="15" fill="#0D1117"/>
+        <circle cx="150" cy="148" r="13" fill="#E8500A"/>
+      </svg>
+      <div class="cap">primary · ink</div>
+    </div>
+    <div class="item">
+      <svg width="100" height="100" viewBox="0 0 200 200" aria-label="p-dot paper">
+        <rect width="200" height="200" rx="44" fill="#F5F1EB"/>
+        <rect x="64" y="56" width="22" height="104" rx="11" fill="#0D1117"/>
+        <circle cx="104" cy="92" r="34" fill="#0D1117"/>
+        <circle cx="104" cy="92" r="15" fill="#F5F1EB"/>
+        <circle cx="150" cy="148" r="13" fill="#E8500A"/>
+      </svg>
+      <div class="cap">reversed · paper</div>
+    </div>
+    <div class="item">
+      <svg width="100" height="100" viewBox="0 0 200 200" aria-label="p-dot blue">
+        <rect width="200" height="200" rx="44" fill="#1B3F8B"/>
+        <rect x="64" y="56" width="22" height="104" rx="11" fill="#fff"/>
+        <circle cx="104" cy="92" r="34" fill="#fff"/>
+        <circle cx="104" cy="92" r="15" fill="#1B3F8B"/>
+        <circle cx="150" cy="148" r="13" fill="#E8500A"/>
+      </svg>
+      <div class="cap">blue</div>
+    </div>
+    <div class="item">
+      <svg width="100" height="100" viewBox="0 0 200 200" aria-label="dot only">
+        <rect width="200" height="200" rx="44" fill="#0D1117"/>
+        <circle cx="100" cy="100" r="40" fill="#E8500A"/>
+      </svg>
+      <div class="cap">ultra-minimal · dot</div>
+    </div>
+    <div class="item">
+      <svg width="100" height="100" viewBox="0 0 200 200" aria-label="single colour">
+        <rect width="200" height="200" rx="44" fill="#0D1117"/>
+        <rect x="14" y="14" width="172" height="172" rx="32" fill="#fff"/>
+        <rect x="64" y="56" width="22" height="104" rx="11" fill="#0D1117"/>
+        <circle cx="104" cy="92" r="34" fill="#0D1117"/>
+        <circle cx="104" cy="92" r="15" fill="#fff"/>
+        <circle cx="150" cy="148" r="13" fill="#0D1117"/>
+      </svg>
+      <div class="cap">single-colour (stamp)</div>
+    </div>
+  </div>
+
+  <div class="card on-paper"><div class="lk">
+    <svg width="92" height="92" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#0D1117"/><rect x="64" y="56" width="22" height="104" rx="11" fill="#F5F1EB"/><circle cx="104" cy="92" r="34" fill="#F5F1EB"/><circle cx="104" cy="92" r="15" fill="#0D1117"/><circle cx="150" cy="148" r="13" fill="#E8500A"/></svg>
+    <div><div class="wordmark">Printosky<span class="dot">.</span></div><div class="sub">Online Printing · Thriprayar, Thrissur</div></div>
+  </div></div>
+  <div class="card on-ink"><div class="lk">
+    <svg width="92" height="92" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#1B3F8B"/><rect x="64" y="56" width="22" height="104" rx="11" fill="#fff"/><circle cx="104" cy="92" r="34" fill="#fff"/><circle cx="104" cy="92" r="15" fill="#1B3F8B"/><circle cx="150" cy="148" r="13" fill="#E8500A"/></svg>
+    <div><div class="wordmark">Printosky<span class="dot">.</span></div><div class="sub">Online Printing · Thriprayar, Thrissur</div></div>
+  </div></div>
+
+  <div class="smalltest">
+    <div class="item"><svg width="48" height="48" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#0D1117"/><rect x="64" y="56" width="22" height="104" rx="11" fill="#F5F1EB"/><circle cx="104" cy="92" r="34" fill="#F5F1EB"/><circle cx="104" cy="92" r="15" fill="#0D1117"/><circle cx="150" cy="148" r="13" fill="#E8500A"/></svg><span>48px</span></div>
+    <div class="item"><svg width="32" height="32" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#0D1117"/><rect x="64" y="56" width="22" height="104" rx="11" fill="#F5F1EB"/><circle cx="104" cy="92" r="34" fill="#F5F1EB"/><circle cx="104" cy="92" r="15" fill="#0D1117"/><circle cx="150" cy="148" r="13" fill="#E8500A"/></svg><span>32px favicon</span></div>
+    <div class="item"><svg width="20" height="20" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#0D1117"/><rect x="64" y="56" width="22" height="104" rx="11" fill="#F5F1EB"/><circle cx="104" cy="92" r="34" fill="#F5F1EB"/><circle cx="104" cy="92" r="15" fill="#0D1117"/><circle cx="150" cy="148" r="13" fill="#E8500A"/></svg><span>20px</span></div>
+  </div>
+
+  <!-- ============ DIRECTION B ============ -->
+  <h2>Direction B — "Clear Sky"</h2>
+  <div class="why">Keeps the literal <em>sky</em> tie-in: a clean single-colour cloud with the orange dot as the sun (the only colour pop). This is the friendlier, more literal route — handsome, but closer to the generic "icon tile" the survey flags, so it reads slightly less premium / less ownable than Direction A.</div>
+
+  <div class="iconrow">
+    <div class="item">
+      <svg width="100" height="100" viewBox="0 0 200 200" aria-label="cloud ink">
+        <rect width="200" height="200" rx="44" fill="#0D1117"/>
+        <circle cx="140" cy="64" r="22" fill="#E8500A"/>
+        <g fill="#F5F1EB"><circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/><circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/><rect x="52" y="118" width="98" height="26" rx="13"/></g>
+      </svg>
+      <div class="cap">primary · ink</div>
+    </div>
+    <div class="item">
+      <svg width="100" height="100" viewBox="0 0 200 200" aria-label="cloud blue">
+        <rect width="200" height="200" rx="44" fill="#1B3F8B"/>
+        <circle cx="140" cy="64" r="22" fill="#E8500A"/>
+        <g fill="#fff"><circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/><circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/><rect x="52" y="118" width="98" height="26" rx="13"/></g>
+      </svg>
+      <div class="cap">blue</div>
+    </div>
+    <div class="item">
+      <svg width="100" height="100" viewBox="0 0 200 200" aria-label="cloud single">
+        <rect width="200" height="200" rx="44" fill="#0D1117"/>
+        <rect x="14" y="14" width="172" height="172" rx="32" fill="#fff"/>
+        <circle cx="140" cy="64" r="22" fill="#0D1117"/>
+        <g fill="#0D1117"><circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/><circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/><rect x="52" y="118" width="98" height="26" rx="13"/></g>
+      </svg>
+      <div class="cap">single-colour</div>
+    </div>
+  </div>
+
+  <div class="card on-paper"><div class="lk">
+    <svg width="92" height="92" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#1B3F8B"/><circle cx="140" cy="64" r="22" fill="#E8500A"/><g fill="#fff"><circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/><circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/><rect x="52" y="118" width="98" height="26" rx="13"/></g></svg>
+    <div><div class="wordmark">Printosky<span class="dot">.</span></div><div class="sub">Online Printing · Thriprayar, Thrissur</div></div>
+  </div></div>
+
+  <div class="smalltest">
+    <div class="item"><svg width="48" height="48" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#0D1117"/><circle cx="140" cy="64" r="22" fill="#E8500A"/><g fill="#F5F1EB"><circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/><circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/><rect x="52" y="118" width="98" height="26" rx="13"/></g></svg><span>48px</span></div>
+    <div class="item"><svg width="32" height="32" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#0D1117"/><circle cx="140" cy="64" r="22" fill="#E8500A"/><g fill="#F5F1EB"><circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/><circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/><rect x="52" y="118" width="98" height="26" rx="13"/></g></svg><span>32px favicon</span></div>
+  </div>
+
+</body>
+</html>
