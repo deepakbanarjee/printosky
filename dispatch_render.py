@@ -89,10 +89,10 @@ def _slip(order: dict) -> str:
         '</div>'
         '<div class="fw"><div>Courier: <span class="ln"></span></div>'
         '<div>AWB No: <span class="ln"></span></div></div>'
-        '</div></div>'
+        '</div></div></div>'   # close foot, body, AND left (left close was missing)
         f'<div class="right" style="background-image:url(\'{INSERT_URL}\')">'
         '<span class="cut">&#9986; cut here</span></div>'
-        '</div>'
+        '</div>'   # close slip
     )
 
 
