@@ -447,6 +447,7 @@ html, body {
         onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg();}"
         oninput="this.style.height='';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
       <span id="upload-status"></span>
+      <button class="attach-btn" title="ഓർഡർ തുടങ്ങുക / Start book order" onclick="startBookOrder()">📚</button>
       <button class="send-btn" onclick="sendMsg()">&#10148;</button>
     </div>
     </div><!-- /chat-thread -->
@@ -834,6 +835,24 @@ async function sendMsg() {
     });
     await fetchThread();
   } catch(e) { alert('Send failed: ' + e.message); }
+}
+
+/* ── START BOOK ORDER (Malayalam flow) ──────────────────────── */
+async function startBookOrder() {
+  if (!_phone) { alert('Select a conversation first.'); return; }
+  if (!confirm('Start the book order flow for this customer?\nThey will get the order menu in Malayalam.')) return;
+  try {
+    const r = await fetch(`${API}/admin/book-orders/start`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password:_pw, phone:_phone})
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(()=>({}));
+      alert('Could not start order — ' + (e.error || ('HTTP ' + r.status)));
+      return;
+    }
+    await fetchThread();
+  } catch(e) { alert('Could not start order: ' + e.message); }
 }
 
 /* ── HAND BACK TO BOT ───────────────────────────────────────── */
