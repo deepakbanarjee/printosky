@@ -160,20 +160,36 @@ def _has_pincode(text: str) -> bool:
 
 
 def _parse_choice(text: str) -> list[str] | None:
-    """A selection (button id or typed) → ordered list of book keys, or None."""
+    """A selection → ordered list of book keys, or None.
+
+    Accepts a button/list id ("bk_all"), a numeric pick ("1", "1,3", "all"),
+    or the visible option *title* sent as text — in English OR Malayalam. The
+    bilingual list shows Malayalam titles (e.g. "മൂന്നും (Set)", "മലയാളം + ഹിന്ദി"),
+    and a confused customer may type/echo those instead of tapping the row, so
+    the Malayalam wording must parse too — not just the English keywords.
+    """
     t = (text or "").strip().lower()
     if t in _SELECT_IDS:
         return list(_SELECT_IDS[t])
-    keys = bc.parse_selection(text)   # handles "1", "1,3", "all", "4"
+    keys = bc.parse_selection(text)   # handles "1", "1,3", "all", "set", "4"
     if keys:
         return keys
-    if "akshara" in t or "malayalam" in t:
-        return ["malayalam"]
-    if "vidya" in t or "hindi" in t:
-        return ["hindi"]
-    if "english" in t:
-        return ["english"]
-    return None
+    # "All three" by its visible title ("മൂന്നും (Set)") or words.
+    if ("മൂന്ന" in t or "എല്ലാ" in t or "(set)" in t
+            or "all three" in t or "all 3" in t):
+        return list(bc.BOOK_KEYS)
+    # Collect every language named in the text — English keyword OR Malayalam
+    # title — in canonical order, so a combo title like "മലയാളം + ഹിന്ദി" resolves
+    # to both books, not just the first match. (Short Malayalam roots avoid
+    # trailing-glyph Unicode variance.)
+    langs: list[str] = []
+    if "akshara" in t or "malayalam" in t or "അക്ഷര" in t or "മലയാള" in t:
+        langs.append("malayalam")
+    if "vidya" in t or "hindi" in t or "വിദ്യ" in t or "ഹിന്ദ" in t:
+        langs.append("hindi")
+    if "english" in t or "ഇംഗ്ല" in t:
+        langs.append("english")
+    return langs or None
 
 
 def _parse_qty(text: str):
