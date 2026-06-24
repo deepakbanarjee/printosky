@@ -189,32 +189,36 @@ def _send_select_list(phone: str, edit: bool = False) -> None:
     b = bc.BOOKS
     p = {k: b[k]["price"] for k in ("malayalam", "hindi", "english")}
     rows = [
-        {"id": "bk_ml", "title": "Aksharamrutham", "description": f"Malayalam · ₹{p['malayalam']:.0f}"},
-        {"id": "bk_hi", "title": "Vidyamrut",      "description": f"Hindi · ₹{p['hindi']:.0f}"},
-        {"id": "bk_en", "title": "Easy English",   "description": f"English · ₹{p['english']:.0f}"},
-        {"id": "bk_ml_hi", "title": "Malayalam + Hindi",
-         "description": f"Aksharamrutham + Vidyamrut · ₹{p['malayalam'] + p['hindi']:.0f}"},
-        {"id": "bk_ml_en", "title": "Malayalam + English",
-         "description": f"Aksharamrutham + Easy English · ₹{p['malayalam'] + p['english']:.0f}"},
-        {"id": "bk_hi_en", "title": "Hindi + English",
+        {"id": "bk_ml", "title": "അക്ഷരാമൃതം", "description": f"മലയാളം പുസ്തകം · ₹{p['malayalam']:.0f}"},
+        {"id": "bk_hi", "title": "Vidyamrut",   "description": f"ഹിന്ദി പുസ്തകം · ₹{p['hindi']:.0f}"},
+        {"id": "bk_en", "title": "Easy English", "description": f"ഇംഗ്ലീഷ് പുസ്തകം · ₹{p['english']:.0f}"},
+        {"id": "bk_ml_hi", "title": "മലയാളം + ഹിന്ദി",
+         "description": f"അക്ഷരാമൃതം + Vidyamrut · ₹{p['malayalam'] + p['hindi']:.0f}"},
+        {"id": "bk_ml_en", "title": "മലയാളം + ഇംഗ്ലീഷ്",
+         "description": f"അക്ഷരാമൃതം + Easy English · ₹{p['malayalam'] + p['english']:.0f}"},
+        {"id": "bk_hi_en", "title": "ഹിന്ദി + ഇംഗ്ലീഷ്",
          "description": f"Vidyamrut + Easy English · ₹{p['hindi'] + p['english']:.0f}"},
-        {"id": "bk_all", "title": "All 3 books (Set)",
-         "description": f"All three · ₹{bc.SET_PRICE} when 1 of each"},
+        {"id": "bk_all", "title": "മൂന്നും (Set)",
+         "description": f"എല്ലാം · ₹{bc.SET_PRICE} (ഓരോന്നും 1 വീതം)"},
     ]
     if edit:
-        body = "Pick your books again (single, a pair, or all three):"
+        body = ("പുസ്തകം വീണ്ടും തിരഞ്ഞെടുക്കുക (ഒന്ന്, ജോഡി, അല്ലെങ്കിൽ മൂന്നും).\n"
+                "Pick your books again (single, a pair, or all three).")
     else:
-        body = ("📚 *Xtraa — Adithara Balappeduthu*\nFoundation books for early "
-                "readers.\n\nChoose the books you'd like — pick *one row* for a "
-                "single book, a pair, or all three.\n\n"
-                f"_+ courier charged by weight (₹75+)._")
-    _send_list(phone, body, "📚 Choose books", rows, header="Xtraa Books")
+        body = ("📚 *Xtraa*\n"
+                "മലയാളം, English & हिंदी ഭാഷകളുടെ അടിസ്ഥാനം ഉറപ്പാക്കുന്നതിനായി ഇതാ 3 പുസ്തകങ്ങൾ.\n\n"
+                "വേണ്ട പുസ്തകം തിരഞ്ഞെടുക്കുക (ഒന്ന്, രണ്ട് അല്ലെങ്കിൽ മൂന്നും).\n"
+                "Pick the books you want (one, two, or all three).\n\n"
+                "_+ ഭാരം അനുസരിച്ച് കൊറിയർ ചാർജ് (₹75 മുതൽ)._")
+    _send_list(phone, body, "📚 തിരഞ്ഞെടുക്കൂ", rows, header="Xtraa Books")
 
 
 def _send_qty_buttons(phone: str, label: str) -> None:
     _send_buttons(
         phone,
-        f"How many copies of *{label}*?\n\n_Tap a number, or type one (e.g. 5)._",
+        f"*{label}* എത്ര എണ്ണം വേണം?\n"
+        f"How many copies of *{label}*?\n\n"
+        "_നമ്പർ ടാപ്പ് ചെയ്യൂ, അല്ലെങ്കിൽ ടൈപ്പ് ചെയ്യൂ (ഉദാ: 5)._",
         [("qty_1", "1"), ("qty_2", "2"), ("qty_3", "3")],
     )
 
@@ -222,8 +226,9 @@ def _send_qty_buttons(phone: str, label: str) -> None:
 def _send_phone_buttons(phone: str) -> None:
     _send_buttons(
         phone,
+        f"ഡെലിവറി അപ്ഡേറ്റുകൾക്ക് *{_format_phone(phone)}* ശരിയായ നമ്പറാണോ?\n"
         f"Is *{_format_phone(phone)}* the right number for delivery updates?",
-        [("ph_yes", "✅ Use this"), ("ph_edit", "✏️ Other number")],
+        [("ph_yes", "✅ ശരി"), ("ph_edit", "✏️ വേറെ നമ്പർ")],
     )
 
 
@@ -238,11 +243,11 @@ def _summary_text(order: dict) -> str:
     dtdc = order.get("dtdc_center")
     dtdc_line = f"\n🏢 DTDC: {dtdc}" if dtdc else ""
     return (
-        "🧾 *Order summary*\n\n"
+        "🧾 *ഓർഡർ വിശദാംശം / Order summary*\n\n"
         f"{lines}\n\n"
-        f"Books: ₹{totals['books_total']:.0f}\n"
-        f"Courier: ₹{totals['courier']:.0f}\n"
-        f"*Total: ₹{totals['grand_total']:.0f}*\n\n"
+        f"പുസ്തകങ്ങൾ / Books: ₹{totals['books_total']:.0f}\n"
+        f"കൊറിയർ / Courier: ₹{totals['courier']:.0f}\n"
+        f"*ആകെ / Total: ₹{totals['grand_total']:.0f}*\n\n"
         f"👤 {name}\n"
         f"📍 {order.get('address', '')}"
         f"{dtdc_line}\n"
@@ -252,40 +257,42 @@ def _summary_text(order: dict) -> str:
 
 def _send_summary(phone: str, order: dict) -> None:
     _send_buttons(phone, _summary_text(order),
-                  [("ord_yes", "✅ Confirm"), ("ord_edit", "✏️ Edit"), ("ord_no", "❌ Cancel")])
+                  [("ord_yes", "✅ ഉറപ്പിക്കൂ"), ("ord_edit", "✏️ മാറ്റം"), ("ord_no", "❌ റദ്ദാക്കൂ")])
 
 
 def _send_edit_menu(phone: str) -> None:
     _send_list(
-        phone, "What would you like to edit?", "✏️ Edit",
+        phone, "എന്ത് മാറ്റണം? / What would you like to edit?", "✏️ മാറ്റം",
         [
-            {"id": "ed_name",  "title": "👤 Recipient name"},
-            {"id": "ed_books", "title": "📚 Books & qty"},
-            {"id": "ed_addr",  "title": "📍 Delivery address"},
+            {"id": "ed_name",  "title": "👤 പേര് / Name"},
+            {"id": "ed_books", "title": "📚 പുസ്തകം & എണ്ണം"},
+            {"id": "ed_addr",  "title": "📍 വിലാസം / Address"},
             {"id": "ed_dtdc",  "title": "🏢 DTDC center"},
-            {"id": "ed_phone", "title": "📞 Phone number"},
+            {"id": "ed_phone", "title": "📞 ഫോൺ നമ്പർ"},
         ],
         header="Edit order",
-        section_title="Choose what to edit",
+        section_title="എന്ത് മാറ്റണം",
     )
 
 
 def _send_pay_buttons(phone: str) -> None:
     _send_buttons(
         phone,
-        "After paying, *send a screenshot* here.\n\nNeed to change something "
-        "before paying?",
-        [("pay_edit", "✏️ Edit order"), ("pay_cancel", "❌ Cancel order")],
+        "പണമടച്ച ശേഷം *സ്ക്രീൻഷോട്ട്* ഇവിടെ അയക്കൂ.\n"
+        "After paying, *send a screenshot* here.\n\n"
+        "പണമടയ്ക്കും മുമ്പ് എന്തെങ്കിലും മാറ്റണോ?",
+        [("pay_edit", "✏️ മാറ്റം"), ("pay_cancel", "❌ റദ്ദാക്കൂ")],
     )
 
 
 def _payment_caption(order: dict) -> str:
     totals = bc.compute_totals(order.get("items") or {})
     return (
-        f"💳 *Pay ₹{totals['grand_total']:.0f}* by scanning this UPI QR.\n\n"
-        f"Order: {order.get('order_code')}\n\n"
-        "After paying, *send a screenshot* of the payment confirmation here. "
-        "We'll verify and confirm your order. 🙏"
+        f"💳 *₹{totals['grand_total']:.0f} അടയ്ക്കൂ* — ഈ UPI QR സ്കാൻ ചെയ്യൂ.\n"
+        f"Pay *₹{totals['grand_total']:.0f}* by scanning this UPI QR.\n\n"
+        f"ഓർഡർ / Order: {order.get('order_code')}\n\n"
+        "പണമടച്ച ശേഷം പേയ്മെന്റ് സ്ക്രീൻഷോട്ട് ഇവിടെ അയക്കൂ. ഞങ്ങൾ വെരിഫൈ ചെയ്ത് ഓർഡർ ഉറപ്പിക്കും. 🙏\n"
+        "After paying, send a screenshot of the confirmation here."
     )
 
 
@@ -396,8 +403,9 @@ def _forward_payment_text_to_verifier(order: dict, payment: dict,
 
 def _address_prompt() -> str:
     return (
-        "📍 Please type the *full delivery address* — "
-        "house/flat no., street, place, district and *PIN code*."
+        "📍 *പൂർണ്ണ ഡെലിവറി വിലാസം* ടൈപ്പ് ചെയ്യൂ — വീട്/ഫ്ലാറ്റ് നമ്പർ, സ്ഥലം, "
+        "ജില്ല, *PIN കോഡ്* സഹിതം.\n"
+        "Type the *full delivery address* incl. *PIN code*."
     )
 
 
@@ -413,11 +421,12 @@ def _is_valid_name(text: str) -> bool:
 def _send_dtdc_prompt(phone: str) -> None:
     _send_buttons(
         phone,
-        "📦 Books will be shipped via *DTDC courier*.\n\n"
-        "⚠️ Home delivery is not guaranteed — depends on your local DTDC branch.\n\n"
-        "Do you have a *preferred DTDC center* (e.g. *DTDC Kozhikode City*)? "
-        "If yes, type it. If not, tap *Skip*.",
-        [("dtdc_skip", "⏭️ No preference")],
+        "📦 പുസ്തകങ്ങൾ *DTDC കൊറിയർ* വഴി അയക്കും.\n"
+        "⚠️ ഹോം ഡെലിവറി ഉറപ്പില്ല — നിങ്ങളുടെ DTDC ബ്രാഞ്ച് അനുസരിച്ചാണ്.\n\n"
+        "*ഇഷ്ടമുള്ള DTDC സെന്റർ* ഉണ്ടോ (ഉദാ: *DTDC Kozhikode City*)? "
+        "ഉണ്ടെങ്കിൽ ടൈപ്പ് ചെയ്യൂ. ഇല്ലെങ്കിൽ *Skip* ടാപ്പ് ചെയ്യൂ.\n"
+        "Type a preferred DTDC center, or tap Skip.",
+        [("dtdc_skip", "⏭️ വേണ്ട")],
     )
 
 
@@ -444,9 +453,11 @@ def _start(phone: str, name: str | None, force_new: bool = False) -> list[str]:
         # re-typing "books" must not destroy items/address. Point them at payment
         # or an explicit fresh start.
         return [
-            f"Your order *{active['order_code']}* is awaiting payment confirmation. "
-            "Send your payment screenshot (or the payment details) here, or reply "
-            "*NEW* to start a fresh order. 🙏"
+            f"നിങ്ങളുടെ ഓർഡർ *{active['order_code']}* പേയ്മെന്റ് സ്ഥിരീകരണത്തിനായി "
+            "കാത്തിരിക്കുന്നു. പേയ്മെന്റ് സ്ക്രീൻഷോട്ട് (അല്ലെങ്കിൽ പേയ്മെന്റ് വിവരം) "
+            "ഇവിടെ അയക്കൂ, അല്ലെങ്കിൽ പുതിയ ഓർഡറിന് *NEW* എന്ന് റിപ്ലൈ ചെയ്യൂ. 🙏\n"
+            f"Order *{active['order_code']}* is awaiting payment — send the screenshot, "
+            "or reply *NEW* for a fresh order."
         ]
     else:
         code = _new_order_code()
@@ -458,6 +469,16 @@ def _start(phone: str, name: str | None, force_new: bool = False) -> list[str]:
     _dbc.save_session(DB, phone, step="book_select", needs_human=False)
     _send_select_list(phone)
     return []
+
+
+def start_order(phone: str, name: str | None = None) -> list[str]:
+    """Public entry to begin/reset the book order flow for `phone`.
+
+    Used by the typed trigger path and by the admin "Start Order" button.
+    Sends the opening book list as a side effect; returns any text the caller
+    must relay to the customer (e.g. the awaiting-payment guard message).
+    """
+    return _start(phone, name)
 
 
 def _handle_select(phone: str, text: str, order: dict) -> list[str]:
@@ -510,9 +531,11 @@ def _handle_qty(phone: str, text: str, order: dict) -> list[str]:
     _dbc.save_session(DB, phone, step="book_name")
     _send_text(
         phone,
-        f"Your order comes to *₹{totals['grand_total']:.0f}* "
-        f"(incl. ₹{totals['courier']:.0f} courier).\n\n"
-        "👤 Please type the *full name* of the person receiving the parcel.",
+        f"നിങ്ങളുടെ ഓർഡർ ആകെ *₹{totals['grand_total']:.0f}* "
+        f"(₹{totals['courier']:.0f} കൊറിയർ ഉൾപ്പെടെ).\n"
+        f"Your order comes to *₹{totals['grand_total']:.0f}* (incl. ₹{totals['courier']:.0f} courier).\n\n"
+        "👤 പാർസൽ ലഭിക്കുന്ന ആളുടെ *പൂർണ്ണ പേര്* ടൈപ്പ് ചെയ്യൂ.\n"
+        "Type the *full name* of the person receiving the parcel.",
     )
     return []
 
@@ -520,8 +543,9 @@ def _handle_qty(phone: str, text: str, order: dict) -> list[str]:
 def _handle_name(phone: str, text: str, order: dict) -> list[str]:
     name = (text or "").strip()
     if not _is_valid_name(name):
-        _send_text(phone, "Please type the *full name* of the person receiving the parcel "
-                          "(e.g. Priya Krishnan, John Thomas). 👤")
+        _send_text(phone, "പാർസൽ ലഭിക്കുന്ന ആളുടെ *പൂർണ്ണ പേര്* ടൈപ്പ് ചെയ്യൂ "
+                          "(ഉദാ: Priya Krishnan). 👤\n"
+                          "Please type the recipient's *full name*.")
         return []
     _dbc.update_book_order(order["order_code"], name=name)
     _dbc.save_session(DB, phone, step="book_address")
@@ -532,12 +556,14 @@ def _handle_name(phone: str, text: str, order: dict) -> list[str]:
 def _handle_address(phone: str, text: str, order: dict) -> list[str]:
     address = (text or "").strip()
     if len(address) < 10:
-        _send_text(phone, "That address looks too short. Please type your *full "
-                          "delivery address* including place and PIN code. 📍")
+        _send_text(phone, "വിലാസം വളരെ ചെറുതാണ്. സ്ഥലവും *PIN കോഡും* സഹിതം *പൂർണ്ണ വിലാസം* "
+                          "ടൈപ്പ് ചെയ്യൂ. 📍\n"
+                          "That address looks too short — include place and PIN code.")
         return []
     if not _has_pincode(address):
-        _send_text(phone, "Please include your *6-digit PIN code* in the address "
-                          "(we can't ship without it). 📍")
+        _send_text(phone, "വിലാസത്തിൽ *6-അക്ക PIN കോഡ്* ഉൾപ്പെടുത്തൂ "
+                          "(അതില്ലാതെ അയക്കാനാവില്ല). 📍\n"
+                          "Please include your *6-digit PIN code*.")
         return []
     _dbc.update_book_order(order["order_code"], address=address)
     _dbc.save_session(DB, phone, step="book_dtdc")
@@ -564,7 +590,8 @@ def _resolve_phone(phone: str, text: str) -> str | None:
 def _handle_phone(phone: str, text: str, order: dict) -> list[str]:
     t = (text or "").strip().lower()
     if t == "ph_edit" or t in {"other", "change", "edit", "✏️ other number"}:
-        _send_text(phone, "Please *type the correct phone number* (10 digits). 📞")
+        _send_text(phone, "*ശരിയായ ഫോൺ നമ്പർ* (10 അക്കം) ടൈപ്പ് ചെയ്യൂ. 📞\n"
+                          "Please type the correct phone number (10 digits).")
         return []
     contact = _resolve_phone(phone, text)
     if not contact:
@@ -588,7 +615,7 @@ def _handle_summary(phone: str, text: str, order: dict) -> list[str]:
                                books_total=0, courier=0, grand_total=0,
                                address=None, contact_phone=None)
         _dbc.save_session(DB, phone, step="book_select")
-        _send_text(phone, "No problem — let's start over.")
+        _send_text(phone, "കുഴപ്പമില്ല — വീണ്ടും തുടങ്ങാം.\nNo problem — let's start over.")
         _send_select_list(phone)
         return []
     if t == "ord_yes" or t in _AFFIRM:
@@ -597,8 +624,9 @@ def _handle_summary(phone: str, text: str, order: dict) -> list[str]:
         refreshed = _dbc.get_book_order(code)
         if not _send_qr(phone, refreshed):
             totals = bc.compute_totals(refreshed.get("items") or {})
-            _send_text(phone, f"Please pay *₹{totals['grand_total']:.0f}* to our UPI "
-                              "and send a screenshot here. (Reply *QR* to retry the image.)")
+            _send_text(phone, f"*₹{totals['grand_total']:.0f}* ഞങ്ങളുടെ UPI യിലേക്ക് അടച്ച് "
+                              "സ്ക്രീൻഷോട്ട് അയക്കൂ. (ഇമേജ് വീണ്ടും വേണമെങ്കിൽ *QR* റിപ്ലൈ ചെയ്യൂ.)\n"
+                              "Pay to our UPI and send a screenshot. (Reply *QR* to retry the image.)")
         _send_pay_buttons(phone)
         return []
     _send_summary(phone, order)
@@ -610,7 +638,7 @@ def _handle_edit(phone: str, text: str, order: dict) -> list[str]:
     t = (text or "").strip().lower()
     if t == "ed_name" or t in {"name", "recipient"}:
         _dbc.save_session(DB, phone, step="book_edit_name")
-        _send_text(phone, "👤 Please type the *new recipient name*.")
+        _send_text(phone, "👤 *പുതിയ പേര്* ടൈപ്പ് ചെയ്യൂ.\nType the *new recipient name*.")
         return []
     if t == "ed_books" or "book" in t:
         _dbc.update_book_order(code, flow_cursor={"editing": True})
@@ -619,7 +647,8 @@ def _handle_edit(phone: str, text: str, order: dict) -> list[str]:
         return []
     if t == "ed_addr" or "address" in t:
         _dbc.save_session(DB, phone, step="book_edit_address")
-        _send_text(phone, "📍 Please *type the new delivery address* (include PIN code).")
+        _send_text(phone, "📍 *പുതിയ വിലാസം* ടൈപ്പ് ചെയ്യൂ (PIN കോഡ് സഹിതം).\n"
+                          "Type the new delivery address (incl. PIN).")
         return []
     if t == "ed_dtdc" or "dtdc" in t or "center" in t or "centre" in t:
         _dbc.save_session(DB, phone, step="book_edit_dtdc")
@@ -636,7 +665,8 @@ def _handle_edit(phone: str, text: str, order: dict) -> list[str]:
 def _handle_edit_name(phone: str, text: str, order: dict) -> list[str]:
     name = (text or "").strip()
     if not _is_valid_name(name):
-        _send_text(phone, "Please type the *full name* of the person receiving the parcel. 👤")
+        _send_text(phone, "പാർസൽ ലഭിക്കുന്ന ആളുടെ *പൂർണ്ണ പേര്* ടൈപ്പ് ചെയ്യൂ. 👤\n"
+                          "Please type the recipient's *full name*.")
         return []
     _dbc.update_book_order(order["order_code"], name=name)
     _dbc.save_session(DB, phone, step="book_summary")
@@ -647,12 +677,14 @@ def _handle_edit_name(phone: str, text: str, order: dict) -> list[str]:
 def _handle_edit_address(phone: str, text: str, order: dict) -> list[str]:
     address = (text or "").strip()
     if len(address) < 10:
-        _send_text(phone, "That address looks too short. Please type your *full "
-                          "delivery address* including place and PIN code. 📍")
+        _send_text(phone, "വിലാസം വളരെ ചെറുതാണ്. സ്ഥലവും *PIN കോഡും* സഹിതം *പൂർണ്ണ വിലാസം* "
+                          "ടൈപ്പ് ചെയ്യൂ. 📍\n"
+                          "That address looks too short — include place and PIN code.")
         return []
     if not _has_pincode(address):
-        _send_text(phone, "Please include your *6-digit PIN code* in the address "
-                          "(we can't ship without it). 📍")
+        _send_text(phone, "വിലാസത്തിൽ *6-അക്ക PIN കോഡ്* ഉൾപ്പെടുത്തൂ "
+                          "(അതില്ലാതെ അയക്കാനാവില്ല). 📍\n"
+                          "Please include your *6-digit PIN code*.")
         return []
     _dbc.update_book_order(order["order_code"], address=address)
     _dbc.save_session(DB, phone, step="book_summary")
@@ -672,7 +704,8 @@ def _handle_edit_dtdc(phone: str, text: str, order: dict) -> list[str]:
 def _handle_edit_phone(phone: str, text: str, order: dict) -> list[str]:
     t = (text or "").strip().lower()
     if t == "ph_edit" or t in {"other", "change", "edit", "✏️ other number"}:
-        _send_text(phone, "Please *type the correct phone number* (10 digits). 📞")
+        _send_text(phone, "*ശരിയായ ഫോൺ നമ്പർ* (10 അക്കം) ടൈപ്പ് ചെയ്യൂ. 📞\n"
+                          "Please type the correct phone number (10 digits).")
         return []
     contact = _resolve_phone(phone, text)
     if not contact:
@@ -687,8 +720,8 @@ def _handle_edit_phone(phone: str, text: str, order: dict) -> list[str]:
 def _handle_post_order(phone: str, text: str) -> list[str]:
     """First message after a confirmed order → offer further help."""
     _dbc.save_session(DB, phone, step="post_order_ask")
-    _send_buttons(phone, "Is there anything else we can help you with?",
-                  [("po_yes", "✅ Yes"), ("po_no", "❌ No, I'm done")])
+    _send_buttons(phone, "മറ്റെന്തെങ്കിലും സഹായം വേണോ?\nAnything else we can help with?",
+                  [("po_yes", "✅ വേണം"), ("po_no", "❌ വേണ്ട")])
     return []
 
 
@@ -699,8 +732,8 @@ def _handle_post_order_ask(phone: str, text: str, name: str | None) -> list[str]
             _dbc.clear_session(DB, phone)
         except Exception:
             pass
-        _send_text(phone, "Thank you for shopping with *Printosky × Xtraa*! 🙏 "
-                          "Have a great day. 📚")
+        _send_text(phone, "*Printosky × Xtraa* തിരഞ്ഞെടുത്തതിന് നന്ദി! 🙏 നല്ലൊരു ദിവസം. 📚\n"
+                          "Thank you for shopping with Printosky × Xtraa!")
         return []
     if t == "po_yes" or t in _AFFIRM:
         # Start from the top: clear state and show the general help menu.
@@ -708,13 +741,14 @@ def _handle_post_order_ask(phone: str, text: str, name: str | None) -> list[str]
             _dbc.clear_session(DB, phone)
         except Exception:
             pass
-        _send_text(phone, "👍 *How can we help?*\n\n"
-                          "📄 *Printouts* — send your PDF or document here.\n"
-                          "📚 *Xtraa books* — reply *books*.\n"
-                          "🧑‍💼 *Talk to staff* — reply *agent*.")
+        _send_text(phone, "👍 *എങ്ങനെ സഹായിക്കാം? / How can we help?*\n\n"
+                          "📄 *പ്രിന്റൗട്ട് / Printouts* — PDF/ഡോക്യുമെന്റ് ഇവിടെ അയക്കൂ.\n"
+                          "📚 *Xtraa പുസ്തകങ്ങൾ / books* — *books* എന്ന് റിപ്ലൈ ചെയ്യൂ.\n"
+                          "🧑‍💼 *സ്റ്റാഫുമായി സംസാരിക്കാൻ / staff* — *agent* എന്ന് റിപ്ലൈ ചെയ്യൂ.")
         return []
-    _send_buttons(phone, "Anything else? Tap *Yes* or *No*.",
-                  [("po_yes", "✅ Yes"), ("po_no", "❌ No, I'm done")])
+    _send_buttons(phone, "മറ്റെന്തെങ്കിലും? *വേണം* അല്ലെങ്കിൽ *വേണ്ട* ടാപ്പ് ചെയ്യൂ.\n"
+                         "Anything else? Tap Yes or No.",
+                  [("po_yes", "✅ വേണം"), ("po_no", "❌ വേണ്ട")])
     return []
 
 
@@ -737,8 +771,9 @@ def _handle_pay(phone: str, text: str, order: dict) -> list[str]:
             _dbc.clear_session(DB, phone)
         except Exception:
             pass
-        _send_text(phone, "❌ Your order has been *cancelled*. Reply *books* "
-                          "anytime to start a new order. 🙏")
+        _send_text(phone, "❌ നിങ്ങളുടെ ഓർഡർ *റദ്ദാക്കി*. പുതിയ ഓർഡറിന് എപ്പോൾ വേണമെങ്കിലും "
+                          "*books* എന്ന് റിപ്ലൈ ചെയ്യൂ. 🙏\n"
+                          "Your order has been cancelled. Reply *books* anytime to start a new order.")
         return []
     pay = bc.parse_payment_text(text)
     if pay:
@@ -755,11 +790,13 @@ def _handle_pay(phone: str, text: str, order: dict) -> list[str]:
         except Exception as exc:
             logger.error("forward payment text to verifier failed for %s: %s", code, exc)
         _send_text(phone,
-                   f"✅ Got your payment details for *{code}*.\n\n"
-                   "We're confirming it now — you'll get an update shortly. Thank you! 🙏")
+                   f"✅ *{code}* ന്റെ പേയ്മെന്റ് വിവരം ലഭിച്ചു.\n\n"
+                   "ഇപ്പോൾ സ്ഥിരീകരിക്കുന്നു — ഉടൻ അപ്ഡേറ്റ് ലഭിക്കും. നന്ദി! 🙏\n"
+                   f"We're confirming it now for *{code}* — you'll get an update shortly.")
         return []
-    _send_text(phone, "Please complete the UPI payment and *send a screenshot* of "
-                      "the confirmation here. 🙏")
+    _send_text(phone, "UPI പേയ്മെന്റ് പൂർത്തിയാക്കി, സ്ഥിരീകരണത്തിന്റെ *സ്ക്രീൻഷോട്ട്* "
+                      "ഇവിടെ അയക്കൂ. 🙏\n"
+                      "Please complete the UPI payment and send a screenshot here.")
     _send_pay_buttons(phone)
     return []
 
