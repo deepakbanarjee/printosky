@@ -390,6 +390,34 @@ def test_no_trigger_when_mid_print(fake):
 # ── selection list offers combos ──────────────────────────────────────────────
 
 @pytest.mark.unit
+def test_typed_malayalam_title_all_advances(fake):
+    # Confused customer SENDS the Malayalam option as text (typed/echoed the
+    # visible title) instead of tapping the list row. Must still advance.
+    db, sent = fake
+    book_bot.maybe_handle_book(PHONE, "book")
+    book_bot.maybe_handle_book(PHONE, "മൂന്നും (Set)")
+    assert db.sessions[PHONE]["step"] == "book_qty"
+
+
+@pytest.mark.unit
+def test_typed_malayalam_title_single_advances(fake):
+    db, sent = fake
+    book_bot.maybe_handle_book(PHONE, "book")
+    book_bot.maybe_handle_book(PHONE, "അക്ഷരാമൃതം")
+    assert db.sessions[PHONE]["step"] == "book_qty"
+
+
+@pytest.mark.unit
+def test_typed_malayalam_title_combo_advances(fake):
+    db, sent = fake
+    book_bot.maybe_handle_book(PHONE, "book")
+    book_bot.maybe_handle_book(PHONE, "മലയാളം + ഹിന്ദി")
+    assert db.sessions[PHONE]["step"] == "book_qty"
+    order = db.orders[_code(db)]
+    assert set((order.get("items") or {}).keys()) == {"malayalam", "hindi"}
+
+
+@pytest.mark.unit
 def test_select_list_has_combo_rows(fake):
     db, sent = fake
     book_bot.maybe_handle_book(PHONE, "book")
