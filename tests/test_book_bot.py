@@ -690,6 +690,29 @@ def test_no_abandoned_carts_no_messages(fake, monkeypatch):
     assert sent["text"] == []
 
 
+@pytest.mark.unit
+def test_abandoned_message_payment_segment(fake):
+    # Confirmed-but-unpaid cart → "complete your payment ₹X", not the continue copy.
+    import book_catalog as _bc
+    total = _bc.compute_totals({"malayalam": 2})["grand_total"]
+    msg = book_bot._abandoned_message(
+        {"order_code": "XTR-9", "status": "awaiting_payment", "items": {"malayalam": 2}})
+    assert "PAY" in msg
+    assert f"₹{total:.0f}" in msg
+    assert _ML.search(msg)                       # bilingual
+    assert "to continue" not in msg.lower()      # not the collecting copy
+
+
+@pytest.mark.unit
+def test_abandoned_message_continue_segment_is_bilingual(fake):
+    # Not-yet-confirmed cart → keeps the existing continue copy, now bilingual.
+    msg = book_bot._abandoned_message(
+        {"order_code": "XTR-8", "status": "collecting", "items": {"malayalam": 1}})
+    assert _ML.search(msg)                       # Malayalam line added
+    assert "didn't finish" in msg.lower() or "didn’t finish" in msg.lower()
+    assert "Aksharamrutham × 1" in msg           # cart contents preserved
+
+
 # ── verifier (Anu) confirm / reject ───────────────────────────────────────────
 
 VERIFIER = "919072034907"

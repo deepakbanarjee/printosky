@@ -64,3 +64,22 @@ def test_start_calls_resume_order_and_relays_text(patched):
     assert h.status == 200 and h.payload == {"ok": True}
     assert calls["start"] == ["919000000001"]
     assert calls["sent"] == [("919000000001", "guard msg")]
+
+
+# ── POST /admin/run-cart-nudge (manual abandoned-cart sweep) ──────────────────
+
+def test_run_cart_nudge_requires_valid_password(patched):
+    h = _FakeHandler()
+    ha._handle_admin_run_cart_nudge(h, b'{"admin_password":"wrong"}')
+    assert h.status == 403
+
+
+def test_run_cart_nudge_runs_sweep_and_returns_counts(patched):
+    monkeypatch = patched
+    import book_bot
+    monkeypatch.setattr(book_bot, "send_abandoned_reminders",
+                        lambda: {"carts": 3, "reminded": 2})
+    h = _FakeHandler()
+    ha._handle_admin_run_cart_nudge(h, b'{"admin_password":"secret123"}')
+    assert h.status == 200
+    assert h.payload == {"ok": True, "carts": 3, "reminded": 2}

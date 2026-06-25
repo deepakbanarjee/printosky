@@ -1,0 +1,30 @@
+name: Printosky abandoned-cart reminders
+
+# Nudge customers who started an Xtraa book order but went quiet. Calls
+# /cron/abandoned-carts, which sends a one-time "finish your order" (or
+# "complete your payment") message to each open cart that has been idle a
+# couple of hours but is still inside WhatsApp's 24h window. One reminder per
+# cart ever (tracked by abandoned_reminder_at).
+#
+# Runs hourly during IST daytime only — this both respects quiet hours and
+# keeps sends inside the customer's likely-open 24h window. Lives in GitHub
+# Actions like the other Printosky crons (see payment-review-cron.yml).
+on:
+  schedule:
+    - cron: "0 3-16 * * *"   # 03:00–16:00 UTC = 08:30–21:30 IST, hourly
+  workflow_dispatch: {}        # allow manual run from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Abandoned-cart reminder sweep
+        run: |
+          echo "Calling abandoned-cart reminder sweep..."
+          code=$(curl -s -o /tmp/ac.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://printosky.vercel.app/cron/abandoned-carts")
+          echo "HTTP $code"; cat /tmp/ac.json || true
+          exit 0
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}

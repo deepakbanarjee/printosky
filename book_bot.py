@@ -1081,12 +1081,27 @@ def handle_payment_proof(phone: str, content: bytes, mime_type: str) -> list[str
 def _abandoned_message(order: dict) -> str:
     items = order.get("items") or {}
     have = [(k, q) for k, q in items.items() if q and k in bc.BOOKS]
+
+    # Segment 2: order confirmed, payment pending → ask them to finish paying.
+    if order.get("status") == "awaiting_payment":
+        total  = bc.compute_totals(items)["grand_total"] if have else 0
+        amt_ml = f" — ₹{total:.0f}" if total else ""
+        amt_en = f" of ₹{total:.0f}" if total else ""
+        return (
+            "നമസ്കാരം 👋 നിങ്ങളുടെ Xtraa പുസ്തക ഓർഡർ പേയ്മെന്റ് ബാക്കിയുണ്ട്" + amt_ml + ".\n"
+            "പേയ്മെന്റ് QR വീണ്ടും വേണമെങ്കിൽ *PAY* എന്ന് റിപ്ലൈ ചെയ്യൂ. 🙏\n\n"
+            "Your order has a pending payment" + amt_en + ". "
+            "Reply *PAY* and we'll resend the payment QR to finish. 🙏"
+        )
+
+    # Segment 1 (default): cart started, never confirmed → invite them back.
     line = ""
     if have:
         cart = ", ".join(f"{bc.BOOKS[k]['label'].split(' (')[0]} × {q}" for k, q in have)
         line = f"\n\n🛒 In your cart: {cart}"
     return (
         "👋 *Did you still want the Xtraa books?*\n"
+        "നിങ്ങൾ ഓർഡർ തുടങ്ങിയിരുന്നു, പക്ഷേ പൂർത്തിയാക്കിയില്ല.\n"
         "You started an order but didn't finish it." + line +
         "\n\nReply *books* to continue — it only takes a minute! 🙏\n"
         "_Aksharamrutham · Vidyamrut · Easy English_"

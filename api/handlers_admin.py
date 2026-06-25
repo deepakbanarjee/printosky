@@ -167,6 +167,34 @@ def _handle_admin_start_book_order(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "Server error"})
 
 
+def _handle_admin_run_cart_nudge(h, body: bytes) -> None:
+    """POST /admin/run-cart-nudge — staff fire the abandoned-cart reminder sweep
+    on demand. Same one-per-cart, 24h-window-guarded sweep the cron runs; returns
+    {carts, reminded}."""
+    try:
+        payload  = json.loads(body)
+        admin_pw = payload.get("admin_password", "").strip()
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+
+    if not ADMIN_PASSWORD_HASH:
+        _json_response(h, 503, {"error": "Admin auth not configured"})
+        return
+    if not hmac.compare_digest(_sha256(admin_pw), ADMIN_PASSWORD_HASH):
+        _json_response(h, 403, {"error": "Invalid admin password"})
+        return
+
+    try:
+        from book_bot import send_abandoned_reminders
+        result = send_abandoned_reminders()
+        _json_response(h, 200, {"ok": True, **result})
+        logger.info("Admin ran cart-nudge sweep: %s", result)
+    except Exception as e:
+        logger.error(f"admin run-cart-nudge error: {e}")
+        _json_response(h, 500, {"error": "Server error"})
+
+
 def _handle_admin_conversations(h) -> None:
     """GET /admin/conversations — inbox: one row per contact, last msg + unread count."""
     from urllib.parse import parse_qs, urlparse
