@@ -44,12 +44,13 @@ def test_start_requires_phone(patched):
     assert h.status == 400
 
 
-def test_start_calls_start_order_and_relays_text(patched):
+def test_start_calls_resume_order_and_relays_text(patched):
     monkeypatch = patched
     calls = {"start": [], "sent": []}
     import book_bot
-    monkeypatch.setattr(book_bot, "start_order",
-                        lambda phone, name=None: (calls["start"].append(phone) or ["guard msg"]))
+    # The take-over button resumes a dropped cart (never wipes it).
+    monkeypatch.setattr(book_bot, "resume_order",
+                        lambda phone: (calls["start"].append(phone) or ["guard msg"]))
     import whatsapp_notify
     monkeypatch.setattr(whatsapp_notify, "_send",
                         lambda phone, msg: (calls["sent"].append((phone, msg)) or True))

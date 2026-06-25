@@ -425,6 +425,14 @@ def _address_prompt() -> str:
     )
 
 
+def _name_prompt() -> str:
+    return (
+        "👤 പാർസൽ ലഭിക്കുന്ന ആളുടെ *പൂർണ്ണ പേര്* ടൈപ്പ് ചെയ്യൂ "
+        "(ഉദാ: Priya Krishnan).\n"
+        "Type the *full name* of the person receiving the parcel."
+    )
+
+
 def _is_valid_name(text: str) -> bool:
     """Return True if text looks like a real recipient name (not a placeholder)."""
     t = (text or "").strip()
@@ -490,11 +498,74 @@ def _start(phone: str, name: str | None, force_new: bool = False) -> list[str]:
 def start_order(phone: str, name: str | None = None) -> list[str]:
     """Public entry to begin/reset the book order flow for `phone`.
 
-    Used by the typed trigger path and by the admin "Start Order" button.
-    Sends the opening book list as a side effect; returns any text the caller
-    must relay to the customer (e.g. the awaiting-payment guard message).
+    Used by the typed trigger path. Sends the opening book list as a side
+    effect; returns any text the caller must relay to the customer (e.g. the
+    awaiting-payment guard message). NOTE: on a `collecting` cart this RESETS
+    progress — use `resume_order` for the admin take-over button so a dropped
+    cart is continued, not wiped.
     """
     return _start(phone, name)
+
+
+# Step → no-arg prompt sender, for re-issuing the question a dropped cart
+# stalled on. Steps needing the order/cursor (book_qty, book_summary, book_pay)
+# are handled inline in `_resume`.
+_RESUME_SENDERS = {
+    "book_name":    lambda phone: _send_text(phone, _name_prompt()),
+    "book_address": lambda phone: _send_text(phone, _address_prompt()),
+    "book_dtdc":    _send_dtdc_prompt,
+    "book_phone":   _send_phone_buttons,
+}
+
+
+def _resume(phone: str) -> list[str]:
+    """Re-issue the prompt for the step a dropped cart stalled at — WITHOUT
+    wiping items/name/address. Lifts any `staff_hold`/SOS so the bot listens
+    again. Falls back to a fresh start when there is nothing to resume.
+    """
+    order = _dbc.get_active_book_order(phone)
+    if not order or order.get("status") != "collecting":
+        # No cart in progress (or already past collecting) → start fresh.
+        return _start(phone, None)
+
+    session = _dbc.get_session(DB, phone) or {}
+    step = session.get("step") or ""
+    if step == "staff_hold":
+        step = session.get("prev_step") or ""
+
+    # Still on (or before) the catalog → (re)send the book list. Note book_qty
+    # is NOT here: items can be empty mid-counting, but the flow_cursor holds
+    # their place, so we re-ask the quantity rather than restart selection.
+    if step in ("", "book_select"):
+        _dbc.save_session(DB, phone, step="book_select", needs_human=False)
+        _send_select_list(phone)
+        return []
+
+    _dbc.save_session(DB, phone, step=step, needs_human=False)
+    if step == "book_qty":
+        cur = (order.get("flow_cursor") or {}).get("current")
+        if cur and cur in bc.BOOKS:
+            _send_qty_buttons(phone, bc.BOOKS[cur]["label"])
+        else:                                   # corrupt cursor → re-pick books
+            _dbc.save_session(DB, phone, step="book_select", needs_human=False)
+            _send_select_list(phone)
+    elif step == "book_pay":
+        refreshed = _dbc.get_book_order(order["order_code"])
+        if not _send_qr(phone, refreshed):
+            _send_pay_buttons(phone)
+    elif step in _RESUME_SENDERS:
+        _RESUME_SENDERS[step](phone)
+    else:
+        # book_summary / book_edit* / anything else with real progress → show
+        # the order summary (Confirm / Edit / Cancel) rather than re-asking.
+        _send_summary(phone, _dbc.get_book_order(order["order_code"]))
+    return []
+
+
+def resume_order(phone: str) -> list[str]:
+    """Public entry for the admin take-over button — continue a customer's
+    dropped cart in place (see `_resume`)."""
+    return _resume(phone)
 
 
 def _handle_select(phone: str, text: str, order: dict) -> list[str]:
@@ -559,9 +630,7 @@ def _handle_qty(phone: str, text: str, order: dict) -> list[str]:
 def _handle_name(phone: str, text: str, order: dict) -> list[str]:
     name = (text or "").strip()
     if not _is_valid_name(name):
-        _send_text(phone, "പാർസൽ ലഭിക്കുന്ന ആളുടെ *പൂർണ്ണ പേര്* ടൈപ്പ് ചെയ്യൂ "
-                          "(ഉദാ: Priya Krishnan). 👤\n"
-                          "Please type the recipient's *full name*.")
+        _send_text(phone, _name_prompt())
         return []
     _dbc.update_book_order(order["order_code"], name=name)
     _dbc.save_session(DB, phone, step="book_address")
