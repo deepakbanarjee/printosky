@@ -1429,7 +1429,7 @@
                     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendConvMessage();}"
                     oninput="this.style.height='';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
           <span id="conv-upload-status"></span>
-          <button class="conv-attach-btn" title="ഓർഡർ തുടങ്ങുക / Start book order"
+          <button class="conv-attach-btn" title="ഓർഡർ ഏറ്റെടുക്കുക / Take over (resume) book order"
                   onclick="convStartBookOrder()">📚</button>
           <button class="conv-send-btn" onclick="sendConvMessage()" title="Send">&#10148;</button>
         </div>
@@ -4334,8 +4334,9 @@ async function sendConvMessage() {
 
 async function convStartBookOrder() {
   if (!_convActivePhone) { alert('Select a conversation first.'); return; }
-  const ok = confirm('Start the book order flow for this customer?\n' +
-                     'They will get the order menu in Malayalam.');
+  const ok = confirm('Take over this customer’s book order?\n' +
+                     'If they already started, they continue from where they stopped ' +
+                     '(their books/address are kept). If not, they get the order menu.');
   if (!ok) return;
   try {
     const r = await fetch(`${ACAD_API}/admin/book-orders/start`, {

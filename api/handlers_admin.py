@@ -121,8 +121,9 @@ def _handle_admin_send(h, body: bytes) -> None:
 
 
 def _handle_admin_start_book_order(h, body: bytes) -> None:
-    """POST /admin/book-orders/start — staff start the book order flow for a
-    customer (sends the opening Malayalam book list to their WhatsApp)."""
+    """POST /admin/book-orders/start — staff take over a customer's book order:
+    resume a dropped cart at the step it stalled on, or send the opening
+    Malayalam book list if there is no cart yet (never wipes existing items)."""
     try:
         payload  = json.loads(body)
         admin_pw = payload.get("admin_password", "").strip()
@@ -146,8 +147,10 @@ def _handle_admin_start_book_order(h, body: bytes) -> None:
 
     try:
         import book_bot
-        # name=None: the flow asks the customer for the recipient name itself.
-        relay = book_bot.start_order(phone, None)
+        # Take over a dropped cart: resume the customer at the step they stalled
+        # on (re-issues that prompt) instead of wiping their items/address. A
+        # customer with no cart yet just gets the opening book list.
+        relay = book_bot.resume_order(phone)
         from whatsapp_notify import _send
         from db_cloud import log_message
         for msg in (relay or []):

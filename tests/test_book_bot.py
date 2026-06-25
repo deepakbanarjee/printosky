@@ -921,6 +921,89 @@ def test_start_order_relays_awaiting_payment_guard(fake):
     assert "XTR-TEST-1" in res[0]                 # guard text returned to caller
 
 
+# ── admin take-over of a dropped cart (resume, never wipe) ────────────────────
+
+def _seed_collecting(db, *, step, items=None, name=None, address=None,
+                     flow_cursor=None, contact_phone=None, session=None):
+    """Seed a collecting cart + its bot session, as a dropped cart looks live."""
+    code = "XTR-RESUME-1"
+    db.create_book_order(code, PHONE, name)
+    db.update_book_order(code, items=items or {}, name=name, address=address,
+                         flow_cursor=flow_cursor or {}, contact_phone=contact_phone,
+                         grand_total=250, books_total=180, courier=70)
+    db.sessions[PHONE] = {"step": step, **(session or {})}
+    return code
+
+
+@pytest.mark.unit
+def test_resume_empty_cart_resends_catalog(fake):
+    db, sent = fake
+    code = _seed_collecting(db, step="book_select", items={})
+    res = book_bot.resume_order(PHONE)
+    assert res == []
+    assert sent["list"][-1] == ["bk_ml", "bk_hi", "bk_en",
+                                "bk_ml_hi", "bk_ml_en", "bk_hi_en", "bk_all"]
+    assert db.orders[code]["items"] == {}          # nothing to wipe, nothing lost
+
+
+@pytest.mark.unit
+def test_resume_midflow_does_not_wipe_and_reissues_prompt(fake):
+    # CORE of Fix A: a cart that stalled at the address step must keep its
+    # books + name and simply be re-asked for the address — not reset to step 1.
+    db, sent = fake
+    code = _seed_collecting(db, step="book_address",
+                            items={"malayalam": 2}, name="Priya Krishnan")
+    res = book_bot.resume_order(PHONE)
+    assert res == []
+    assert db.orders[code]["items"] == {"malayalam": 2}   # NOT wiped
+    assert db.orders[code]["name"] == "Priya Krishnan"    # NOT wiped
+    assert db.sessions[PHONE]["step"] == "book_address"   # stays where they were
+    assert sent["text"][-1] == book_bot._address_prompt()
+    assert sent["list"] == []                              # catalog never re-shown
+
+
+@pytest.mark.unit
+def test_resume_qty_step_reissues_quantity_buttons(fake):
+    # Mid-counting: items is still empty but the flow_cursor holds their place.
+    db, sent = fake
+    _seed_collecting(db, step="book_qty", items={},
+                     flow_cursor={"current": "hindi", "queue": []})
+    book_bot.resume_order(PHONE)
+    assert sent["buttons"][-1] == ["qty_1", "qty_2", "qty_3"]
+
+
+@pytest.mark.unit
+def test_resume_from_staff_hold_uses_prev_step_and_clears_sos(fake):
+    # Staff had taken the chat (bot silent). Take-over resumes the real step
+    # and lifts the SOS so the bot answers again.
+    db, sent = fake
+    _seed_collecting(db, step="staff_hold", items={"malayalam": 1},
+                     name="A", address=ADDR,
+                     session={"prev_step": "book_dtdc", "needs_human": True})
+    book_bot.resume_order(PHONE)
+    assert sent["buttons"][-1] == ["dtdc_skip"]
+    assert db.sessions[PHONE]["step"] == "book_dtdc"
+    assert db.sessions[PHONE]["needs_human"] is False
+
+
+@pytest.mark.unit
+def test_resume_summary_step_shows_summary(fake):
+    db, sent = fake
+    _seed_collecting(db, step="book_summary", items={"malayalam": 1},
+                     name="A", address=ADDR, contact_phone="9876543210")
+    book_bot.resume_order(PHONE)
+    assert sent["buttons"][-1] == ["ord_yes", "ord_edit", "ord_no"]
+
+
+@pytest.mark.unit
+def test_resume_no_cart_starts_fresh(fake):
+    db, sent = fake
+    res = book_bot.resume_order(PHONE)
+    assert res == []
+    assert sent["list"][-1][0] == "bk_ml"          # opening catalog sent
+    assert db.sessions[PHONE]["step"] == "book_select"
+
+
 @pytest.mark.unit
 def test_opening_list_is_trilingual(monkeypatch):
     bodies = []
