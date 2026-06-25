@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Printosky — Logo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0D1117; --paper:#F5F1EB; --blue:#1B3F8B;
+    --accent:#E8500A; --mid:#6B7280; --white:#FFFFFF;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#d9d4cb;display:flex;flex-direction:column;align-items:center;gap:40px;padding:60px;font-family:'DM Sans',sans-serif;}
+
+  .card{width:1200px;border-radius:8px;overflow:hidden;}
+
+  /* Primary logo on paper */
+  .logo-primary{
+    background:var(--paper);
+    padding:120px 100px;
+    display:flex;flex-direction:column;align-items:flex-start;
+  }
+  .wordmark{
+    font-family:'Syne',sans-serif;font-weight:800;
+    font-size:110px;letter-spacing:-5px;line-height:.9;
+    color:var(--ink);
+  }
+  .wordmark .dot{color:var(--accent);}
+  .sub{
+    margin-top:22px;font-family:'DM Sans',sans-serif;font-weight:500;
+    font-size:18px;letter-spacing:6px;text-transform:uppercase;color:var(--mid);
+  }
+
+  /* Reversed logo on ink */
+  .logo-reversed{
+    background:var(--ink);
+    padding:120px 100px;
+    display:flex;flex-direction:column;align-items:flex-start;
+  }
+  .logo-reversed .wordmark{color:var(--paper);}
+  .logo-reversed .sub{color:#9aa3ad;}
+
+  /* Logo on blue */
+  .logo-blue{
+    background:var(--blue);
+    padding:120px 100px;
+    display:flex;flex-direction:column;align-items:flex-start;
+  }
+  .logo-blue .wordmark{color:var(--white);}
+  .logo-blue .wordmark .dot{color:var(--accent);}
+  .logo-blue .sub{color:#aab6d4;}
+
+  .label{font-size:13px;color:#000;letter-spacing:1px;text-transform:uppercase;opacity:.5;align-self:flex-start;margin-left:4px;}
+</style>
+</head>
+<body>
+  <span class="label">Primary — ink on paper</span>
+  <div class="card logo-primary">
+    <div class="wordmark">Printosky<span class="dot">.</span></div>
+    <div class="sub">Online Printing · Thriprayar, Thrissur</div>
+  </div>
+
+  <span class="label">Reversed — paper on ink</span>
+  <div class="card logo-reversed">
+    <div class="wordmark">Printosky<span class="dot">.</span></div>
+    <div class="sub">Online Printing · Thriprayar, Thrissur</div>
+  </div>
+
+  <span class="label">On brand blue</span>
+  <div class="card logo-blue">
+    <div class="wordmark">Printosky<span class="dot">.</span></div>
+    <div class="sub">Online Printing · Thriprayar, Thrissur</div>
+  </div>
+</body>
+</html>

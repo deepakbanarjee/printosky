@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Printosky — Logo System v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0D1117; --paper:#F5F1EB; --blue:#1B3F8B;
+    --accent:#E8500A; --mid:#6B7280; --white:#FFFFFF;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#d9d4cb;font-family:'DM Sans',sans-serif;color:var(--ink);padding:56px 48px 96px;}
+  h1{font-family:'Syne',sans-serif;font-weight:800;font-size:40px;letter-spacing:-1.5px;margin-bottom:6px;}
+  .lede{color:var(--mid);font-size:15px;margin-bottom:48px;}
+  h2{font-family:'Syne',sans-serif;font-weight:700;font-size:13px;letter-spacing:3px;text-transform:uppercase;color:var(--mid);margin:48px 0 18px;border-bottom:1px solid #c4beb3;padding-bottom:10px;}
+
+  .row{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start;}
+  .concept{background:#fff;border-radius:14px;padding:26px;width:300px;box-shadow:0 8px 24px rgba(0,0,0,.06);}
+  .concept .tile{display:flex;gap:18px;align-items:center;margin-bottom:18px;}
+  .concept h3{font-family:'Syne',sans-serif;font-weight:800;font-size:19px;letter-spacing:-.5px;}
+  .concept p{font-size:13px;color:var(--mid);line-height:1.5;}
+  .tag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;background:var(--accent);color:#fff;padding:3px 9px;border-radius:99px;margin-bottom:10px;}
+
+  .card{width:760px;max-width:100%;border-radius:10px;padding:64px 72px;display:flex;flex-direction:column;gap:8px;}
+  .card .lk{display:flex;align-items:center;gap:26px;}
+  .wordmark{font-family:'Syne',sans-serif;font-weight:800;font-size:72px;letter-spacing:-3.5px;line-height:.9;}
+  .wordmark .dot{color:var(--accent);}
+  .sub{margin-top:14px;font-weight:500;font-size:14px;letter-spacing:5px;text-transform:uppercase;color:var(--mid);}
+  .on-paper{background:var(--paper);} .on-paper .wordmark{color:var(--ink);}
+  .on-ink{background:var(--ink);} .on-ink .wordmark{color:var(--paper);} .on-ink .sub{color:#9aa3ad;}
+  .on-blue{background:var(--blue);} .on-blue .wordmark{color:#fff;} .on-blue .sub{color:#aab6d4;}
+
+  .favrow{display:flex;gap:20px;align-items:flex-end;flex-wrap:wrap;}
+  .favrow .fav{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:11px;color:var(--mid);}
+  .stack{display:flex;flex-direction:column;gap:28px;}
+</style>
+</head>
+<body>
+  <h1>Printosky — Logo System v2</h1>
+  <div class="lede">Developing the existing wordmark into a full <strong>wordmark&nbsp;+&nbsp;icon</strong> lockup. The orange dot (your existing signature) carries into every icon. Pick a concept — A, B, or C.</div>
+
+  <h2>Three icon concepts</h2>
+  <div class="row">
+
+    <!-- CONCEPT A -->
+    <div class="concept">
+      <span class="tag">Concept A · recommended</span>
+      <div class="tile">
+        <svg width="92" height="92" viewBox="0 0 200 200" aria-label="Printosky icon A">
+          <rect x="0" y="0" width="200" height="200" rx="46" fill="#1B3F8B"/>
+          <circle cx="140" cy="64" r="22" fill="#E8500A"/>
+          <g fill="#F5F1EB">
+            <circle cx="74" cy="108" r="30"/>
+            <circle cx="112" cy="96" r="36"/>
+            <circle cx="146" cy="118" r="24"/>
+            <circle cx="56" cy="124" r="22"/>
+            <rect x="52" y="118" width="98" height="26" rx="13"/>
+          </g>
+        </svg>
+        <div><h3>Cloud + sun</h3></div>
+      </div>
+      <p><strong>Cloud printing.</strong> A clean paper-white cloud with the orange dot as a rising sun behind it. Reads instantly as "the cloud," ties to <em>Printo-<strong>sky</strong></em>, keeps the orange signature. Scales down to a favicon cleanly.</p>
+    </div>
+
+    <!-- CONCEPT B -->
+    <div class="concept">
+      <span class="tag" style="background:var(--blue)">Concept B</span>
+      <div class="tile">
+        <svg width="92" height="92" viewBox="0 0 200 200" aria-label="Printosky icon B">
+          <rect x="0" y="0" width="200" height="200" rx="46" fill="#0D1117"/>
+          <rect x="56" y="50" width="26" height="104" rx="13" fill="#F5F1EB"/>
+          <g fill="#F5F1EB">
+            <circle cx="108" cy="78" r="34"/>
+            <circle cx="138" cy="86" r="20"/>
+            <rect x="70" y="62" width="62" height="48" rx="24"/>
+          </g>
+          <circle cx="110" cy="80" r="15" fill="#0D1117"/>
+          <circle cx="150" cy="150" r="13" fill="#E8500A"/>
+        </svg>
+        <div><h3>P-cloud monogram</h3></div>
+      </div>
+      <p><strong>The letter P, as a cloud.</strong> Uses the actual initial of Printosky, with the bowl puffed into a cloud and the orange dot anchored as the period. Most "logo-like" as a standalone monogram.</p>
+    </div>
+
+    <!-- CONCEPT C -->
+    <div class="concept">
+      <span class="tag" style="background:var(--ink)">Concept C</span>
+      <div class="tile">
+        <svg width="92" height="92" viewBox="0 0 200 200" aria-label="Printosky icon C">
+          <rect x="0" y="0" width="200" height="200" rx="46" fill="#1B3F8B"/>
+          <g fill="#aab6d4">
+            <circle cx="92" cy="58" r="20"/>
+            <circle cx="122" cy="54" r="24"/>
+            <circle cx="146" cy="64" r="16"/>
+            <rect x="86" y="58" width="74" height="18" rx="9"/>
+          </g>
+          <path d="M60 96 H124 L150 122 V168 H60 Z" fill="#F5F1EB"/>
+          <path d="M124 96 L150 122 H124 Z" fill="#cfc8bb"/>
+          <g fill="#1B3F8B">
+            <rect x="74" y="122" width="58" height="8" rx="4"/>
+            <rect x="74" y="138" width="58" height="8" rx="4"/>
+            <rect x="74" y="154" width="36" height="8" rx="4"/>
+          </g>
+          <circle cx="150" cy="150" r="10" fill="#E8500A"/>
+        </svg>
+        <div><h3>Page from cloud</h3></div>
+      </div>
+      <p><strong>Most literal.</strong> A printed sheet (text lines + folded corner) descending from a cloud — "upload to the cloud, collect your prints." Richest meaning, but busiest at tiny sizes.</p>
+    </div>
+  </div>
+
+  <h2>Full lockup — Concept A</h2>
+  <div class="stack">
+    <div class="card on-paper">
+      <div class="lk">
+        <svg width="96" height="96" viewBox="0 0 200 200">
+          <rect x="0" y="0" width="200" height="200" rx="46" fill="#1B3F8B"/>
+          <circle cx="140" cy="64" r="22" fill="#E8500A"/>
+          <g fill="#F5F1EB">
+            <circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/>
+            <circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/>
+            <rect x="52" y="118" width="98" height="26" rx="13"/>
+          </g>
+        </svg>
+        <div>
+          <div class="wordmark">Printosky<span class="dot">.</span></div>
+          <div class="sub">Online Printing · Thriprayar, Thrissur</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card on-ink">
+      <div class="lk">
+        <svg width="96" height="96" viewBox="0 0 200 200">
+          <rect x="0" y="0" width="200" height="200" rx="46" fill="#1B3F8B"/>
+          <circle cx="140" cy="64" r="22" fill="#E8500A"/>
+          <g fill="#F5F1EB">
+            <circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/>
+            <circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/>
+            <rect x="52" y="118" width="98" height="26" rx="13"/>
+          </g>
+        </svg>
+        <div>
+          <div class="wordmark">Printosky<span class="dot">.</span></div>
+          <div class="sub">Online Printing · Thriprayar, Thrissur</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card on-blue">
+      <div class="lk">
+        <svg width="96" height="96" viewBox="0 0 200 200">
+          <rect x="0" y="0" width="200" height="200" rx="46" fill="#F5F1EB"/>
+          <circle cx="140" cy="64" r="22" fill="#E8500A"/>
+          <g fill="#1B3F8B">
+            <circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/>
+            <circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/>
+            <rect x="52" y="118" width="98" height="26" rx="13"/>
+          </g>
+        </svg>
+        <div>
+          <div class="wordmark">Printosky<span class="dot">.</span></div>
+          <div class="sub">Online Printing · Thriprayar, Thrissur</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Icon at app / favicon sizes (Concept A)</h2>
+  <div class="favrow">
+    <div class="fav">
+      <svg width="128" height="128" viewBox="0 0 200 200"><rect width="200" height="200" rx="46" fill="#1B3F8B"/><circle cx="140" cy="64" r="22" fill="#E8500A"/><g fill="#F5F1EB"><circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/><circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/><rect x="52" y="118" width="98" height="26" rx="13"/></g></svg>
+      <span>128px</span>
+    </div>
+    <div class="fav">
+      <svg width="64" height="64" viewBox="0 0 200 200"><rect width="200" height="200" rx="46" fill="#1B3F8B"/><circle cx="140" cy="64" r="22" fill="#E8500A"/><g fill="#F5F1EB"><circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/><circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/><rect x="52" y="118" width="98" height="26" rx="13"/></g></svg>
+      <span>64px</span>
+    </div>
+    <div class="fav">
+      <svg width="32" height="32" viewBox="0 0 200 200"><rect width="200" height="200" rx="46" fill="#1B3F8B"/><circle cx="140" cy="64" r="22" fill="#E8500A"/><g fill="#F5F1EB"><circle cx="74" cy="108" r="30"/><circle cx="112" cy="96" r="36"/><circle cx="146" cy="118" r="24"/><circle cx="56" cy="124" r="22"/><rect x="52" y="118" width="98" height="26" rx="13"/></g></svg>
+      <span>32px favicon</span>
+    </div>
+  </div>
+
+</body>
+</html>
