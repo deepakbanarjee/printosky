@@ -1570,6 +1570,7 @@
         <button class="ctrl-btn" onclick="openCourierSlips()" title="Branded A4 courier slips + Thank-You insert — one per parcel, ready to print and stick on the package">🏷️ Courier slips</button>
         <button class="ctrl-btn" onclick="openWalkInForm()">➕ New order</button>
         <button class="ctrl-btn" onclick="openDivyaStatement()">📊 Divya statement</button>
+        <button class="ctrl-btn" onclick="runCartNudge()" title="Send a one-time WhatsApp reminder to customers who started an order but went quiet (only carts active in the last 24h; one nudge per cart)">📣 Nudge stuck carts</button>
         <button class="ctrl-btn" onclick="loadBookOrders()">↻ Refresh</button>
       </div>
     </div>
@@ -4707,6 +4708,30 @@ function _fmtDeadline(deadlineIso) {
 
 // ── Book Orders (Xtraa campaign) ─────────────────────────────────────────────
 let _bookOrdersCache = [];
+
+// Fire the abandoned-cart reminder sweep on demand. One-time nudge per cart,
+// only for carts active in the last 24h (older carts need the WhatsApp template,
+// landing after Meta approval). The hourly cron runs this same sweep.
+async function runCartNudge() {
+  const pw = _convPw();
+  if (!pw) return;
+  if (!confirm('Send a one-time WhatsApp reminder to customers who started an order but went quiet?\n\n' +
+               'Only carts active in the last 24h are eligible, and each is nudged just once. ' +
+               'Older carts need the WhatsApp template (after approval).')) return;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/run-cart-nudge`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ admin_password: pw }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { alert('Nudge sweep failed — ' + (j.error || ('HTTP ' + r.status))); return; }
+    alert(`Nudge sweep done — ${j.reminded || 0} of ${j.carts || 0} eligible cart(s) reminded.`);
+  } catch (e) {
+    console.error('[book] cart nudge failed', e);
+    alert('Nudge sweep failed — ' + e.message);
+  }
+}
 
 // Branded A4-landscape courier slips + Thank-You insert (one per parcel) for
 // confirmed, undispatched orders — ready to print and stick on packages.
