@@ -1,4 +1,4 @@
-﻿"""Xtraa book campaign — WhatsApp conversational order flow (button-driven).
+"""Xtraa book campaign — WhatsApp conversational order flow (button-driven).
 
 Cloud-only (runs in the Vercel webhook). Order data lives in the `book_orders`
 table; the `bot_sessions.step` column drives state (book_* steps). Pure pricing
@@ -35,10 +35,31 @@ logger = logging.getLogger(__name__)
 
 DB = "supabase"  # db_path is ignored in cloud mode
 
+# Single-word triggers — any one of these alone fires the books flow
 _TRIGGER_WORDS = {
-    "book", "books", "xtraa", "xtra", "adithara", "balappeduthu",
-    "foundation", "aksharamrutham", "vidyamrut", "അടിത്തറ",
+    # Generic
+    "book", "books",
+    # Campaign / brand names + book titles (specific enough to stand alone)
+    "xtraa", "xtra", "adithara", "balappeduthu",
+    "foundation", "aksharamrutham", "vidyamrut", "vidyamrutham",
+    # Malayalam script (brand / book titles)
+    "അടിത്തറ", "അക്ഷരാമൃതം", "വിദ്യാമൃത്",
 }
+# NOTE: bare language/easy words ("hi", "en", "ml", "english", "malayalam",
+# "hindi", "easy") are deliberately NOT standalone triggers — they collide with
+# greetings and the print flow on this shared line. The language-qualified
+# intents are caught by _TRIGGER_PHRASES below ("malayalam book", "easy
+# english", "ml book", …) instead.
+
+# Multi-word phrases that must be matched as a substring (after lowercasing)
+_TRIGGER_PHRASES = [
+    "easy english",
+    "english book", "malayalam book", "hindi book",
+    "ml book", "en book", "hi book",
+    "english books", "malayalam books", "hindi books",
+    "buy book", "buy books", "order book", "order books",
+    "want book", "need book",
+]
 
 _AFFIRM = {
     "yes", "y", "ok", "okay", "confirm", "confirmed", "correct", "right",
@@ -92,11 +113,21 @@ _QTY_IDS = {"qty_1": 1, "qty_2": 2, "qty_3": 3}
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def is_book_trigger(text: str) -> bool:
+    """Return True if the customer's message should start the books flow.
+
+    Matches:
+    - Any single trigger word (book, books, malayalam, easy, ml, …)
+    - Any trigger phrase as a substring ("easy english", "malayalam book", …)
+    """
     if not text:
         return False
     t = text.strip().lower()
+    # Single-word match
     words = set(re.split(r"[^\wഀ-ൿ]+", t))
-    return bool(words & _TRIGGER_WORDS)
+    if words & _TRIGGER_WORDS:
+        return True
+    # Phrase match (substring)
+    return any(phrase in t for phrase in _TRIGGER_PHRASES)
 
 
 def _in_print_flow(session: dict) -> bool:
@@ -493,6 +524,19 @@ def _start(phone: str, name: str | None, force_new: bool = False) -> list[str]:
     _dbc.save_session(DB, phone, step="book_select", needs_human=False)
     _send_select_list(phone)
     return []
+
+
+def start_catalog(phone: str, name: str | None = None) -> list[str]:
+    """Open the Xtraa book catalog unconditionally.
+
+    Public seam for the router's xtraa-only default: when an idle customer's
+    message isn't claimed by a more specific handler (vendor, help, notes,
+    credits, tracking, website order, or an active book step) it lands here and
+    the catalog is opened instead of the old generic welcome/print menu. The
+    select list is sent inside `_start`, so the return is the usual [] ("already
+    sent").
+    """
+    return _start(phone, name)
 
 
 def start_order(phone: str, name: str | None = None) -> list[str]:
@@ -906,9 +950,9 @@ def _try_website_order(phone: str, text: str, name: str | None) -> list[str] | N
         code = existing["order_code"]
     else:
         code = _new_order_code()
-        if not _dbc.create_book_order(code, phone, parsed["name"] or name):
+        if not _dbc.create_book_order(code, phone, parsed["name"] or name, source="website"):
             code = _new_order_code()
-            _dbc.create_book_order(code, phone, parsed["name"] or name)
+            _dbc.create_book_order(code, phone, parsed["name"] or name, source="website")
 
     totals = bc.compute_totals(parsed["items"])
     _dbc.update_book_order(
@@ -1121,6 +1165,70 @@ def send_abandoned_reminders(idle_hours: int = 2) -> dict:
         except Exception as exc:
             logger.error("abandoned reminder failed for %s: %s", o.get("order_code"), exc)
     return {"carts": len(carts), "reminded": reminded}
+
+
+CART_CONTINUE_TEMPLATE = os.environ.get("CART_CONTINUE_TEMPLATE", "")
+CART_PAYMENT_TEMPLATE  = os.environ.get("CART_PAYMENT_TEMPLATE", "")
+
+
+def _cart_template_for(order: dict):
+    """(template_name, body_params) for a stuck cart's segment, or (None, None)
+    when that segment's template env var isn't configured.
+      collecting       → CART_CONTINUE_TEMPLATE  [name]
+      awaiting_payment → CART_PAYMENT_TEMPLATE   [name, order_code, amount]
+    """
+    name = order.get("name") or "Customer"
+    if order.get("status") == "awaiting_payment":
+        if not CART_PAYMENT_TEMPLATE:
+            return None, None
+        items = order.get("items") or {}
+        total = bc.compute_totals(items)["grand_total"] if items else 0
+        return CART_PAYMENT_TEMPLATE, [name, order.get("order_code") or "", f"{total:.0f}"]
+    if not CART_CONTINUE_TEMPLATE:
+        return None, None
+    return CART_CONTINUE_TEMPLATE, [name]
+
+
+def send_template_reminders(idle_hours: int = 24, window_hours: int = 168) -> dict:
+    """Nudge the >24h backlog (≤7 days) that a free-form message can't reach, via
+    the Meta-approved templates. Shares ``abandoned_reminder_at`` with the
+    free-form sweep, so each cart is nudged at most once overall. A segment whose
+    template is not configured is skipped (left for a later sweep).
+    Returns {carts, reminded}.
+    """
+    if not CART_CONTINUE_TEMPLATE and not CART_PAYMENT_TEMPLATE:
+        return {"carts": 0, "reminded": 0}          # nothing approved yet
+    carts = _dbc.find_abandoned_book_carts(idle_hours=idle_hours, window_hours=window_hours)
+    import whatsapp_notify as _wn
+    sender = getattr(_wn, "_send_meta_template", None)
+    if sender is None:
+        return {"carts": len(carts), "reminded": 0}
+    reminded = 0
+    for o in carts:
+        template, params = _cart_template_for(o)
+        if not template:
+            continue                                 # segment template not set → skip
+        try:
+            if sender(o["phone"], template, params, "ml"):
+                _dbc.mark_abandoned_reminded(o["order_code"])
+                reminded += 1
+        except Exception as exc:
+            logger.error("template reminder failed for %s: %s", o.get("order_code"), exc)
+    return {"carts": len(carts), "reminded": reminded}
+
+
+def run_cart_reminders() -> dict:
+    """Full stuck-cart sweep: free-form for carts still in the 24h window +
+    templates for the >24h backlog. Returns combined counts plus each breakdown.
+    """
+    freeform = send_abandoned_reminders()
+    template = send_template_reminders()
+    return {
+        "carts":    freeform["carts"] + template["carts"],
+        "reminded": freeform["reminded"] + template["reminded"],
+        "freeform": freeform,
+        "template": template,
+    }
 
 
 def _remind_verifier(order: dict) -> bool:

@@ -40,10 +40,11 @@ class FakeDB:
         active.sort(key=lambda o: o["_seq"], reverse=True)
         return dict(active[0]) if active else {}
 
-    def create_book_order(self, code, phone, name=None):
+    def create_book_order(self, code, phone, name=None, source="whatsapp"):
         self._seq += 1
         o = {"order_code": code, "phone": phone, "name": name, "items": {},
-             "status": "collecting", "flow_cursor": {}, "_seq": self._seq}
+             "status": "collecting", "flow_cursor": {}, "source": source,
+             "_seq": self._seq}
         self.orders[code] = o
         return dict(o)
 
@@ -177,6 +178,16 @@ WEB_ORDER = (
 )
 
 
+@pytest.mark.unit
+def test_conversational_order_stamped_whatsapp(fake):
+    # An order started from the chat catalog is tagged source='whatsapp', so it
+    # can be told apart from website / walk-in / divya orders later.
+    db, _ = fake
+    book_bot.maybe_handle_book(PHONE, "book")
+    o = db.get_active_book_order(PHONE)
+    assert o and o["source"] == "whatsapp"
+
+
 @pytest.mark.integration
 def test_website_order_ingested_without_reasking(fake):
     db, sent = fake
@@ -185,6 +196,7 @@ def test_website_order_ingested_without_reasking(fake):
     code = _code(db)
     o = db.orders[code]
     assert o["items"] == {"malayalam": 2, "hindi": 1}   # parsed + alias-mapped
+    assert o["source"] == "website"                     # tagged distinct from chat orders
     assert o["name"] == "Priya Krishnan"
     assert o["address"] == "12 MG Road, Thrissur 680001"
     assert o["contact_phone"] == "9876543210"
@@ -377,6 +389,27 @@ def test_overpayment_is_flagged(fake):
 @pytest.mark.unit
 @pytest.mark.parametrize("text", ["book", "BOOKS", "xtraa", "Aksharamrutham"])
 def test_trigger_words(text):
+    assert book_bot.is_book_trigger(text) is True
+
+
+# Bare greeting / language words must NOT hijack the shared line into the
+# book flow — only specific brand/title words or qualified phrases do.
+@pytest.mark.unit
+@pytest.mark.parametrize("text", [
+    "hi", "Hi there", "hello", "en", "ml",
+    "english", "malayalam", "hindi", "easy",
+    "I need english printout",
+])
+def test_non_trigger_words(text):
+    assert book_bot.is_book_trigger(text) is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("text", [
+    "easy english", "malayalam book", "ml book",
+    "I want to order books", "need book",
+])
+def test_trigger_phrases(text):
     assert book_bot.is_book_trigger(text) is True
 
 
@@ -711,6 +744,89 @@ def test_abandoned_message_continue_segment_is_bilingual(fake):
     assert _ML.search(msg)                       # Malayalam line added
     assert "didn't finish" in msg.lower() or "didn’t finish" in msg.lower()
     assert "Aksharamrutham × 1" in msg           # cart contents preserved
+
+
+# ── template reminders for the >24h backlog (Fix C2) ──────────────────────────
+
+@pytest.mark.unit
+def test_cart_template_for_segments(fake, monkeypatch):
+    monkeypatch.setattr(book_bot, "CART_CONTINUE_TEMPLATE", "xtraa_cart_continue")
+    monkeypatch.setattr(book_bot, "CART_PAYMENT_TEMPLATE", "xtraa_payment_pending")
+    import book_catalog as _bc
+    t, p = book_bot._cart_template_for(
+        {"order_code": "XTR-1", "status": "collecting", "name": "Priya", "items": {"malayalam": 1}})
+    assert t == "xtraa_cart_continue" and p == ["Priya"]
+    total = _bc.compute_totals({"malayalam": 2})["grand_total"]
+    t2, p2 = book_bot._cart_template_for(
+        {"order_code": "XTR-2", "status": "awaiting_payment", "name": "Anu", "items": {"malayalam": 2}})
+    assert t2 == "xtraa_payment_pending"
+    assert p2 == ["Anu", "XTR-2", f"{total:.0f}"]
+
+
+@pytest.mark.unit
+def test_cart_template_for_skips_when_unset(fake, monkeypatch):
+    monkeypatch.setattr(book_bot, "CART_CONTINUE_TEMPLATE", "")
+    monkeypatch.setattr(book_bot, "CART_PAYMENT_TEMPLATE", "")
+    t, p = book_bot._cart_template_for({"order_code": "X", "status": "collecting", "items": {}})
+    assert t is None and p is None
+
+
+@pytest.mark.unit
+def test_send_template_reminders_sends_and_stamps(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(book_bot, "CART_CONTINUE_TEMPLATE", "xtraa_cart_continue")
+    monkeypatch.setattr(book_bot, "CART_PAYMENT_TEMPLATE", "xtraa_payment_pending")
+    carts = [
+        {"order_code": "XTR-A", "phone": "9111", "status": "collecting",
+         "name": "P", "items": {"malayalam": 1}},
+        {"order_code": "XTR-B", "phone": "9222", "status": "awaiting_payment",
+         "name": "Q", "items": {"malayalam": 1}},
+    ]
+    monkeypatch.setattr(_dbc, "find_abandoned_book_carts", lambda **kw: carts)
+    marked = []
+    monkeypatch.setattr(_dbc, "mark_abandoned_reminded", lambda code: marked.append(code))
+    calls = []
+    import whatsapp_notify as _wn
+    monkeypatch.setattr(_wn, "_send_meta_template",
+                        lambda phone, name, params, lang: calls.append((phone, name, params, lang)) or True)
+
+    res = book_bot.send_template_reminders()
+    assert res == {"carts": 2, "reminded": 2}
+    assert marked == ["XTR-A", "XTR-B"]
+    assert calls[0] == ("9111", "xtraa_cart_continue", ["P"], "ml")
+    assert calls[1][1] == "xtraa_payment_pending"
+
+
+@pytest.mark.unit
+def test_send_template_reminders_skips_unconfigured_segment(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(book_bot, "CART_CONTINUE_TEMPLATE", "")            # not approved yet
+    monkeypatch.setattr(book_bot, "CART_PAYMENT_TEMPLATE", "xtraa_payment_pending")
+    carts = [
+        {"order_code": "XTR-A", "phone": "9111", "status": "collecting",
+         "name": "P", "items": {"malayalam": 1}},
+        {"order_code": "XTR-B", "phone": "9222", "status": "awaiting_payment",
+         "name": "Q", "items": {"malayalam": 1}},
+    ]
+    monkeypatch.setattr(_dbc, "find_abandoned_book_carts", lambda **kw: carts)
+    marked = []
+    monkeypatch.setattr(_dbc, "mark_abandoned_reminded", lambda code: marked.append(code))
+    import whatsapp_notify as _wn
+    monkeypatch.setattr(_wn, "_send_meta_template", lambda *a, **k: True)
+
+    res = book_bot.send_template_reminders()
+    assert res == {"carts": 2, "reminded": 1}     # only the payment cart sent
+    assert marked == ["XTR-B"]
+
+
+@pytest.mark.unit
+def test_run_cart_reminders_combines_both(fake, monkeypatch):
+    monkeypatch.setattr(book_bot, "send_abandoned_reminders", lambda: {"carts": 2, "reminded": 2})
+    monkeypatch.setattr(book_bot, "send_template_reminders", lambda: {"carts": 5, "reminded": 3})
+    res = book_bot.run_cart_reminders()
+    assert res["carts"] == 7 and res["reminded"] == 5
+    assert res["freeform"] == {"carts": 2, "reminded": 2}
+    assert res["template"] == {"carts": 5, "reminded": 3}
 
 
 # ── verifier (Anu) confirm / reject ───────────────────────────────────────────

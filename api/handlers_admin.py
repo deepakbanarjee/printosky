@@ -186,8 +186,8 @@ def _handle_admin_run_cart_nudge(h, body: bytes) -> None:
         return
 
     try:
-        from book_bot import send_abandoned_reminders
-        result = send_abandoned_reminders()
+        from book_bot import run_cart_reminders
+        result = run_cart_reminders()
         _json_response(h, 200, {"ok": True, **result})
         logger.info("Admin ran cart-nudge sweep: %s", result)
     except Exception as e:

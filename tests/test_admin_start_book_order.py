@@ -77,9 +77,13 @@ def test_run_cart_nudge_requires_valid_password(patched):
 def test_run_cart_nudge_runs_sweep_and_returns_counts(patched):
     monkeypatch = patched
     import book_bot
-    monkeypatch.setattr(book_bot, "send_abandoned_reminders",
-                        lambda: {"carts": 3, "reminded": 2})
+    # Manual button fires the full sweep (free-form + template backlog).
+    monkeypatch.setattr(book_bot, "run_cart_reminders",
+                        lambda: {"carts": 3, "reminded": 2,
+                                 "freeform": {"carts": 1, "reminded": 1},
+                                 "template": {"carts": 2, "reminded": 1}})
     h = _FakeHandler()
     ha._handle_admin_run_cart_nudge(h, b'{"admin_password":"secret123"}')
     assert h.status == 200
-    assert h.payload == {"ok": True, "carts": 3, "reminded": 2}
+    assert h.payload["ok"] is True
+    assert h.payload["carts"] == 3 and h.payload["reminded"] == 2

@@ -1066,23 +1066,23 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
         if (not _step) or _session_is_stale(_session):
             customer_is_idle = True
             customer_is_new = is_new_contact(sender)
-            reply_msg = None
-            if customer_is_new:
-                reply_msg = WELCOME_MESSAGE      # first-time customer
-            elif _is_greeting(text):
-                reply_msg = GREETING_MESSAGE     # returning customer says hi
-            if reply_msg:
-                if _step:
-                    # Abandoned session (e.g. forgotten staff_hold) — reset it
-                    # so the customer isn't stuck being ignored.
-                    try:
-                        from db_cloud import clear_session
-                        clear_session("supabase", sender)
-                    except Exception:
-                        pass
-                # _send_meta logs the outbound; don't double-log here.
-                _send(sender, reply_msg)
-                return
+            # ── Xtraa-only line: default any idle customer into the book catalog
+            # instead of the old generic welcome/print menu. Every more specific
+            # intent (vendor, help, notes, credits, referral, tracking, website
+            # order, an active book step) was already claimed above; whatever
+            # reaches here is a book prospect. Confused customers still reach a
+            # human via the help keywords (handled before this point).
+            if _step:
+                # Abandoned session (e.g. forgotten staff_hold) — reset it first
+                # so the catalog starts clean.
+                try:
+                    from db_cloud import clear_session
+                    clear_session("supabase", sender)
+                except Exception:
+                    pass
+            from book_bot import start_catalog
+            start_catalog(sender, name)   # sends the catalog list itself
+            return
     except Exception as e:
         logger.error(f"Welcome handler error for {sender}: {e}")
 
@@ -2289,8 +2289,8 @@ def _handle_cron_abandoned_carts(h) -> None:
         _json_response(h, 401, {"error": "Unauthorized"})
         return
     try:
-        from book_bot import send_abandoned_reminders
-        result = send_abandoned_reminders()
+        from book_bot import run_cart_reminders
+        result = run_cart_reminders()
         _json_response(h, 200, {"ok": True, **result})
     except Exception as exc:
         logger.error("abandoned-carts cron error: %s", exc)

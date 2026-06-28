@@ -1418,8 +1418,15 @@ def get_dispatched_book_order(phone: str) -> dict:
         return {}
 
 
-def create_book_order(order_code: str, phone: str, name: str | None = None) -> dict:
-    """Insert a new 'collecting' book order. Returns the created row, or {}."""
+def create_book_order(order_code: str, phone: str, name: str | None = None,
+                      source: str = "whatsapp") -> dict:
+    """Insert a new 'collecting' book order. Returns the created row, or {}.
+
+    `source` records where the order originated so books can be distinguished
+    from other channels later: 'whatsapp' (conversational Xtraa flow),
+    'website' (checkout form pasted in), alongside 'walk_in' / 'divya' from the
+    manual-entry path.
+    """
     try:
         result = (
             _client().table("book_orders")
@@ -1428,6 +1435,7 @@ def create_book_order(order_code: str, phone: str, name: str | None = None) -> d
                 "phone":      phone,
                 "name":       name,
                 "status":     "collecting",
+                "source":     source,
             })
             .execute()
         )
@@ -1681,7 +1689,7 @@ def find_abandoned_book_carts(idle_hours: int = 2, window_hours: int = 24,
         window_cut = (now - timedelta(hours=window_hours)).isoformat()
         rows = (
             _client().table("book_orders")
-            .select("order_code,phone,items,status,updated_at")
+            .select("order_code,phone,name,items,status,updated_at")
             .in_("status", ["collecting", "awaiting_payment"])
             .is_("abandoned_reminder_at", "null")
             .lt("updated_at", idle_cut)
