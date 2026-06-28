@@ -291,6 +291,22 @@ class TestCustomerWelcome:
         assert self.catalog == ["91999000111"]
         assert bot_calls["n"] == 0
 
+    def test_idle_with_awaiting_payment_order_forwards_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # start_catalog returns a non-empty list for a customer who already has
+        # an order awaiting payment (it does NOT open a fresh catalog). The
+        # router must forward that message, not drop it (regression guard).
+        self._patch_common(monkeypatch, is_new=False, session={})
+        bb = sys.modules["book_bot"]
+        monkeypatch.setattr(bb, "start_catalog",
+                            lambda phone, name=None: ["Order XTR-1 awaiting payment — send screenshot or reply NEW"],
+                            raising=False)
+        monkeypatch.setattr(sys.modules["whatsapp_bot"], "handle_message",
+                            lambda **kw: [], raising=False)
+        with patch.object(sys.modules["whatsapp_notify"], "_send") as send_mock:
+            api_mod._handle_text("91999000111", "PAY")
+        assert send_mock.called
+        assert "awaiting payment" in send_mock.call_args[0][1]
+
     def test_one_customer_staff_hold_does_not_affect_others(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Customer B messages while customer A is in staff_hold. B must still be
         # served (catalog) — A's hold is per-phone and never blocks others.

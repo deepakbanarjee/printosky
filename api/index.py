@@ -1081,7 +1081,13 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
                 except Exception:
                     pass
             from book_bot import start_catalog
-            start_catalog(sender, name)   # sends the catalog list itself
+            # For a fresh/collecting cart start_catalog opens the catalog itself
+            # (sends internally, returns []). For a customer who already has an
+            # order awaiting payment it does NOT wipe it — it returns a "send your
+            # payment / reply NEW" message instead. Forward whatever it returns so
+            # that prompt (and the PAY-nudge reply path) isn't dropped.
+            for _reply in start_catalog(sender, name):
+                _send(sender, _reply)
             return
     except Exception as e:
         logger.error(f"Welcome handler error for {sender}: {e}")
