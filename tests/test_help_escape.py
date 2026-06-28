@@ -197,14 +197,39 @@ class TestHandleTextShortCircuit:
         assert called == {"capture": 0, "bot": 0, "help": 1}
 
     def test_non_help_falls_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Normal text must still reach _capture_referral_code."""
+        """Normal text must still reach _capture_referral_code.
+
+        Mocks all external state the router touches before _capture_referral_code
+        so the assertion never depends on leftover live `bot_sessions` rows for
+        the test phone (else the book flow can claim the message and return
+        early). Mirrors TestCustomerWelcome._patch_common's seam set, but keeps
+        the real capture/help counters since they're the thing under test.
+        """
         called = {"capture": 0, "help": 0}
         monkeypatch.setattr(
             sys.modules["whatsapp_bot"], "handle_message",
             lambda **kw: [], raising=False,
         )
 
-        with patch.object(api_mod, "_capture_referral_code",
+        # No active session for the test phone → book flow can't claim it, and
+        # the idle/xtraa-catalog branch is reachable but mocked to a no-op.
+        bb = sys.modules.get("book_bot")
+        if bb is None:
+            bb = types.ModuleType("book_bot")
+            sys.modules["book_bot"] = bb
+        monkeypatch.setattr(bb, "maybe_handle_book", lambda *a, **kw: None, raising=False)
+        monkeypatch.setattr(bb, "start_catalog", lambda phone, name=None: [], raising=False)
+        monkeypatch.setattr(sys.modules["db_cloud"], "get_session",
+                            lambda *a, **kw: {}, raising=False)
+        monkeypatch.setattr(sys.modules["db_cloud"], "is_new_contact",
+                            lambda *a, **kw: False, raising=False)
+        monkeypatch.setattr(sys.modules["db_cloud"], "clear_session",
+                            lambda *a, **kw: None, raising=False)
+        monkeypatch.setattr(sys.modules["db_cloud"], "log_message",
+                            lambda *a, **kw: None, raising=False)
+
+        with patch.object(sys.modules["whatsapp_notify"], "_send"), \
+             patch.object(api_mod, "_capture_referral_code",
                           side_effect=lambda *a, **kw: called.__setitem__("capture", called["capture"] + 1)), \
              patch.object(api_mod, "_handle_help_request",
                           side_effect=lambda *a, **kw: called.__setitem__("help", called["help"] + 1)):
