@@ -1167,8 +1167,13 @@ def send_abandoned_reminders(idle_hours: int = 2) -> dict:
     return {"carts": len(carts), "reminded": reminded}
 
 
+# Payment template (xtraa_payment_pending, ml) is Meta-approved → default ON so
+# the awaiting_payment backlog is nudged without extra Vercel config. The
+# collecting/continue template (xtraa_cart_continue) is Marketing and stays
+# GATED (empty default) until it clears approval — set
+# CART_CONTINUE_TEMPLATE=xtraa_cart_continue then (or flip this default).
 CART_CONTINUE_TEMPLATE = os.environ.get("CART_CONTINUE_TEMPLATE", "")
-CART_PAYMENT_TEMPLATE  = os.environ.get("CART_PAYMENT_TEMPLATE", "")
+CART_PAYMENT_TEMPLATE  = os.environ.get("CART_PAYMENT_TEMPLATE", "xtraa_payment_pending")
 
 
 def _cart_template_for(order: dict):
