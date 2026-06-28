@@ -469,8 +469,21 @@ def _is_valid_name(text: str) -> bool:
     t = (text or "").strip()
     if len(t) < 3:
         return False
-    # Must have at least one letter (Latin or Malayalam)
-    return bool(re.search(r"[A-Za-zഀ-ൿ]", t))
+    if not re.search(r"[A-Za-zഀ-ൿ]", t):
+        return False
+    # Reject internal button IDs (e.g. qty_1, bk_ml, ph_yes, dtdc_skip)
+    if re.fullmatch(r"[a-z][a-z0-9]*_[a-z0-9]+", t):
+        return False
+    # Reject address blocks: multiple newlines, PIN code, mobile number, or address keywords
+    if t.count("\n") > 1:
+        return False
+    if re.search(r"\b\d{6}\b", t):
+        return False
+    if re.search(r"\b\d{10}\b", t):
+        return False
+    if re.search(r"\b(mob|p\.o|dist|district|pin)\b", t, re.IGNORECASE):
+        return False
+    return True
 
 
 def _send_dtdc_prompt(phone: str) -> None:

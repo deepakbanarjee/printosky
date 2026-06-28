@@ -1182,3 +1182,48 @@ def test_qty_prompt_after_full_set_is_malayalam(fake):
     book_bot.maybe_handle_book(PHONE, "1")               # qty for book 2
     book_bot.maybe_handle_book(PHONE, "1")               # qty for book 3 -> name prompt
     assert any(_ML.search(m) for m in sent["text"]), "name prompt must be Malayalam"
+
+
+# ── _is_valid_name validation ──────────────────────────────────────────────
+
+def test_valid_name_accepts_simple_name():
+    from book_bot import _is_valid_name
+    assert _is_valid_name("Zeenath Priyaranjini")
+
+def test_valid_name_rejects_multiline_address():
+    from book_bot import _is_valid_name
+    addr = "ZEENATH PRIYARANJINI \nKAYAMKULAM HOUSE \nP.O.KONATHUKUNNU \nTHRISSUR DIST \nPIN 680123"
+    assert not _is_valid_name(addr)
+
+def test_valid_name_rejects_pin_code():
+    from book_bot import _is_valid_name
+    assert not _is_valid_name("Suresh Kumar 680001")
+
+def test_valid_name_rejects_mobile_number():
+    from book_bot import _is_valid_name
+    assert not _is_valid_name("Arun 9447123456")
+
+def test_valid_name_rejects_mob_keyword():
+    from book_bot import _is_valid_name
+    assert not _is_valid_name("Ravi MOB 9447123456")
+
+def test_valid_name_rejects_dist_keyword():
+    from book_bot import _is_valid_name
+    assert not _is_valid_name("Thrissur Dist PIN 680001")
+
+def test_valid_name_accepts_name_with_one_newline():
+    from book_bot import _is_valid_name
+    # Some people type name on two lines (first + last) — allow 1 newline
+    assert _is_valid_name("Margaret P.J\nമാർഗരറ്റ്")
+
+def test_valid_name_rejects_short():
+    from book_bot import _is_valid_name
+    assert not _is_valid_name("Ab")
+
+def test_valid_name_rejects_button_ids():
+    from book_bot import _is_valid_name
+    assert not _is_valid_name("qty_1")
+    assert not _is_valid_name("qty_2")
+    assert not _is_valid_name("bk_ml")
+    assert not _is_valid_name("ph_yes")
+    assert not _is_valid_name("dtdc_skip")
