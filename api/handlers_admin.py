@@ -584,6 +584,13 @@ def _handle_admin_book_order_create(h, body) -> None:
             _json_response(h, 500, {"error": "Could not create order"})
             return
         _json_response(h, 200, {"ok": True, "order_code": code, "grand_total": grand})
+        # Send payment QR via WhatsApp when payment is still pending.
+        if not handed_over and payment_collected_by == "pending":
+            try:
+                import book_bot
+                book_bot._send_qr(phone, row)
+            except Exception as qr_exc:
+                logger.warning("walk-in QR send failed for %s: %s", code, qr_exc)
     except Exception as exc:
         logger.error("book-order create error: %s", exc)
         _json_response(h, 500, {"error": str(exc)})
