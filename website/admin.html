@@ -1583,11 +1583,11 @@
       <div style="font-weight:600;font-size:16px;margin-bottom:12px">➕ New book order (walk-in / in-store)</div>
       <div style="display:grid;gap:10px;font-size:.9rem">
         <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Aksharamrutham <span style="color:#888">ML · ₹200</span>
-          <input id="wi-ml" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+          <input id="wi-ml" type="number" min="0" value="0" oninput="updateWiPreview()" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
         <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Vidyamrut <span style="color:#888">HI · ₹150</span>
-          <input id="wi-hi" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+          <input id="wi-hi" type="number" min="0" value="0" oninput="updateWiPreview()" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
         <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Easy English <span style="color:#888">EN · ₹200</span>
-          <input id="wi-en" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+          <input id="wi-en" type="number" min="0" value="0" oninput="updateWiPreview()" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
         <input id="wi-name" placeholder="Customer name *" style="padding:7px;border:1px solid #ccc;border-radius:6px">
         <input id="wi-phone" placeholder="Phone number * (for delivery updates)" style="padding:7px;border:1px solid #ccc;border-radius:6px">
         <textarea id="wi-address" placeholder="Delivery address + PIN (required unless handed over)" style="padding:7px;border:1px solid #ccc;border-radius:6px;min-height:48px"></textarea>
@@ -1600,12 +1600,13 @@
           <option value="divya">Collected by: Divya teacher</option>
           <option value="pending">Payment pending</option>
         </select>
-        <select id="wi-delivery" style="padding:7px;border:1px solid #ccc;border-radius:6px" title="Delivery method (ignored when handed over in-store)">
-          <option value="courier">Courier (₹75)</option>
+        <select id="wi-delivery" style="padding:7px;border:1px solid #ccc;border-radius:6px" title="Delivery method (ignored when handed over in-store)" onchange="updateWiPreview()">
+          <option value="courier">Courier (weight-based)</option>
           <option value="xtraa_office">Drop at Xtraa office (no courier)</option>
         </select>
         <label style="display:flex;gap:8px;align-items:center"><input id="wi-handed" type="checkbox" onchange="onWiHanded()"> Handed over now (in-store — no courier)</label>
       </div>
+      <div id="wi-preview" style="display:none;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;font-size:.85rem;margin-top:4px"></div>
       <div id="wi-error" style="color:#dc2626;font-size:.8rem;margin-top:8px"></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
         <button class="ctrl-btn" onclick="closeWalkInForm()">Cancel</button>
@@ -1646,11 +1647,11 @@
       <input type="hidden" id="edit-code">
       <div style="display:grid;gap:10px;font-size:.9rem">
         <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Aksharamrutham <span style="color:#888">ML · ₹200</span>
-          <input id="edit-ml" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+          <input id="edit-ml" type="number" min="0" value="0" oninput="updateEditPreview()" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
         <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Vidyamrut <span style="color:#888">HI · ₹150</span>
-          <input id="edit-hi" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+          <input id="edit-hi" type="number" min="0" value="0" oninput="updateEditPreview()" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
         <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Easy English <span style="color:#888">EN · ₹200</span>
-          <input id="edit-en" type="number" min="0" value="0" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+          <input id="edit-en" type="number" min="0" value="0" oninput="updateEditPreview()" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
         <input id="edit-name" placeholder="Customer name *" style="padding:7px;border:1px solid #ccc;border-radius:6px">
         <input id="edit-phone" placeholder="Phone number *" style="padding:7px;border:1px solid #ccc;border-radius:6px">
         <textarea id="edit-address" placeholder="Delivery address + PIN" style="padding:7px;border:1px solid #ccc;border-radius:6px;min-height:48px"></textarea>
@@ -1664,11 +1665,12 @@
           <option value="divya">Collected by: Divya teacher</option>
           <option value="pending">Payment pending</option>
         </select>
-        <select id="edit-delivery" style="padding:7px;border:1px solid #ccc;border-radius:6px">
-          <option value="courier">Courier (₹75)</option>
+        <select id="edit-delivery" style="padding:7px;border:1px solid #ccc;border-radius:6px" onchange="updateEditPreview()">
+          <option value="courier">Courier (weight-based)</option>
           <option value="xtraa_office">Xtraa office (no courier)</option>
         </select>
       </div>
+      <div id="edit-preview" style="display:none;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;font-size:.85rem;margin-top:4px"></div>
       <div id="edit-error" style="color:#dc2626;font-size:.8rem;margin-top:8px"></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
         <button class="ctrl-btn" onclick="closeEditBookOrder()">Cancel</button>
@@ -4945,6 +4947,7 @@ function openWalkInForm() {
   onWiHanded();
   document.getElementById('wi-error').textContent = '';
   document.getElementById('walkin-modal').style.display = 'flex';
+  updateWiPreview();
 }
 
 function onWiHanded() {
@@ -4956,9 +4959,64 @@ function onWiHanded() {
   var d = document.getElementById('wi-delivery');
   d.disabled = handed;
   d.style.opacity = handed ? '0.5' : '1';
+  updateWiPreview();
 }
 
 function closeWalkInForm() { document.getElementById('walkin-modal').style.display = 'none'; }
+
+// Mirror of book_catalog.py courier_charge() + compute_totals() — kept in sync with backend constants.
+function _calcBookOrder(ml, hi, en, delivery) {
+  ml = Math.max(0, parseInt(ml) || 0);
+  hi = Math.max(0, parseInt(hi) || 0);
+  en = Math.max(0, parseInt(en) || 0);
+  const total = ml + hi + en;
+  if (!total) return null;
+  // Set pricing: all three books at same quantity
+  const booksTotal = (ml && hi && en && ml === hi && hi === en)
+    ? 549 * ml
+    : ml * 200 + hi * 150 + en * 200;
+  const weight = ml * 500 + hi * 250 + en * 500;
+  let courier = 0;
+  if (delivery !== 'xtraa_office') {
+    const extraSlabs = Math.ceil(Math.max(0, weight - 1000) / 500);
+    courier = 75 + extraSlabs * 40;
+    if (total >= 5) courier = Math.round(courier * (1 - 0.07));
+  }
+  return { booksTotal, courier, grandTotal: booksTotal + courier, weight };
+}
+
+function _renderOrderPreview(elId, ml, hi, en, delivery) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const r = _calcBookOrder(ml, hi, en, delivery);
+  if (!r) { el.style.display = 'none'; return; }
+  const courierLine = r.courier > 0
+    ? `<div style="display:flex;justify-content:space-between"><span style="color:#555">Courier (${r.weight}g)</span><span>₹${r.courier}</span></div>`
+    : `<div style="display:flex;justify-content:space-between"><span style="color:#555">Courier</span><span style="color:#16a34a">₹0 (no courier)</span></div>`;
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between"><span style="color:#555">Books subtotal</span><span>₹${r.booksTotal}</span></div>
+    ${courierLine}
+    <div style="display:flex;justify-content:space-between;font-weight:700;border-top:1px solid #bbf7d0;margin-top:5px;padding-top:5px"><span>Grand total</span><span style="color:#15803d">₹${r.grandTotal}</span></div>`;
+}
+
+function updateWiPreview() {
+  const handed = document.getElementById('wi-handed').checked;
+  const delivery = handed ? 'xtraa_office' : (document.getElementById('wi-delivery').value || 'courier');
+  _renderOrderPreview('wi-preview',
+    document.getElementById('wi-ml').value,
+    document.getElementById('wi-hi').value,
+    document.getElementById('wi-en').value,
+    delivery);
+}
+
+function updateEditPreview() {
+  _renderOrderPreview('edit-preview',
+    document.getElementById('edit-ml').value,
+    document.getElementById('edit-hi').value,
+    document.getElementById('edit-en').value,
+    document.getElementById('edit-delivery').value || 'courier');
+}
 
 async function submitWalkIn() {
   const items = {
@@ -5213,6 +5271,7 @@ function openEditBookOrder(code) {
   document.getElementById('edit-delivery').value = o.delivery_method || 'courier';
   document.getElementById('edit-error').textContent = '';
   document.getElementById('edit-modal').style.display = 'flex';
+  updateEditPreview();
 }
 
 function closeEditBookOrder() { document.getElementById('edit-modal').style.display = 'none'; }
