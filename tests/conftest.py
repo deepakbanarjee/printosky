@@ -136,7 +136,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     date_str = datetime.date.today().isoformat()
     lines = [f"=== Printosky Browser Gap Report — {date_str} ===", ""] + _gap_results + [""]
     report_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"\nGap report → {report_path}")
+    print(f"\nGap report -> {report_path}")
 
 
 # ── store_only marker ─────────────────────────────────────────────────────────
