@@ -1167,12 +1167,13 @@ def send_abandoned_reminders(idle_hours: int = 2) -> dict:
     return {"carts": len(carts), "reminded": reminded}
 
 
-# Payment template (xtraa_payment_pending, ml) is Meta-approved → default ON so
-# the awaiting_payment backlog is nudged without extra Vercel config. The
-# collecting/continue template (xtraa_cart_continue) is Marketing and stays
-# GATED (empty default) until it clears approval — set
-# CART_CONTINUE_TEMPLATE=xtraa_cart_continue then (or flip this default).
-CART_CONTINUE_TEMPLATE = os.environ.get("CART_CONTINUE_TEMPLATE", "")
+# Both templates are Meta-approved (ml) → default ON so the full stuck-cart
+# backlog is nudged on deploy with no extra Vercel config (matches the
+# hardcoded-template pattern of book_feedback). An env var still overrides
+# either — set to "" to disable a segment.
+#   xtraa_cart_continue   (collecting)       body {{1}}=name
+#   xtraa_payment_pending (awaiting_payment) body {{1}}=name {{2}}=order {{3}}=amount
+CART_CONTINUE_TEMPLATE = os.environ.get("CART_CONTINUE_TEMPLATE", "xtraa_cart_continue")
 CART_PAYMENT_TEMPLATE  = os.environ.get("CART_PAYMENT_TEMPLATE", "xtraa_payment_pending")
 
 
