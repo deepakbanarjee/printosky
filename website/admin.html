@@ -1570,7 +1570,7 @@
         <button class="ctrl-btn" onclick="openCourierSlips()" title="Branded A4 courier slips + Thank-You insert — one per parcel, ready to print and stick on the package">🏷️ Courier slips</button>
         <button class="ctrl-btn" onclick="openWalkInForm()">➕ New order</button>
         <button class="ctrl-btn" onclick="openDivyaStatement()">📊 Divya statement</button>
-        <button class="ctrl-btn" onclick="runCartNudge()" title="Send a one-time WhatsApp reminder to customers who started an order but went quiet (only carts active in the last 24h; one nudge per cart)">📣 Nudge stuck carts</button>
+        <button class="ctrl-btn" onclick="runCartNudge()" title="Send a one-time WhatsApp reminder to customers who started an order but went quiet (carts idle up to 7 days; one nudge per cart)">📣 Nudge stuck carts</button>
         <button class="ctrl-btn" onclick="loadBookOrders()">↻ Refresh</button>
       </div>
     </div>
@@ -4716,8 +4716,8 @@ async function runCartNudge() {
   const pw = _convPw();
   if (!pw) return;
   if (!confirm('Send a one-time WhatsApp reminder to customers who started an order but went quiet?\n\n' +
-               'Only carts active in the last 24h are eligible, and each is nudged just once. ' +
-               'Older carts need the WhatsApp template (after approval).')) return;
+               'Covers carts idle up to 7 days (recent ones get a normal message; older ones the ' +
+               'approved template), and each cart is nudged just once.')) return;
   try {
     const r = await fetch(`${ACAD_API}/admin/run-cart-nudge`, {
       method:  'POST',

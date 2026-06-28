@@ -232,9 +232,10 @@ class TestIsGreeting:
 
 
 class TestCustomerWelcome:
-    """Welcome fires on a greeting from any idle customer, or on a brand-new
-    contact's first message. Stray non-greeting text from a returning customer
-    stays silent."""
+    """Xtraa-only line: any idle customer (new or returning, greeting or not)
+    is defaulted into the book catalog. A recent active flow is never
+    interrupted. (Replaces the old generic welcome/print menu — every specific
+    intent is claimed by an earlier handler, and 'help' still reaches a human.)"""
 
     def _patch_common(self, monkeypatch, *, is_new, session=None):
         bb = sys.modules.get("book_bot")
@@ -242,6 +243,10 @@ class TestCustomerWelcome:
             bb = types.ModuleType("book_bot")
             sys.modules["book_bot"] = bb
         monkeypatch.setattr(bb, "maybe_handle_book", lambda *a, **kw: None, raising=False)
+        self.catalog = []
+        monkeypatch.setattr(bb, "start_catalog",
+                            lambda phone, name=None: self.catalog.append(phone) or [],
+                            raising=False)
         monkeypatch.setattr(sys.modules["db_cloud"], "get_session",
                             lambda *a, **kw: dict(session or {}), raising=False)
         monkeypatch.setattr(sys.modules["db_cloud"], "is_new_contact",
@@ -263,40 +268,48 @@ class TestCustomerWelcome:
             api_mod._handle_text("91999000111", text)
         return send_mock, bot_calls
 
-    def test_new_contact_first_message_gets_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # First-time customer → full welcome, regardless of message wording.
-        send_mock, bot_calls = self._run(monkeypatch, is_new=True, text="hi")
-        assert send_mock.called
-        assert "Welcome to Printosky" in send_mock.call_args[0][1]
+    def test_new_contact_first_message_opens_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # First-time customer → straight into the book catalog, any wording.
+        _send_mock, bot_calls = self._run(monkeypatch, is_new=True, text="hi")
+        assert self.catalog == ["91999000111"]
+        assert bot_calls["n"] == 0          # print state machine not reached
+
+    def test_new_contact_non_greeting_opens_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _send_mock, bot_calls = self._run(monkeypatch, is_new=True, text="anyone there")
+        assert self.catalog == ["91999000111"]
         assert bot_calls["n"] == 0
 
-    def test_new_contact_non_greeting_gets_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        send_mock, bot_calls = self._run(monkeypatch, is_new=True, text="anyone there")
-        assert send_mock.called
-        assert "Welcome to Printosky" in send_mock.call_args[0][1]
+    def test_returning_contact_greeting_opens_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="hi")
+        assert self.catalog == ["91999000111"]
         assert bot_calls["n"] == 0
 
-    def test_returning_contact_greeting_gets_greeting_not_welcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Returning customer says hi → shorter "how can we help", NOT the
-        # first-time welcome.
-        send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="hi")
-        assert send_mock.called
-        msg = send_mock.call_args[0][1]
-        assert "How can we help" in msg
-        assert "Welcome to Printosky" not in msg
+    def test_returning_contact_non_greeting_opens_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Previously fell through silently to the print state machine; on an
+        # xtraa-only line it now opens the catalog too.
+        _send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="i want the malayalam one")
+        assert self.catalog == ["91999000111"]
         assert bot_calls["n"] == 0
 
-    def test_returning_contact_non_greeting_no_reply(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="how much for printing")
-        assert bot_calls["n"] == 1          # falls through to the state machine
-        if send_mock.called:
-            assert "How can we help" not in send_mock.call_args[0][1]
-            assert "Welcome to Printosky" not in send_mock.call_args[0][1]
+    def test_idle_with_awaiting_payment_order_forwards_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # start_catalog returns a non-empty list for a customer who already has
+        # an order awaiting payment (it does NOT open a fresh catalog). The
+        # router must forward that message, not drop it (regression guard).
+        self._patch_common(monkeypatch, is_new=False, session={})
+        bb = sys.modules["book_bot"]
+        monkeypatch.setattr(bb, "start_catalog",
+                            lambda phone, name=None: ["Order XTR-1 awaiting payment — send screenshot or reply NEW"],
+                            raising=False)
+        monkeypatch.setattr(sys.modules["whatsapp_bot"], "handle_message",
+                            lambda **kw: [], raising=False)
+        with patch.object(sys.modules["whatsapp_notify"], "_send") as send_mock:
+            api_mod._handle_text("91999000111", "PAY")
+        assert send_mock.called
+        assert "awaiting payment" in send_mock.call_args[0][1]
 
     def test_one_customer_staff_hold_does_not_affect_others(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Customer B sends a greeting while customer A is in staff_hold.
-        # Customer B must still get the normal greeting reply — A's hold is
-        # per-phone and must NEVER hold replies to other customers.
+        # Customer B messages while customer A is in staff_hold. B must still be
+        # served (catalog) — A's hold is per-phone and never blocks others.
         sessions = {
             "918943232033": {"step": "staff_hold", "updated_at": "2026-05-11 01:03:58"},
             "918111222333": {},
@@ -304,6 +317,9 @@ class TestCustomerWelcome:
         bb = sys.modules.get("book_bot") or types.ModuleType("book_bot")
         sys.modules["book_bot"] = bb
         monkeypatch.setattr(bb, "maybe_handle_book", lambda *a, **kw: None, raising=False)
+        catalog = []
+        monkeypatch.setattr(bb, "start_catalog",
+                            lambda phone, name=None: catalog.append(phone) or [], raising=False)
         monkeypatch.setattr(sys.modules["db_cloud"], "get_session",
                             lambda db, phone, *a, **kw: dict(sessions.get(phone, {})),
                             raising=False)
@@ -315,32 +331,27 @@ class TestCustomerWelcome:
                             lambda *a, **kw: None, raising=False)
         monkeypatch.setattr(api_mod, "_capture_referral_code", lambda *a, **kw: None)
 
-        with patch.object(sys.modules["whatsapp_notify"], "_send") as send_mock:
+        with patch.object(sys.modules["whatsapp_notify"], "_send"):
             api_mod._handle_text("918111222333", "hi")          # customer B
-        assert send_mock.called
-        assert "How can we help" in send_mock.call_args[0][1]
-        # And A is still on hold (we did NOT message phone A here):
-        assert send_mock.call_args[0][0] == "918111222333"
+        assert catalog == ["918111222333"]   # B served; A untouched
 
     def test_recent_active_session_not_interrupted(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Customer mid-flow (recent session) says hi → NOT interrupted.
+        # Customer mid-flow (recent session) says hi → NOT interrupted, no catalog.
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="hi",
-                                         session={"step": "size", "updated_at": now})
+        _send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="hi",
+                                          session={"step": "size", "updated_at": now})
+        assert self.catalog == []           # not defaulted into the catalog
         assert bot_calls["n"] == 1          # handed to the print state machine
         assert self.cleared == []           # session preserved
-        if send_mock.called:
-            assert "How can we help" not in send_mock.call_args[0][1]
 
-    def test_stale_staff_hold_greeting_resets_and_greets(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # A forgotten staff_hold (old) must not black-hole the customer: a
-        # greeting clears it and replies.
-        send_mock, bot_calls = self._run(
+    def test_stale_staff_hold_resets_and_opens_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A forgotten staff_hold (old) must not black-hole the customer: it is
+        # cleared and the catalog opens.
+        _send_mock, bot_calls = self._run(
             monkeypatch, is_new=False, text="hi",
             session={"step": "staff_hold", "updated_at": "2026-05-11 01:03:58"})
-        assert send_mock.called
-        assert "How can we help" in send_mock.call_args[0][1]
+        assert self.catalog == ["91999000111"]
         assert "91999000111" in self.cleared   # stale session was reset
         assert bot_calls["n"] == 0
 
