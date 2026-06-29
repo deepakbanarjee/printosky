@@ -399,7 +399,7 @@ PORT = 3005
 # don't burn real ink).
 PRINTERS = {
     "konica": "KONICA MINOLTA 1100 PS",
-    "epson":  "WF-C21000 Series(Network)",
+    "epson":  "EM-C8100 Series(Network)",  # Epson EM-C8100 installed 2026-06-29 — verify exact queue name on store PC
 }
 try:
     _store_pq = getattr(get_store_config(), "printer_queue_names", None)

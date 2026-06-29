@@ -39,7 +39,7 @@ _LEGACY_OXYGEN_DEFAULTS: dict[str, Any] = {
     "store_name": "Oxygen Students Paradise, Thrissur",
     "printers": {
         "konica_ip": "192.168.55.110",
-        "epson_ip": "192.168.55.202",
+        "epson_ip": "192.168.55.214",  # Epson EM-C8100 (replaced WF-C21000 2026-06-29)
     },
     "hot_folder": r"C:\Printosky\Jobs\Incoming",
     "db_path": r"C:\Printosky\Data\jobs.db",
