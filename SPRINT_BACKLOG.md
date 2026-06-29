@@ -57,7 +57,7 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 | S9-3 | ~~**Epson ink alerts**~~ ✅ | `_send_ink_alerts()` in printer_poller.py:434. Fires on threshold crossing (EMPTY at 0%, LOW at ≤10%). Called in poll_once() for both printers. |
 | S9-4 | **A3 printing** | Test A3 job end-to-end (bot → quote → print) |
 | S9-5 | ~~**Receipt printer**~~ 🗑️ | RETIRED 2026-05-12 — hardware never purchased, stub returned "not configured" on every call. See `retired/2026-05-12-graveyard/receipt_printer.py` for code + revival path. |
-| S9-6 | **Epson per-job mono/colour tracking** ⏳ | Re-scoped to **Epson EM-C8100** (at binding store, opening 2026-07-02). WF-C21000 retired 2026-06-20. Blocked until EM-C8100 is installed and LAN IP assigned. Prior work: (a) ✅ delta dedup on Supabase; (b) ✅ `source='spec'` rows on Epson dispatch in print_server.py. Remaining: (c) ⏳ binding store PC deploy; (d) ⏳ admin-UI spec ↔ weblog reconciliation. |
+| S9-6 | **Epson per-job mono/colour tracking** ⏳ | Re-scoped to **Epson EM-C8100** (OSP unit — replaces WF-C21000 retired 2026-06-20). Blocked until OSP EM-C8100 is installed and LAN IP assigned. Prior work: (a) ✅ delta dedup on Supabase; (b) ✅ `source='spec'` rows on Epson dispatch in print_server.py. Remaining: (c) ⏳ store-PC redeploy after new printer install; (d) ⏳ admin-UI spec ↔ weblog reconciliation. Note: binding store gets its own separate EM-C8100 (see S11-4). |
 
 ---
 
