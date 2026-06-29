@@ -45,7 +45,7 @@ Storage bucket: `academic-outputs` (public)
 | `rate_card.py` | Pricing: paper × sides × layout × copies × finishing |
 | `razorpay_integration.py` | Creates payment links; verifies Razorpay webhook sigs |
 | `supabase_sync.py` | Background thread; upserts jobs + counters every 5 min |
-| `printer_poller.py` | SNMP/HTTP poll: Konica `192.168.55.110`, Epson `192.168.55.202` |
+| `printer_poller.py` | SNMP/HTTP poll: Konica `192.168.55.110`, Epson `192.168.55.202` (**RETIRED 2026-06-20** — Epson WF-C21000 decommissioned; replacement Epson EM-C8100 not yet installed) |
 | `konica_jobs_fetcher.py` | Pulls CSV job log from Konica web admin |
 | `session_timeout.py` | Flags idle WhatsApp sessions; sends staff alerts |
 | `b2b_manager.py` | B2B credit accounts, per-client discounts, monthly invoice PDF |

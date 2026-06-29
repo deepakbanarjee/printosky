@@ -57,7 +57,7 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 | S9-3 | ~~**Epson ink alerts**~~ ✅ | `_send_ink_alerts()` in printer_poller.py:434. Fires on threshold crossing (EMPTY at 0%, LOW at ≤10%). Called in poll_once() for both printers. |
 | S9-4 | **A3 printing** | Test A3 job end-to-end (bot → quote → print) |
 | S9-5 | ~~**Receipt printer**~~ 🗑️ | RETIRED 2026-05-12 — hardware never purchased, stub returned "not configured" on every call. See `retired/2026-05-12-graveyard/receipt_printer.py` for code + revival path. |
-| S9-6 | **Epson per-job mono/colour tracking** ⏳ | Partial: (a) ✅ delta dedup applied to Supabase (173k → 187 rows, partial unique index added); (b) ✅ new `source='spec'` rows written by print_server.py on Epson dispatch — captures mono/colour/copies/paper from spec, committed 5b50a93. (c) ⏳ store-PC redeploy pending. (d) ⏳ admin-UI report showing spec ↔ weblog reconciliation. |
+| S9-6 | **Epson per-job mono/colour tracking** ⏳ | Re-scoped to **Epson EM-C8100** (at binding store, opening 2026-07-02). WF-C21000 retired 2026-06-20. Blocked until EM-C8100 is installed and LAN IP assigned. Prior work: (a) ✅ delta dedup on Supabase; (b) ✅ `source='spec'` rows on Epson dispatch in print_server.py. Remaining: (c) ⏳ binding store PC deploy; (d) ⏳ admin-UI spec ↔ weblog reconciliation. |
 
 ---
 
@@ -83,7 +83,7 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 | S11-1 | **Cloud hosting for WhatsApp bot** | Bot goes offline when PC is off. Options: Hostinger VPS Rs.350/mo, Hetzner CX22 €4/mo, DigitalOcean $6/mo |
 | S11-2 | **PM2 for Node process** | Replace manual CMD window start with PM2 for auto-restart on crash |
 | S11-3 | **Job Centro DB** | Investigate silent auto-export of Konica job logs from Job Centro local DB |
-| S11-4 | **Second store setup** | Multi-store architecture. Each store needs own PC + tunnel + Supabase store_id |
+| S11-4 | **Binding store setup** ⏳ | Binding store opens 2026-07-02. Needs own PC + Cloudflare tunnel + Supabase store_id. **Blocked** until computers are installed on-site. Multi-store architecture already in place (`store_config.json` per PC). |
 | S11-5 | **Netlify OXYGEN team credit** | Monitor plan limit. Upgrade if needed or keep deploying via personal account |
 
 ---
