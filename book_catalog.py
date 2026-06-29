@@ -231,15 +231,12 @@ def parse_anu_order(text: str) -> dict | None:
     }
 
 
-def _is_complete_uniform_set(items: dict[str, int]) -> int:
-    """If items are all three books at the same qty N (N>=1), return N; else 0."""
+def _complete_set_count(items: dict[str, int]) -> int:
+    """Return how many complete sets (one of each book) can be formed from items."""
     present = {k: q for k, q in items.items() if q and q > 0}
     if set(present.keys()) != set(BOOK_KEYS):
         return 0
-    qtys = set(present.values())
-    if len(qtys) == 1:
-        return qtys.pop()
-    return 0
+    return min(present.values())
 
 
 def compute_totals(items: dict[str, int]) -> dict:
@@ -251,9 +248,11 @@ def compute_totals(items: dict[str, int]) -> dict:
     """
     clean = {k: int(q) for k, q in items.items() if q and int(q) > 0}
 
-    sets = _is_complete_uniform_set(clean)
+    sets = _complete_set_count(clean)
     if sets:
         books_total = SET_PRICE * sets
+        remainder = {k: q - sets for k, q in clean.items() if k in BOOKS and q - sets > 0}
+        books_total += sum(BOOKS[k]["price"] * q for k, q in remainder.items())
     else:
         books_total = sum(BOOKS[k]["price"] * q for k, q in clean.items() if k in BOOKS)
 

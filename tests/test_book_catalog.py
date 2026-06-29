@@ -103,11 +103,17 @@ def test_courier_bulk_discount_applies_at_5_books():
 
 
 @pytest.mark.unit
-def test_totals_all_three_uneven_qty_is_individual():
-    # All three present but not uniform → individual pricing, no set.
+def test_totals_all_three_uneven_qty_partial_set():
+    # All three present, unequal qty → extract min() sets, price remainder individually.
+    # 2ML+1HI+1EN: 1 complete set (549) + 1 extra ML (200) = 749
     t = bc.compute_totals({"malayalam": 2, "hindi": 1, "english": 1})
-    assert t["books_total"] == 750.0      # 400 + 150 + 200
-    assert t["is_set"] is False
+    assert t["books_total"] == 749.0
+    assert t["is_set"] is True
+
+    # 3ML+2HI+2EN: 2 sets (1098) + 1 extra ML (200) = 1298
+    t2 = bc.compute_totals({"malayalam": 3, "hindi": 2, "english": 2})
+    assert t2["books_total"] == 1298.0
+    assert t2["is_set"] is True
 
 
 @pytest.mark.unit
