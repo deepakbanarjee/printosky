@@ -1,4 +1,4 @@
-"""Admin-dashboard HTTP handlers — extracted from api/index.py.
+﻿"""Admin-dashboard HTTP handlers — extracted from api/index.py.
 
 Backs the /admin/* endpoints: conversations/threads, operator queue,
 book-order ops (list/confirm/dispatch/deliver/create/edit/settle-divya),
@@ -489,7 +489,7 @@ def _handle_admin_book_order_dispatch(h, body, order_code: str) -> None:
                 extra += f"\nTracking: {tracking}"
             if order.get("phone"):
                 _send(order["phone"], f"📦 *Order dispatched!*\nOrder: {order_code}"
-                                      f"{extra}\n\nYour Xtraa books are on the way. 🙏")
+                                      f"{extra}\n\nYour books are on the way. 🙏")
         except Exception:
             pass
         _json_response(h, 200, {"ok": True})
@@ -715,7 +715,7 @@ def _handle_admin_dispatch_sheet(h) -> None:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Dispatch Sheet &mdash; Xtraa by Printosky</title>
+<title>Dispatch Sheet &mdash; Printosky</title>
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
   body{{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:16px}}
@@ -753,7 +753,7 @@ def _handle_admin_dispatch_sheet(h) -> None:
     Print this sheet
   </button>
 </div>
-<h1>Xtraa &mdash; Dispatch Sheet</h1>
+<h1>Dispatch Sheet</h1>
 <p class="meta">Generated: {generated} &nbsp;|&nbsp; Confirmed, undispatched orders only</p>
 {pick_section}
 <div class="slips">{slips_html}</div>

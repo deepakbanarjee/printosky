@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""Branded Xtraa courier-slip HTML for the admin dispatch flow.
+﻿# -*- coding: utf-8 -*-
+"""Branded courier-slip HTML for the admin dispatch flow.
 
 Server-side port of tools/gen_despatch_slips.py: A4-landscape, one order/page,
 left = cut-out courier slip (FROM / TO / contents / courier + AWB), right = the
@@ -74,7 +74,7 @@ def _slip(order: dict) -> str:
         '<div class="slip"><div class="left">'
         '<div class="hdr"><div class="logo">'
         f'<span class="plaque"><img src="{LOGO_URL}" alt="Printosky"></span></div>'
-        '<div class="doc"><div class="dt">DESPATCH SLIP &mdash; Xtraa Books</div>'
+        '<div class="doc"><div class="dt">DESPATCH SLIP &mdash; Printosky Books</div>'
         f'<div class="code">{_html.escape(code)}</div></div></div>'
         '<div class="body"><div class="lbl">FROM</div>'
         '<div class="from">Printosky<br>Thriprayar<br>Thrissur, Kerala - 680567'
@@ -156,7 +156,7 @@ def build_courier_slips(orders: list, generated: str = "") -> str:
         body = bar + "\n".join(_slip(o) for o in orders)
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
-        '<title>Xtraa Courier Slips</title>'
+        '<title>Printosky Courier Slips</title>'
         '<link rel="preconnect" href="https://fonts.googleapis.com">'
         '<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700'
         '&display=swap" rel="stylesheet">'

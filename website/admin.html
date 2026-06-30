@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <!-- printosky-favicons -->
@@ -1554,7 +1554,7 @@
   <!-- ── Operator Queue Tab (P0 Day 2.5) ── -->
   <div id="book-orders-tab" style="display:none">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-size:.85rem;color:var(--muted)">Xtraa book orders · confirm payment after checking your UPI app</div>
+      <div style="font-size:.85rem;color:var(--muted)">book orders · confirm payment after checking your UPI app</div>
       <div style="display:flex;gap:8px;align-items:center">
         <select id="book-status-filter" onchange="loadBookOrders()" style="padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:.85rem">
           <option value="payment_review" selected>Awaiting confirmation</option>
@@ -1602,7 +1602,7 @@
         </select>
         <select id="wi-delivery" style="padding:7px;border:1px solid #ccc;border-radius:6px" title="Delivery method (ignored when handed over in-store)" onchange="updateWiPreview()">
           <option value="courier">Courier (weight-based)</option>
-          <option value="xtraa_office">Drop at Xtraa office (no courier)</option>
+          <option value="xtraa_office">Office pickup (no courier)</option>
         </select>
         <label style="display:flex;gap:8px;align-items:center"><input id="wi-handed" type="checkbox" onchange="onWiHanded()"> Handed over now (in-store — no courier)</label>
       </div>
@@ -1667,7 +1667,7 @@
         </select>
         <select id="edit-delivery" style="padding:7px;border:1px solid #ccc;border-radius:6px" onchange="updateEditPreview()">
           <option value="courier">Courier (weight-based)</option>
-          <option value="xtraa_office">Xtraa office (no courier)</option>
+          <option value="xtraa_office">Office pickup (no courier)</option>
         </select>
       </div>
       <div id="edit-preview" style="display:none;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;font-size:.85rem;margin-top:4px"></div>
@@ -4708,7 +4708,7 @@ function _fmtDeadline(deadlineIso) {
     : `<span style="color:${mins < 60 ? '#b91c1c' : 'inherit'}">${label} left</span>`;
 }
 
-// ── Book Orders (Xtraa campaign) ─────────────────────────────────────────────
+// ── Book Orders ─────────────────────────────────────────────
 let _bookOrdersCache = [];
 
 // Fire the abandoned-cart reminder sweep on demand. One-time nudge per cart,
@@ -4869,7 +4869,7 @@ function renderBookOrders(rows) {
     const collLabel = { oxygen: 'we collected', divya: 'Divya collected', pending: 'payment pending' }[o.payment_collected_by] || (o.payment_collected_by || '');
     const commLine = (o.via_divya === false)
       ? ''
-      : `<div style="font-size:.78rem;color:#92400e;margin-top:3px">🏷️ Divya commission <strong>₹${o.commission || 0}</strong>${collLabel ? ' · ' + collLabel : ''}${o.divya_settled ? ' · <span style="color:#15803d">✓ settled</span>' : ''}${o.delivery_method === 'xtraa_office' ? ' · 🏫 Xtraa office' : ''}</div>`;
+      : `<div style="font-size:.78rem;color:#92400e;margin-top:3px">🏷️ Divya commission <strong>₹${o.commission || 0}</strong>${collLabel ? ' · ' + collLabel : ''}${o.divya_settled ? ' · <span style="color:#15803d">✓ settled</span>' : ''}${o.delivery_method === 'xtraa_office' ? ' · 🏫 Office pickup' : ''}</div>`;
     const payTag = o.payment_mode ? `<span style="color:#888;font-size:.7rem;margin-left:6px">${(o.payment_mode||'').toUpperCase()}</span>` : '';
     const shipInfo = (o.courier_name || o.tracking_no)
       ? `<div style="font-size:.78rem;color:#555;margin-top:2px">🚚 ${(o.courier_name || '')}${o.tracking_no ? ' · ' + o.tracking_no : ''}</div>` : '';
@@ -5335,7 +5335,7 @@ function openBookOrderDetail(code) {
           ${o.divya_settled
             ? `<span style="color:#15803d">✓ Settled</span>`
             : `<span style="color:#d97706">Unsettled</span>`}
-          ${o.delivery_method === 'xtraa_office' ? ' · 🏫 Xtraa office delivery' : ''}
+          ${o.delivery_method === 'xtraa_office' ? ' · 🏫 Office pickup delivery' : ''}
         </div>
       </div>` : ''}
       <div>

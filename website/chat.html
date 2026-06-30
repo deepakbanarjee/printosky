@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <!-- printosky-favicons -->
@@ -503,6 +503,7 @@ async function doLogin() {
     if (r.status === 401 || r.status === 403) { err.textContent = 'Wrong password.'; return; }
     if (!r.ok) { err.textContent = `Server error ${r.status}`; return; }
     _pw = pw;
+    localStorage.setItem('chat_pw', pw);
     document.getElementById('login').style.display = 'none';
     const app = document.getElementById('app'); app.style.display = 'flex';
     renderContacts(await r.json());
@@ -908,7 +909,11 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ── BOOT ───────────────────────────────────────────────────── */
-document.getElementById('pw-input').focus();
+(function() {
+  const saved = localStorage.getItem('chat_pw');
+  if (saved) { document.getElementById('pw-input').value = saved; doLogin(); }
+  else { document.getElementById('pw-input').focus(); }
+})();
 </script>
 </body>
 </html>

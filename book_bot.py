@@ -1,4 +1,4 @@
-"""Xtraa book campaign — WhatsApp conversational order flow (button-driven).
+﻿"""Book campaign — WhatsApp conversational order flow (button-driven).
 
 Cloud-only (runs in the Vercel webhook). Order data lives in the `book_orders`
 table; the `bot_sessions.step` column drives state (book_* steps). Pure pricing
@@ -72,7 +72,7 @@ _QR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 # Staff member who verifies UPI payments. Payment screenshots are forwarded here;
 # she taps Confirm/Reject. International format, no '+'.
-# Anu is ALSO the Xtraa/Divya order forwarder — she sends new orders here using
+# Anu is ALSO the Divya order forwarder — she sends new orders here using
 # the ORDER template below (see _handle_anu_order / book_catalog.parse_anu_order).
 VERIFIER_PHONE = os.environ.get("PAYMENT_VERIFIER_PHONE", "919072034907")
 
@@ -252,12 +252,12 @@ def _send_select_list(phone: str, edit: bool = False) -> None:
         body = ("പുസ്തകം വീണ്ടും തിരഞ്ഞെടുക്കുക (ഒന്ന്, ജോഡി, അല്ലെങ്കിൽ മൂന്നും).\n"
                 "Pick your books again (single, a pair, or all three).")
     else:
-        body = ("📚 *Xtraa*\n"
+        body = ("📚 *Books*\n"
                 "മലയാളം, English & हिंदी ഭാഷകളുടെ അടിസ്ഥാനം ഉറപ്പാക്കുന്നതിനായി ഇതാ 3 പുസ്തകങ്ങൾ.\n\n"
                 "വേണ്ട പുസ്തകം തിരഞ്ഞെടുക്കുക (ഒന്ന്, രണ്ട് അല്ലെങ്കിൽ മൂന്നും).\n"
                 "Pick the books you want (one, two, or all three).\n\n"
                 "_+ ഭാരം അനുസരിച്ച് കൊറിയർ ചാർജ് (₹75 മുതൽ)._")
-    _send_list(phone, body, "📚 തിരഞ്ഞെടുക്കൂ", rows, header="Xtraa Books")
+    _send_list(phone, body, "📚 തിരഞ്ഞെടുക്കൂ", rows, header="Books")
 
 
 def _send_qty_buttons(phone: str, label: str) -> None:
@@ -540,9 +540,9 @@ def _start(phone: str, name: str | None, force_new: bool = False) -> list[str]:
 
 
 def start_catalog(phone: str, name: str | None = None) -> list[str]:
-    """Open the Xtraa book catalog unconditionally.
+    """Open the books catalog unconditionally.
 
-    Public seam for the router's xtraa-only default: when an idle customer's
+    Public seam for the router's books-only default: when an idle customer's
     message isn't claimed by a more specific handler (vendor, help, notes,
     credits, tracking, website order, or an active book step) it lands here and
     the catalog is opened instead of the old generic welcome/print menu. The
@@ -874,8 +874,8 @@ def _handle_post_order_ask(phone: str, text: str, name: str | None) -> list[str]
             _dbc.clear_session(DB, phone)
         except Exception:
             pass
-        _send_text(phone, "*Printosky × Xtraa* തിരഞ്ഞെടുത്തതിന് നന്ദി! 🙏 നല്ലൊരു ദിവസം. 📚\n"
-                          "Thank you for shopping with Printosky × Xtraa!")
+        _send_text(phone, "*Printosky* തിരഞ്ഞെടുത്തതിന് നന്ദി! 🙏 നല്ലൊരു ദിവസം. 📚\n"
+                          "Thank you for shopping with Printosky!")
         return []
     if t == "po_yes" or t in _AFFIRM:
         # Start from the top: clear state and show the general help menu.
@@ -885,7 +885,7 @@ def _handle_post_order_ask(phone: str, text: str, name: str | None) -> list[str]
             pass
         _send_text(phone, "👍 *എങ്ങനെ സഹായിക്കാം? / How can we help?*\n\n"
                           "📄 *പ്രിന്റൗട്ട് / Printouts* — PDF/ഡോക്യുമെന്റ് ഇവിടെ അയക്കൂ.\n"
-                          "📚 *Xtraa പുസ്തകങ്ങൾ / books* — *books* എന്ന് റിപ്ലൈ ചെയ്യൂ.\n"
+                          "📚 *പുസ്തകങ്ങൾ / books* — *books* എന്ന് റിപ്ലൈ ചെയ്യൂ.\n"
                           "🧑‍💼 *സ്റ്റാഫുമായി സംസാരിക്കാൻ / staff* — *agent* എന്ന് റിപ്ലൈ ചെയ്യൂ.")
         return []
     _send_buttons(phone, "മറ്റെന്തെങ്കിലും? *വേണം* അല്ലെങ്കിൽ *വേണ്ട* ടാപ്പ് ചെയ്യൂ.\n"
@@ -1145,7 +1145,7 @@ def _abandoned_message(order: dict) -> str:
         amt_ml = f" — ₹{total:.0f}" if total else ""
         amt_en = f" of ₹{total:.0f}" if total else ""
         return (
-            "നമസ്കാരം 👋 നിങ്ങളുടെ Xtraa പുസ്തക ഓർഡർ പേയ്മെന്റ് ബാക്കിയുണ്ട്" + amt_ml + ".\n"
+            "നമസ്കാരം 👋 നിങ്ങളുടെ പുസ്തക ഓർഡർ പേയ്മെന്റ് ബാക്കിയുണ്ട്" + amt_ml + ".\n"
             "പേയ്മെന്റ് QR വീണ്ടും വേണമെങ്കിൽ *PAY* എന്ന് റിപ്ലൈ ചെയ്യൂ. 🙏\n\n"
             "Your order has a pending payment" + amt_en + ". "
             "Reply *PAY* and we'll resend the payment QR to finish. 🙏"
@@ -1157,7 +1157,7 @@ def _abandoned_message(order: dict) -> str:
         cart = ", ".join(f"{bc.BOOKS[k]['label'].split(' (')[0]} × {q}" for k, q in have)
         line = f"\n\n🛒 In your cart: {cart}"
     return (
-        "👋 *Did you still want the Xtraa books?*\n"
+        "👋 *Did you still want the books?*\n"
         "നിങ്ങൾ ഓർഡർ തുടങ്ങിയിരുന്നു, പക്ഷേ പൂർത്തിയാക്കിയില്ല.\n"
         "You started an order but didn't finish it." + line +
         "\n\nReply *books* to continue — it only takes a minute! 🙏\n"
@@ -1335,6 +1335,7 @@ def _handle_anu_order(parsed: dict) -> None:
     courier = 0.0 if deliv == "xtraa_office" else totals["courier"]
     grand   = totals["books_total"] + courier
     commission = bc.commission_for(items)
+    pradeep_commission = bc.pradeep_commission_for(items)
 
     from datetime import datetime
     code = f"XTR-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
@@ -1342,7 +1343,8 @@ def _handle_anu_order(parsed: dict) -> None:
         code, parsed["name"], parsed["phone"], parsed["address"], items,
         totals["books_total"], courier, grand,
         payment_mode="", status="confirmed",
-        commission=commission, payment_collected_by=parsed["payment_collected_by"],
+        commission=commission, pradeep_commission=pradeep_commission,
+        payment_collected_by=parsed["payment_collected_by"],
         delivery_method=deliv, via_divya=True, source="divya",
     )
     if not row:
@@ -1353,7 +1355,7 @@ def _handle_anu_order(parsed: dict) -> None:
                  "oxygen":  "Oxygen collected",
                  "pending": "Pending (we collect)"}.get(parsed["payment_collected_by"],
                                                         parsed["payment_collected_by"])
-    deliv_label = "Xtraa office" if deliv == "xtraa_office" else "Courier"
+    deliv_label = "Office pickup" if deliv == "xtraa_office" else "Courier"
     summary = (
         f"✅ *Order saved & queued:* {code}\n"
         f"{parsed['name']} · +{parsed['phone']}\n"
@@ -1383,7 +1385,7 @@ def _divya_summary(code, name, phone, items, courier, grand, commission,
                    payment_collected_by, delivery_method) -> str:
     pay_label = {"divya": "Divya collected", "oxygen": "Oxygen collected",
                  "pending": "Pending (we collect)"}.get(payment_collected_by, payment_collected_by)
-    deliv_label = "Xtraa office" if delivery_method == "xtraa_office" else "Courier"
+    deliv_label = "Office pickup" if delivery_method == "xtraa_office" else "Courier"
     books_total = grand - courier
     return (
         f"✅ *Order saved & queued:* {code}\n"
@@ -1406,9 +1408,11 @@ def _create_divya_confirmed(code, name, phone, address, items,
     courier = 0.0 if delivery_method == "xtraa_office" else totals["courier"]
     grand   = totals["books_total"] + courier
     commission = bc.commission_for(items)
+    pradeep_commission = bc.pradeep_commission_for(items)
     row = _dbc.create_walk_in_order(
         code, name, phone, address, items, totals["books_total"], courier, grand,
         payment_mode="", status="confirmed", commission=commission,
+        pradeep_commission=pradeep_commission,
         payment_collected_by=payment_collected_by, delivery_method=delivery_method,
         via_divya=True, source="divya",
     )
@@ -1632,6 +1636,7 @@ def _handle_anu_freeform(text: str) -> None:
     courier    = totals["courier"]
     grand      = totals["books_total"] + courier
     commission = bc.commission_for(o["items"])
+    pradeep_commission = bc.pradeep_commission_for(o["items"])
     _send_buttons(
         VERIFIER_PHONE,
         "📋 *Confirm this order?*\n"
@@ -1639,7 +1644,7 @@ def _handle_anu_freeform(text: str) -> None:
         f"{o['address'] or '—'}\n"
         f"{_cart_line(o['items'])}\n"
         f"Books ₹{totals['books_total']:.0f} + Courier ₹{courier:.0f} = *₹{grand:.0f}*\n"
-        f"Divya commission: ₹{commission:.0f}",
+        f"Divya commission (ML): ₹{commission:.0f} | Pradeep (HI+EN): ₹{pradeep_commission:.0f}",
         [("aok", "✅ Confirm & print"), ("axx", "❌ Cancel")],
     )
 
@@ -1864,13 +1869,15 @@ def confirm_book_order(order_code: str) -> dict:
     from datetime import datetime, timezone
     items = order.get("items") or {}
     confirm_fields = {
-        "status":       "confirmed",
-        "commission":   bc.commission_for(items),
-        "confirmed_at": datetime.now(timezone.utc).isoformat(),
+        "status":              "confirmed",
+        "commission":          bc.commission_for(items),
+        "pradeep_commission":  bc.pradeep_commission_for(items),
+        "confirmed_at":        datetime.now(timezone.utc).isoformat(),
     }
     # Hard rule: Divya's own order is courier-free + commission-free.
     if bc.is_divya_phone(order.get("phone")):
-        confirm_fields.update(commission=0.0, via_divya=False, courier=0.0,
+        confirm_fields.update(commission=0.0, pradeep_commission=0.0,
+                              via_divya=False, courier=0.0,
                               grand_total=order.get("books_total") or 0.0)
     ok = _dbc.update_book_order(order_code, **confirm_fields)
 
@@ -1899,6 +1906,6 @@ def confirm_book_order(order_code: str) -> dict:
         f"Order: *{order_code}*\n"
         f"Amount: ₹{totals['grand_total']:.0f}\n\n"
         "Your books will be couriered to the address you shared. "
-        "Thank you for ordering from Printosky × Xtraa! 📚",
+        "Thank you for ordering from Printosky! 📚",
     )
     return {"ok": True, "order": fresh}

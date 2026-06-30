@@ -1,4 +1,4 @@
-"""
+﻿"""
 PRINTOSKY — Vercel Python Serverless Webhook
 =============================================
 Handles:
@@ -755,7 +755,7 @@ WELCOME_MESSAGE = (
     "Happy to help — what do you need today?\n\n"
     "📄 *Printouts / photocopies* — just send your PDF or document here and "
     "we'll quote you instantly.\n"
-    "📚 *Xtraa books* — reply *BOOKS* to order the Adithara Balappeduthu set.\n"
+    "📚 *Books* — reply *BOOKS* to order the Adithara Balappeduthu set.\n"
     "📝 *Sell your notes* — upload at printosky.com/account and earn store "
     "credit every time someone prints them.\n"
     "🎁 *Refer & earn ₹20* — grab your share link at printosky.com/account; "
@@ -770,7 +770,7 @@ GREETING_MESSAGE = (
     "🙏 *Hi! How can we help you today?*\n\n"
     "📄 *Printouts / photocopies* — send your PDF or document here and we'll "
     "quote you instantly.\n"
-    "📚 *Xtraa books* — reply *BOOKS*.\n"
+    "📚 *Books* — reply *BOOKS*.\n"
     "📝 *Sell your notes & 🎁 refer friends* — earn store credit at "
     "printosky.com/account.\n"
     "🧑‍💼 *Talk to staff* — reply *AGENT*.\n\n"
@@ -823,6 +823,23 @@ def _alert_ops(summary: str, fallback: str) -> bool:
     from whatsapp_notify import send_ops_alert
     when = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %H:%M IST")
     return send_ops_alert(_alert_phone(), summary, when, fallback=fallback)
+
+
+def _alert_new_inbound(sender: str, name: str, preview: str) -> None:
+    """Alert staff on WhatsApp when a customer message arrives with no recent bot reply.
+
+    Skips the alert if the bot replied in the last 5 minutes to avoid spam
+    during active bot-handled conversations. Best-effort; never raises."""
+    try:
+        from db_cloud import has_recent_outbound
+        if has_recent_outbound(sender, minutes=5):
+            return
+        display = name or sender
+        short = (preview or "")[:80]
+        msg = f"💬 *New message*\n\n*{display}*: {short}"
+        send_staff_alert(msg)
+    except Exception as exc:
+        logger.warning(f"_alert_new_inbound({sender}) failed: {exc}")
 
 
 def _session_is_stale(session: dict) -> bool:
@@ -982,7 +999,7 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     except Exception as e:
         logger.error(f"Stale-session pre-clear error for {sender}: {e}")
 
-    # ── Xtraa book campaign: separate flow + book_orders table ────────────────
+    # ── book campaign: separate flow + book_orders table ────────────────
     # Runs before the print state machine. Only takes over when the customer is
     # mid book-order or explicitly enquires about books (never mid print-job).
     try:
@@ -1066,7 +1083,7 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
         if (not _step) or _session_is_stale(_session):
             customer_is_idle = True
             customer_is_new = is_new_contact(sender)
-            # ── Xtraa-only line: default any idle customer into the book catalog
+            # ── books-only line: default any idle customer into the book catalog
             # instead of the old generic welcome/print menu. Every more specific
             # intent (vendor, help, notes, credits, referral, tracking, website
             # order, an active book step) was already claimed above; whatever
@@ -1443,6 +1460,7 @@ def _process_meta_webhook(data: dict) -> None:
                             upsert_contact(sender, name=pushname)
                         except Exception:
                             pass
+                        _alert_new_inbound(sender, pushname, text)
 
                 elif msg_type in ("document", "image"):
                     blk      = msg.get(msg_type, {})
@@ -2550,7 +2568,7 @@ class handler(BaseHTTPRequestHandler):
             _handle_admin_health_models(self)
             return
 
-        # ── Xtraa book orders ────────────────────────────────────────────────
+        # ── book orders ────────────────────────────────────────────────
         # Exact path (+ optional query) only, so a GET to a sub-route like
         # /admin/book-orders/<code>/confirm is not swallowed by the list handler.
         if self.path == "/admin/book-orders" or self.path.startswith("/admin/book-orders?"):
@@ -2801,17 +2819,17 @@ class handler(BaseHTTPRequestHandler):
             _handle_admin_operator_queue_deliver(self, body, _opq_deliver.group(1))
             return
 
-        # ── Xtraa book order: staff start the bilingual order flow ───────────
+        # ── book order: staff start the bilingual order flow ───────────
         if self.path == "/admin/book-orders/start":
             _handle_admin_start_book_order(self, body)
             return
 
-        # ── Xtraa book carts: staff fire the abandoned-cart reminder sweep ───
+        # ── book carts: staff fire the abandoned-cart reminder sweep ───
         if self.path == "/admin/run-cart-nudge":
             _handle_admin_run_cart_nudge(self, body)
             return
 
-        # ── Xtraa book order: owner confirms payment ─────────────────────────
+        # ── book order: owner confirms payment ─────────────────────────
         if self.path == "/admin/book-orders/create":
             _handle_admin_book_order_create(self, body)
             return

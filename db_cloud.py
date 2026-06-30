@@ -1,4 +1,4 @@
-"""
+﻿"""
 PRINTOSKY CLOUD DB ADAPTER
 ===========================
 Supabase backend for whatsapp_bot.py and webhook_receiver.py.
@@ -394,6 +394,27 @@ def log_message(phone: str, direction: str, body: str,
         }).execute()
     except Exception as e:
         logger.warning(f"log_message error ({direction} {phone}): {e}")
+
+
+def has_recent_outbound(phone: str, minutes: int = 5) -> bool:
+    """True if there is an outbound message for this phone in the last N minutes.
+    Used to suppress redundant inbound alerts when the bot is actively replying."""
+    try:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+        res = (
+            _client()
+            .table("conversation_log")
+            .select("id", count="exact")
+            .eq("phone", phone)
+            .eq("direction", "outbound")
+            .gte("created_at", cutoff)
+            .limit(1)
+            .execute()
+        )
+        return (res.count or 0) > 0
+    except Exception:
+        return False
 
 
 # ── WhatsApp (Meta) per-message cost tracking ─────────────────────────────────
@@ -1370,7 +1391,7 @@ def search_contacts(q: str, limit: int = 30) -> list:
     return out
 
 
-# ── book_orders (Xtraa book campaign) ─────────────────────────────────────────
+# ── book_orders (book campaign) ─────────────────────────────────────────
 
 # Statuses considered "in progress" — a new enquiry resumes/uses these rather
 # than starting a fresh order. confirmed/cancelled are terminal.
@@ -1423,7 +1444,7 @@ def create_book_order(order_code: str, phone: str, name: str | None = None,
     """Insert a new 'collecting' book order. Returns the created row, or {}.
 
     `source` records where the order originated so books can be distinguished
-    from other channels later: 'whatsapp' (conversational Xtraa flow),
+    from other channels later: 'whatsapp' (conversational book flow),
     'website' (checkout form pasted in), alongside 'walk_in' / 'divya' from the
     manual-entry path.
     """
@@ -1497,6 +1518,7 @@ def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
                          books_total: float, courier: float, grand_total: float,
                          payment_mode: str, status: str,
                          commission: float = 0.0,
+                         pradeep_commission: float = 0.0,
                          payment_collected_by: str = "oxygen",
                          delivery_method: str = "courier",
                          via_divya: bool = True,
@@ -1504,8 +1526,9 @@ def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
     """Insert a manually-created book order (walk-in / in-store, or Divya-via-Anu).
 
     Returns the inserted row. `source` distinguishes 'walk_in' from 'divya'.
-    `commission` is the ₹50/book owed to Divya teacher; `payment_collected_by`
-    is 'oxygen' | 'divya' | 'pending' and drives the settlement ledger.
+    `commission` is Divya's ₹50/Malayalam-book share; `pradeep_commission` is
+    Pradeep sir's ₹50/Hindi-or-English-book share. `payment_collected_by` is
+    'oxygen' | 'divya' | 'pending' and drives the settlement ledger.
     """
     # Hard rule (single source of truth: book_catalog.is_divya_phone): Divya's own
     # order is courier-free + commission-free — she pays the book cost alone and
@@ -1515,6 +1538,7 @@ def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
         courier = 0.0
         grand_total = books_total
         commission = 0.0
+        pradeep_commission = 0.0
         via_divya = False
     now = datetime.now(timezone.utc).isoformat()
     row = {
@@ -1530,7 +1554,8 @@ def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
         "status":       status,
         "payment_mode": payment_mode,
         "source":       source,
-        "commission":   commission,
+        "commission":          commission,
+        "pradeep_commission":  pradeep_commission,
         "payment_collected_by": payment_collected_by,
         "delivery_method":      delivery_method,
         "via_divya":    via_divya,
@@ -1632,6 +1657,74 @@ def divya_ledger(include_settled: bool = False,
         "net":               divya_owes - oxygen_owes,
         "orders":            orders,
         "unsettled":         unsettled,
+    }
+
+
+def pradeep_ledger(date_from: str | None = None,
+                   date_to: str | None = None) -> dict:
+    """Aggregate Pradeep sir's commission ledger (₹50 per Hindi/English book sold).
+
+    Mirrors divya_ledger structure. `commission` here means pradeep_commission.
+    Settlement direction: payment_collected_by='divya' → Divya owes Pradeep;
+    'oxygen'/'pending' → Oxygen owes Pradeep.
+    """
+    empty = {"total_orders": 0, "total_books": 0, "total_commission": 0.0,
+             "oxygen_owes_pradeep": 0.0, "divya_owes_pradeep": 0.0, "net": 0.0,
+             "orders": []}
+    try:
+        q = (
+            _client().table("book_orders")
+            .select("order_code,name,items,grand_total,pradeep_commission,"
+                    "payment_collected_by,status,created_at")
+            .eq("via_divya", True)
+            .in_("status", list(DIVYA_LEDGER_STATUSES))
+            .gt("pradeep_commission", 0)
+        )
+        if date_from:
+            q = q.gte("created_at", date_from)
+        if date_to:
+            q = q.lt("created_at", date_to)
+        rows = q.order("created_at", desc=True).execute().data or []
+    except Exception as exc:
+        logger.error("pradeep_ledger error: %s", exc)
+        return empty
+
+    total_books = total_commission = 0
+    oxygen_owes = divya_owes = 0.0
+    orders = []
+    for r in rows:
+        comm = float(r.get("pradeep_commission") or 0)
+        gt = float(r.get("grand_total") or 0)
+        items = r.get("items") or {}
+        books = int(items.get("hindi") or 0) + int(items.get("english") or 0)
+        total_books += books
+        total_commission += comm
+        collected = r.get("payment_collected_by") or "oxygen"
+        if collected == "divya":
+            amount, direction = comm, "divya_owes_pradeep"
+            divya_owes += amount
+        else:
+            amount, direction = comm, "oxygen_owes_pradeep"
+            oxygen_owes += amount
+        orders.append({
+            "order_code":   r.get("order_code"),
+            "name":         r.get("name"),
+            "books":        books,
+            "grand_total":  gt,
+            "commission":   comm,
+            "collected_by": collected,
+            "direction":    direction,
+            "amount":       amount,
+            "created_at":   r.get("created_at"),
+        })
+    return {
+        "total_orders":        len(rows),
+        "total_books":         total_books,
+        "total_commission":    float(total_commission),
+        "oxygen_owes_pradeep": oxygen_owes,
+        "divya_owes_pradeep":  divya_owes,
+        "net":                 divya_owes - oxygen_owes,
+        "orders":              orders,
     }
 
 

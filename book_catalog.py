@@ -1,4 +1,4 @@
-"""Xtraa book campaign — catalog data and pure order logic.
+﻿"""Book campaign — catalog data and pure order logic.
 
 This module holds NO I/O. Everything here is pure and unit-tested so the
 conversational flow in book_bot.py can stay thin. Edit BOOKS / SET_PRICE / courier constants below to change pricing — nothing else needs to change.
@@ -55,7 +55,7 @@ def courier_charge(items: dict[str, int]) -> float:
         base *= (1 - _BULK_COURIER_DISCOUNT)
     return float(round(base))
 
-# Divya teacher (Xtraa coordinator) earns a flat commission per physical book
+# Divya teacher (coordinator) earns a flat commission per physical book
 # sold. Applies to every book order; courier is excluded. CRITICAL: this figure
 # drives the settlement ledger — change it here and nowhere else.
 COMMISSION_PER_BOOK = 50
@@ -272,12 +272,17 @@ def total_book_count(items: dict[str, int]) -> int:
 
 
 def commission_for(items: dict[str, int]) -> float:
-    """Divya teacher's commission for a cart: ₹50 per physical book sold.
+    """Divya teacher's commission: ₹50 per Malayalam book sold.
 
-    Courier is excluded. This is the single source of truth for the figure that
-    feeds the settlement ledger — never recompute it inline elsewhere.
+    Hindi and English commission goes to Pradeep sir — see pradeep_commission_for.
+    Courier excluded. Single source of truth for the Divya settlement ledger.
     """
-    return float(COMMISSION_PER_BOOK * total_book_count(items))
+    return float(COMMISSION_PER_BOOK * int(items.get("malayalam") or 0))
+
+
+def pradeep_commission_for(items: dict[str, int]) -> float:
+    """Pradeep sir's commission: ₹50 per Hindi or English book sold."""
+    return float(COMMISSION_PER_BOOK * (int(items.get("hindi") or 0) + int(items.get("english") or 0)))
 
 
 def divya_order_terms(phone: str | None, items: dict[str, int],
@@ -297,11 +302,12 @@ def divya_order_terms(phone: str | None, items: dict[str, int],
     if is_divya_phone(phone):
         return {"books_total": books_total, "courier": 0.0,
                 "grand_total": books_total, "commission": 0.0,
-                "via_divya": False}
+                "pradeep_commission": 0.0, "via_divya": False}
     courier = 0.0 if delivery_method == "xtraa_office" else totals["courier"]
     return {"books_total": books_total, "courier": courier,
             "grand_total": books_total + courier,
-            "commission": commission_for(items), "via_divya": True}
+            "commission": commission_for(items),
+            "pradeep_commission": pradeep_commission_for(items), "via_divya": True}
 
 
 def line_items(items: dict[str, int]) -> list[dict]:
