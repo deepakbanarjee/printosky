@@ -332,6 +332,84 @@ def line_items(items: dict[str, int]) -> list[dict]:
     return out
 
 
+# ── MA Sociology catalog (SNGU Semester 1) ───────────────────────────────────
+# Sreenarayanaguru Open University — MA Sociology, Sem 1 SLM books.
+# No commission applies; sold directly by Printosky.
+SOC_BOOKS: dict[str, dict] = {
+    "soc1": {"label": "Foundations of Sociological Theory", "code": "M21SO001DC", "price": 300},
+    "soc2": {"label": "Fundamentals of Social Research",    "code": "M21SO002DC", "price": 300},
+    "soc3": {"label": "Indian Sociology",                   "code": "M21SO003DC", "price": 300},
+    "soc4": {"label": "Economy, Polity and Society",        "code": "M21SO004DC", "price": 300},
+    "soc5": {"label": "Project Planning and Management",    "code": "M21SO001AC", "price": 300},
+}
+SOC_BOOK_KEYS: list[str] = ["soc1", "soc2", "soc3", "soc4", "soc5"]
+
+_SOC_WEIGHT_G: dict[str, int] = {k: 350 for k in SOC_BOOK_KEYS}
+
+
+def soc_courier_charge(items: dict[str, int]) -> float:
+    """Courier charge for a sociology order (same weight/rate logic as main catalog)."""
+    clean = {k: int(q) for k, q in items.items() if k in SOC_BOOKS and q and int(q) > 0}
+    if not clean:
+        return 0.0
+    weight = sum(_SOC_WEIGHT_G.get(k, 350) * q for k, q in clean.items())
+    extra_slabs = math.ceil(max(0, weight - _COURIER_THRESHOLD) / _COURIER_SLAB_G)
+    base = _COURIER_BASE + extra_slabs * _COURIER_SLAB_RATE
+    if sum(clean.values()) >= _BULK_QTY_THRESHOLD:
+        base *= (1 - _BULK_COURIER_DISCOUNT)
+    return float(round(base))
+
+
+def compute_soc_totals(items: dict[str, int]) -> dict:
+    """Totals for a sociology order. No commission, no set-price discount."""
+    clean = {k: int(q) for k, q in items.items() if k in SOC_BOOKS and q and int(q) > 0}
+    books_total = sum(SOC_BOOKS[k]["price"] * q for k, q in clean.items())
+    courier = soc_courier_charge(clean)
+    return {
+        "books_total": float(books_total),
+        "courier":     float(courier),
+        "grand_total": float(books_total + courier),
+    }
+
+
+def soc_line_items(items: dict[str, int]) -> list[dict]:
+    """Ordered line items for a sociology order summary."""
+    clean = {k: int(q) for k, q in items.items() if k in SOC_BOOKS and q and int(q) > 0}
+    out = []
+    for k in SOC_BOOK_KEYS:
+        q = clean.get(k, 0)
+        if q <= 0:
+            continue
+        unit = SOC_BOOKS[k]["price"]
+        out.append({"key": k, "label": SOC_BOOKS[k]["label"],
+                    "qty": q, "unit_price": float(unit), "line_total": float(unit * q)})
+    return out
+
+
+def parse_soc_selection(text: str) -> list[str] | None:
+    """Parse a sociology book selection reply (1-5, comma/space separated, or 'all').
+
+    Returns canonical-order list of soc keys, or None if invalid.
+    """
+    if not text:
+        return None
+    t = text.strip().lower()
+    if t in {"all", "all five", "all 5", "5 books", "everything"}:
+        return list(SOC_BOOK_KEYS)
+    tokens = [tok for tok in re.split(r"[\s,]+", t) if tok]
+    chosen: set[str] = set()
+    for tok in tokens:
+        if tok in {"all", "all five", "all 5"}:
+            return list(SOC_BOOK_KEYS)
+        if tok.isdigit() and 1 <= int(tok) <= 5:
+            chosen.add(SOC_BOOK_KEYS[int(tok) - 1])
+        else:
+            return None
+    if not chosen:
+        return None
+    return [k for k in SOC_BOOK_KEYS if k in chosen]
+
+
 # ── payment-confirmation text detection ───────────────────────────────────────
 # Customers sometimes paste their bank/UPI confirmation text instead of sending a
 # screenshot, e.g. "Rs.275.00 paid ... to OXYGEN STUDENTS, UPI Ref 616443327414

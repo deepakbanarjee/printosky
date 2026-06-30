@@ -1909,3 +1909,268 @@ def confirm_book_order(order_code: str) -> dict:
         "Thank you for ordering from Printosky! 📚",
     )
     return {"ok": True, "order": fresh}
+
+# ════════════════════════════════════════════════════════════════════════════════
+# MA SOCIOLOGY FLOW (SNGU Sem 1)
+# Mirrors the main book flow but uses the SOC_BOOKS catalog with no commission.
+# Steps: soc_select → soc_qty → soc_address → soc_delivery → soc_summary → soc_pay
+# ════════════════════════════════════════════════════════════════════════════════
+
+_SOC_TRIGGER_WORDS = {
+    "sociology", "sociological", "sngu", "soc",
+    "m21so001dc", "m21so002dc", "m21so003dc", "m21so004dc", "m21so001ac",
+}
+_SOC_TRIGGER_PHRASES = [
+    "ma sociology", "ma socio", "sociology book", "sociology books",
+    "sngu book", "sngu books", "ma book", "semester 1", "sem 1",
+    "social research", "sociological theory", "indian sociology",
+    "economy polity", "project planning",
+]
+_SOC_STEPS = {
+    "soc_select", "soc_qty", "soc_address", "soc_delivery",
+    "soc_summary", "soc_pay", "post_soc_order",
+}
+
+
+def is_soc_trigger(text: str) -> bool:
+    """True when the message should start the MA Sociology order flow."""
+    if not text:
+        return False
+    t = text.strip().lower()
+    words = set(re.split(r"[^\w]+", t))
+    if words & _SOC_TRIGGER_WORDS:
+        return True
+    return any(phrase in t for phrase in _SOC_TRIGGER_PHRASES)
+
+
+def _soc_send_catalog(phone: str) -> None:
+    rows = []
+    for i, k in enumerate(bc.SOC_BOOK_KEYS, 1):
+        b = bc.SOC_BOOKS[k]
+        rows.append((f"soc_{i}", f"{i}. {b['label']}", f"₹{b['price']} · {b['code']}"))
+    body = (
+        "📚 *MA Sociology — SNGU Sem 1*\n"
+        "5 books available at ₹300 each.\n\n"
+        "Reply the number(s) of the books you want\n"
+        "(e.g. *1*, *1,3*, or *all* for all five).\n\n"
+        "1. Foundations of Sociological Theory\n"
+        "2. Fundamentals of Social Research\n"
+        "3. Indian Sociology\n"
+        "4. Economy, Polity and Society\n"
+        "5. Project Planning and Management"
+    )
+    _send_text(phone, body)
+    _dbc.save_session(DB, phone, step="soc_select", needs_human=False)
+
+
+def _soc_cart(phone: str) -> dict:
+    """Load the current sociology cart from session extra, or {}."""
+    sess = _dbc.get_session(DB, phone) or {}
+    try:
+        import json
+        return json.loads(sess.get("saved_json") or "{}").get("soc_cart") or {}
+    except Exception:
+        return {}
+
+
+def _soc_save(phone: str, cart: dict, selected: list[str],
+              cursor: int, **fields) -> None:
+    import json
+    sess = _dbc.get_session(DB, phone) or {}
+    try:
+        payload = json.loads(sess.get("saved_json") or "{}")
+    except Exception:
+        payload = {}
+    payload["soc_cart"] = cart
+    payload["soc_selected"] = selected
+    payload["soc_cursor"] = cursor
+    payload.update(fields)
+    _dbc.save_session(DB, phone, saved_json=json.dumps(payload, ensure_ascii=False))
+
+
+def _soc_data(phone: str) -> dict:
+    import json
+    sess = _dbc.get_session(DB, phone) or {}
+    try:
+        return json.loads(sess.get("saved_json") or "{}")
+    except Exception:
+        return {}
+
+
+def _soc_summary_text(phone: str, data: dict) -> str:
+    cart = data.get("soc_cart") or {}
+    totals = bc.compute_soc_totals(cart)
+    lines = bc.soc_line_items(cart)
+    delivery = data.get("soc_delivery", "courier")
+    courier = 0.0 if delivery == "xtraa_office" else totals["courier"]
+    grand = totals["books_total"] + courier
+    items_text = "\n".join(
+        f"  {l['label']}: {l['qty']} × ₹{l['unit_price']:.0f} = ₹{l['line_total']:.0f}"
+        for l in lines
+    )
+    deliv_label = "Office pickup" if delivery == "xtraa_office" else f"Courier ₹{courier:.0f}"
+    return (
+        f"📋 *Order Summary — MA Sociology*\n\n"
+        f"{items_text}\n\n"
+        f"Books: ₹{totals['books_total']:.0f}\n"
+        f"Delivery: {deliv_label}\n"
+        f"*Total: ₹{grand:.0f}*\n\n"
+        f"Address: {data.get('soc_address') or '—'}"
+    )
+
+
+def maybe_handle_soc(phone: str, text: str, name: str | None = None) -> list[str] | None:
+    """Handle MA Sociology order flow. Returns [] (already sent), a list of
+    reply strings, or None (not our message to handle)."""
+    sess = _dbc.get_session(DB, phone) or {}
+    step = sess.get("step") or ""
+    t = (text or "").strip()
+
+    # Route into flow if triggered or already in soc steps
+    if step not in _SOC_STEPS and not is_soc_trigger(t):
+        return None
+
+    # Fresh trigger — show catalog
+    if step not in _SOC_STEPS or is_soc_trigger(t):
+        _soc_send_catalog(phone)
+        return []
+
+    # ── soc_select: parse which books they want ────────────────────────────
+    if step == "soc_select":
+        # handle list-row tap: soc_1 ... soc_5
+        m = re.match(r"^soc_(\d)$", t)
+        if m:
+            t = m.group(1)
+        selected = bc.parse_soc_selection(t)
+        if not selected:
+            return ["Please reply with numbers like *1*, *1,3* or *all* to pick your books."]
+        _soc_save(phone, {}, selected, 0)
+        # ask qty for first selected book
+        first = selected[0]
+        label = bc.SOC_BOOKS[first]["label"]
+        _dbc.save_session(DB, phone, step="soc_qty", needs_human=False)
+        _send_buttons(phone,
+                      f"How many copies of *{label}*?",
+                      [("sqty_1", "1"), ("sqty_2", "2"), ("sqty_3", "3")])
+        return []
+
+    # ── soc_qty: collect quantity for each selected book one at a time ─────
+    if step == "soc_qty":
+        data = _soc_data(phone)
+        selected = data.get("soc_selected") or []
+        cursor = int(data.get("soc_cursor") or 0)
+        cart = data.get("soc_cart") or {}
+        if not selected:
+            _soc_send_catalog(phone)
+            return []
+        # parse qty
+        raw = re.sub(r"^sqty_", "", t)
+        qty = bc.parse_qty(raw)
+        if qty is None:
+            label = bc.SOC_BOOKS[selected[cursor]]["label"]
+            return [f"Please reply with a number (1, 2, 3 …) for *{label}*."]
+        cart[selected[cursor]] = qty
+        cursor += 1
+        if cursor < len(selected):
+            # next book
+            label = bc.SOC_BOOKS[selected[cursor]]["label"]
+            _soc_save(phone, cart, selected, cursor)
+            _send_buttons(phone,
+                          f"How many copies of *{label}*?",
+                          [("sqty_1", "1"), ("sqty_2", "2"), ("sqty_3", "3")])
+            return []
+        # all qtys collected — ask address
+        _soc_save(phone, cart, selected, cursor)
+        _dbc.save_session(DB, phone, step="soc_address", needs_human=False)
+        return ["Please share your *full delivery address* (with PIN code):"]
+
+    # ── soc_address: collect delivery address ─────────────────────────────
+    if step == "soc_address":
+        if len(t) < 10:
+            return ["Please share your full address including PIN code."]
+        data = _soc_data(phone)
+        _soc_save(phone, data.get("soc_cart") or {},
+                  data.get("soc_selected") or [], int(data.get("soc_cursor") or 0),
+                  soc_address=t)
+        _dbc.save_session(DB, phone, step="soc_delivery", needs_human=False)
+        _send_buttons(phone,
+                      "How would you like to receive the books?",
+                      [("sdel_courier", "📦 Courier"), ("sdel_office", "🏫 Office pickup")])
+        return []
+
+    # ── soc_delivery: courier or office ───────────────────────────────────
+    if step == "soc_delivery":
+        if "office" in t or t == "sdel_office":
+            delivery = "xtraa_office"
+        else:
+            delivery = "courier"
+        data = _soc_data(phone)
+        _soc_save(phone, data.get("soc_cart") or {},
+                  data.get("soc_selected") or [], int(data.get("soc_cursor") or 0),
+                  soc_address=data.get("soc_address"), soc_delivery=delivery)
+        _dbc.save_session(DB, phone, step="soc_summary", needs_human=False)
+        data["soc_delivery"] = delivery
+        summary = _soc_summary_text(phone, data)
+        _send_buttons(phone, summary,
+                      [("sconf", "✅ Confirm"), ("scanc", "❌ Cancel")])
+        return []
+
+    # ── soc_summary: confirm or cancel ────────────────────────────────────
+    if step == "soc_summary":
+        if t in {"scanc", "cancel"} | _NEGATE:
+            _dbc.save_session(DB, phone, step=None, needs_human=False)
+            return ["Order cancelled. Reply *sociology* anytime to start again. 🙏"]
+        if t not in {"sconf"} | _AFFIRM:
+            data = _soc_data(phone)
+            summary = _soc_summary_text(phone, data)
+            _send_buttons(phone, summary,
+                          [("sconf", "✅ Confirm"), ("scanc", "❌ Cancel")])
+            return []
+        # Confirmed — create order in DB
+        data = _soc_data(phone)
+        cart = data.get("soc_cart") or {}
+        delivery = data.get("soc_delivery", "courier")
+        totals = bc.compute_soc_totals(cart)
+        courier = 0.0 if delivery == "xtraa_office" else totals["courier"]
+        grand = totals["books_total"] + courier
+        code = _new_order_code()
+        try:
+            _dbc.create_book_order(
+                order_code=code,
+                name=name or phone,
+                phone=phone,
+                address=data.get("soc_address") or "",
+                items=cart,
+                status="awaiting_payment",
+                books_total=totals["books_total"],
+                courier=courier,
+                grand_total=grand,
+                commission=0.0,
+                delivery_method=delivery,
+                source="whatsapp",
+            )
+        except Exception as exc:
+            logger.error("create soc order failed for %s: %s", phone, exc)
+            return ["Sorry, there was an error saving your order. Please try again. 🙏"]
+        _dbc.save_session(DB, phone, step="soc_pay", needs_human=False)
+        # Send payment QR
+        try:
+            import whatsapp_notify as _wn
+            _wn._send_meta_media(phone, _QR_PATH, "image",
+                                 caption=(
+                                     f"📚 *MA Sociology Books — ₹{grand:.0f}*\n\n"
+                                     f"Order *{code}*\n"
+                                     "Please pay to *Oxygen Students Paradise* and send a *screenshot*."
+                                 ))
+        except Exception:
+            _send_text(phone,
+                       f"📚 *MA Sociology Books — ₹{grand:.0f}*\n\n"
+                       f"Order: *{code}*\n"
+                       "Please pay and send a *screenshot* of the payment. 🙏")
+        return []
+
+    # ── soc_pay: waiting for payment screenshot ────────────────────────────
+    if step == "soc_pay":
+        return ["Thanks! Please send a *screenshot* of your payment to confirm. 🙏"]
+
+    return None

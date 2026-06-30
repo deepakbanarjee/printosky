@@ -1009,9 +1009,19 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
         logger.error(f"Book flow error for {sender}: {e}")
         book_replies = None
     if book_replies is not None:
-        # _send_meta logs the outbound to conversation_log on success; don't
-        # double-log here.
         for reply in book_replies:
+            _send(sender, reply)
+        return
+
+    # ── MA Sociology books flow ──────────────────────────────────────────
+    try:
+        from book_bot import maybe_handle_soc
+        soc_replies = maybe_handle_soc(sender, text, name=name)
+    except Exception as e:
+        logger.error(f"Sociology flow error for {sender}: {e}")
+        soc_replies = None
+    if soc_replies is not None:
+        for reply in soc_replies:
             _send(sender, reply)
         return
 
