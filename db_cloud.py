@@ -1593,13 +1593,15 @@ def divya_ledger(include_settled: bool = False,
     """
     empty = {"total_orders": 0, "total_books": 0, "total_commission": 0.0,
              "oxygen_owes_divya": 0.0, "divya_owes_oxygen": 0.0, "net": 0.0,
+             "books_taken": 0, "books_cost": 0.0,
              "orders": [], "unsettled": []}
+    from book_catalog import is_divya_phone
     try:
         q = (
             _client().table("book_orders")
-            .select("order_code,name,items,grand_total,commission,"
-                    "payment_collected_by,delivery_method,divya_settled,status,created_at")
-            .eq("via_divya", True)
+            .select("order_code,name,phone,items,grand_total,commission,"
+                    "payment_collected_by,delivery_method,divya_settled,status,"
+                    "created_at,via_divya")
             .in_("status", list(DIVYA_LEDGER_STATUSES))
         )
         if date_from:
@@ -1613,17 +1615,49 @@ def divya_ledger(include_settled: bool = False,
 
     total_books = total_commission = 0
     oxygen_owes = divya_owes = 0.0
+    books_taken = 0
+    books_cost = 0.0
+    total_orders = 0
     orders, unsettled = [], []
     for r in rows:
-        comm = float(r.get("commission") or 0)
         gt = float(r.get("grand_total") or 0)
         items = r.get("items") or {}
         books = sum(int(v) for k, v in items.items()
                     if k in ("malayalam", "hindi", "english") and v)
+        settled = bool(r.get("divya_settled"))
+
+        # Divya's own order (via_divya forced False by the self-order exemption
+        # — courier-free, commission-free): she took the physical books herself
+        # and owes Oxygen their cost. Kept as its own settle-able entry (S10-10)
+        # rather than folded into the commission totals below, which would
+        # otherwise silently omit what she owes for her own copies.
+        if not r.get("via_divya", True) and is_divya_phone(r.get("phone")):
+            books_taken += books
+            books_cost += gt
+            entry = {
+                "order_code":   r.get("order_code"),
+                "name":         r.get("name"),
+                "books":        books,
+                "grand_total":  gt,
+                "commission":   0.0,
+                "collected_by": "divya_own_use",
+                "direction":    "divya_owes_oxygen",
+                "amount":       gt,
+                "settled":      settled,
+                "created_at":   r.get("created_at"),
+            }
+            orders.append(entry)
+            if settled and not include_settled:
+                continue
+            divya_owes += gt
+            unsettled.append(entry)
+            continue
+
+        comm = float(r.get("commission") or 0)
+        total_orders += 1
         total_books += books
         total_commission += comm
         collected = r.get("payment_collected_by") or "oxygen"
-        settled = bool(r.get("divya_settled"))
         if collected == "divya":
             amount, direction = gt - comm, "divya_owes_oxygen"
         else:  # 'oxygen' or 'pending'
@@ -1649,12 +1683,14 @@ def divya_ledger(include_settled: bool = False,
             oxygen_owes += amount
         unsettled.append(entry)
     return {
-        "total_orders":      len(rows),
+        "total_orders":      total_orders,
         "total_books":       total_books,
         "total_commission":  float(total_commission),
         "oxygen_owes_divya": oxygen_owes,
         "divya_owes_oxygen": divya_owes,
         "net":               divya_owes - oxygen_owes,
+        "books_taken":       books_taken,
+        "books_cost":        float(books_cost),
         "orders":            orders,
         "unsettled":         unsettled,
     }

@@ -180,19 +180,29 @@ def parse_anu_order(text: str) -> dict | None:
 
     fields: dict[str, str] = {}
     items: dict[str, int] = {}
+    last_field: str | None = None
     for ln in lines[1:]:
         if ":" not in ln:
+            # Continuation of the previous free-text field — real addresses are
+            # often multi-line (house name / PO / district / PIN each on their
+            # own line) and must not be silently dropped just because they lack
+            # a "key:" prefix.
+            if last_field:
+                fields[last_field] = (fields[last_field] + "\n" + ln).strip()
             continue
         key, _, val = ln.partition(":")
         key, val = key.strip().lower(), val.strip()
         if not val:
+            last_field = None
             continue
         if key in aliases:
             qty = parse_qty(val)
             if qty:
                 items[aliases[key]] = items.get(aliases[key], 0) + qty
+            last_field = None
         else:
             fields[key] = val
+            last_field = key
 
     name    = fields.get("name")
     phone   = re.sub(r"\D", "", fields.get("phone", "")) or None

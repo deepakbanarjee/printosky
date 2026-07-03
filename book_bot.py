@@ -185,9 +185,31 @@ def _extract_phone(text: str) -> str | None:
     return None
 
 
+_PINCODE_RE = re.compile(r"(?<!\d)[1-9]\d{5}(?!\d)")
+# House/door/plot numbers are the other common 6-digit token in an address and
+# sit right before a number like this; a real PIN never does. Matching this
+# prefix lets us tell "Door No 204568, near temple, Thrissur" (no real PIN)
+# apart from "Nedumkunnam PO, Kottayam 686542" (PIN) without rejecting any
+# address that doesn't mention a house-number word near a 6-digit number.
+_HOUSE_NUM_PREFIX_RE = re.compile(
+    r"(?:door|flat|house|plot|survey|room|floor|building|blk|block|no\.?|#)\s*[:\-]?\s*$",
+    re.IGNORECASE,
+)
+
+
 def _has_pincode(text: str) -> bool:
-    """True if the text contains an isolated 6-digit Indian PIN code."""
-    return bool(re.search(r"(?<!\d)[1-9]\d{5}(?!\d)", text or ""))
+    """True if the text contains a plausible 6-digit Indian PIN code.
+
+    Accepts any isolated 6-digit number EXCEPT one immediately preceded by a
+    house/door/plot-number word — that pattern means the address gave a
+    building number, not a PIN, and a customer relying on it alone would ship
+    with no real PIN on file (see _has_pincode false-positive backlog note).
+    """
+    t = text or ""
+    for m in _PINCODE_RE.finditer(t):
+        if not _HOUSE_NUM_PREFIX_RE.search(t[:m.start()]):
+            return True
+    return False
 
 
 def _parse_choice(text: str) -> list[str] | None:
@@ -279,9 +301,23 @@ def _send_phone_buttons(phone: str) -> None:
     )
 
 
+def _order_totals(order: dict) -> dict:
+    """Money terms for `order`, honouring the Divya self-order exemption.
+
+    Single source of truth: book_catalog.divya_order_terms(). Every place that
+    quotes a total, asks for payment, or decides whether an order is fully
+    paid must derive it from here so the customer total, the payment ask and
+    the settlement ledger can never drift apart (previously this exemption
+    was only applied retroactively at confirm_book_order, after the customer
+    may have already been asked to pay the wrong amount).
+    """
+    return bc.divya_order_terms(order.get("phone"), order.get("items") or {},
+                                order.get("delivery_method") or "courier")
+
+
 def _summary_text(order: dict) -> str:
     items = order.get("items") or {}
-    totals = bc.compute_totals(items)
+    totals = _order_totals(order)
     lines = "\n".join(
         f"• {ln['label'].split(' (')[0]} × {ln['qty']} = ₹{ln['line_total']:.0f}"
         for ln in bc.line_items(items)
@@ -333,7 +369,7 @@ def _send_pay_buttons(phone: str) -> None:
 
 
 def _payment_caption(order: dict) -> str:
-    totals = bc.compute_totals(order.get("items") or {})
+    totals = _order_totals(order)
     return (
         f"💳 *₹{totals['grand_total']:.0f} അടയ്ക്കൂ* — ഈ UPI QR സ്കാൻ ചെയ്യൂ.\n"
         f"Pay *₹{totals['grand_total']:.0f}* by scanning this UPI QR.\n\n"
@@ -380,7 +416,7 @@ def _forward_to_verifier(order: dict, payment: dict, content: bytes, mime_type: 
     """
     code    = order.get("order_code")
     payid   = payment.get("id")
-    totals  = bc.compute_totals(order.get("items") or {})
+    totals  = _order_totals(order)
     grand   = totals["grand_total"]
     paid    = _dbc.book_amount_paid(code)          # verified so far (excludes this pending one)
     balance = grand - paid
@@ -420,7 +456,7 @@ def _forward_payment_text_to_verifier(order: dict, payment: dict,
     """
     code    = order.get("order_code")
     payid   = payment.get("id")
-    grand   = bc.compute_totals(order.get("items") or {})["grand_total"]
+    grand   = _order_totals(order)["grand_total"]
     paid    = _dbc.book_amount_paid(code)
     balance = grand - paid
     ref     = (parsed or {}).get("ref")
@@ -451,8 +487,10 @@ def _forward_payment_text_to_verifier(order: dict, payment: dict,
 def _address_prompt() -> str:
     return (
         "📍 *പൂർണ്ണ ഡെലിവറി വിലാസം* ടൈപ്പ് ചെയ്യൂ — വീട്/ഫ്ലാറ്റ് നമ്പർ, സ്ഥലം, "
-        "ജില്ല, *PIN കോഡ്* സഹിതം.\n"
-        "Type the *full delivery address* incl. *PIN code*."
+        "ജില്ല, *PIN കോഡ്* സഹിതം (അവസാനം PIN).\n"
+        "Type the *full delivery address* incl. *PIN code* — put the *PIN "
+        "last*.\n"
+        "_ഉദാ / e.g.: House name, Place, District - 680001_"
     )
 
 
@@ -663,7 +701,8 @@ def _handle_qty(phone: str, text: str, order: dict) -> list[str]:
         return []
 
     # All books counted.
-    totals = bc.compute_totals(items)
+    totals = bc.divya_order_terms(order.get("phone"), items,
+                                  order.get("delivery_method") or "courier")
     _dbc.update_book_order(code, items=items, flow_cursor={},
                            books_total=totals["books_total"],
                            courier=totals["courier"],
@@ -703,9 +742,11 @@ def _handle_address(phone: str, text: str, order: dict) -> list[str]:
                           "That address looks too short — include place and PIN code.")
         return []
     if not _has_pincode(address):
-        _send_text(phone, "വിലാസത്തിൽ *6-അക്ക PIN കോഡ്* ഉൾപ്പെടുത്തൂ "
+        _send_text(phone, "വിലാസത്തിൽ *6-അക്ക PIN കോഡ്* അവസാനം ഉൾപ്പെടുത്തൂ "
                           "(അതില്ലാതെ അയക്കാനാവില്ല). 📍\n"
-                          "Please include your *6-digit PIN code*.")
+                          "Please include your *6-digit PIN code*, *at the "
+                          "end* of the address.\n"
+                          "_ഉദാ / e.g.: House name, Place, District - 680001_")
         return []
     _dbc.update_book_order(order["order_code"], address=address)
     _dbc.save_session(DB, phone, step="book_dtdc")
@@ -765,7 +806,7 @@ def _handle_summary(phone: str, text: str, order: dict) -> list[str]:
         _dbc.save_session(DB, phone, step="book_pay")
         refreshed = _dbc.get_book_order(code)
         if not _send_qr(phone, refreshed):
-            totals = bc.compute_totals(refreshed.get("items") or {})
+            totals = _order_totals(refreshed)
             _send_text(phone, f"*₹{totals['grand_total']:.0f}* ഞങ്ങളുടെ UPI യിലേക്ക് അടച്ച് "
                               "സ്ക്രീൻഷോട്ട് അയക്കൂ. (ഇമേജ് വീണ്ടും വേണമെങ്കിൽ *QR* റിപ്ലൈ ചെയ്യൂ.)\n"
                               "Pay to our UPI and send a screenshot. (Reply *QR* to retry the image.)")
@@ -824,9 +865,11 @@ def _handle_edit_address(phone: str, text: str, order: dict) -> list[str]:
                           "That address looks too short — include place and PIN code.")
         return []
     if not _has_pincode(address):
-        _send_text(phone, "വിലാസത്തിൽ *6-അക്ക PIN കോഡ്* ഉൾപ്പെടുത്തൂ "
+        _send_text(phone, "വിലാസത്തിൽ *6-അക്ക PIN കോഡ്* അവസാനം ഉൾപ്പെടുത്തൂ "
                           "(അതില്ലാതെ അയക്കാനാവില്ല). 📍\n"
-                          "Please include your *6-digit PIN code*.")
+                          "Please include your *6-digit PIN code*, *at the "
+                          "end* of the address.\n"
+                          "_ഉദാ / e.g.: House name, Place, District - 680001_")
         return []
     _dbc.update_book_order(order["order_code"], address=address)
     _dbc.save_session(DB, phone, step="book_summary")
@@ -967,7 +1010,7 @@ def _try_website_order(phone: str, text: str, name: str | None) -> list[str] | N
             code = _new_order_code()
             _dbc.create_book_order(code, phone, parsed["name"] or name, source="website")
 
-    totals = bc.compute_totals(parsed["items"])
+    totals = bc.divya_order_terms(phone, parsed["items"], "courier")
     _dbc.update_book_order(
         code,
         items=parsed["items"],
@@ -1040,6 +1083,32 @@ def _maybe_tracking_reply(phone: str, text: str) -> list[str] | None:
     if not order:
         return None
     _send_text(phone, compose_tracking_reply(order))
+    return []
+
+
+def maybe_handle_location(phone: str) -> list[str] | None:
+    """Handle a WhatsApp location share (a pin, not typed text).
+
+    We have no reverse-geocoding — a lat/long pin can't be turned into the
+    house-name/PO/district/PIN address DTDC needs — so mid-address-capture we
+    ask the customer to type it instead rather than leaving them with no
+    reply at all (the message previously matched no branch in the webhook
+    dispatch and was silently dropped). Returns [] when handled (already
+    sent), or None when the customer wasn't mid-address-entry (not ours to
+    handle — the caller may still want to log/ignore the location).
+    """
+    session = _dbc.get_session(DB, phone) or {}
+    step = session.get("step") or ""
+    if step not in ("book_address", "book_edit_address"):
+        return None
+    _send_text(
+        phone,
+        "📍 ക്ഷമിക്കണം, ലൊക്കേഷൻ പിൻ വായിക്കാൻ കഴിയില്ല — ദയവായി നിങ്ങളുടെ "
+        "*പൂർണ്ണ വിലാസം* ടൈപ്പ് ചെയ്യൂ (സ്ഥലം + PIN കോഡ് സഹിതം, അവസാനം PIN).\n"
+        "Sorry, we can't read location pins yet — please *type* your full "
+        "address instead (place name + PIN code, PIN last).\n"
+        "_ഉദാ / e.g.: House name, Place, District - 680001_",
+    )
     return []
 
 
@@ -1141,7 +1210,7 @@ def _abandoned_message(order: dict) -> str:
 
     # Segment 2: order confirmed, payment pending → ask them to finish paying.
     if order.get("status") == "awaiting_payment":
-        total  = bc.compute_totals(items)["grand_total"] if have else 0
+        total  = _order_totals(order)["grand_total"] if have else 0
         amt_ml = f" — ₹{total:.0f}" if total else ""
         amt_en = f" of ₹{total:.0f}" if total else ""
         return (
@@ -1201,7 +1270,7 @@ def _cart_template_for(order: dict):
         if not CART_PAYMENT_TEMPLATE:
             return None, None
         items = order.get("items") or {}
-        total = bc.compute_totals(items)["grand_total"] if items else 0
+        total = _order_totals(order)["grand_total"] if items else 0
         return CART_PAYMENT_TEMPLATE, [name, order.get("order_code") or "", f"{total:.0f}"]
     if not CART_CONTINUE_TEMPLATE:
         return None, None
@@ -1262,7 +1331,7 @@ def _remind_verifier(order: dict) -> bool:
     pays = _dbc.get_book_payments(code) or []
     pending = [p for p in pays if p.get("status") == "pending"]
     pay = pending[-1] if pending else (pays[-1] if pays else None)
-    totals  = bc.compute_totals(order.get("items") or {})
+    totals  = _order_totals(order)
     grand   = totals["grand_total"]
     paid    = _dbc.book_amount_paid(code)
     balance = grand - paid
@@ -1331,11 +1400,11 @@ def _handle_anu_order(parsed: dict) -> None:
 
     items   = parsed["items"]
     deliv   = parsed["delivery_method"]
-    totals  = bc.compute_totals(items)
-    courier = 0.0 if deliv == "xtraa_office" else totals["courier"]
-    grand   = totals["books_total"] + courier
-    commission = bc.commission_for(items)
-    pradeep_commission = bc.pradeep_commission_for(items)
+    totals  = bc.divya_order_terms(parsed["phone"], items, deliv)
+    courier = totals["courier"]
+    grand   = totals["grand_total"]
+    commission = totals["commission"]
+    pradeep_commission = totals["pradeep_commission"]
 
     from datetime import datetime
     code = f"XTR-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
@@ -1404,11 +1473,11 @@ def _divya_summary(code, name, phone, items, courier, grand, commission,
 def _create_divya_confirmed(code, name, phone, address, items,
                             payment_collected_by="pending", delivery_method="courier") -> None:
     """Create a confirmed Divya order from a clear, complete parse, and ping Anu."""
-    totals  = bc.compute_totals(items)
-    courier = 0.0 if delivery_method == "xtraa_office" else totals["courier"]
-    grand   = totals["books_total"] + courier
-    commission = bc.commission_for(items)
-    pradeep_commission = bc.pradeep_commission_for(items)
+    totals  = bc.divya_order_terms(phone, items, delivery_method)
+    courier = totals["courier"]
+    grand   = totals["grand_total"]
+    commission = totals["commission"]
+    pradeep_commission = totals["pradeep_commission"]
     row = _dbc.create_walk_in_order(
         code, name, phone, address, items, totals["books_total"], courier, grand,
         payment_mode="", status="confirmed", commission=commission,
@@ -1508,7 +1577,7 @@ def _after_payment_change(code: str, rejected: bool = False) -> None:
     awaiting_payment if nothing verified yet) and tell the customer the balance.
     """
     order = _dbc.get_book_order(code) or {}
-    grand = bc.compute_totals(order.get("items") or {})["grand_total"]
+    grand = _order_totals(order)["grand_total"]
     paid = _dbc.book_amount_paid(code)
     _dbc.update_book_order(code, amount_paid=paid)
     cust = order.get("phone")
@@ -1561,7 +1630,7 @@ def _handle_payment_action(kind: str, payid: int) -> None:
         return
     code = pay["order_code"]
     order = _dbc.get_book_order(code) or {}
-    grand = bc.compute_totals(order.get("items") or {})["grand_total"]
+    grand = _order_totals(order)["grand_total"]
     balance = grand - _dbc.book_amount_paid(code)
 
     if kind == "pr":                      # not received
@@ -1632,11 +1701,11 @@ def _handle_anu_freeform(text: str) -> None:
 
     # Complete → stage for confirmation (NOT created yet).
     _anu_save_buffer(raw, "anu_staged", order=o)
-    totals     = bc.compute_totals(o["items"])
+    totals     = bc.divya_order_terms(o["phone"], o["items"], "courier")
     courier    = totals["courier"]
-    grand      = totals["books_total"] + courier
-    commission = bc.commission_for(o["items"])
-    pradeep_commission = bc.pradeep_commission_for(o["items"])
+    grand      = totals["grand_total"]
+    commission = totals["commission"]
+    pradeep_commission = totals["pradeep_commission"]
     _send_buttons(
         VERIFIER_PHONE,
         "📋 *Confirm this order?*\n"
@@ -1899,7 +1968,7 @@ def confirm_book_order(order_code: str) -> dict:
     except Exception:
         pass
 
-    totals = bc.compute_totals(order.get("items") or {})
+    totals = _order_totals(fresh)
     _send_text(
         phone,
         f"🎉 *Order confirmed!*\n\n"

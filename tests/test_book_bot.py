@@ -9,6 +9,7 @@ import re as _re
 import pytest
 
 import book_bot
+import book_catalog as bc
 import db_cloud as _dbc
 
 _ML = _re.compile(r"[ഀ-ൿ]")   # Malayalam block
@@ -507,7 +508,51 @@ def test_all_three_one_tap_then_count_each(fake):
     assert db.sessions[PHONE]["step"] == "post_order"       # follow-up armed
 
 
-# ── multi-select pair in one tap ──────────────────────────────────────────────
+# ── Divya's own self-order exemption must apply during checkout itself ────────
+# (not just retroactively at confirm_book_order) — she pays book cost alone,
+# no courier, no commission, on any channel including her own chat session.
+
+@pytest.mark.integration
+def test_divya_self_order_via_chat_is_courier_free_at_qty_step(fake):
+    db, sent = fake
+    book_bot.maybe_handle_book(bc.DIVYA_PHONE, "book")
+    code = _code(db)
+    book_bot.maybe_handle_book(bc.DIVYA_PHONE, "bk_all")
+    book_bot.maybe_handle_book(bc.DIVYA_PHONE, "qty_1")
+    book_bot.maybe_handle_book(bc.DIVYA_PHONE, "qty_1")
+    book_bot.maybe_handle_book(bc.DIVYA_PHONE, "qty_1")   # done counting
+    order = db.orders[code]
+    assert order["courier"] == 0.0
+    assert order["grand_total"] == order["books_total"] == 549.0
+
+    # The summary/payment screens shown to her must reflect the same exemption,
+    # not just the stored row (this is what she actually sees and is asked to pay).
+    summary = book_bot._summary_text(db.orders[code])
+    caption = book_bot._payment_caption(db.orders[code])
+    assert "₹549" in summary and "₹0" in summary
+    assert "₹549" in caption
+
+
+@pytest.mark.integration
+def test_divya_self_order_via_website_template_is_courier_free(fake):
+    db, sent = fake
+    web_order = (
+        "ORDER\n"
+        "Name: Divya M\n"
+        "Phone: 9947184088\n"      # delivery contact can differ from her own number
+        "Address: 12 MG Road, Thrissur 680001\n"
+        "Aksharamrutham: 1\n"
+        "Vidyamrut: 1\n"
+        "Easy English: 1\n"
+        "Delivery: courier\n"
+    )
+    res = book_bot.maybe_handle_book(bc.DIVYA_PHONE, web_order)
+    assert res == []
+    code = _code(db)
+    order = db.orders[code]
+    assert order["courier"] == 0.0
+    assert order["grand_total"] == order["books_total"] == 549.0
+
 
 @pytest.mark.integration
 def test_pair_one_tap(fake):
@@ -1227,3 +1272,63 @@ def test_valid_name_rejects_button_ids():
     assert not _is_valid_name("bk_ml")
     assert not _is_valid_name("ph_yes")
     assert not _is_valid_name("dtdc_skip")
+
+
+# ── _has_pincode: house/door numbers must not be mistaken for a real PIN ──────
+
+@pytest.mark.unit
+def test_has_pincode_rejects_bare_house_number():
+    from book_bot import _has_pincode
+    # No real PIN anywhere — only a 6-digit door number.
+    assert not _has_pincode("Door No 204568, near temple, Thrissur")
+    assert not _has_pincode("Flat No: 118392, Rose Apartments, Kochi")
+    assert not _has_pincode("House no 556231 Ollur")
+
+
+@pytest.mark.unit
+def test_has_pincode_accepts_real_pin_after_house_number():
+    from book_bot import _has_pincode
+    # A real PIN later in the same address must still be recognised.
+    assert _has_pincode("Door No 204568, near temple, Thrissur - 680001")
+
+
+@pytest.mark.unit
+def test_has_pincode_accepts_normal_addresses_unaffected():
+    from book_bot import _has_pincode
+    assert _has_pincode("12 MG Road, Thrissur 680001")
+    assert _has_pincode("Nedumkunnam PO\nKottayam 686542")
+    assert not _has_pincode("My house, MG Road, Thrissur")
+
+
+@pytest.mark.unit
+def test_address_prompt_shows_example_with_pin_last():
+    p = book_bot._address_prompt()
+    assert "680001" in p and "PIN" in p
+
+
+# ── WhatsApp location shares mid-address-capture ──────────────────────────────
+
+@pytest.mark.unit
+def test_maybe_handle_location_ignored_outside_address_step(fake):
+    db, sent = fake
+    db.sessions[PHONE] = {"step": "book_summary"}
+    assert book_bot.maybe_handle_location(PHONE) is None
+    assert sent["text"] == []
+
+
+@pytest.mark.unit
+def test_maybe_handle_location_prompts_during_address_step(fake):
+    db, sent = fake
+    db.sessions[PHONE] = {"step": "book_address"}
+    result = book_bot.maybe_handle_location(PHONE)
+    assert result == []
+    assert any("type" in m.lower() and "address" in m.lower() for m in sent["text"])
+
+
+@pytest.mark.unit
+def test_maybe_handle_location_prompts_during_edit_address_step(fake):
+    db, sent = fake
+    db.sessions[PHONE] = {"step": "book_edit_address"}
+    result = book_bot.maybe_handle_location(PHONE)
+    assert result == []
+    assert sent["text"]

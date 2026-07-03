@@ -226,7 +226,8 @@ def test_divya_order_terms_customer_pays_courier_and_earns_commission():
     assert t["books_total"] == 400.0
     assert t["courier"] == 75.0
     assert t["grand_total"] == 475.0
-    assert t["commission"] == 100.0        # 2 books * ₹50
+    assert t["commission"] == 50.0        # 1 Malayalam book * ₹50
+    assert t["pradeep_commission"] == 50.0 # 1 English book * ₹50
     assert t["via_divya"] is True
 
 
@@ -250,3 +251,62 @@ def test_divya_order_terms_office_pickup_no_courier_but_commission_stands():
     assert t["grand_total"] == 200.0
     assert t["commission"] == 50.0
     assert t["via_divya"] is True
+
+
+# ── parse_anu_order: multi-line address must not be truncated ────────────────
+
+@pytest.mark.unit
+def test_parse_anu_order_preserves_multiline_address():
+    # Real addresses often span several lines (house name / PO / district / PIN)
+    # with no "key:" prefix on the continuation lines — those must be folded
+    # into the address, not silently dropped.
+    text = (
+        "ORDER\n"
+        "Name: Jaise Abraham\n"
+        "Phone: 9847012345\n"
+        "Address: Near Temple\n"
+        "Nedumkunnam PO\n"
+        "Kottayam 686542\n"
+        "Aksharamrutham: 1\n"
+        "Payment: pending\n"
+        "Delivery: courier"
+    )
+    parsed = bc.parse_anu_order(text)
+    assert parsed["ok"] is True
+    assert parsed["address"] == "Near Temple\nNedumkunnam PO\nKottayam 686542"
+
+
+@pytest.mark.unit
+def test_parse_anu_order_single_line_address_unaffected():
+    text = (
+        "ORDER\n"
+        "Name: Priya\n"
+        "Phone: 9947184088\n"
+        "Address: House name, Thrissur - 680001\n"
+        "Aksharamrutham: 1\n"
+        "Payment: oxygen\n"
+        "Delivery: courier"
+    )
+    parsed = bc.parse_anu_order(text)
+    assert parsed["ok"] is True
+    assert parsed["address"] == "House name, Thrissur - 680001"
+
+
+@pytest.mark.unit
+def test_parse_anu_order_continuation_after_qty_line_is_ignored():
+    # A stray non-colon line after a book-quantity line (not an address) must
+    # not silently attach itself to anything.
+    text = (
+        "ORDER\n"
+        "Name: Priya\n"
+        "Phone: 9947184088\n"
+        "Address: Thrissur - 680001\n"
+        "Aksharamrutham: 1\n"
+        "some stray note\n"
+        "Payment: oxygen\n"
+        "Delivery: courier"
+    )
+    parsed = bc.parse_anu_order(text)
+    assert parsed["ok"] is True
+    assert parsed["address"] == "Thrissur - 680001"
+    assert parsed["items"] == {"malayalam": 1}

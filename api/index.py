@@ -1504,6 +1504,25 @@ def _process_meta_webhook(data: dict) -> None:
                             upsert_contact(sender, name=pushname)
                         except Exception:
                             pass
+                elif msg_type == "location":
+                    # Customer shared a location pin (not typed text) — most
+                    # likely while we're asking for a delivery address. There's
+                    # no reverse-geocoding here (a lat/long can't be turned into
+                    # the house-name/PO/district/PIN DTDC needs), so ask them to
+                    # type it instead rather than silently dropping the message
+                    # (previously matched no branch at all here).
+                    try:
+                        from book_bot import maybe_handle_location
+                        maybe_handle_location(sender)
+                    except Exception as e:
+                        logger.error("location message handling failed: %s", e)
+                    try:
+                        from db_cloud import log_message, upsert_contact
+                        log_message(sender, "inbound", "[location shared]",
+                                    message_type="location")
+                        upsert_contact(sender, name=pushname)
+                    except Exception:
+                        pass
                 elif msg_type == "interactive":
                     # Customer tapped a reply button or list row. Extract the id
                     # (e.g. 'bk_ml', 'qty_2', 'ord_yes') and route it through the

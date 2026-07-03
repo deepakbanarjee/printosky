@@ -573,11 +573,13 @@ def _handle_admin_book_order_create(h, body) -> None:
         courier     = 0.0 if no_courier else totals["courier"]
         grand       = books_total + courier
         commission  = bc.commission_for(items)
+        pradeep_commission = bc.pradeep_commission_for(items)
         code        = f"XTR-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
         status      = "delivered" if handed_over else "confirmed"
         row = create_walk_in_order(code, name, phone, address, items,
                                    books_total, courier, grand, payment_mode, status,
                                    commission=commission,
+                                   pradeep_commission=pradeep_commission,
                                    payment_collected_by=payment_collected_by,
                                    delivery_method=delivery_method)
         if not row:
@@ -859,6 +861,7 @@ def _handle_admin_book_order_edit(h, body, order_code: str) -> None:
             fields["courier"]     = courier
             fields["grand_total"] = totals["books_total"] + courier
             fields["commission"]  = bc.commission_for(items)
+            fields["pradeep_commission"] = bc.pradeep_commission_for(items)
         elif fields.get("delivery_method"):
             # Delivery changed without items — recompute courier from existing items.
             items = order.get("items") or {}
@@ -874,8 +877,8 @@ def _handle_admin_book_order_edit(h, body, order_code: str) -> None:
         # pays the book cost alone, earns no commission on herself).
         if bc.is_divya_phone(fields.get("phone") or order.get("phone")):
             _bt = fields.get("books_total", order.get("books_total") or 0.0)
-            fields.update(commission=0.0, via_divya=False, courier=0.0,
-                          grand_total=_bt)
+            fields.update(commission=0.0, pradeep_commission=0.0, via_divya=False,
+                          courier=0.0, grand_total=_bt)
         update_book_order(order_code, **fields)
         # If the operator just set a payment field on a not-yet-confirmed order,
         # hint the UI to offer moving it to Ready to Dispatch — a manual payment

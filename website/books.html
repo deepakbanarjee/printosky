@@ -699,7 +699,18 @@
   var addr={name:'',phone:'',line:'',pincode:''};
   var STEP='addr';
   function g(id){return document.getElementById(id);}
-  function total(){var t=0;for(var k in cart){t+=BOOKS[k].price*cart[k];}return t;}
+  function total(){
+    // Mirror the backend's set-pricing: a complete 1-of-each combo (however it
+    // was assembled — via the Set-of-3 button or by adding each book one at a
+    // time) bills at the ₹549 set price, not the sum of individual prices.
+    var c=bookCounts();
+    var sets=Math.min(c.malayalam,c.hindi,c.english);
+    var t=sets*BOOKS.set3.price;
+    t+=(c.malayalam-sets)*BOOKS.malayalam.price;
+    t+=(c.hindi-sets)*BOOKS.hindi.price;
+    t+=(c.english-sets)*BOOKS.english.price;
+    return t;
+  }
   function count(){var n=0;for(var k in cart){n+=cart[k];}return n;}
   function openM(){g('co-modal').classList.add('open');document.body.style.overflow='hidden';}
   window.coClose=function(){g('co-modal').classList.remove('open');document.body.style.overflow='';};
