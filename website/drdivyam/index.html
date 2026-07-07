@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dr. Divya M — Teacher · Author · Poet</title>
+  <meta name="description" content="The official website of Dr. Divya M — educator, novelist, poet and podcaster from Thrissur, Kerala. Books, poems, educational resources and daily podcasts.">
+  <link rel="canonical" href="https://www.drdivyam.com/">
+  <meta property="og:title" content="Dr. Divya M — Teacher · Author · Poet">
+  <meta property="og:description" content="A journey through the seasons of a life in words — novels, poems, education and daily podcasts.">
+  <meta property="og:url" content="https://www.drdivyam.com/">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Noto+Serif+Malayalam:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,300..600;1,8..60,300..600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+
+  <!-- Fixed atmospheric background layers — crossfaded by scroll -->
+  <div id="atmosphere" aria-hidden="true">
+    <div class="sky sky--venal"></div>
+    <div class="sky sky--monsoon">
+      <div class="rain" id="rainField"></div>
+    </div>
+    <div class="sky sky--thula"></div>
+    <div class="sky sky--harvest">
+      <div class="motes" id="moteField"></div>
+    </div>
+    <div class="grain"></div>
+  </div>
+
+  <div class="cursor" id="cursor" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="/drdivyam/">Dr.&nbsp;Divya&nbsp;M</a>
+    <div class="season-indicator" aria-live="polite">
+      <span class="season-indicator__ml" id="seasonMl">വേനൽ</span>
+      <span class="season-indicator__en" id="seasonEn">Venal · Summer</span>
+    </div>
+    <nav class="site-nav" aria-label="Main">
+      <a href="books.html">Books</a>
+      <a href="poems.html">Poems</a>
+      <a href="press.html">Press</a>
+    </nav>
+  </header>
+
+  <main>
+
+  <!-- ============ CHAPTER 1 · VENAL (SUMMER) — HERO + ABOUT ============ -->
+  <section class="chapter chapter--venal" id="venal"
+           data-season-ml="വേനൽ" data-season-en="Venal · Summer">
+
+    <div class="hero">
+      <p class="hero__kicker reveal">വേനൽ — a dawn in Thrissur</p>
+      <h1 class="hero__name reveal">Dr.&nbsp;Divya&nbsp;M</h1>
+      <p class="hero__name-ml reveal">ഡോ. ദിവ്യ എം</p>
+      <p class="hero__roles reveal">Teacher&ensp;·&ensp;Author&ensp;·&ensp;Poet&ensp;·&ensp;Podcaster</p>
+      <p class="hero__lede reveal">
+        A life told in four seasons — the summer of beginnings, the monsoon of
+        words, the growing season of teaching, and the harvest of a Kerala
+        community that reads because of her.
+      </p>
+      <div class="scroll-cue reveal" aria-hidden="true">
+        <span>Scroll through the seasons</span>
+        <svg width="14" height="22" viewBox="0 0 14 22" fill="none"><path d="M7 1v18m0 0 5-5M7 19l-5-5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+
+    <div class="about">
+      <div class="about__portrait reveal">
+        <img src="images/divya-portrait.jpg" width="1205" height="1600"
+             alt="Dr. Divya M" class="portrait" loading="lazy">
+      </div>
+      <div class="about__text">
+        <h2 class="chapter-title reveal">
+          <span class="chapter-title__ml">ജീവിതം</span>
+          <span class="chapter-title__en">The teacher who writes</span>
+        </h2>
+        <!-- Bio drawn from her own documents + Manorama (2019) and Kerala Kaumudi (2023, 2024). -->
+        <p class="reveal">Dr. Divya M is a teacher, writer and poet from Puranattukara,
+        Thrissur. Her doctoral work at Mahatma Gandhi University was a critical study of
+        the prose of N.V. Krishna Warrier — the poet-scholar she has long admired. She is
+        best known across Kerala for a quietly radical idea: reviving the habit of reading
+        by carrying literature onto the small screen, one WhatsApp status at a time.</p>
+        <p class="reveal">Alongside the classroom she is an award-winning poet, a literary
+        critic and researcher with books and journal papers to her name, author of
+        Malayalam's first WhatsApp-status novel, and — through her early-reading books — a
+        teacher who puts first letters into the hands of children yet to learn to read.</p>
+        <dl class="facts reveal">
+          <div><dt>Doctorate</dt><dd>N.V. Krishna Warrier's Prose Literature — A Critical Study · Mahatma Gandhi University (guide: Dr. S.K. Vasanthan)</dd></div>
+          <div><dt>Qualifications</dt><dd>MA, B.Ed · NET, JRF, SRF — Malayalam</dd></div>
+          <div><dt>Teaching</dt><dd>Vivekodayam Boys' Higher Secondary School, Thrissur</dd></div>
+          <div><dt>Awards</dt><dd>People's Poetry Award, Chilankam (2014) · AWCF award (2019) · and other honours for her poems</dd></div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CHAPTER 2 · EDAVAPPATHI (MONSOON) — NOVELS & POEMS ============ -->
+  <section class="chapter chapter--monsoon" id="edavappathi"
+           data-season-ml="ഇടവപ്പാതി" data-season-en="Edavappathi · Monsoon">
+
+    <div class="chapter-head">
+      <h2 class="chapter-title reveal">
+        <span class="chapter-title__ml">എഴുത്ത്</span>
+        <span class="chapter-title__en">When the rain writes</span>
+      </h2>
+      <p class="chapter-lede reveal">
+        The monsoon is Kerala's season of ink — and hers. Novels and poems,
+        written in the language of home.
+      </p>
+    </div>
+
+    <div class="works">
+      <h3 class="works__heading reveal">Books</h3>
+      <div class="works__row">
+        <!-- Titles confirmed from her manuscripts (Content compilation). Covers/publisher/year to add. -->
+        <article class="work-card reveal">
+          <div class="ph ph--cover"><span class="ph__label">Cover to come</span></div>
+          <h4 lang="ml">ഇനിയും കരയാത്ത കാർമുകിൽ</h4>
+          <p class="work-card__meta">Iniyum Karayaatha Kaarmukil — Malayalam's first WhatsApp-status novel</p>
+        </article>
+        <article class="work-card reveal">
+          <div class="ph ph--cover"><span class="ph__label">Cover to come</span></div>
+          <h4 lang="ml">കരുണ</h4>
+          <p class="work-card__meta">Karuna — a play</p>
+        </article>
+        <article class="work-card reveal">
+          <div class="ph ph--cover"><span class="ph__label">Cover to come</span></div>
+          <h4 lang="ml">തക്ഷകൻ</h4>
+          <p class="work-card__meta">Thakshakan — a poetry collection · Mentor Books, Thrissur</p>
+        </article>
+        <article class="work-card reveal">
+          <div class="ph ph--cover"><span class="ph__label">Cover to come</span></div>
+          <h4 lang="ml">മയിൽപ്പീലികൾ ഉടവാളുകൾ</h4>
+          <p class="work-card__meta">Mayilppeelikal Udavalukal — literary criticism · Bookdigest, Kottayam</p>
+        </article>
+        <article class="work-card reveal">
+          <div class="ph ph--cover"><span class="ph__label">Cover to come</span></div>
+          <h4 lang="ml">തേനും വയമ്പും</h4>
+          <p class="work-card__meta">Thenum Vayambum — a study · Ascend Publishers, Kottayam</p>
+        </article>
+      </div>
+      <!-- Her best-known act: reviving reading by serialising Rajalakshmi's 1959 classic
+           'Oru Vazhiyum Kure Nizhalukalum' across 380 WhatsApp statuses (2019). See press. -->
+    </div>
+
+    <div class="pubs">
+      <h3 class="works__heading reveal">Selected publications</h3>
+      <p class="chapter-lede reveal">Peer-reviewed papers and essays — much of it tracing the poet-scholar
+      N.V. Krishna Warrier, the subject of her doctoral research.</p>
+      <ul class="press-list reveal">
+        <li lang="ml">പള്ളിവാളും കാൽച്ചിലമ്പും <span lang="en">· Sahityalokam, 2011</span></li>
+        <li lang="ml">എൻ.വി. കൃഷ്ണവാര്യരുടെ ആട്ടക്കഥകൾ <span lang="en">· Sahityalokam, Vol. 44, 2016</span></li>
+        <li lang="ml">ചരിത്രഗവേഷകനായ എൻ.വി. കൃഷ്ണവാര്യർ <span lang="en">· Sahityalokam, 2017</span></li>
+        <li lang="ml">എൻ.വി.യുടെ അവതാരികകളെക്കുറിച്ച് <span lang="en">· Sahityachakravalam, 2019</span></li>
+        <li lang="ml">മലയാളത്തിലെ ഗീതാഞ്ജലി പരിഭാഷകൾ <span lang="en">· Malayalam Research Journal, 2012</span></li>
+        <li lang="ml">വാനപ്രസ്ഥം — ഒരു പഠനം <span lang="en">· Bharatapatrika, 2016</span></li>
+        <li lang="ml">ലോകസഞ്ചാരം വേറിട്ട വഴികളിലൂടെ <span lang="en">· chapter in “Katha Thedunna Sanchari”, a volume on S.K. Pottekkatt</span></li>
+      </ul>
+    </div>
+
+    <div class="poems">
+      <h3 class="works__heading reveal">Poems</h3>
+      <div class="poems__fall">
+        <!-- Full poems live on poems.html; these cards show a short opening excerpt. -->
+        <blockquote class="poem-card" lang="ml">
+          <p>മാനത്ത് മിന്നുന്ന താരകമേ
+മാമഴക്കാറിനെ പേടിയാണോ ?
+അമ്പിളിമാമനുണ്ടെങ്കിലേ നീ
+വമ്പങ്ങു കാട്ടിച്ചിരിപ്പതുള്ളൂ ?</p>
+          <cite lang="en">നക്ഷത്രം · Star</cite>
+        </blockquote>
+        <blockquote class="poem-card" lang="ml">
+          <p>വീടുകളെല്ലാം മനുഷ്യരെപ്പോലെയാണ്.
+പുറമേ പരുക്കനെങ്കിലും
+അകമേ സ്നേഹം നിറഞ്ഞവ.
+പുറമേ സൗന്ദര്യമെങ്കിലും
+അകമേ വെളിച്ചം കയറാത്തവ.</p>
+          <cite lang="en">ഭവനഭേദനം · Bhavanabhedanam</cite>
+        </blockquote>
+        <blockquote class="poem-card" lang="ml">
+          <p>കൊതിക്കിനാവിൻറെയൂഞ്ഞാലിനൊപ്പം
+കുതിച്ചുപൊങ്ങുന്ന കുപ്പായനൂലിനെ
+ചതിക്കുഴിയുടെ വക്കോളമെത്തിച്ച്
+ചതുപ്പിലെപ്പൊഴോ താഴ്ത്തിക്കളഞ്ഞു നീ...!</p>
+          <cite lang="en">ദ്രൗപദി · Draupadi</cite>
+        </blockquote>
+        <blockquote class="poem-card" lang="ml">
+          <p>പോരാടി നേടാൻ
+പ്രണയം യുദ്ധമല്ല.
+പിൻതിരിഞ്ഞോടിയവർ
+പരിഹസിക്കപ്പെടേണ്ടവരുമല്ല.</p>
+          <cite lang="en">പോരാട്ടം · Poraattam</cite>
+        </blockquote>
+      </div>
+      <p class="more-link reveal"><a href="poems.html">Read the poems →</a></p>
+    </div>
+  </section>
+
+  <!-- ============ CHAPTER 3 · THULAVARSHAM — EDUCATION & PODCAST ============ -->
+  <section class="chapter chapter--thula" id="thulavarsham"
+           data-season-ml="തുലാവർഷം" data-season-en="Thulavarsham · Post-monsoon">
+
+    <div class="chapter-head">
+      <h2 class="chapter-title reveal">
+        <span class="chapter-title__ml">പഠനം</span>
+        <span class="chapter-title__en">The growing season</span>
+      </h2>
+      <p class="chapter-lede reveal">
+        After the rain, everything grows. Resources for children learning to
+        read, students preparing for exams, and the teachers who guide them.
+      </p>
+    </div>
+
+    <div class="edu">
+      <article class="edu-feature reveal">
+        <div class="edu-feature__media">
+          <img src="images/aksharathelicham-cover.jpg" width="1166" height="1654"
+               alt="Aksharathelicham — Malayalam letters primer cover" class="book-cover" loading="lazy">
+        </div>
+        <div class="edu-feature__body">
+          <h3>Aksharathelicham <span lang="ml">അക്ഷരത്തെളിച്ചം</span></h3>
+          <p>Her own book (published by Oxygen Publishers) — a primer that opens the door
+          to Malayalam letters through structured practice, building the foundation that
+          lets children face their textbooks with confidence. Written for teachers,
+          parents, and anyone who wants to learn to read Malayalam.</p>
+          <a class="btn" href="books.html">About the book →</a>
+        </div>
+      </article>
+
+      <article class="edu-feature edu-feature--flip reveal">
+        <div class="edu-feature__media">
+          <img src="images/aksharamrutham-cover.jpg" width="777" height="1100"
+               alt="Aksharamrutham — Malayalam early-reading book cover" class="book-cover" loading="lazy">
+        </div>
+        <div class="edu-feature__body">
+          <h3>Aksharamrutham <span lang="ml">അക്ഷരാമൃതം</span></h3>
+          <p>A Malayalam early-reading book she co-authored (with Pradeep K.K., published
+          by Xtraa) — phonics, sight words, guided writing and picture stories that carry
+          children from their very first letters to confident, independent reading.
+          Malayalam, with Hindi and English editions.</p>
+          <a class="btn" href="books.html">About the book →</a>
+        </div>
+      </article>
+
+      <article class="edu-feature reveal">
+        <div class="edu-feature__media">
+          <img src="images/amrutham-cover.jpg" width="1654" height="2339"
+               alt="Amrutham — Malayalam Padanakkalari cover" class="book-cover" loading="lazy">
+        </div>
+        <div class="edu-feature__body">
+          <h3>Amrutham <span lang="ml">അമൃതം</span></h3>
+          <p><span lang="ml">മലയാളം പഠനക്കളരി</span> — a second Malayalam learning book she
+          co-created (with Pradeep K.K.), guiding children from their first letters into
+          reading. Featured in Kerala Kaumudi (2024) as it reached schools across districts.</p>
+          <a class="btn" href="books.html">About the book →</a>
+        </div>
+      </article>
+
+      <section class="podcast reveal" aria-label="Podcast">
+        <h3>Divyadinasandesham <span lang="ml">ദിവ്യദിനസന്ദേശം</span></h3>
+        <p>Her daily message — a few minutes of Malayalam on language, learning and life,
+        shared the way she has always reached her readers: voice to voice.</p>
+        <ul class="episodes">
+          <li class="episode">
+            <div class="episode__head">
+              <span class="episode__title" lang="ml">ദിവ്യദിനസന്ദേശം · 1</span>
+              <span class="episode__len">6:54</span>
+            </div>
+            <audio controls preload="none" src="audio/divyadinasandesham-01.mp3"></audio>
+          </li>
+          <li class="episode">
+            <div class="episode__head">
+              <span class="episode__title" lang="ml">ദിവ്യദിനസന്ദേശം · 2</span>
+              <span class="episode__len">9:15</span>
+            </div>
+            <audio controls preload="none" src="audio/divyadinasandesham-02.mp3"></audio>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </section>
+
+  <!-- ============ CHAPTER 4 · KOYTHU (HARVEST) — RECOGNITION & BOOKS ============ -->
+  <section class="chapter chapter--harvest" id="koythu"
+           data-season-ml="കൊയ്ത്ത്" data-season-en="Koythu · Harvest">
+
+    <div class="chapter-head">
+      <h2 class="chapter-title reveal">
+        <span class="chapter-title__ml">കൊയ്ത്ത്</span>
+        <span class="chapter-title__en">What the seasons returned</span>
+      </h2>
+      <p class="chapter-lede reveal">
+        Reviews from readers, features in the press, and the books themselves —
+        the harvest of a life spent sowing words.
+      </p>
+    </div>
+
+    <div class="testimonials">
+      <!-- PLACEHOLDER: real quotes with names & roles (parents / teachers / critics) -->
+      <figure class="quote reveal">
+        <blockquote><em>[Reader or critic quote about her work]</em></blockquote>
+        <figcaption>— <em>[Name, role]</em></figcaption>
+      </figure>
+      <figure class="quote reveal">
+        <blockquote><em>[Teacher or parent testimonial]</em></blockquote>
+        <figcaption>— <em>[Name, role]</em></figcaption>
+      </figure>
+    </div>
+
+    <div class="press-strip reveal">
+      <h3 class="works__heading">In the news</h3>
+      <!-- PLACEHOLDER: more press items to add — publication, headline, date, link/scan -->
+      <ul class="press-list">
+        <li><a href="https://www.manoramaonline.com/literature/literaryworld/2019/05/17/oru-vazhiyum-kure-nizhalukalum-full-novel-in-whatsapp-status.html" rel="noopener">Manorama Online</a> — 380 statuses, one novel: her WhatsApp serialisation of Rajalakshmi's <em lang="ml">ഒരു വഴിയും കുറെ നിഴലുകളും</em> · 17 May 2019</li>
+        <li>Kerala Kaumudi — the early-reading books movement (she co-authored <em>Aksharamrutham</em>, Xtraa) · 17 Oct 2024</li>
+        <li>Kerala Kaumudi — Reading Day feature, with her <em lang="ml">ടീച്ചറോർമ്മ</em> column “Vivekodaya Madhuryam” · 19 Jun 2023</li>
+        <li>Mathrubhumi Books — “ദിവ്യ ടീച്ചർക്ക് നോവലൊരു ‘സ്റ്റാറ്റസ്’ ആണ്” · 11 May 2019</li>
+        <li>Santham (magazine) — interview · January 2020</li>
+        <!-- Also on file: Athma Online writer profile (23 Sep 2019) and a TV-news video on the WhatsApp-reading teacher — add links once located online. -->
+      </ul>
+      <p class="more-link"><a href="press.html">All news &amp; features →</a></p>
+    </div>
+
+    <div class="shop reveal">
+      <h3>Take a book home</h3>
+      <p>Every book is delivered across Kerala. Order directly on WhatsApp —
+      a real person replies.</p>
+      <a class="btn btn--primary" href="https://wa.me/919495706405?text=Hi%2C%20I%20would%20like%20to%20order%20a%20book%20by%20Dr.%20Divya%20M"
+         rel="noopener">Order on WhatsApp</a>
+      <a class="btn" href="books.html">Browse all books</a>
+    </div>
+
+    <footer class="site-footer">
+      <p class="site-footer__name">Dr. Divya M <span lang="ml">· ഡോ. ദിവ്യ എം</span></p>
+      <!-- PLACEHOLDER: public email + social links (FB / Instagram / YouTube) -->
+      <p class="site-footer__links"><a href="mailto:drdivyam.tcr@gmail.com">drdivyam.tcr@gmail.com</a> · <em>[social links]</em></p>
+      <p class="site-footer__fine">© <span id="year">2026</span> Dr. Divya M · Thrissur, Kerala</p>
+    </footer>
+  </section>
+
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
