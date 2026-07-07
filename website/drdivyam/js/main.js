@@ -38,7 +38,7 @@
         trigger: sectionEl,
         start: "top 90%",
         end: "top 20%",
-        scrub: true
+        scrub: 0.8
       }
     });
     gsap.to(skyEl, {
@@ -48,7 +48,7 @@
         trigger: sectionEl,
         start: "bottom 80%",
         end: "bottom 10%",
-        scrub: true
+        scrub: 0.8
       }
     });
 
@@ -98,7 +98,7 @@
       trigger: ".hero",
       start: "top top",
       end: "bottom top",
-      scrub: true
+      scrub: 0.8
     }
   });
 
