@@ -33,3 +33,26 @@ class TestParseIntentTag:
     def test_all_intents_have_a_tag(self):
         for intent in INTENTS:
             assert parse_intent_tag(f"intent_{intent}") == intent
+
+
+from routing.intent import keyword_intent
+
+
+class TestKeywordIntent:
+    def test_print_words(self):
+        for msg in ("i need a printout", "can you xerox this", "photocopy 10 pages"):
+            assert keyword_intent(msg) == "print"
+
+    def test_sociology_reuses_book_bot_trigger(self):
+        assert keyword_intent("MA sociology sngu books") == "sociology"
+
+    def test_academic_words(self):
+        assert keyword_intent("need my project report binding") == "academic"
+
+    def test_book_trigger_maps_to_xtraa_interim(self):
+        # Plan 1 interim: any book intent opens the shared catalog.
+        assert keyword_intent("malayalam book venam") == "xtraa"
+
+    def test_plain_greeting_is_none(self):
+        assert keyword_intent("hi") is None
+        assert keyword_intent("hello") is None
