@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Printosky UAT — field checklist</title>
+<style>
+  :root {
+    --paper:#f4f2ec; --surface:#fffefb; --surface-2:#faf8f2;
+    --ink:#1a1b22; --ink-soft:#4a4c58; --ink-faint:#7c7e8c;
+    --line:#e3e0d6; --line-strong:#d2cec1;
+    --accent:#3d3fd4; --accent-soft:#ecebff; --accent-ink:#2a2ba3;
+    --pass:#1c9a55; --pass-bg:#e7f6ec; --fail:#d13c48; --fail-bg:#fbe9ea;
+    --block:#b7770a; --block-bg:#fbf1dc;
+    --wa:#25a366;
+    --r:10px;
+    --shadow:0 1px 2px rgba(26,27,34,.05), 0 6px 20px -12px rgba(26,27,34,.18);
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"Cascadia Code","SF Mono","Consolas",monospace;
+  }
+  @media (prefers-color-scheme: dark){:root{
+    --paper:#101116;--surface:#191b22;--surface-2:#20222c;--ink:#e9e9f0;--ink-soft:#b0b2c0;--ink-faint:#7e808f;
+    --line:#2a2d38;--line-strong:#363a48;--accent:#8b8dff;--accent-soft:#23243a;--accent-ink:#a9abff;
+    --pass:#49c483;--pass-bg:#12281c;--fail:#ff6b74;--fail-bg:#2e1518;--block:#e0a52e;--block-bg:#2c2410;--wa:#2fbd77;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -14px rgba(0,0,0,.6);}}
+  :root[data-theme="dark"]{
+    --paper:#101116;--surface:#191b22;--surface-2:#20222c;--ink:#e9e9f0;--ink-soft:#b0b2c0;--ink-faint:#7e808f;
+    --line:#2a2d38;--line-strong:#363a48;--accent:#8b8dff;--accent-soft:#23243a;--accent-ink:#a9abff;
+    --pass:#49c483;--pass-bg:#12281c;--fail:#ff6b74;--fail-bg:#2e1518;--block:#e0a52e;--block-bg:#2c2410;--wa:#2fbd77;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -14px rgba(0,0,0,.6);}
+  :root[data-theme="light"]{
+    --paper:#f4f2ec;--surface:#fffefb;--surface-2:#faf8f2;--ink:#1a1b22;--ink-soft:#4a4c58;--ink-faint:#7c7e8c;
+    --line:#e3e0d6;--line-strong:#d2cec1;--accent:#3d3fd4;--accent-soft:#ecebff;--accent-ink:#2a2ba3;
+    --pass:#1c9a55;--pass-bg:#e7f6ec;--fail:#d13c48;--fail-bg:#fbe9ea;--block:#b7770a;--block-bg:#fbf1dc;--wa:#25a366;
+    --shadow:0 1px 2px rgba(26,27,34,.05),0 6px 20px -12px rgba(26,27,34,.18);}
+
+  *{box-sizing:border-box;} html,body{margin:0;}
+  body{font-family:var(--sans);background:var(--paper);color:var(--ink);min-height:100vh;-webkit-font-smoothing:antialiased;line-height:1.5;}
+  .shell{max-width:760px;margin:0 auto;padding:0 16px calc(120px + env(safe-area-inset-bottom));}
+
+  header.top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--paper) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);}
+  .top-inner{max-width:760px;margin:0 auto;padding:12px 16px 10px;}
+  .brandrow{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+  .brand{font-weight:700;letter-spacing:-.02em;font-size:1.15rem;}
+  .brand .dot{color:var(--accent);}
+  .eyebrow{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);}
+  .controls{margin-left:auto;display:flex;gap:6px;}
+  .icon-btn{font-family:var(--sans);font-size:.74rem;font-weight:600;color:var(--ink-soft);background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;padding:5px 9px;cursor:pointer;white-space:nowrap;}
+  .icon-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .icon-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+  .progress{margin-top:11px;}
+  .bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden;display:flex;}
+  .bar>i{display:block;height:100%;transition:width .35s ease;}
+  .bar .p{background:var(--pass);} .bar .f{background:var(--fail);} .bar .b{background:var(--block);}
+  .tally{display:flex;gap:14px;margin-top:8px;flex-wrap:wrap;font-family:var(--mono);font-size:.72rem;font-variant-numeric:tabular-nums;}
+  .tally b{font-weight:700;} .tally .k{color:var(--ink-faint);}
+  .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle;}
+  .filters{display:flex;gap:6px;margin-top:11px;flex-wrap:wrap;}
+  .chip{font-family:var(--mono);font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-soft);background:var(--surface);border:1px solid var(--line-strong);border-radius:99px;padding:4px 11px;cursor:pointer;}
+  .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff;}
+  :root[data-theme="dark"] .chip[aria-pressed="true"]{color:#12131a;}
+
+  .intro{padding:22px 0 6px;}
+  .intro h1{font-size:clamp(1.5rem,5vw,2rem);line-height:1.1;letter-spacing:-.03em;margin:0 0 8px;text-wrap:balance;}
+  .intro p{color:var(--ink-soft);margin:0;max-width:60ch;}
+
+  .siterow{margin:16px 0 4px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;box-shadow:var(--shadow);display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .siterow label{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);}
+  .siterow input{flex:1;min-width:180px;font-family:var(--sans);font-size:.9rem;color:var(--ink);background:var(--surface-2);border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;}
+  .siterow input:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent);}
+
+  .known{margin:14px 0 4px;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--block);border-radius:var(--r);padding:12px 14px;box-shadow:var(--shadow);}
+  .known h2{font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--block);margin:0 0 8px;}
+  .known ul{margin:0;padding-left:0;list-style:none;display:grid;gap:6px;}
+  .known li{font-size:.84rem;color:var(--ink-soft);padding-left:16px;position:relative;}
+  .known li::before{content:"\25B9";position:absolute;left:0;color:var(--block);}
+  .known li b{color:var(--ink);font-weight:600;}
+
+  .station{margin-top:26px;}
+  .st-head{display:flex;align-items:center;gap:11px;margin-bottom:12px;}
+  .st-num{font-family:var(--mono);font-weight:700;font-size:.78rem;color:var(--accent);background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);border-radius:7px;padding:3px 8px;white-space:nowrap;}
+  .st-title{font-weight:700;letter-spacing:-.01em;font-size:1.02rem;}
+  .st-meta{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);}
+  .st-prog{margin-left:auto;font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);font-variant-numeric:tabular-nums;}
+
+  .cards{display:grid;gap:8px;}
+  .test{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 13px;box-shadow:var(--shadow);border-left:3px solid var(--line-strong);transition:border-color .2s;}
+  .test[data-state="pass"]{border-left-color:var(--pass);}
+  .test[data-state="fail"]{border-left-color:var(--fail);}
+  .test[data-state="block"]{border-left-color:var(--block);}
+  .test.hidden{display:none;}
+  .t-top{display:flex;gap:9px;align-items:baseline;}
+  .t-id{font-family:var(--mono);font-size:.72rem;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;flex:none;}
+  .t-feat{font-weight:600;font-size:.92rem;letter-spacing:-.01em;}
+  .t-detail{color:var(--ink-soft);font-size:.83rem;margin:3px 0 0;}
+  .t-expect{font-size:.8rem;color:var(--ink-soft);margin:7px 0 0;padding:6px 9px;background:var(--surface-2);border-radius:7px;}
+  .t-expect .lbl{font-family:var(--mono);font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-right:6px;}
+  .t-note-known{display:inline-block;margin-top:7px;font-family:var(--mono);font-size:.64rem;letter-spacing:.06em;text-transform:uppercase;color:var(--block);background:var(--block-bg);padding:2px 7px;border-radius:5px;}
+  .seg{display:flex;gap:6px;margin-top:11px;}
+  .seg button{flex:1;font-family:var(--sans);font-weight:600;font-size:.78rem;padding:9px 4px;min-height:42px;cursor:pointer;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--ink-soft);display:flex;align-items:center;justify-content:center;gap:6px;transition:all .12s;}
+  .seg button .mk{font-size:.9rem;line-height:1;}
+  .seg button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .seg button[aria-pressed="true"][data-v="pass"]{background:var(--pass-bg);color:var(--pass);border-color:var(--pass);}
+  .seg button[aria-pressed="true"][data-v="fail"]{background:var(--fail-bg);color:var(--fail);border-color:var(--fail);}
+  .seg button[aria-pressed="true"][data-v="block"]{background:var(--block-bg);color:var(--block);border-color:var(--block);}
+  .t-noteinput{width:100%;margin-top:8px;font-family:var(--sans);font-size:.82rem;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;resize:vertical;height:36px;}
+  .t-noteinput::placeholder{color:var(--ink-faint);}
+  .t-noteinput:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent);}
+
+  .scorecard{margin-top:34px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px 16px;box-shadow:var(--shadow);}
+  .scorecard h2{font-size:1.05rem;letter-spacing:-.01em;margin:0 0 4px;}
+  .scorecard .sub{color:var(--ink-faint);font-size:.82rem;margin:0 0 14px;}
+  table{width:100%;border-collapse:collapse;font-size:.84rem;}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);}
+  th{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;}
+  td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;}
+  tr.total td{border-top:2px solid var(--line-strong);border-bottom:none;font-weight:700;}
+  .verdict{margin-top:16px;}
+  .verdict label{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);}
+  .verdict textarea{width:100%;margin-top:6px;min-height:60px;font-family:var(--sans);font-size:.86rem;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:10px;}
+
+  .report{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;}
+  .report button{font-family:var(--sans);font-weight:700;font-size:.85rem;padding:11px 14px;min-height:46px;border-radius:9px;cursor:pointer;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--ink);display:inline-flex;align-items:center;gap:8px;}
+  .report button.primary{background:var(--wa);border-color:var(--wa);color:#fff;flex:1;justify-content:center;min-width:200px;}
+  .report button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--paper);font-size:.85rem;font-weight:600;padding:10px 16px;border-radius:99px;box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.25s;z-index:50;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  footer.meta{margin-top:20px;text-align:center;font-family:var(--mono);font-size:.66rem;color:var(--ink-faint);line-height:1.7;}
+  footer.meta a{color:var(--accent);}
+
+  @media (prefers-reduced-motion: reduce){*{transition:none !important;}}
+  @media print{
+    header.top,.filters,.controls,.icon-btn,.report{display:none !important;}
+    body{background:#fff;color:#000;}
+    .test.hidden{display:block !important;}
+    .test,.known,.scorecard,.station,.siterow{box-shadow:none;break-inside:avoid;}
+    .seg button{display:none;} .seg button[aria-pressed="true"]{display:flex;}
+  }
+</style>
+</head>
+<body>
+  <header class="top">
+    <div class="top-inner">
+      <div class="brandrow">
+        <span class="brand">Printosky<span class="dot">&middot;</span>UAT</span>
+        <span class="eyebrow" id="runtag">acceptance run</span>
+        <div class="controls">
+          <button class="icon-btn" id="themeBtn" title="Toggle theme">Theme</button>
+          <button class="icon-btn" id="printBtn" title="Print / save PDF">Print</button>
+          <button class="icon-btn" id="resetBtn" title="Clear all results">Reset</button>
+        </div>
+      </div>
+      <div class="progress">
+        <div class="bar" aria-hidden="true">
+          <i class="p" id="barP" style="width:0"></i>
+          <i class="f" id="barF" style="width:0"></i>
+          <i class="b" id="barB" style="width:0"></i>
+        </div>
+        <div class="tally">
+          <span><span class="k">Tested</span> <b id="tTested">0</b>/47</span>
+          <span><span class="swatch" style="background:var(--pass)"></span><span class="k">Pass</span> <b id="tPass">0</b></span>
+          <span><span class="swatch" style="background:var(--fail)"></span><span class="k">Fail</span> <b id="tFail">0</b></span>
+          <span><span class="swatch" style="background:var(--block)"></span><span class="k">Block</span> <b id="tBlock">0</b></span>
+        </div>
+        <div class="filters" id="filters">
+          <button class="chip" data-f="all" aria-pressed="true">All</button>
+          <button class="chip" data-f="untested" aria-pressed="false">Untested</button>
+          <button class="chip" data-f="pass" aria-pressed="false">Pass</button>
+          <button class="chip" data-f="fail" aria-pressed="false">Fail</button>
+          <button class="chip" data-f="block" aria-pressed="false">Block</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="shell">
+    <section class="intro">
+      <h1>Where do we actually stand?</h1>
+      <p>Walk each station, set every test to Pass, Fail, or Block, and jot a note. Results save on this phone &mdash; close it and pick up later. When you're done, tap <b>Send to WhatsApp</b> at the bottom to report this site's run back to the shop.</p>
+
+      <div class="siterow">
+        <label for="site">Site</label>
+        <input id="site" list="sitelist" placeholder="Which location is this run?" autocomplete="off">
+        <datalist id="sitelist">
+          <option value="Oxygen Students Paradise — Thrissur"></option>
+          <option value="Binding Store"></option>
+        </datalist>
+      </div>
+
+      <div class="known">
+        <h2>Known state before you start</h2>
+        <ul>
+          <li><b>Colour printing (Epson)</b> is offline &mdash; WF&#8209;C21000 retired, EM&#8209;C8100 not yet installed. Test 2.3 will Block until it's in.</li>
+          <li><b>Staff PIN login</b> has been dormant since 1 Apr. Test 2.5 is the one that revives the whole ops layer.</li>
+          <li><b>Razorpay webhook</b> may not be repointed yet &mdash; 0 online payments ever recorded. Station 5 confirms.</li>
+          <li><b>Konica attribution &middot; B2B bot &middot; Receipt printer</b> are retired &mdash; not tested here.</li>
+        </ul>
+      </div>
+    </section>
+
+    <div id="stations"></div>
+
+    <section class="scorecard">
+      <h2>Scorecard</h2>
+      <p class="sub">Updates live as you work. When done, send it to the shop &mdash; no app or login needed.</p>
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr><th>Station</th><th class="num">Pass</th><th class="num">Fail</th><th class="num">Block</th><th class="num">Left</th></tr>
+          </thead>
+          <tbody id="scoreBody"></tbody>
+          <tfoot id="scoreFoot"></tfoot>
+        </table>
+      </div>
+      <div class="verdict">
+        <label for="verdict">Verdict &mdash; is the core money path solid, and what's the biggest gap?</label>
+        <textarea id="verdict" placeholder="One honest line&hellip;"></textarea>
+      </div>
+      <div class="report">
+        <button class="primary" id="waBtn" type="button">&#128172; Send to WhatsApp</button>
+        <button id="copyBtn" type="button">Copy summary</button>
+        <button id="jsonBtn" type="button">Download backup</button>
+      </div>
+    </section>
+
+    <footer class="meta">
+      Printosky &middot; Oxygen Students Paradise, Thrissur<br>
+      Results report to WhatsApp <b>+91&nbsp;94957&nbsp;06405</b> &middot; canonical copy: <code>docs/UAT.md</code>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+  var KEY = "printosky-uat-v1";
+  var WA_NUMBER = "919495706405";
+
+  var STATIONS = [
+    { n:"0", title:"Automated pre‑flight", meta:"store PC · ~10 min", tests:[
+      {id:"0.1", feat:"Env manifest", detail:"python scripts/check_env.py store_pc", expect:"Exit 0 — no missing or malformed vars"},
+      {id:"0.2", feat:"Full test suite", detail:"pytest -q", expect:"All green (roadmap: 650+ passing)"},
+      {id:"0.3", feat:"Production smoke", detail:"python scripts/smoke.py", expect:"8/8 green — health, Meta‑verify, Razorpay bad‑sig, auth gates"},
+      {id:"0.4", feat:"Health endpoint", detail:"open /api/health on Vercel", expect:"200 + JSON, each subsystem OK"},
+      {id:"0.5", feat:"Supabase sync alive", detail:"supabase_sync.get_sync_status()", expect:"synced_at is today"}
+    ]},
+    { n:"1", title:"Test phone — WhatsApp flows", meta:"→ 919495706405 · ~30 min", tests:[
+      {id:"1.1", feat:"New‑customer welcome", detail:"From a brand‑new number, send “hi”", expect:"Welcome + menu (printouts / Xtraa books / staff)"},
+      {id:"1.2", feat:"Core print order (6 steps)", detail:"Send a PDF, answer every step", expect:"Bot walks all steps, returns a correct quote total"},
+      {id:"1.3", feat:"Payment link", detail:"Complete the quote", expect:"Razorpay payment link delivered in chat"},
+      {id:"1.4", feat:"Quote correctness", detail:"Cross‑check total vs rate_card.py", expect:"Amount matches the rate card exactly"},
+      {id:"1.5", feat:"HELP escape hatch", detail:"Send “help” / “human” / “support”", expect:"Customer ack + staff alerted, session flagged needs‑human"},
+      {id:"1.6", feat:"STATUS", detail:"Send “STATUS”", expect:"Returns last up‑to‑3 jobs and their status"},
+      {id:"1.7", feat:"REORDER", detail:"Send “REORDER”", expect:"Re‑uses last job's settings, asks only for the new file"},
+      {id:"1.8", feat:"Referral leaderboard", detail:"Send “TOP REFERRERS”", expect:"Top 5 by store‑credit earned"},
+      {id:"1.9", feat:"Store‑credit balance", detail:"Send “MY CREDITS” / “BALANCE”", expect:"Correct store‑credit balance"},
+      {id:"1.10", feat:"A3 print (never used live)", detail:"At size step choose A3 (option 2)", expect:"Flow reaches payment with no error"},
+      {id:"1.11", feat:"Thermal binding (never used live)", detail:"Choose thermal binding", expect:"Correct thermal rate; watch the outsourced‑flag bug"},
+      {id:"1.12", feat:"Book order (Xtraa/Divya)", detail:"“books” → add a title → checkout", expect:"Bilingual flow, correct total/balance, payment prompt"},
+      {id:"1.13", feat:"Group/broadcast ignore", detail:"Trigger a message from a group, if possible", expect:"Bot ignores @g.us / broadcast / newsletter"}
+    ]},
+    { n:"2", title:"Store PC — at the shop", meta:"192.168.55.212:3005 · ~30 min", tests:[
+      {id:"2.1", feat:"Processes running", detail:"tasklist | findstr python (+ Node window)", expect:"watcher, print_server, printer_poller all present"},
+      {id:"2.2", feat:"Print B&W (Konica)", detail:"Send a real B&W job through", expect:"Prints correctly on Konica 192.168.55.110"},
+      {id:"2.3", feat:"Print colour (Epson)", detail:"Send a colour job", expect:"Clean colour print", known:"Blocked until EM‑C8100 installed"},
+      {id:"2.4", feat:"Printer supplies fresh", detail:"Check printer_supplies (printers on)", expect:"Fresh Konica toner/drum rows in last minutes"},
+      {id:"2.5", feat:"Staff PIN login (dormant)", detail:"A staff member logs in with their PIN", expect:"New staff_sessions row — first since 1 Apr"},
+      {id:"2.6", feat:"Idle logout", detail:"After 2.5, leave a session idle past timeout", expect:"idle_logout=1 written on that session"},
+      {id:"2.7", feat:"Supabase PATCH on print", detail:"Complete a print, watch the cloud", expect:"Job row updates in Supabase within seconds"},
+      {id:"2.8", feat:"Vendor workflow", detail:"Job with finishing = project/record/lam_roll", expect:"Vendor selection appears; dispatch works"}
+    ]},
+    { n:"3", title:"Admin panel — browser", meta:"printosky.com/admin · ~20 min", tests:[
+      {id:"3.1", feat:"Login (each role)", detail:"superadmin, store, MIS", expect:"Correct access per role; wrong password rejected"},
+      {id:"3.2", feat:"Job list", detail:"Open the job list", expect:"Jobs load with phone column and statuses"},
+      {id:"3.3", feat:"Floating print panel", detail:"Click a job row", expect:"Panel opens under row with saved specs + preview"},
+      {id:"3.4", feat:"Quote in panel", detail:"Change specs, re‑quote", expect:"Total updates; colour billed at colour rate"},
+      {id:"3.5", feat:"Mark Paid / Ready", detail:"Mark a test job Paid then Ready", expect:"Status transitions; pickup notify attempted"},
+      {id:"3.6", feat:"Conversations panel", detail:"Open Conversations tab", expect:"Threads load (not 404); errors visible if any"},
+      {id:"3.7", feat:"Referral leaderboard tab", detail:"Open leaderboard", expect:"Sortable table + CSV export"},
+      {id:"3.8", feat:"Store‑credit adjust", detail:"Grant/revoke credit on a test customer", expect:"Balance changes; audit row written"},
+      {id:"3.9", feat:"Book Orders tab", detail:"Open book orders", expect:"Orders list (S10‑9 “New Book Order” may be absent)"},
+      {id:"3.10", feat:"Divya ledger", detail:"Open Divya settlement view", expect:"Commission sum shows (own‑book deductions may be absent)"}
+    ]},
+    { n:"4", title:"MIS dashboard", meta:"printosky.com/mis.html · ~10 min", tests:[
+      {id:"4.1", feat:"MIS login", detail:"Log in (needs the MIS password)", expect:"Dashboard loads"},
+      {id:"4.2", feat:"Printer supplies cards", detail:"View toner/ink cards", expect:"Fresh levels — data is flowing"},
+      {id:"4.3", feat:"Staff session cards", detail:"View staff activity", expect:"Populated only if 2.5 ran; else empty (expected)"}
+    ]},
+    { n:"5", title:"Payments & reconciliation", meta:"~15 min", tests:[
+      {id:"5.1", feat:"Webhook repointed?", detail:"Razorpay → Settings → Webhooks", expect:"URL = printosky.vercel.app/webhook/razorpay"},
+      {id:"5.2", feat:"Live ₹1 test payment", detail:"Pay ₹1 via a test job's link", expect:"Job → Paid in Supabase ~5s; Vercel log 200"},
+      {id:"5.3", feat:"processed_webhooks row", detail:"Check the table after 5.2", expect:"A razorpay_* row recorded"},
+      {id:"5.4", feat:"Idempotency", detail:"If safe, replay the same event", expect:"Already‑processed; no double‑charge/complete"}
+    ]},
+    { n:"6", title:"Monitoring & external", meta:"~10 min", tests:[
+      {id:"6.1", feat:"Health monitors", detail:"UptimeRobot — 3 monitors", expect:"health, printosky.com/, /admin all green"},
+      {id:"6.2", feat:"Meta templates", detail:"Meta → Message Templates", expect:"pickup_ready_v1 + pickup_completed_v1 = APPROVED"},
+      {id:"6.3", feat:"Alert delivery", detail:"Trigger one failing smoke/monitor", expect:"WhatsApp alert lands on owner number"},
+      {id:"6.4", feat:"Daily‑activity cron", detail:"GitHub Action last run", expect:"Ran 21:00 IST, no 0‑inbound false alarm"}
+    ]}
+  ];
+
+  var MARK = { pass:"✓", fail:"✕", block:"⏸" };
+  var LABEL = { pass:"Pass", fail:"Fail", block:"Block" };
+
+  var state = load();
+  function load(){ try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch(e){ return {}; } }
+  function save(){ try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){} }
+
+  var stationsEl = document.getElementById("stations");
+  var activeFilter = "all";
+
+  STATIONS.forEach(function(st){
+    var sec = document.createElement("section");
+    sec.className = "station"; sec.dataset.st = st.n;
+    var head = document.createElement("div");
+    head.className = "st-head";
+    head.innerHTML = '<span class="st-num">STN '+st.n+'</span>' +
+      '<div><div class="st-title">'+st.title+'</div><div class="st-meta">'+st.meta+'</div></div>' +
+      '<span class="st-prog" data-prog="'+st.n+'">0/'+st.tests.length+'</span>';
+    sec.appendChild(head);
+    var cards = document.createElement("div"); cards.className = "cards";
+    st.tests.forEach(function(t){
+      var rec = state[t.id] || {};
+      var card = document.createElement("div");
+      card.className = "test"; card.dataset.id = t.id;
+      if (rec.v) card.dataset.state = rec.v;
+      var knownHtml = t.known ? '<span class="t-note-known">'+t.known+'</span>' : '';
+      var seg = ["pass","fail","block"].map(function(v){
+        var on = rec.v === v ? ' aria-pressed="true"' : ' aria-pressed="false"';
+        return '<button type="button" data-v="'+v+'"'+on+'><span class="mk">'+MARK[v]+'</span>'+LABEL[v]+'</button>';
+      }).join("");
+      card.innerHTML =
+        '<div class="t-top"><span class="t-id">'+t.id+'</span>' +
+          '<div><div class="t-feat">'+esc(t.feat)+'</div><div class="t-detail">'+esc(t.detail)+'</div></div></div>' +
+        '<div class="t-expect"><span class="lbl">Expect</span>'+esc(t.expect)+'</div>' +
+        knownHtml +
+        '<div class="seg">'+seg+'</div>' +
+        '<textarea class="t-noteinput" placeholder="Note (optional)…">'+(rec.note?esc(rec.note):"")+'</textarea>';
+      cards.appendChild(card);
+    });
+    sec.appendChild(cards);
+    stationsEl.appendChild(sec);
+  });
+
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+
+  stationsEl.addEventListener("click", function(e){
+    var btn = e.target.closest(".seg button"); if (!btn) return;
+    var card = btn.closest(".test"), id = card.dataset.id, v = btn.dataset.v;
+    var rec = state[id] || {};
+    if (rec.v === v) delete rec.v; else rec.v = v;
+    if (!rec.v && !rec.note) delete state[id]; else state[id] = rec;
+    card.querySelectorAll(".seg button").forEach(function(b){ b.setAttribute("aria-pressed",(b.dataset.v===rec.v)?"true":"false"); });
+    if (rec.v) card.dataset.state = rec.v; else card.removeAttribute("data-state");
+    save(); refresh();
+  });
+  stationsEl.addEventListener("input", function(e){
+    if (!e.target.classList.contains("t-noteinput")) return;
+    var card = e.target.closest(".test"), id = card.dataset.id;
+    var rec = state[id] || {}; rec.note = e.target.value;
+    if (!rec.v && !rec.note) delete state[id]; else state[id] = rec;
+    save();
+  });
+
+  var siteEl = document.getElementById("site");
+  if (state.__site) siteEl.value = state.__site;
+  siteEl.addEventListener("input", function(){ state.__site = siteEl.value; save(); });
+
+  var verdictEl = document.getElementById("verdict");
+  if (state.__verdict) verdictEl.value = state.__verdict;
+  verdictEl.addEventListener("input", function(){ state.__verdict = verdictEl.value; save(); });
+
+  var filterWrap = document.getElementById("filters");
+  filterWrap.addEventListener("click", function(e){
+    var chip = e.target.closest(".chip"); if (!chip) return;
+    activeFilter = chip.dataset.f;
+    filterWrap.querySelectorAll(".chip").forEach(function(c){ c.setAttribute("aria-pressed", c===chip?"true":"false"); });
+    applyFilter();
+  });
+  function applyFilter(){
+    document.querySelectorAll(".test").forEach(function(card){
+      var v = (state[card.dataset.id]||{}).v;
+      var show = activeFilter==="all" || (activeFilter==="untested" && !v) || (activeFilter===v);
+      card.classList.toggle("hidden", !show);
+    });
+  }
+
+  document.getElementById("themeBtn").addEventListener("click", function(){
+    var root = document.documentElement, cur = root.getAttribute("data-theme");
+    var next = cur==="dark"?"light":cur==="light"?"dark":(window.matchMedia("(prefers-color-scheme: dark)").matches?"light":"dark");
+    root.setAttribute("data-theme", next);
+    try{ localStorage.setItem(KEY+"-theme", next); }catch(e){}
+  });
+  try{ var st2 = localStorage.getItem(KEY+"-theme"); if(st2) document.documentElement.setAttribute("data-theme", st2); }catch(e){}
+
+  document.getElementById("printBtn").addEventListener("click", function(){ window.print(); });
+  document.getElementById("resetBtn").addEventListener("click", function(){
+    if (!confirm("Clear all results and notes from this phone?")) return;
+    var site = state.__site;
+    state = {}; if (site) state.__site = site; save();
+    document.querySelectorAll(".test").forEach(function(card){
+      card.removeAttribute("data-state");
+      card.querySelectorAll(".seg button").forEach(function(b){ b.setAttribute("aria-pressed","false"); });
+      card.querySelector(".t-noteinput").value = "";
+    });
+    verdictEl.value = ""; refresh();
+  });
+
+  // ---- reporting ----
+  function buildSummary(){
+    var counts = tally(), lines = [];
+    lines.push("Printosky UAT — " + (state.__site || "(site not set)"));
+    lines.push(new Date().toLocaleString());
+    lines.push("Tested " + counts.done + "/47  ·  Pass " + counts.p + "  Fail " + counts.f + "  Block " + counts.b + "  Left " + counts.left);
+    var fails = [], blocks = [];
+    STATIONS.forEach(function(st){ st.tests.forEach(function(t){
+      var rec = state[t.id]; if (!rec || !rec.v) return;
+      var note = rec.note ? " — " + rec.note : "";
+      if (rec.v === "fail") fails.push("✕ " + t.id + " " + t.feat + note);
+      else if (rec.v === "block") blocks.push("⏸ " + t.id + " " + t.feat + note);
+    });});
+    if (fails.length){ lines.push(""); lines.push("FAILS:"); lines = lines.concat(fails); }
+    if (blocks.length){ lines.push(""); lines.push("BLOCKED:"); lines = lines.concat(blocks); }
+    if (state.__verdict){ lines.push(""); lines.push("Verdict: " + state.__verdict); }
+    return lines.join("\n");
+  }
+  function toast(msg){ var t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(function(){t.classList.remove("show");},2200); }
+
+  document.getElementById("waBtn").addEventListener("click", function(){
+    if (!state.__site){ siteEl.focus(); toast("Enter the site name first"); return; }
+    var url = "https://wa.me/" + WA_NUMBER + "?text=" + encodeURIComponent(buildSummary());
+    window.open(url, "_blank");
+  });
+  document.getElementById("copyBtn").addEventListener("click", function(){
+    var text = buildSummary();
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){ toast("Summary copied"); }, function(){ fallbackCopy(text); });
+    } else { fallbackCopy(text); }
+  });
+  function fallbackCopy(text){
+    var ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); toast("Summary copied"); }catch(e){ toast("Copy failed — long-press to select"); }
+    document.body.removeChild(ta);
+  }
+  document.getElementById("jsonBtn").addEventListener("click", function(){
+    var blob = new Blob([JSON.stringify(state,null,2)], {type:"application/json"});
+    var a = document.createElement("a");
+    var sitePart = (state.__site||"site").replace(/[^a-z0-9]+/gi,"-").toLowerCase();
+    a.href = URL.createObjectURL(blob);
+    a.download = "printosky-uat-" + sitePart + "-" + new Date().toISOString().slice(0,10) + ".json";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+  });
+
+  function tally(){
+    var p=0,f=0,b=0,total=0;
+    STATIONS.forEach(function(st){ st.tests.forEach(function(t){
+      total++; var v=(state[t.id]||{}).v;
+      if(v==="pass")p++; else if(v==="fail")f++; else if(v==="block")b++;
+    });});
+    return {p:p,f:f,b:b,total:total,done:p+f+b,left:total-(p+f+b)};
+  }
+
+  var scoreBody = document.getElementById("scoreBody"), scoreFoot = document.getElementById("scoreFoot");
+  function refresh(){
+    var total=0,gP=0,gF=0,gB=0; scoreBody.innerHTML="";
+    STATIONS.forEach(function(st){
+      var p=0,f=0,b=0;
+      st.tests.forEach(function(t){ var v=(state[t.id]||{}).v; if(v==="pass")p++; else if(v==="fail")f++; else if(v==="block")b++; });
+      var done=p+f+b, tot=st.tests.length, left=tot-done;
+      total+=tot; gP+=p; gF+=f; gB+=b;
+      var prog=document.querySelector('[data-prog="'+st.n+'"]'); if(prog) prog.textContent=done+"/"+tot;
+      var tr=document.createElement("tr");
+      tr.innerHTML='<td><b>'+st.n+'</b> '+esc(st.title)+'</td><td class="num">'+p+'</td><td class="num">'+f+'</td><td class="num">'+b+'</td>' +
+        '<td class="num" style="color:'+(left?'var(--ink-faint)':'var(--pass)')+'">'+left+'</td>';
+      scoreBody.appendChild(tr);
+    });
+    var gDone=gP+gF+gB, gLeft=total-gDone;
+    scoreFoot.innerHTML='<tr class="total"><td>Total</td><td class="num">'+gP+'</td><td class="num">'+gF+'</td><td class="num">'+gB+'</td><td class="num">'+gLeft+'</td></tr>';
+    document.getElementById("tTested").textContent=gDone;
+    document.getElementById("tPass").textContent=gP;
+    document.getElementById("tFail").textContent=gF;
+    document.getElementById("tBlock").textContent=gB;
+    document.getElementById("barP").style.width=(gP/total*100)+"%";
+    document.getElementById("barF").style.width=(gF/total*100)+"%";
+    document.getElementById("barB").style.width=(gB/total*100)+"%";
+    document.getElementById("runtag").textContent="run "+new Date().toISOString().slice(0,10);
+  }
+  refresh(); applyFilter();
+})();
+</script>
+</body>
+</html>
