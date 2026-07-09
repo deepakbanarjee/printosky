@@ -204,3 +204,85 @@ def decide_intent(text: str, classifier=None) -> str:
     if intent in INTENTS and conf >= CONFIDENCE_THRESHOLD:
         return intent
     return "unknown"
+
+
+_ORDER_LINK = "https://printosky.com/order"
+_ACADEMIC_LINK = "https://printosky.com/academic"
+
+_LINK_MESSAGES = {
+    "print": (
+        "🖨️ *Print a file*\n"
+        "Upload your file, pick paper / colour / copies and pay online here:\n"
+        f"{_ORDER_LINK}\n\n"
+        "— Oxygen Students Paradise, Thriprayar"
+    ),
+    "academic": (
+        "🎓 *Academic project*\n"
+        "Submit your project-report details (and binding) here:\n"
+        f"{_ACADEMIC_LINK}"
+    ),
+    "notes": (
+        "📝 *Study notes*\n"
+        "To sell your notes, reply *upload notes*.\n"
+        "To buy a specific note, send *print note NOTE-XXXX*."
+    ),
+}
+
+
+def build_menu_rows() -> list[dict]:
+    """Rows for the tap-to-choose fallback menu (row id → parse_intent_tag)."""
+    return [
+        {"id": "intent_print",     "title": "🖨️ Print a file",    "description": "Documents, photos, PDFs"},
+        {"id": "intent_xtraa",     "title": "📘 Xtraa books",      "description": "English & Hindi learning books"},
+        {"id": "intent_malayalam", "title": "📗 Malayalam book",   "description": "Aksharamrutham"},
+        {"id": "intent_sociology", "title": "📕 Sociology books",  "description": "MA Sociology (SNGU)"},
+        {"id": "intent_academic",  "title": "🎓 Academic project", "description": "Project report & binding"},
+    ]
+
+
+def _send_text(phone: str, message: str) -> None:
+    from whatsapp_notify import _send
+    _send(phone, message)
+
+
+def _send_menu(phone: str) -> None:
+    from whatsapp_notify import send_list
+    ok = send_list(
+        phone,
+        body="Hi! 👋 How can we help you today? Tap what you need 👇",
+        button_text="Choose",
+        rows=build_menu_rows(),
+        header="Printosky",
+        section_title="How can we help",
+    )
+    if not ok:
+        _send_text(phone, "How can we help?\n"
+                          "• Print a file: " + _ORDER_LINK + "\n"
+                          "• Books: reply *books*\n"
+                          "• Sociology: reply *sociology*\n"
+                          "• Academic project: " + _ACADEMIC_LINK)
+
+
+def _open_books(phone: str, name: str | None) -> None:
+    from book_bot import start_catalog
+    for msg in start_catalog(phone, name) or []:
+        _send_text(phone, msg)
+
+
+def _open_soc(phone: str, name: str | None) -> None:
+    from book_bot import maybe_handle_soc
+    for msg in maybe_handle_soc(phone, "sociology", name=name) or []:
+        _send_text(phone, msg)
+
+
+def route_front_door(phone: str, text: str, name: str | None = None) -> None:
+    """Decide intent and perform the side effect. Sends everything internally."""
+    intent = decide_intent(text)
+    if intent in _LINK_MESSAGES:
+        _send_text(phone, _LINK_MESSAGES[intent])
+    elif intent in ("xtraa", "malayalam"):
+        _open_books(phone, name)               # Plan 1 interim: shared catalog
+    elif intent == "sociology":
+        _open_soc(phone, name)
+    else:                                       # unknown / anything unhandled
+        _send_menu(phone)

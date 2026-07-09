@@ -95,3 +95,56 @@ class TestDecideIntent:
         def fake(_):
             return ("weather", 0.99)  # not a real intent
         assert decide_intent("random", classifier=fake) == "unknown"
+
+
+import routing.intent as ir
+
+
+class TestRouteFrontDoor:
+    def setup_method(self):
+        self.sent = []    # (phone, text) plain sends
+        self.menus = []   # phone
+        self.opened = []  # flow name
+
+    def _patch(self, monkeypatch, intent):
+        monkeypatch.setattr(ir, "decide_intent", lambda text: intent)
+        monkeypatch.setattr(ir, "_send_text", lambda phone, msg: self.sent.append((phone, msg)))
+        monkeypatch.setattr(ir, "_send_menu", lambda phone: self.menus.append(phone))
+        monkeypatch.setattr(ir, "_open_books", lambda phone, name: self.opened.append("books"))
+        monkeypatch.setattr(ir, "_open_soc", lambda phone, name: self.opened.append("soc"))
+
+    def test_print_sends_order_link(self, monkeypatch):
+        self._patch(monkeypatch, "print")
+        ir.route_front_door("91999", "whatever", "Ann")
+        assert any("printosky.com/order" in m for _, m in self.sent)
+        assert not self.opened and not self.menus
+
+    def test_academic_sends_academic_link(self, monkeypatch):
+        self._patch(monkeypatch, "academic")
+        ir.route_front_door("91999", "x", None)
+        assert any("printosky.com/academic" in m for _, m in self.sent)
+
+    def test_xtraa_opens_books(self, monkeypatch):
+        self._patch(monkeypatch, "xtraa")
+        ir.route_front_door("91999", "x", None)
+        assert self.opened == ["books"]
+
+    def test_malayalam_opens_books_interim(self, monkeypatch):
+        self._patch(monkeypatch, "malayalam")
+        ir.route_front_door("91999", "x", None)
+        assert self.opened == ["books"]
+
+    def test_sociology_opens_soc(self, monkeypatch):
+        self._patch(monkeypatch, "sociology")
+        ir.route_front_door("91999", "x", None)
+        assert self.opened == ["soc"]
+
+    def test_unknown_sends_menu(self, monkeypatch):
+        self._patch(monkeypatch, "unknown")
+        ir.route_front_door("91999", "???", None)
+        assert self.menus == ["91999"]
+
+    def test_menu_rows_cover_every_intent(self):
+        ids = {r["id"] for r in ir.build_menu_rows()}
+        for intent in ("print", "xtraa", "malayalam", "sociology", "academic"):
+            assert f"intent_{intent}" in ids
