@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Studio · Dr. Divya M (private)</title>
+  <style>
+    :root { --ink:#2a2118; --accent:#8a5a1c; --line:rgba(60,44,18,.2); --bg:#fbf7ef; --ok:#2e7d32; --warn:#b26a00; --mute:#777; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); margin: 0; line-height: 1.5; }
+    .wrap { max-width: 780px; margin: 0 auto; padding: 24px 18px 80px; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    .sub { color: var(--mute); font-size: .85rem; margin-bottom: 24px; }
+    label { display: block; font-size: .8rem; font-weight: 600; margin: 12px 0 4px; }
+    input[type=text], input[type=date], input[type=url], textarea, select {
+      width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 4px;
+      font: inherit; background: #fff; color: var(--ink);
+    }
+    textarea { min-height: 90px; resize: vertical; }
+    [lang=ml] { font-family: "Noto Serif Malayalam", serif; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .row > div { flex: 1; min-width: 160px; }
+    .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: .9rem; }
+    .check input { width: auto; }
+    button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: #fff; color: var(--ink);
+      padding: 8px 16px; border-radius: 4px; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff8ea; font-weight: 600; }
+    button.mini { padding: 4px 10px; font-size: .78rem; }
+    .tabs { display: flex; gap: 6px; margin: 18px 0; border-bottom: 1px solid var(--line); }
+    .tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 14px; }
+    .tabs button.on { border-bottom-color: var(--accent); font-weight: 700; }
+    .card { border: 1px solid var(--line); border-radius: 6px; padding: 16px; margin: 12px 0; background: #fff; }
+    .badge { display: inline-block; font-size: .7rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; text-transform: uppercase; letter-spacing: .04em; }
+    .b-approved { background: #e6f4e7; color: var(--ok); }
+    .b-pending { background: #fff2e0; color: var(--warn); }
+    .b-hidden { background: #eee; color: var(--mute); }
+    .b-yes { background: #e6f4e7; color: var(--ok); }
+    .b-no { background: #fdecec; color: #c0392b; }
+    .item-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .msg { padding: 10px 14px; border-radius: 4px; margin: 12px 0; font-size: .9rem; display: none; }
+    .msg.show { display: block; }
+    .msg.ok { background: #e6f4e7; color: var(--ok); }
+    .msg.err { background: #fdecec; color: #c0392b; }
+    .hidden { display: none; }
+    fieldset { border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin-top: 14px; }
+    legend { font-size: .78rem; font-weight: 700; padding: 0 6px; color: var(--mute); }
+    .hint { font-size: .78rem; color: var(--mute); margin-top: 4px; }
+    .quote-body { white-space: pre-line; margin: 6px 0; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Dr. Divya M · Studio</h1>
+  <p class="sub">Private admin — add testimonials &amp; study materials for the website.</p>
+
+  <!-- Login -->
+  <div id="login">
+    <label for="pw">Password</label>
+    <input type="text" id="pw" autocomplete="off" placeholder="studio password" style="max-width:320px">
+    <p><button class="primary" id="loginBtn">Unlock</button></p>
+    <div class="msg" id="loginMsg"></div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="hidden">
+    <div class="tabs">
+      <button data-tab="reviews" class="on">Reviews</button>
+      <button data-tab="materials">Study materials</button>
+    </div>
+
+    <!-- REVIEWS -->
+    <section id="tab-reviews">
+      <fieldset>
+        <legend>Add a review</legend>
+        <div class="row">
+          <div><label>Name <span lang="ml">(പേര്)</span></label><input type="text" id="r_name" lang="ml"></div>
+          <div><label>Role (parent / student / colleague…)</label><input type="text" id="r_role"></div>
+        </div>
+        <label>Received on</label><input type="date" id="r_date" style="max-width:200px">
+        <label>Review text <span lang="ml">(അവലോകനം)</span></label>
+        <textarea id="r_body" lang="ml"></textarea>
+        <label>English translation (optional)</label>
+        <textarea id="r_body_en"></textarea>
+        <div class="check"><input type="checkbox" id="r_consent"><label for="r_consent" style="margin:0">The person agreed to show this publicly (consent)</label></div>
+        <p class="hint">Saved as <b>approved</b> and shown on the site immediately. If you don't have consent yet, untick — it saves as <b>pending</b> and stays hidden until you approve it.</p>
+        <p><button class="primary" id="r_add">Save review</button></p>
+        <div class="msg" id="r_msg"></div>
+      </fieldset>
+      <h3>Existing reviews</h3>
+      <div id="r_list"></div>
+    </section>
+
+    <!-- MATERIALS -->
+    <section id="tab-materials" class="hidden">
+      <fieldset>
+        <legend>Add study material</legend>
+        <label>Title</label><input type="text" id="m_title">
+        <div class="row">
+          <div><label>Subject</label><input type="text" id="m_subject" placeholder="Malayalam"></div>
+          <div><label>Class / level</label><input type="text" id="m_class" placeholder="SSLC"></div>
+        </div>
+        <label>Description (optional)</label><textarea id="m_desc"></textarea>
+        <fieldset>
+          <legend>Source — choose ONE</legend>
+          <label>Upload a file (PDF, image, etc.)</label>
+          <input type="file" id="m_file">
+          <p class="hint">— or —</p>
+          <label>Link to a blog / YouTube / Drive</label>
+          <input type="url" id="m_url" placeholder="https://…">
+        </fieldset>
+        <p><button class="primary" id="m_add">Save material</button> <span id="m_progress" class="hint"></span></p>
+        <div class="msg" id="m_msg"></div>
+      </fieldset>
+      <h3>Existing materials</h3>
+      <div id="m_list"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var FN = "https://kygngswtynxaawrpxkuq.supabase.co/functions/v1/submit-testimonial";
+  var pw = sessionStorage.getItem("studio_pw") || "";
+
+  var $ = function (id) { return document.getElementById(id); };
+  function show(el, text, ok) { el.textContent = text; el.className = "msg show " + (ok ? "ok" : "err"); }
+  function esc(s) { return (s == null ? "" : String(s)); }
+
+  function api(payload) {
+    payload.password = pw;
+    return fetch(FN, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); });
+  }
+
+  // ---- Login ----
+  function tryUnlock(candidate) {
+    pw = candidate;
+    return api({ action: "list" }).then(function (res) {
+      if (res.status === 200 && res.j.ok) {
+        sessionStorage.setItem("studio_pw", pw);
+        $("login").classList.add("hidden");
+        $("app").classList.remove("hidden");
+        renderReviews(res.j.rows);
+        loadMaterials();
+        return true;
+      }
+      sessionStorage.removeItem("studio_pw");
+      return false;
+    });
+  }
+  $("loginBtn").addEventListener("click", function () {
+    tryUnlock($("pw").value.trim()).then(function (okDone) {
+      if (!okDone) show($("loginMsg"), "Wrong password.", false);
+    }).catch(function () { show($("loginMsg"), "Network error.", false); });
+  });
+  $("pw").addEventListener("keydown", function (e) { if (e.key === "Enter") $("loginBtn").click(); });
+
+  // ---- Tabs ----
+  document.querySelectorAll(".tabs button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      document.querySelectorAll(".tabs button").forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on");
+      $("tab-reviews").classList.toggle("hidden", b.dataset.tab !== "reviews");
+      $("tab-materials").classList.toggle("hidden", b.dataset.tab !== "materials");
+    });
+  });
+
+  // ---- Reviews ----
+  function renderReviews(rows) {
+    var box = $("r_list"); box.innerHTML = "";
+    if (!rows || !rows.length) { box.innerHTML = "<p class='hint'>No reviews yet.</p>"; return; }
+    rows.forEach(function (r) {
+      var d = document.createElement("div"); d.className = "card";
+      var badge = "<span class='badge b-" + r.status + "'>" + r.status + "</span> " +
+        "<span class='badge " + (r.consent ? "b-yes" : "b-no") + "'>consent " + (r.consent ? "yes" : "no") + "</span>";
+      var who = esc(r.author_name) + (r.author_role ? ", " + esc(r.author_role) : "");
+      d.innerHTML = badge + "<div class='quote-body' lang='ml'></div><div><b lang='ml'></b> · <span class='hint'>" + esc(r.received_on || "") + "</span></div>";
+      d.querySelector(".quote-body").textContent = r.body_ml || "";
+      d.querySelector("b").textContent = who;
+      var acts = document.createElement("div"); acts.className = "item-actions";
+      acts.appendChild(mkBtn(r.status === "approved" ? "Unpublish (hide)" : "Approve & show", function () {
+        setReview(r.id, { status: r.status === "approved" ? "hidden" : "approved" });
+      }));
+      acts.appendChild(mkBtn(r.consent ? "Mark no consent" : "Mark consent given", function () {
+        setReview(r.id, { consent: !r.consent });
+      }));
+      d.appendChild(acts);
+      box.appendChild(d);
+    });
+  }
+  function mkBtn(label, fn) { var b = document.createElement("button"); b.className = "mini"; b.textContent = label; b.addEventListener("click", fn); return b; }
+  function setReview(id, patch) {
+    patch.action = "setStatus"; patch.id = id;
+    api(patch).then(function () { return api({ action: "list" }); }).then(function (res) { renderReviews(res.j.rows); });
+  }
+  $("r_add").addEventListener("click", function () {
+    var payload = {
+      action: "add",
+      author_name: $("r_name").value.trim(),
+      author_role: $("r_role").value.trim(),
+      received_on: $("r_date").value || null,
+      body_ml: $("r_body").value.trim(),
+      body_en: $("r_body_en").value.trim(),
+      consent: $("r_consent").checked,
+      status: $("r_consent").checked ? "approved" : "pending"
+    };
+    if (!payload.author_name || !payload.body_ml) { show($("r_msg"), "Name and review text are required.", false); return; }
+    api(payload).then(function (res) {
+      if (res.j.ok) {
+        show($("r_msg"), "Saved (" + payload.status + ").", true);
+        ["r_name", "r_role", "r_date", "r_body", "r_body_en"].forEach(function (id) { $(id).value = ""; });
+        $("r_consent").checked = false;
+        return api({ action: "list" }).then(function (r2) { renderReviews(r2.j.rows); });
+      }
+      show($("r_msg"), "Error: " + (res.j.error || "unknown"), false);
+    }).catch(function () { show($("r_msg"), "Network error.", false); });
+  });
+
+  // ---- Materials ----
+  function loadMaterials() { api({ action: "material_list" }).then(function (res) { renderMaterials(res.j.rows); }); }
+  function renderMaterials(rows) {
+    var box = $("m_list"); box.innerHTML = "";
+    if (!rows || !rows.length) { box.innerHTML = "<p class='hint'>No materials yet.</p>"; return; }
+    rows.forEach(function (m) {
+      var d = document.createElement("div"); d.className = "card";
+      var badge = "<span class='badge " + (m.published ? "b-approved" : "b-hidden") + "'>" + (m.published ? "published" : "hidden") + "</span> " +
+        "<span class='badge b-hidden'>" + m.material_type + "</span>";
+      var meta = [m.subject, m.class_level].filter(Boolean).join(" · ");
+      d.innerHTML = badge + "<div><b></b></div><div class='hint'>" + esc(meta) + "</div><div class='quote-body'></div>";
+      d.querySelector("b").textContent = m.title || "";
+      d.querySelector(".quote-body").textContent = m.description || "";
+      var link = m.file_url || m.external_url;
+      if (link) { var a = document.createElement("a"); a.href = link; a.target = "_blank"; a.rel = "noopener"; a.textContent = "open ↗"; a.className = "hint"; d.appendChild(a); }
+      var acts = document.createElement("div"); acts.className = "item-actions";
+      acts.appendChild(mkBtn(m.published ? "Unpublish" : "Publish", function () {
+        api({ action: "material_setStatus", id: m.id, published: !m.published }).then(loadMaterials);
+      }));
+      acts.appendChild(mkBtn("Delete", function () {
+        if (confirm("Delete this material permanently?")) api({ action: "material_delete", id: m.id }).then(loadMaterials);
+      }));
+      d.appendChild(acts);
+      box.appendChild(d);
+    });
+  }
+  $("m_add").addEventListener("click", function () {
+    var title = $("m_title").value.trim();
+    var url = $("m_url").value.trim();
+    var file = $("m_file").files[0];
+    if (!title) { show($("m_msg"), "Title is required.", false); return; }
+    if (!file && !url) { show($("m_msg"), "Upload a file OR paste a link.", false); return; }
+
+    var base = {
+      action: "material_add", title: title,
+      subject: $("m_subject").value.trim(), class_level: $("m_class").value.trim(),
+      description: $("m_desc").value.trim()
+    };
+
+    function finish(extra) {
+      Object.keys(extra).forEach(function (k) { base[k] = extra[k]; });
+      api(base).then(function (res) {
+        if (res.j.ok) {
+          show($("m_msg"), "Material saved.", true);
+          ["m_title", "m_subject", "m_class", "m_desc", "m_url"].forEach(function (id) { $(id).value = ""; });
+          $("m_file").value = ""; $("m_progress").textContent = "";
+          loadMaterials();
+        } else { show($("m_msg"), "Error: " + (res.j.error || "unknown"), false); }
+      }).catch(function () { show($("m_msg"), "Network error.", false); });
+    }
+
+    if (file) {
+      $("m_progress").textContent = "Uploading…";
+      api({ action: "sign_upload", filename: file.name }).then(function (res) {
+        if (!res.j.ok) { show($("m_msg"), "Upload sign failed.", false); $("m_progress").textContent = ""; return; }
+        return fetch(res.j.uploadUrl, { method: "PUT", headers: { "content-type": file.type || "application/octet-stream", "x-upsert": "true" }, body: file })
+          .then(function (up) {
+            if (!up.ok) { show($("m_msg"), "Upload failed (" + up.status + ").", false); $("m_progress").textContent = ""; return; }
+            finish({ file_url: res.j.publicUrl, file_size: file.size });
+          });
+      }).catch(function () { show($("m_msg"), "Upload error.", false); $("m_progress").textContent = ""; });
+    } else {
+      finish({ external_url: url });
+    }
+  });
+
+  // Auto-unlock if a password is already saved this session
+  if (pw) tryUnlock(pw).then(function (ok) { if (!ok) { $("pw").value = ""; } });
+})();
+</script>
+</body>
+</html>

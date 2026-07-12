@@ -256,22 +256,41 @@ class TestIsGreeting:
         assert api_mod._is_greeting(text) is False
 
 
-class TestCustomerWelcome:
-    """Xtraa-only line: any idle customer (new or returning, greeting or not)
-    is defaulted into the book catalog. A recent active flow is never
-    interrupted. (Replaces the old generic welcome/print menu — every specific
-    intent is claimed by an earlier handler, and 'help' still reaches a human.)"""
+class TestFrontDoorRouting:
+    """Idle customers are routed by the smart front-door (routing.intent):
+    a greeting / unclear message shows the choose-what-you-need menu (NOT a blind
+    Xtraa catalog); an explicit book/print/sociology message goes to the right
+    flow/link; a customer with an order awaiting payment is reminded, never
+    dropped. Replaces the old 'everyone -> Xtraa catalog' default.
 
-    def _patch_common(self, monkeypatch, *, is_new, session=None):
+    Intent is driven via the injected classifier / print keywords so the tests
+    are deterministic whether book_bot is real or stubbed in sys.modules.
+    """
+
+    def _patch_common(self, monkeypatch, *, is_new, session=None,
+                      intent=("unknown", 0.0), pending=None):
+        import routing.intent as ir
         bb = sys.modules.get("book_bot")
         if bb is None:
             bb = types.ModuleType("book_bot")
             sys.modules["book_bot"] = bb
+        # Upstream cascade handlers must NOT claim the message (return None) so it
+        # reaches the idle-customer front door.
         monkeypatch.setattr(bb, "maybe_handle_book", lambda *a, **kw: None, raising=False)
+        monkeypatch.setattr(bb, "maybe_handle_soc", lambda *a, **kw: None, raising=False)
+        # Drive + observe route_front_door's branches directly.
+        monkeypatch.setattr(ir, "classify_intent", lambda text: intent)
+        monkeypatch.setattr(ir, "_pending_payment_reminder",
+                            lambda phone, name=None: pending)
+        self.links = []
+        self.menus = []
         self.catalog = []
-        monkeypatch.setattr(bb, "start_catalog",
-                            lambda phone, name=None: self.catalog.append(phone) or [],
-                            raising=False)
+        self.soc = []
+        monkeypatch.setattr(ir, "_send_text",
+                            lambda phone, msg: self.links.append((phone, msg)))
+        monkeypatch.setattr(ir, "_send_menu", lambda phone: self.menus.append(phone))
+        monkeypatch.setattr(ir, "_open_books", lambda phone, name: self.catalog.append(phone))
+        monkeypatch.setattr(ir, "_open_soc", lambda phone, name: self.soc.append(phone))
         monkeypatch.setattr(sys.modules["db_cloud"], "get_session",
                             lambda *a, **kw: dict(session or {}), raising=False)
         monkeypatch.setattr(sys.modules["db_cloud"], "is_new_contact",
@@ -280,61 +299,91 @@ class TestCustomerWelcome:
                             lambda *a, **kw: None, raising=False)
         self.cleared = []
         monkeypatch.setattr(sys.modules["db_cloud"], "clear_session",
-                            lambda db, phone, *a, **kw: self.cleared.append(phone), raising=False)
+                            lambda db, phone, *a, **kw: self.cleared.append(phone),
+                            raising=False)
         monkeypatch.setattr(api_mod, "_capture_referral_code", lambda *a, **kw: None)
 
-    def _run(self, monkeypatch, *, is_new, text, session=None):
-        self._patch_common(monkeypatch, is_new=is_new, session=session)
+    def _run(self, monkeypatch, *, is_new, text, session=None,
+             intent=("unknown", 0.0), pending=None):
+        self._patch_common(monkeypatch, is_new=is_new, session=session,
+                          intent=intent, pending=pending)
         bot_calls = {"n": 0}
         monkeypatch.setattr(sys.modules["whatsapp_bot"], "handle_message",
                             lambda **kw: bot_calls.__setitem__("n", bot_calls["n"] + 1) or [],
                             raising=False)
-        with patch.object(sys.modules["whatsapp_notify"], "_send") as send_mock:
+        with patch.object(sys.modules["whatsapp_notify"], "_send"):
             api_mod._handle_text("91999000111", text)
-        return send_mock, bot_calls
+        return bot_calls
 
-    def test_new_contact_first_message_opens_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # First-time customer → straight into the book catalog, any wording.
-        _send_mock, bot_calls = self._run(monkeypatch, is_new=True, text="hi")
-        assert self.catalog == ["91999000111"]
-        assert bot_calls["n"] == 0          # print state machine not reached
-
-    def test_new_contact_non_greeting_opens_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        _send_mock, bot_calls = self._run(monkeypatch, is_new=True, text="anyone there")
-        assert self.catalog == ["91999000111"]
+    def test_greeting_shows_menu(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        bot_calls = self._run(monkeypatch, is_new=True, text="hi")
+        assert self.menus == ["91999000111"]
+        assert self.catalog == []
         assert bot_calls["n"] == 0
 
-    def test_returning_contact_greeting_opens_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        _send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="hi")
+    def test_unclear_message_shows_menu(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._run(monkeypatch, is_new=True, text="anyone there")
+        assert self.menus == ["91999000111"]
+        assert self.catalog == []
+
+    def test_returning_greeting_shows_menu(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._run(monkeypatch, is_new=False, text="hi")
+        assert self.menus == ["91999000111"]
+
+    def test_book_intent_opens_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        bot_calls = self._run(monkeypatch, is_new=True, text="books please",
+                              intent=("xtraa", 0.9))
         assert self.catalog == ["91999000111"]
+        assert self.menus == []
         assert bot_calls["n"] == 0
 
-    def test_returning_contact_non_greeting_opens_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Previously fell through silently to the print state machine; on an
-        # xtraa-only line it now opens the catalog too.
-        _send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="i want the malayalam one")
+    def test_print_message_sends_order_link(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # 'printout' is a module-level print keyword -> deterministic.
+        self._run(monkeypatch, is_new=True, text="i need a printout")
+        assert any("printosky.com/order" in m for _, m in self.links)
+        assert self.catalog == [] and self.menus == []
+
+    def test_sociology_intent_opens_soc(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._run(monkeypatch, is_new=True, text="need sociology help",
+                  intent=("sociology", 0.9))
+        assert self.soc == ["91999000111"]
+
+    def test_freeform_resolved_by_classifier(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # No tag/keyword -> injected classifier decides (malayalam -> catalog, interim).
+        self._run(monkeypatch, is_new=True, text="onnu vaayikkan",
+                  intent=("malayalam", 0.9))
         assert self.catalog == ["91999000111"]
+
+    def test_awaiting_payment_customer_reminded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        reminder = ["Order XTR-1 awaiting payment - send screenshot or reply NEW"]
+        self._run(monkeypatch, is_new=False, text="PAY", pending=reminder)
+        assert any("awaiting payment" in m for _, m in self.links)
+        assert self.catalog == [] and self.menus == []
+
+    def test_recent_active_session_not_interrupted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        bot_calls = self._run(monkeypatch, is_new=False, text="hi",
+                              session={"step": "size", "updated_at": now})
+        assert self.catalog == []
+        assert self.menus == []
+        assert bot_calls["n"] == 1          # handed to the print state machine
+        assert self.cleared == []
+
+    def test_stale_staff_hold_resets_then_routes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        bot_calls = self._run(
+            monkeypatch, is_new=False, text="hi",
+            session={"step": "staff_hold", "updated_at": "2026-05-11 01:03:58"})
+        assert "91999000111" in self.cleared    # stale session was reset
+        assert self.menus == ["91999000111"]
+        assert self.catalog == []
         assert bot_calls["n"] == 0
 
-    def test_idle_with_awaiting_payment_order_forwards_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # start_catalog returns a non-empty list for a customer who already has
-        # an order awaiting payment (it does NOT open a fresh catalog). The
-        # router must forward that message, not drop it (regression guard).
-        self._patch_common(monkeypatch, is_new=False, session={})
-        bb = sys.modules["book_bot"]
-        monkeypatch.setattr(bb, "start_catalog",
-                            lambda phone, name=None: ["Order XTR-1 awaiting payment — send screenshot or reply NEW"],
-                            raising=False)
-        monkeypatch.setattr(sys.modules["whatsapp_bot"], "handle_message",
-                            lambda **kw: [], raising=False)
-        with patch.object(sys.modules["whatsapp_notify"], "_send") as send_mock:
-            api_mod._handle_text("91999000111", "PAY")
-        assert send_mock.called
-        assert "awaiting payment" in send_mock.call_args[0][1]
-
-    def test_one_customer_staff_hold_does_not_affect_others(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Customer B messages while customer A is in staff_hold. B must still be
-        # served (catalog) — A's hold is per-phone and never blocks others.
+    def test_one_customer_staff_hold_does_not_affect_others(
+            self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Customer B messages while A is in staff_hold. B must still be served
+        # (menu); A's hold is per-phone and never blocks others.
+        import routing.intent as ir
         sessions = {
             "918943232033": {"step": "staff_hold", "updated_at": "2026-05-11 01:03:58"},
             "918111222333": {},
@@ -342,9 +391,12 @@ class TestCustomerWelcome:
         bb = sys.modules.get("book_bot") or types.ModuleType("book_bot")
         sys.modules["book_bot"] = bb
         monkeypatch.setattr(bb, "maybe_handle_book", lambda *a, **kw: None, raising=False)
-        catalog = []
-        monkeypatch.setattr(bb, "start_catalog",
-                            lambda phone, name=None: catalog.append(phone) or [], raising=False)
+        monkeypatch.setattr(bb, "maybe_handle_soc", lambda *a, **kw: None, raising=False)
+        monkeypatch.setattr(ir, "classify_intent", lambda text: ("unknown", 0.0))
+        monkeypatch.setattr(ir, "_pending_payment_reminder",
+                            lambda phone, name=None: None)
+        menus = []
+        monkeypatch.setattr(ir, "_send_menu", lambda phone: menus.append(phone))
         monkeypatch.setattr(sys.modules["db_cloud"], "get_session",
                             lambda db, phone, *a, **kw: dict(sessions.get(phone, {})),
                             raising=False)
@@ -355,30 +407,9 @@ class TestCustomerWelcome:
         monkeypatch.setattr(sys.modules["db_cloud"], "clear_session",
                             lambda *a, **kw: None, raising=False)
         monkeypatch.setattr(api_mod, "_capture_referral_code", lambda *a, **kw: None)
-
         with patch.object(sys.modules["whatsapp_notify"], "_send"):
             api_mod._handle_text("918111222333", "hi")          # customer B
-        assert catalog == ["918111222333"]   # B served; A untouched
-
-    def test_recent_active_session_not_interrupted(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Customer mid-flow (recent session) says hi → NOT interrupted, no catalog.
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        _send_mock, bot_calls = self._run(monkeypatch, is_new=False, text="hi",
-                                          session={"step": "size", "updated_at": now})
-        assert self.catalog == []           # not defaulted into the catalog
-        assert bot_calls["n"] == 1          # handed to the print state machine
-        assert self.cleared == []           # session preserved
-
-    def test_stale_staff_hold_resets_and_opens_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # A forgotten staff_hold (old) must not black-hole the customer: it is
-        # cleared and the catalog opens.
-        _send_mock, bot_calls = self._run(
-            monkeypatch, is_new=False, text="hi",
-            session={"step": "staff_hold", "updated_at": "2026-05-11 01:03:58"})
-        assert self.catalog == ["91999000111"]
-        assert "91999000111" in self.cleared   # stale session was reset
-        assert bot_calls["n"] == 0
+        assert menus == ["918111222333"]   # B served; A untouched
 
 
 class TestSessionStale:
