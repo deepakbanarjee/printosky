@@ -356,6 +356,28 @@ body:not(.on-dark) .site-header { color: var(--venal-ink); }
 .edu-feature__body h3 [lang="ml"] { font-weight: 600; font-size: 0.85em; opacity: 0.8; }
 .edu-feature__body p { max-width: 52ch; }
 
+/* Study materials — live from Supabase (published only). Hidden until non-empty. */
+.resources { max-width: 1000px; margin: clamp(56px, 9vh, 110px) auto 0; }
+.resources[hidden] { display: none; }
+.resources__lede { text-align: center; max-width: 58ch; margin: 0 auto 5vh; opacity: 0.82; }
+.resources__grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(258px, 1fr));
+  gap: clamp(18px, 3vw, 30px);
+}
+.material-card {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 24px 22px; border-radius: 2px;
+  border: 1px solid rgba(60, 44, 18, 0.22);
+  background: rgba(255, 250, 238, 0.42);
+}
+.material-card h4 { font-family: var(--font-display); font-weight: 500; font-size: 1.12rem; }
+.material-card__meta { font-size: 0.72rem; opacity: 0.6; letter-spacing: 0.05em; text-transform: uppercase; }
+.material-card__desc { font-size: 0.9rem; line-height: 1.55; opacity: 0.85; flex: 1; }
+.material-card .btn { align-self: flex-start; margin: 4px 0 0; }
+.material-card--live { opacity: 0; transform: translateY(20px); animation: quoteIn 0.7s ease forwards; }
+.reduced-motion .material-card--live { opacity: 1; transform: none; animation: none; }
+@media (prefers-reduced-motion: reduce) { .material-card--live { opacity: 1; transform: none; animation: none; } }
+
 /* ---------------- Chapter 4 — harvest ---------------- */
 
 .testimonials {
@@ -368,7 +390,18 @@ body:not(.on-dark) .site-header { color: var(--venal-ink); }
   font-size: clamp(1.1rem, 1.8vw, 1.4rem); line-height: 1.5;
 }
 .quote blockquote::before { content: "“"; display: block; font-size: 3rem; line-height: 0.5; color: var(--harv-accent); margin-bottom: 18px; }
+.quote blockquote[lang="ml"] { font-family: var(--font-ml); font-style: normal; white-space: pre-line; }
 .quote figcaption { margin-top: 16px; font-size: 0.85rem; opacity: 0.7; }
+.quote figcaption [lang="ml"] { font-weight: 600; }
+
+/* Live testimonials (fetched from Supabase after load — self-contained entrance,
+   independent of the GSAP .reveal system which is scanned once at load). */
+#testimonials[hidden] { display: none; }
+.testimonials-block__h { text-align: center; max-width: 900px; margin: 0 auto 4vh; }
+.quote--live { opacity: 0; transform: translateY(22px); animation: quoteIn 0.9s ease forwards; }
+@keyframes quoteIn { to { opacity: 1; transform: none; } }
+.reduced-motion .quote--live { opacity: 1; transform: none; animation: none; }
+@media (prefers-reduced-motion: reduce) { .quote--live { opacity: 1; transform: none; animation: none; } }
 
 .press-strip { max-width: 900px; margin: 0 auto 12vh; }
 .press-list { list-style: none; }
