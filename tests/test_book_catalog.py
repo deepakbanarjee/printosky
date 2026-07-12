@@ -310,3 +310,32 @@ def test_parse_anu_order_continuation_after_qty_line_is_ignored():
     assert parsed["ok"] is True
     assert parsed["address"] == "Thrissur - 680001"
     assert parsed["items"] == {"malayalam": 1}
+
+
+from book_catalog import parse_customer_order
+
+
+class TestParseCustomerOrder:
+    def test_single_title_default_qty(self):
+        assert parse_customer_order("Aksharamrutham") == {"malayalam": 1}
+
+    def test_title_with_qty(self):
+        assert parse_customer_order("aksharamrutham 2 copy") == {"malayalam": 2}
+
+    def test_qty_before_title(self):
+        assert parse_customer_order("2 easy english") == {"english": 2}
+
+    def test_language_words(self):
+        assert parse_customer_order("malayalam book venam") == {"malayalam": 1}
+
+    def test_multi_book_defaults_one_each(self):
+        assert parse_customer_order("malayalam and hindi") == {"malayalam": 1, "hindi": 1}
+
+    def test_vidyamrut_alias(self):
+        assert parse_customer_order("vidyamrut 3") == {"hindi": 3}
+
+    def test_no_book_returns_none(self):
+        assert parse_customer_order("how much for delivery") is None
+
+    def test_empty_returns_none(self):
+        assert parse_customer_order("") is None

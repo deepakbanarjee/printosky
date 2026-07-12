@@ -137,6 +137,36 @@ def parse_qty(text: str) -> int | None:
     return n
 
 
+# Customer-typed order parsing. Deterministic title/keyword match; quantities via
+# parse_qty. Bare language words are accepted because the book campaign is the
+# shop's main WhatsApp push — the confirm step (book_bot) is the safety net.
+_CUSTOMER_TITLE_TOKENS: dict[str, list[str]] = {
+    "malayalam": ["aksharamrutham", "aksharamritham", "malayalam", "അക്ഷരാമൃതം"],
+    "hindi":     ["vidyamrut", "vidyamrutham", "hindi", "വിദ്യാമൃത്"],
+    "english":   ["easy english", "easyenglish", "english"],
+}
+
+
+def parse_customer_order(text: str) -> dict[str, int] | None:
+    """Parse a customer's free-typed book order into {book_key: qty}, or None.
+
+    Deterministic: matches known titles / language words. A single named book
+    takes any quantity found in the text; multiple books default to 1 each
+    (the confirm step lets the customer adjust).
+    """
+    if not text:
+        return None
+    t = text.strip().lower()
+    found: list[str] = []
+    for key, tokens in _CUSTOMER_TITLE_TOKENS.items():
+        if any(tok in t for tok in tokens):
+            found.append(key)
+    if not found:
+        return None
+    qty = parse_qty(t) if len(found) == 1 else None
+    return {k: (qty if (qty and len(found) == 1) else 1) for k in found}
+
+
 def parse_anu_order(text: str) -> dict | None:
     """Parse an order message forwarded by Anu using the fixed ORDER template.
 
