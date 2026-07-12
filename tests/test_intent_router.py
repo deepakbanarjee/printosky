@@ -108,6 +108,7 @@ class TestRouteFrontDoor:
 
     def _patch(self, monkeypatch, intent):
         monkeypatch.setattr(ir, "decide_intent", lambda text: intent)
+        monkeypatch.setattr(ir, "_pending_payment_reminder", lambda phone, name=None: None)
         monkeypatch.setattr(ir, "_send_text", lambda phone, msg: self.sent.append((phone, msg)))
         monkeypatch.setattr(ir, "_send_menu", lambda phone: self.menus.append(phone))
         monkeypatch.setattr(ir, "_open_books", lambda phone, name: self.opened.append("books"))
@@ -148,3 +149,83 @@ class TestRouteFrontDoor:
         ids = {r["id"] for r in ir.build_menu_rows()}
         for intent in ("print", "xtraa", "malayalam", "sociology", "academic"):
             assert f"intent_{intent}" in ids
+
+    def test_pending_payment_reminder_wins_over_intent(self, monkeypatch):
+        # A customer who owes payment is reminded first — intent never consulted.
+        self._patch(monkeypatch, "print")
+        monkeypatch.setattr(ir, "_pending_payment_reminder",
+                            lambda phone, name=None: ["Order XTR-1 awaiting payment — send screenshot"])
+        called = {"decide": 0}
+        monkeypatch.setattr(ir, "decide_intent",
+                            lambda text: called.__setitem__("decide", called["decide"] + 1) or "print")
+        ir.route_front_door("91999", "anything", None)
+        assert any("awaiting payment" in m for _, m in self.sent)
+        assert called["decide"] == 0
+        assert not self.opened and not self.menus
+
+
+class TestPendingPaymentReminder:
+    def test_awaiting_payment_forwards_start_catalog(self, monkeypatch):
+        import db_cloud
+        import book_bot
+        monkeypatch.setattr(db_cloud, "get_active_book_order",
+                            lambda phone: {"status": "awaiting_payment", "order_code": "XTR-1"},
+                            raising=False)
+        monkeypatch.setattr(book_bot, "start_catalog",
+                            lambda phone, name=None: ["Order XTR-1 awaiting payment — send screenshot or reply NEW"],
+                            raising=False)
+        out = ir._pending_payment_reminder("91999", None)
+        assert out and "awaiting payment" in out[0]
+
+    def test_no_order_returns_none(self, monkeypatch):
+        import db_cloud
+        monkeypatch.setattr(db_cloud, "get_active_book_order", lambda phone: None, raising=False)
+        assert ir._pending_payment_reminder("91999", None) is None
+
+    def test_non_payment_status_returns_none(self, monkeypatch):
+        import db_cloud
+        monkeypatch.setattr(db_cloud, "get_active_book_order",
+                            lambda phone: {"status": "collecting"}, raising=False)
+        assert ir._pending_payment_reminder("91999", None) is None
+
+
+import pytest
+
+# (message, expected_intent) through the FULL decide_intent chain. Most real
+# messages resolve deterministically (tag/keyword — free, predictable). Only the
+# genuinely free-form rows fall through to the (mocked) classifier.
+_SIM_CASES = [
+    # deterministic — tag
+    ("Hi, I want to print a file #print", "print"),
+    ("intent_academic", "academic"),
+    # deterministic — keyword / book triggers
+    ("need a printout of 3 pages", "print"),
+    ("can you xerox this", "print"),
+    ("enikk oru file print cheyyanam", "print"),
+    ("MA sociology sngu book", "sociology"),
+    ("sociology theory pusthakam undo", "sociology"),
+    ("project report binding venam", "academic"),
+    ("malayalam book venam", "xtraa"),          # interim: books → xtraa
+    ("easy english book", "xtraa"),
+    ("aksharamrutham kittumo", "xtraa"),         # known title, interim → shared catalog
+    ("do you sell hindi books", "xtraa"),
+    ("upload notes", "notes"),
+    # free-form — resolved by the (mocked) classifier
+    ("a reader for my child in mother tongue", "malayalam"),
+    # unclear → menu
+    ("hi", "unknown"),
+    ("hello there", "unknown"),
+    ("??", "unknown"),
+]
+
+# Mock Haiku only for the rows tag/keyword do not catch; others short-circuit.
+_MOCK_LLM = {
+    "a reader for my child in mother tongue": ("malayalam", 0.9),
+}
+
+
+@pytest.mark.parametrize("msg,expected", _SIM_CASES)
+def test_conversation_simulation(msg, expected):
+    def fake_classifier(text):
+        return _MOCK_LLM.get(text, ("unknown", 0.0))
+    assert decide_intent(msg, classifier=fake_classifier) == expected
