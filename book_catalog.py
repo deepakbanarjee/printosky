@@ -167,6 +167,45 @@ def parse_customer_order(text: str) -> dict[str, int] | None:
     return {k: (qty if (qty and len(found) == 1) else 1) for k in found}
 
 
+_FAQ_WORDS = {
+    "price", "prices", "cost", "rate", "rates", "ethra", "വില",
+    "delivery", "courier", "കൊറിയർ", "days",
+    "gpay", "upi", "payment", "pay", "account",
+}
+_FAQ_PHRASES = [
+    "how much", "how many rupees", "when will i get", "how many days",
+    "which number", "g pay",
+]
+
+
+def is_book_faq(text: str) -> bool:
+    """True if the message is a price / delivery / payment question."""
+    if not text:
+        return False
+    t = text.strip().lower()
+    words = set(re.split(r"[^\wഀ-ൿ]+", t))
+    if words & _FAQ_WORDS:
+        return True
+    return any(p in t for p in _FAQ_PHRASES)
+
+
+def book_faq_text() -> str:
+    """Bilingual price + delivery answer, built from the live catalog."""
+    lines = "\n".join(
+        f"• {BOOKS[k]['label'].split(' (')[0]} — ₹{BOOKS[k]['price']:.0f}"
+        for k in BOOK_KEYS
+    )
+    return (
+        "📚 *പുസ്തകങ്ങൾ / Books — വില / Price*\n"
+        f"{lines}\n"
+        f"+ കൊറിയർ / courier from ₹{_COURIER_BASE}\n\n"
+        "🚚 ഡെലിവറി / Delivery: *3–5 days* by courier.\n"
+        "💳 ഓർഡർ ചെയ്‌താൽ ഉടനെ UPI QR അയക്കും / We'll send the UPI QR as soon as you order.\n\n"
+        "ഓർഡർ ചെയ്യാൻ പുസ്തകത്തിന്റെ പേരും എണ്ണവും ടൈപ്പ് ചെയ്യൂ (ഉദാ: *Aksharamrutham 2*), അല്ലെങ്കിൽ താഴെ ടാപ്പ് ചെയ്യൂ 👇\n"
+        "To order, reply with the book & quantity, or tap below 👇"
+    )
+
+
 def parse_anu_order(text: str) -> dict | None:
     """Parse an order message forwarded by Anu using the fixed ORDER template.
 

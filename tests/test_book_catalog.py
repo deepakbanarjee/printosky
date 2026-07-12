@@ -339,3 +339,30 @@ class TestParseCustomerOrder:
 
     def test_empty_returns_none(self):
         assert parse_customer_order("") is None
+
+
+from book_catalog import is_book_faq, book_faq_text, BOOKS
+
+
+class TestBookFaq:
+    def test_price_words(self):
+        for m in ("what is the price", "ethra rupees", "how much", "book cost"):
+            assert is_book_faq(m) is True
+
+    def test_delivery_words(self):
+        for m in ("delivery how many days", "when will i get it", "courier charge"):
+            assert is_book_faq(m) is True
+
+    def test_payment_words(self):
+        for m in ("gpay number", "how to pay", "upi"):
+            assert is_book_faq(m) is True
+
+    def test_non_faq(self):
+        assert is_book_faq("aksharamrutham") is False
+        assert is_book_faq("hi") is False
+
+    def test_faq_text_lists_prices_from_catalog(self):
+        txt = book_faq_text()
+        assert str(int(BOOKS["malayalam"]["price"])) in txt   # 200
+        assert str(int(BOOKS["hindi"]["price"])) in txt       # 150
+        assert "3" in txt and "5 days" in txt                 # 3-5 days
