@@ -1339,3 +1339,27 @@ def test_payment_caption_includes_upi_number():
              "items": {"malayalam": 1}, "delivery_method": "courier"}
     cap = book_bot._payment_caption(order)
     assert "9072034907" in cap
+
+
+def test_parsed_confirm_yes_advances_to_name(fake):
+    db, sent = fake
+    # Seed a confirm-pending order the way _maybe_book_enquiry will.
+    db.create_book_order("XTR-9", "91888", name=None)
+    db.update_book_order("XTR-9", items={"malayalam": 1},
+                         books_total=200, courier=75, grand_total=275)
+    db.save_session("supabase", "91888", step="book_confirm_parsed")
+    out = book_bot.maybe_handle_book("91888", "yes")
+    assert out == []
+    assert db.sessions["91888"]["step"] == "book_name"
+    assert any("full name" in m.lower() or "പേര" in m for m in sent["text"])
+
+
+def test_parsed_confirm_change_reopens_catalog(fake):
+    db, sent = fake
+    db.create_book_order("XTR-8", "91777", name=None)
+    db.update_book_order("XTR-8", items={"hindi": 1})
+    db.save_session("supabase", "91777", step="book_confirm_parsed")
+    out = book_bot.maybe_handle_book("91777", "bk_change")
+    assert out == []
+    assert db.sessions["91777"]["step"] == "book_select"
+    assert sent["list"]        # catalog select list was sent

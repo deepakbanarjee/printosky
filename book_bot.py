@@ -89,7 +89,7 @@ ANU_TEMPLATE = (
     "Delivery: courier / office"
 )
 
-_BOOK_STEPS = {"book_select", "book_qty", "book_name", "book_address", "book_dtdc",
+_BOOK_STEPS = {"book_select", "book_qty", "book_confirm_parsed", "book_name", "book_address", "book_dtdc",
                "book_phone", "book_summary", "book_pay", "book_edit",
                "book_edit_name", "book_edit_address", "book_edit_dtdc",
                "book_edit_phone", "post_order", "post_order_ask"}
@@ -665,6 +665,46 @@ def resume_order(phone: str) -> list[str]:
     return _resume(phone)
 
 
+def _send_parsed_confirm(phone: str, items: dict, totals: dict) -> None:
+    lines = ", ".join(
+        f"{bc.BOOKS[k]['label'].split(' (')[0]} × {q}"
+        for k, q in items.items() if q and k in bc.BOOKS
+    )
+    _send_buttons(
+        phone,
+        f"🛒 {lines}\n"
+        f"പുസ്തകം/Books ₹{totals['books_total']:.0f} + കൊറിയർ/Courier ₹{totals['courier']:.0f} "
+        f"= *₹{totals['grand_total']:.0f}*\n\n"
+        "ഈ ഓർഡർ ഉറപ്പിക്കണോ? / Confirm this order?",
+        [("ord_yes", "✅ Yes / ശരി"), ("bk_change", "✏️ Change / മാറ്റം")],
+    )
+
+
+def _handle_parsed_confirm(phone: str, text: str, order: dict) -> list[str]:
+    t = (text or "").strip().lower()
+    if t == "ord_yes" or t in _AFFIRM:
+        items = order.get("items") or {}
+        if not items:
+            _dbc.save_session(DB, phone, step="book_select")
+            _send_select_list(phone)
+            return []
+        totals = _order_totals(order)
+        _dbc.save_session(DB, phone, step="book_name")
+        _send_text(
+            phone,
+            f"നിങ്ങളുടെ ഓർഡർ ആകെ *₹{totals['grand_total']:.0f}* "
+            f"(₹{totals['courier']:.0f} കൊറിയർ ഉൾപ്പെടെ).\n"
+            f"Your order comes to *₹{totals['grand_total']:.0f}* (incl. ₹{totals['courier']:.0f} courier).\n\n"
+            "👤 പാർസൽ ലഭിക്കുന്ന ആളുടെ *പൂർണ്ണ പേര്* ടൈപ്പ് ചെയ്യൂ.\n"
+            "Type the *full name* of the person receiving the parcel.",
+        )
+        return []
+    # Anything else — change / no / a tapped book id — reopen the catalog.
+    _dbc.save_session(DB, phone, step="book_select")
+    _send_select_list(phone)
+    return []
+
+
 def _handle_select(phone: str, text: str, order: dict) -> list[str]:
     keys = _parse_choice(text)
     if not keys:
@@ -1234,6 +1274,7 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
         "book_edit_dtdc":    _handle_edit_dtdc,
         "book_edit_phone":   _handle_edit_phone,
         "book_pay":          _handle_pay,
+        "book_confirm_parsed": _handle_parsed_confirm,
     }
     handler = handlers.get(step)
     if not handler:
