@@ -1707,14 +1707,30 @@
 
   <!-- Transcripts Edit Modal -->
   <div id="tr-edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;align-items:center;justify-content:center">
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;width:95%;max-width:900px;height:90vh;display:flex;flex-direction:column;">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;width:95%;max-width:1200px;height:90vh;display:flex;flex-direction:column;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h3 id="tr-modal-title" style="font-size:1.1rem;font-weight:600;color:var(--accent);word-break:break-all;">File Name</h3>
-        <button class="ctrl-btn" id="tr-modal-pdf-btn" onclick="trOpenPDFInNewTab()" style="background:#2563eb;color:#fff;">Open PDF in New Tab ↗</button>
+        <h3 id="tr-modal-title" style="font-size:1.1rem;font-weight:600;color:var(--accent);word-break:break-all;max-width:50%;">File Name</h3>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <button class="ctrl-btn" onclick="trPrevPage()">◀ Prev</button>
+          <span id="tr-page-indicator" style="font-family:var(--mono); font-size:.9rem; color:var(--text)">Page 1 of 1</span>
+          <button class="ctrl-btn" onclick="trNextPage()">Next ▶</button>
+        </div>
+        <button class="ctrl-btn" id="tr-modal-pdf-btn" onclick="trOpenPDFInNewTab()" style="background:#2563eb;color:#fff;">Open PDF ↗</button>
       </div>
-      <div style="flex:1;display:flex;flex-direction:column;gap:10px;margin-bottom:12px;">
-        <textarea id="tr-modal-textarea" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:.9rem;padding:12px;resize:none;outline:none;line-height:1.5;" placeholder="Transcript text..."></textarea>
+      
+      <!-- Side-by-Side layout -->
+      <div style="flex:1; display:flex; gap:15px; min-height:0; margin-bottom:12px;">
+        <!-- Left: Image Viewer -->
+        <div style="flex:1; border:1px solid var(--border); border-radius:6px; background:#0c1015; display:flex; align-items:center; justify-content:center; overflow:auto; position:relative;">
+          <img id="tr-modal-img" src="" style="max-width:100%; max-height:100%; object-fit:contain; display:block;" alt="Manuscript Page scan">
+        </div>
+        
+        <!-- Right: Text Editor -->
+        <div style="flex:1; display:flex; flex-direction:column;">
+          <textarea id="tr-modal-textarea" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--sans);font-size:1rem;padding:12px;resize:none;outline:none;line-height:1.6;" placeholder="Transcript text..."></textarea>
+        </div>
       </div>
+      
       <div style="display:flex;justify-content:flex-end;gap:8px;">
         <button class="ctrl-btn" style="background:#16a34a;color:#fff;" onclick="trSaveTranscript()">Save Changes</button>
         <button class="ctrl-btn" style="background:#4b5563;color:#fff;" onclick="trCloseModal()">Close</button>
@@ -6132,6 +6148,9 @@ async function submitNewAcademicOrder() {
 // ── Transcripts Integration ──────────────────────────────────────────────────
 let trActiveFile = null;
 let trInterval = null;
+let trFilesList = [];
+let trCurrentPage = 0;
+let trTotalPages = 1;
 
 function trStartPolling() {
   if (!trInterval) {
@@ -6151,6 +6170,7 @@ async function loadTranscripts() {
   try {
     const r = await fetch(`${PC}/api/transcripts`);
     const data = await r.json();
+    trFilesList = data.files || [];
     
     // Update Stats
     document.getElementById("tr-total-docs").innerText = data.total_docs;
@@ -6328,17 +6348,72 @@ async function trEditBalance() {
 
 async function trView(filename) {
   trActiveFile = filename;
+  const fileObj = trFilesList.find(f => f.filename === filename);
+  trTotalPages = fileObj ? fileObj.total_pages : 1;
+  trCurrentPage = 0;
+  
   document.getElementById("tr-modal-title").innerText = filename;
   const area = document.getElementById("tr-modal-textarea");
   area.value = "Loading transcript...";
   document.getElementById("tr-edit-modal").style.display = "flex";
+  
+  trUpdatePageIndicator();
+  trLoadPageImage();
   
   const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
   try {
     const res = await fetch(`${PC}/api/transcripts/view?filename=${encodeURIComponent(filename)}`);
     const data = await res.json();
     area.value = data.text;
+    
+    // Scroll to page 1 marker if exists
+    setTimeout(() => trScrollToPage(0), 100);
   } catch (e) { area.value = "Failed to load transcript."; }
+}
+
+function trUpdatePageIndicator() {
+  document.getElementById("tr-page-indicator").innerText = `Page ${trCurrentPage + 1} of ${trTotalPages}`;
+}
+
+function trLoadPageImage() {
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  const img = document.getElementById("tr-modal-img");
+  img.src = `${PC}/api/transcripts/page-image?filename=${encodeURIComponent(trActiveFile)}&page=${trCurrentPage}`;
+}
+
+function trPrevPage() {
+  if (trCurrentPage > 0) {
+    trCurrentPage--;
+    trUpdatePageIndicator();
+    trLoadPageImage();
+    trScrollToPage(trCurrentPage);
+  }
+}
+
+function trNextPage() {
+  if (trCurrentPage < trTotalPages - 1) {
+    trCurrentPage++;
+    trUpdatePageIndicator();
+    trLoadPageImage();
+    trScrollToPage(trCurrentPage);
+  }
+}
+
+function trScrollToPage(pageIndex) {
+  const textarea = document.getElementById("tr-modal-textarea");
+  const text = textarea.value;
+  // Try to find "=== PAGE pageIndex + 1 ==="
+  const marker = `=== PAGE ${pageIndex + 1} ===`;
+  const idx = text.indexOf(marker);
+  if (idx !== -1) {
+    textarea.focus();
+    textarea.setSelectionRange(idx, idx + marker.length);
+    
+    // Scroll the textarea to the selection line
+    const linesBefore = text.substring(0, idx).split("\n").length;
+    const lineHeight = 26; // approximate line height in pixels
+    textarea.scrollTop = (linesBefore - 2) * lineHeight;
+  }
 }
 
 function trOpenPDFInNewTab() {
@@ -6370,6 +6445,7 @@ async function trSaveTranscript() {
 function trCloseModal() {
   document.getElementById("tr-edit-modal").style.display = "none";
   trActiveFile = null;
+  document.getElementById("tr-modal-img").src = ""; // Clear image
 }
 </script>
 

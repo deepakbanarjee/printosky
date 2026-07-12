@@ -562,6 +562,44 @@ def get_pdf():
         return send_file(target_path, mimetype="application/pdf")
     return "File not found", 404
 
+@app.route("/api/transcripts/page-image")
+def get_page_image():
+    filename = request.args.get("filename")
+    page_num = request.args.get("page", type=int)
+    if not filename or page_num is None:
+        return "Missing arguments", 400
+        
+    filename = os.path.basename(filename)
+    
+    # Find matching file in WATCH_DIR (space and case-insensitive)
+    target_path = None
+    if os.path.exists(WATCH_DIR):
+        for f in os.listdir(WATCH_DIR):
+            if f.lower() == filename.lower() or f.replace(" ", "") == filename.replace(" ", ""):
+                target_path = os.path.join(WATCH_DIR, f)
+                break
+                
+    if not target_path or not os.path.exists(target_path):
+        return "File not found", 404
+        
+    try:
+        doc = fitz.open(target_path)
+        if page_num < 0 or page_num >= len(doc):
+            doc.close()
+            return "Invalid page number", 400
+            
+        page = doc[page_num]
+        pix = page.get_pixmap(dpi=150)
+        img_data = pix.tobytes("png")
+        doc.close()
+        
+        return send_file(
+            io.BytesIO(img_data),
+            mimetype="image/png"
+        )
+    except Exception as e:
+        return f"Error: {e}", 500
+
 @app.route("/api/transcripts/logs")
 def get_logs():
     return jsonify({"logs": console_logs})
