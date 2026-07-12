@@ -1,4 +1,4 @@
-﻿"""Book campaign — WhatsApp conversational order flow (button-driven).
+"""Book campaign — WhatsApp conversational order flow (button-driven).
 
 Cloud-only (runs in the Vercel webhook). Order data lives in the `book_orders`
 table; the `bot_sessions.step` column drives state (book_* steps). Pure pricing
@@ -375,7 +375,9 @@ def _payment_caption(order: dict) -> str:
         f"Pay *₹{totals['grand_total']:.0f}* by scanning this UPI QR.\n\n"
         f"ഓർഡർ / Order: {order.get('order_code')}\n\n"
         "പണമടച്ച ശേഷം പേയ്മെന്റ് സ്ക്രീൻഷോട്ട് ഇവിടെ അയക്കൂ. ഞങ്ങൾ വെരിഫൈ ചെയ്ത് ഓർഡർ ഉറപ്പിക്കും. 🙏\n"
-        "After paying, send a screenshot of the confirmation here."
+        "After paying, send a screenshot of the confirmation here.\n\n"
+        "💳 QR സ്കാൻ ചെയ്യാൻ പറ്റുന്നില്ലേ? *9072034907* എന്ന നമ്പറിലേക്ക് UPI അയക്കൂ.\n"
+        "Can't scan? Pay by UPI to *9072034907* (GPay / PhonePe)."
     )
 
 
@@ -1058,6 +1060,39 @@ def is_tracking_question(text: str) -> bool:
     return bool(set(re.findall(r"\w+", t)) & _TRACKING_WORDS)
 
 
+def _get_courier_slug(courier_name: str) -> str:
+    name = (courier_name or "").strip().lower()
+    if "speed" in name:
+        return "speedpost"
+    if "india" in name:
+        return "indiapost"
+    if "dtdc" in name:
+        return "dtdc"
+    if "delhivery" in name:
+        return "delhivery"
+    return name
+
+
+def _fetch_live_tracking(courier_name: str, tracking_no: str) -> dict | None:
+    api_key = os.environ.get("TRACKCOURIER_API_KEY")
+    if not api_key:
+        return None
+    slug = _get_courier_slug(courier_name)
+    try:
+        import requests
+        url = "https://api.trackcourier.io/v1/track"
+        headers = {"X-API-Key": api_key}
+        params = {"courier": slug, "tracking_number": tracking_no}
+        res = requests.get(url, headers=headers, params=params, timeout=3.0)
+        if res.status_code == 200:
+            body = res.json()
+            if body.get("success") and body.get("data"):
+                return body["data"]
+    except Exception as e:
+        logger.error("TrackCourier fetch error: %s", e)
+    return None
+
+
 def compose_tracking_reply(order: dict) -> str:
     """Build the tracking message for a dispatched order."""
     code = order.get("order_code", "")
@@ -1067,10 +1102,42 @@ def compose_tracking_reply(order: dict) -> str:
         return (f"📦 Your order *{code}* has been *dispatched* via {courier}. "
                 "Your tracking number will be shared shortly — reply here if you "
                 "need help.")
+
+    slug = _get_courier_slug(courier)
+    if slug == "speedpost" or slug == "indiapost":
+        track_url = "https://trackcourier.io/speed-post-tracking/"
+    elif slug == "dtdc":
+        track_url = DTDC_TRACK_URL
+    elif slug == "delhivery":
+        track_url = "https://trackcourier.io/delhivery-tracking/"
+    else:
+        track_url = "https://trackcourier.io"
+
+    live_data = _fetch_live_tracking(courier, tn)
+    if live_data:
+        status = (live_data.get("MostRecentStatus") or live_data.get("ShipmentState") or live_data.get("status") or "").replace("_", " ").title()
+        checkpoints = live_data.get("Checkpoints") or live_data.get("checkpoints") or []
+        latest_msg = ""
+        if checkpoints:
+            latest = checkpoints[0]
+            latest_msg = f"📍 Update: _{latest.get('Activity') or latest.get('message') or ''}_"
+            location = latest.get("Location") or latest.get("location")
+            if location:
+                latest_msg += f" ({location})"
+
+        return (
+            f"📦 *Order Status Update:* {code}\n"
+            f"🚚 Carrier: *{courier}*\n"
+            f"🔖 Tracking No: *{tn}*\n"
+            f"⚡ Current Status: *{status}*\n"
+            f"{latest_msg}\n\n"
+            f"🔗 Track here: {track_url}"
+        )
+
     return (
         f"📦 Your order *{code}* shipped via *{courier}*.\n"
         f"🔖 Tracking / Reference no: *{tn}*\n"
-        f"🔗 Track here: {DTDC_TRACK_URL}\n"
+        f"🔗 Track here: {track_url}\n"
         f"On that page, paste *{tn}* and tap search."
     )
 

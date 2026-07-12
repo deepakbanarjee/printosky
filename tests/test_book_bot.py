@@ -1332,3 +1332,10 @@ def test_maybe_handle_location_prompts_during_edit_address_step(fake):
     result = book_bot.maybe_handle_location(PHONE)
     assert result == []
     assert sent["text"]
+
+
+def test_payment_caption_includes_upi_number():
+    order = {"order_code": "XTR-1", "phone": "919999999999",
+             "items": {"malayalam": 1}, "delivery_method": "courier"}
+    cap = book_bot._payment_caption(order)
+    assert "9072034907" in cap
