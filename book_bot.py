@@ -615,6 +615,60 @@ _RESUME_SENDERS = {
 }
 
 
+def _llm_parse_books(text: str) -> dict | None:
+    """Haiku fallback: extract {book_key: qty} from a book-ish message the
+    deterministic parser missed. Reuses anu_parser (forced tool-use, never
+    raises). Returns None on no book / any failure."""
+    try:
+        from anu_parser import parse_order_message
+        parsed = parse_order_message(text) or {}
+        items: dict[str, int] = {}
+        for b in parsed.get("books") or []:
+            k = b.get("title")
+            q = int(b.get("qty") or 1)
+            if k in bc.BOOKS and q > 0:
+                items[k] = items.get(k, 0) + q
+        return items or None
+    except Exception as exc:
+        logger.error("book_bot._llm_parse_books failed: %s", exc)
+        return None
+
+
+def _maybe_book_enquiry(phone: str, text: str, name: str | None) -> list[str] | None:
+    """Triage a fresh (not mid-flow) book-ish message:
+      1. a parseable typed order   -> stage + confirm
+      2. a price/delivery question -> FAQ + open catalog
+      3. otherwise                 -> None (caller falls through)
+    """
+    items = bc.parse_customer_order(text)
+    if not items and is_book_trigger(text):
+        items = _llm_parse_books(text)
+
+    if items:
+        active = _dbc.get_active_book_order(phone)
+        # Don't hijack a customer who already owes payment — let _start remind them.
+        if active and active.get("status") in ("awaiting_payment", "payment_review", "partially_paid"):
+            return None
+        code = active["order_code"] if active else _new_order_code()
+        if not active:
+            _dbc.create_book_order(code, phone, name)
+        totals = bc.divya_order_terms(phone, items, "courier")
+        _dbc.update_book_order(code, items=items, flow_cursor={},
+                               books_total=totals["books_total"],
+                               courier=totals["courier"],
+                               grand_total=totals["grand_total"])
+        _dbc.save_session(DB, phone, step="book_confirm_parsed")
+        _send_parsed_confirm(phone, items, totals)
+        return []
+
+    if is_book_trigger(text) and bc.is_book_faq(text):
+        _send_text(phone, bc.book_faq_text())
+        _send_select_list(phone)
+        return []
+
+    return None
+
+
 def _resume(phone: str) -> list[str]:
     """Re-issue the prompt for the step a dropped cart stalled at — WITHOUT
     wiping items/name/address. Lifts any `staff_hold`/SOS so the bot listens
@@ -1243,6 +1297,10 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
             track = _maybe_tracking_reply(phone, text)
             if track is not None:
                 return track
+        if not _in_print_flow(session):
+            enquiry = _maybe_book_enquiry(phone, text, name)
+            if enquiry is not None:
+                return enquiry
         if is_book_trigger(text) and not _in_print_flow(session):
             return _start(phone, name)
         return None
