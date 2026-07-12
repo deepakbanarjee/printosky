@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Printosky | Manuscript Transcription Suite</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0f111a;
+            --bg-card: rgba(30, 34, 51, 0.6);
+            --border-glow: rgba(99, 102, 241, 0.2);
+            --accent-urgent: #ef4444;
+            --accent-standard: #10b981;
+            --accent-primary: #6366f1;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.15) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.1) 0%, transparent 45%);
+        }
+
+        header {
+            padding: 2rem 4rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            background: rgba(15, 17, 26, 0.8);
+            backdrop-filter: blur(10px);
+            z-index: 10;
+        }
+
+        .logo h1 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 1.8rem;
+            background: linear-gradient(to right, #6366f1, #10b981);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -1px;
+        }
+
+        .logo p {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+
+        .status-badge {
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid var(--accent-primary);
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #818cf8;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-badge::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #818cf8;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #818cf8;
+            animation: pulse 2s infinite;
+        }
+
+        .main-container {
+            max-width: 1400px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 3rem 4rem;
+            flex-grow: 1;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2.5rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 1.5rem;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            border-color: var(--border-glow);
+            transform: translateY(-2px);
+        }
+
+        .stat-card h3 {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-card p {
+            font-size: 2rem;
+            font-weight: 700;
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        .stat-card .detail {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+        }
+
+        .dashboard-card {
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 2rem;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-header h2 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.4rem;
+        }
+
+        .btn-refresh {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            padding: 0.5rem 1.2rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .btn-refresh:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            padding: 1rem;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        td {
+            padding: 1.2rem 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            font-size: 0.95rem;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .file-name {
+            font-weight: 600;
+            max-width: 320px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: block;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            max-width: 200px;
+            background: rgba(255, 255, 255, 0.05);
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 0.4rem;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(to right, var(--accent-primary), #818cf8);
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+
+        .progress-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .badge-status {
+            padding: 0.3rem 0.8rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        .badge-completed {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--accent-standard);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-transcribing {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            animation: pulse-glow 1.5s infinite;
+        }
+
+        .badge-pending {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .mode-toggle-group {
+            display: flex;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 0.25rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            width: fit-content;
+        }
+
+        .mode-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .mode-btn.active-urgent {
+            background: var(--accent-urgent);
+            color: white;
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+        }
+
+        .mode-btn.active-standard {
+            background: var(--accent-standard);
+            color: white;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+        }
+
+        .action-btn {
+            background: var(--accent-primary);
+            color: white;
+            border: none;
+            padding: 0.4rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            margin-right: 0.5rem;
+        }
+
+        .action-btn:hover {
+            background: #4f46e5;
+            box-shadow: 0 0 12px rgba(99, 102, 241, 0.3);
+        }
+
+        .action-btn-secondary {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 0.4rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .action-btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .log-terminal-card {
+            background: #05070c;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 1.5rem;
+            font-family: 'Space Grotesk', monospace;
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 0.8rem;
+            margin-bottom: 1rem;
+        }
+
+        .log-header span {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .log-console {
+            height: 250px;
+            overflow-y: auto;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            color: #34d399;
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+        }
+
+        /* Modal styling */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: #121520;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            width: 95%;
+            max-width: 1600px;
+            height: 90%;
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 50px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.2rem;
+        }
+
+        .modal-body {
+            flex-grow: 1;
+            display: flex;
+            gap: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .modal-pdf-panel {
+            flex: 1.2;
+            height: 100%;
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            background: #0b0c10;
+        }
+
+        .modal-text-panel {
+            flex: 1;
+            height: 100%;
+            padding: 2rem;
+            overflow: hidden; /* textarea handles scrolling */
+            background: #121520;
+        }
+
+        .transcript-text {
+            white-space: pre-wrap;
+            font-family: 'Outfit', sans-serif;
+            line-height: 1.8;
+            font-size: 1.05rem;
+            color: var(--text-main);
+        }
+
+        .transcript-textarea {
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.05rem;
+            line-height: 1.8;
+            resize: none;
+            outline: none;
+            overflow-y: auto;
+        }
+
+        .modal-footer {
+            padding: 1.5rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+        }
+
+        .btn-close {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            padding: 0.5rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.6; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 0px rgba(245, 158, 11, 0); }
+            50% { box-shadow: 0 0 10px rgba(245, 158, 11, 0.4); }
+            100% { box-shadow: 0 0 0px rgba(245, 158, 11, 0); }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <h1>PRINTOSKY</h1>
+            <p>Local AI Manuscript Transcriptor</p>
+        </div>
+        <div class="status-badge" id="service-status">Watcher Running</div>
+    </header>
+
+    <div class="main-container">
+        <!-- Stats Row -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total Documents</h3>
+                <p id="stat-total-docs">-</p>
+                <div class="detail" id="stat-docs-detail">In Watch Folder</div>
+            </div>
+            <div class="stat-card">
+                <h3>Transcribed Pages</h3>
+                <p id="stat-transcribed-pages">-</p>
+                <div class="detail" id="stat-pages-detail">Across all files</div>
+            </div>
+            <div class="stat-card">
+                <h3>Projected Cost</h3>
+                <p id="stat-total-cost">₹0.00</p>
+                <div class="detail">To complete remaining pages</div>
+            </div>
+            <div class="stat-card">
+                <h3>Actual Spent</h3>
+                <p id="stat-total-actual-cost">₹0.00</p>
+                <div class="detail">Total billed historically</div>
+            </div>
+            <div class="stat-card" style="position: relative;">
+                <h3>Prepaid Balance</h3>
+                <p id="stat-current-balance" style="color: #818cf8; cursor: pointer;" onclick="editBalance()" title="Click to sync/edit balance">₹0.00</p>
+                <div class="detail">Remaining credit (Click to Sync)</div>
+            </div>
+        </div>
+
+        <!-- Files List Card -->
+        <div class="dashboard-card">
+            <div class="card-header">
+                <h2>Manuscripts</h2>
+                <div style="display: flex; gap: 8px;">
+                    <input type="file" id="file-upload" accept=".pdf" style="display: none;" onchange="handleFileUpload(event)">
+                    <button class="btn-refresh" style="background: #3b82f6; color: #fff; border-color: #3b82f6;" onclick="document.getElementById('file-upload').click()">Upload PDF</button>
+                    <button class="btn-refresh" onclick="refreshData()">Refresh</button>
+                </div>
+            </div>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>File Name</th>
+                            <th>Pages</th>
+                            <th>Status</th>
+                            <th>Transcription Mode</th>
+                            <th>Est. Cost (Remaining)</th>
+                            <th>Actual Cost (Spent)</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="files-table-body">
+                        <!-- Injected via JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Terminal Logs -->
+        <div class="log-terminal-card">
+            <div class="log-header">
+                <span>
+                    <svg width="12" height="12" viewBox="0 0 100 100" style="fill: #10b981;">
+                        <circle cx="50" cy="50" r="40" />
+                    </svg>
+                    Live Console Output
+                </span>
+            </div>
+            <div class="log-console" id="log-console">
+                <!-- Log entries injected here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Transcript Modal -->
+    <div class="modal" id="transcript-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">File Transcript</h2>
+                <div style="display: flex; gap: 0.8rem;">
+                    <button class="btn-refresh" style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.3); color: #10b981;" onclick="saveTranscript()">Save Changes</button>
+                    <button class="btn-refresh" onclick="copyTranscript()">Copy to Clipboard</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="modal-pdf-panel">
+                    <iframe id="modal-pdf-viewer" src="" style="width: 100%; height: 100%; border: none;"></iframe>
+                </div>
+                <div class="modal-text-panel">
+                    <textarea class="transcript-textarea" id="modal-body-text">Loading...</textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-close" onclick="closeModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = ""; // local api
+
+        async function fetchStats() {
+            try {
+                const res = await fetch(`${API_BASE}/api/transcripts`);
+                const data = await res.json();
+                
+                // Update stats
+                document.getElementById('stat-total-docs').innerText = data.total_docs;
+                document.getElementById('stat-transcribed-pages').innerText = `${data.total_transcribed_pages} / ${data.total_pages}`;
+                document.getElementById('stat-total-cost').innerText = `₹${data.total_cost.toFixed(2)}`;
+                document.getElementById('stat-total-actual-cost').innerText = `₹${data.total_actual_cost.toFixed(2)}`;
+                document.getElementById('stat-current-balance').innerText = `₹${data.current_balance.toFixed(2)}`;
+                
+                // Update status badge
+                const statusBadge = document.getElementById('service-status');
+                if (data.watcher_active) {
+                    statusBadge.innerText = "Watcher Running";
+                    statusBadge.style.borderColor = "var(--accent-standard)";
+                    statusBadge.style.color = "#a7f3d0";
+                } else {
+                    statusBadge.innerText = "Watcher Idle";
+                    statusBadge.style.borderColor = "rgba(255, 255, 255, 0.1)";
+                    statusBadge.style.color = "var(--text-muted)";
+                }
+
+                // Render Table
+                const tableBody = document.getElementById('files-table-body');
+                tableBody.innerHTML = "";
+                
+                data.files.forEach(file => {
+                    const row = document.createElement('tr');
+                    
+                    // Name and progress bar
+                    const pct = file.total_pages > 0 ? (file.transcribed_pages / file.total_pages) * 100 : 0;
+                    const progressHtml = `
+                        <div>
+                            <span class="file-name" title="${file.filename}">${file.filename}</span>
+                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.2rem;">
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar-fill" style="width: ${pct}%"></div>
+                                </div>
+                                <span class="progress-label">${file.transcribed_pages}/${file.total_pages} pg</span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Status Badge
+                    let statusClass = "badge-pending";
+                    if (file.status === "completed") statusClass = "badge-completed";
+                    else if (file.status === "transcribing" || file.status === "resuming") statusClass = "badge-transcribing";
+                    
+                    const statusHtml = `<span class="badge-status ${statusClass}">${file.status.toUpperCase()}</span>`;
+                    
+                    // Mode toggle
+                    const modeHtml = `
+                        <div class="mode-toggle-group">
+                            <button class="mode-btn ${file.mode === 'standard' ? 'active-standard' : ''}" 
+                                onclick="setMode('${file.filename}', 'standard')">
+                                Standard (₹0.08)
+                            </button>
+                            <button class="mode-btn ${file.mode === 'urgent' ? 'active-urgent' : ''}" 
+                                onclick="setMode('${file.filename}', 'urgent')">
+                                Urgent (₹0.46)
+                            </button>
+                        </div>
+                    `;
+                    
+                    // Cost
+                    const costHtml = `<span style="font-weight: 600;">₹${file.est_cost.toFixed(2)}</span>`;
+                    const actualCostHtml = `<span style="font-weight: 600; color: #10b981;">₹${file.actual_cost.toFixed(2)}</span>`;
+                    
+                    // Actions
+                    let actionButtons = "";
+                    if (file.transcribed_pages > 0) {
+                        actionButtons += `<button class="action-btn" onclick="viewTranscript('${file.filename}')">View</button>`;
+                    }
+                    if (file.status === "idle" || file.status === "paused" || file.status === "pending" || file.status === "completed") {
+                        actionButtons += `<button class="action-btn-secondary" onclick="triggerTranscription('${file.filename}')">Transcribe</button>`;
+                    }
+                    actionButtons += `<button class="action-btn" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border-color: rgba(239, 68, 68, 0.2);" onclick="deleteFile('${file.filename}')">Delete</button>`;
+                    
+                    row.innerHTML = `
+                        <td>${progressHtml}</td>
+                        <td>${file.total_pages}</td>
+                        <td>${statusHtml}</td>
+                        <td>${modeHtml}</td>
+                        <td>${costHtml}</td>
+                        <td>${actualCostHtml}</td>
+                        <td>${actionButtons}</td>
+                    `;
+                    
+                    tableBody.appendChild(row);
+                });
+            } catch (err) {
+                console.error("Failed to fetch stats:", err);
+            }
+        }
+
+        async function setMode(filename, mode) {
+            try {
+                await fetch(`${API_BASE}/api/transcripts/set-mode`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ filename, mode })
+                });
+                fetchStats();
+            } catch (err) {
+                console.error("Failed to set mode:", err);
+            }
+        }
+
+        async function triggerTranscription(filename) {
+            try {
+                await fetch(`${API_BASE}/api/transcripts/trigger`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ filename })
+                });
+                fetchStats();
+            } catch (err) {
+                console.error("Failed to trigger:", err);
+            }
+        }
+
+        async function handleFileUpload(event) {
+            const fileInput = event.target;
+            if (fileInput.files.length === 0) return;
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append("file", file);
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/transcripts/upload`, {
+                    method: "POST",
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    alert("Upload successful! The file will be transcribed shortly.");
+                    fetchStats();
+                } else {
+                    alert(`Upload failed: ${data.error}`);
+                }
+            } catch (err) {
+                alert("Network error occurred during file upload.");
+            } finally {
+                fileInput.value = ""; // Reset file input
+            }
+        }
+
+        async function deleteFile(filename) {
+            if (!confirm(`Are you sure you want to delete "${filename}" and its transcript? This action cannot be undone.`)) return;
+            try {
+                const res = await fetch(`${API_BASE}/api/transcripts/delete`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ filename })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    fetchStats();
+                } else {
+                    alert(`Delete failed: ${data.error}`);
+                }
+            } catch (err) {
+                alert("Network error occurred during file deletion.");
+            }
+        }
+
+        let currentEditingFilename = null;
+
+        async function viewTranscript(filename) {
+            const modal = document.getElementById('transcript-modal');
+            const modalText = document.getElementById('modal-body-text');
+            const pdfViewer = document.getElementById('modal-pdf-viewer');
+            
+            currentEditingFilename = filename;
+            document.getElementById('modal-title').innerText = filename;
+            modalText.value = "Loading transcript...";
+            pdfViewer.src = ""; // Clear first
+            
+            modal.style.display = "flex";
+            
+            // Set PDF iframe source to stream the original PDF directly from server
+            pdfViewer.src = `${API_BASE}/api/transcripts/pdf?filename=${encodeURIComponent(filename)}`;
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/transcripts/view?filename=${encodeURIComponent(filename)}`);
+                const data = await res.json();
+                if (data.ok) {
+                    modalText.value = data.text;
+                } else {
+                    modalText.value = `Error: ${data.error}`;
+                }
+            } catch (err) {
+                modalText.value = "Failed to load transcript.";
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('transcript-modal').style.display = "none";
+            document.getElementById('modal-pdf-viewer').src = ""; // Clear to save memory
+            currentEditingFilename = null;
+        }
+
+        async function saveTranscript() {
+            if (!currentEditingFilename) return;
+            const text = document.getElementById('modal-body-text').value;
+            try {
+                const res = await fetch(`${API_BASE}/api/transcripts/save`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ filename: currentEditingFilename, text })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    alert("Transcript saved successfully!");
+                } else {
+                    alert(`Error saving: ${data.error}`);
+                }
+            } catch (err) {
+                alert("Failed to connect to server to save changes.");
+            }
+        }
+
+        function copyTranscript() {
+            const text = document.getElementById('modal-body-text').value;
+            navigator.clipboard.writeText(text);
+            alert("Copied to clipboard!");
+        }
+
+        async function editBalance() {
+            const currentBal = document.getElementById('stat-current-balance').innerText.replace('₹', '');
+            const newBal = prompt("Enter your current Google AI Studio prepaid balance (in ₹):", currentBal);
+            if (newBal === null || newBal.trim() === "") return;
+            const parsed = parseFloat(newBal);
+            if (isNaN(parsed)) {
+                alert("Please enter a valid number.");
+                return;
+            }
+            try {
+                const res = await fetch(`${API_BASE}/api/transcripts/balance`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ balance: parsed })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    fetchStats();
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            } catch (err) {
+                alert("Failed to save balance.");
+            }
+        }
+
+        async function fetchLogs() {
+            try {
+                const res = await fetch(`${API_BASE}/api/transcripts/logs`);
+                const data = await res.json();
+                const consoleDiv = document.getElementById('log-console');
+                
+                // Clear console
+                consoleDiv.innerHTML = "";
+                
+                data.logs.forEach(line => {
+                    const el = document.createElement('div');
+                    el.innerText = line;
+                    consoleDiv.appendChild(el);
+                });
+                
+                // Scroll to bottom
+                consoleDiv.scrollTop = consoleDiv.scrollHeight;
+            } catch (err) {
+                console.error("Failed to fetch logs:", err);
+            }
+        }
+
+        function refreshData() {
+            fetchStats();
+            fetchLogs();
+        }
+
+        // Auto refresh every 5 seconds
+        setInterval(refreshData, 5000);
+        refreshData();
+    </script>
+</body>
+</html>

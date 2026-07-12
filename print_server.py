@@ -1835,7 +1835,7 @@ class PrintHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Store-Token")
+        self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
 
     def _read_body(self):
@@ -1845,10 +1845,61 @@ class PrintHandler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _proxy_to_transcribe(self, method):
+        import urllib.request
+        import urllib.error
+        url = f"http://127.0.0.1:3006{self.path}"
+        
+        headers = {}
+        for k, v in self.headers.items():
+            if k.lower() not in ('host', 'content-length'):
+                headers[k] = v
+                
+        body = None
+        if method == "POST":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length else b""
+            
+        try:
+            req = urllib.request.Request(url, data=body, headers=headers, method=method)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                self.send_response(resp.status)
+                for hk, hv in resp.getheaders():
+                    if hk.lower() not in ('transfer-encoding', 'content-length', 'access-control-allow-origin'):
+                        self.send_header(hk, hv)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                content = resp.read()
+                self.send_header('Content-Length', str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+        except urllib.error.HTTPError as e:
+            self.send_response(e.code)
+            for hk, hv in e.headers.items():
+                if hk.lower() not in ('transfer-encoding', 'content-length', 'access-control-allow-origin'):
+                    self.send_header(hk, hv)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            content = e.read()
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            self.send_response(500)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(f"Proxy error: {e}".encode('utf-8'))
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
+
+        if path in ("/transcripts", "/transcripts/"):
+            self.path = "/"
+            self._proxy_to_transcribe("GET")
+            return
+        elif path.startswith("/api/transcripts"):
+            self._proxy_to_transcribe("GET")
+            return
 
         if path == "/status":
             sumatra = find_sumatra()
@@ -1969,6 +2020,10 @@ class PrintHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+
+        if path.startswith("/api/transcripts"):
+            self._proxy_to_transcribe("POST")
+            return
 
         # Verify shared secret on all mutation endpoints.
         # /staff-login and /staff-logout are exempt (needed before token is available).
