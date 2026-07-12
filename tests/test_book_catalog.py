@@ -310,3 +310,59 @@ def test_parse_anu_order_continuation_after_qty_line_is_ignored():
     assert parsed["ok"] is True
     assert parsed["address"] == "Thrissur - 680001"
     assert parsed["items"] == {"malayalam": 1}
+
+
+from book_catalog import parse_customer_order
+
+
+class TestParseCustomerOrder:
+    def test_single_title_default_qty(self):
+        assert parse_customer_order("Aksharamrutham") == {"malayalam": 1}
+
+    def test_title_with_qty(self):
+        assert parse_customer_order("aksharamrutham 2 copy") == {"malayalam": 2}
+
+    def test_qty_before_title(self):
+        assert parse_customer_order("2 easy english") == {"english": 2}
+
+    def test_language_words(self):
+        assert parse_customer_order("malayalam book venam") == {"malayalam": 1}
+
+    def test_multi_book_defaults_one_each(self):
+        assert parse_customer_order("malayalam and hindi") == {"malayalam": 1, "hindi": 1}
+
+    def test_vidyamrut_alias(self):
+        assert parse_customer_order("vidyamrut 3") == {"hindi": 3}
+
+    def test_no_book_returns_none(self):
+        assert parse_customer_order("how much for delivery") is None
+
+    def test_empty_returns_none(self):
+        assert parse_customer_order("") is None
+
+
+from book_catalog import is_book_faq, book_faq_text, BOOKS
+
+
+class TestBookFaq:
+    def test_price_words(self):
+        for m in ("what is the price", "ethra rupees", "how much", "book cost"):
+            assert is_book_faq(m) is True
+
+    def test_delivery_words(self):
+        for m in ("delivery how many days", "when will i get it", "courier charge"):
+            assert is_book_faq(m) is True
+
+    def test_payment_words(self):
+        for m in ("gpay number", "how to pay", "upi"):
+            assert is_book_faq(m) is True
+
+    def test_non_faq(self):
+        assert is_book_faq("aksharamrutham") is False
+        assert is_book_faq("hi") is False
+
+    def test_faq_text_lists_prices_from_catalog(self):
+        txt = book_faq_text()
+        assert str(int(BOOKS["malayalam"]["price"])) in txt   # 200
+        assert str(int(BOOKS["hindi"]["price"])) in txt       # 150
+        assert "3" in txt and "5 days" in txt                 # 3-5 days

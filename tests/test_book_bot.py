@@ -1332,3 +1332,69 @@ def test_maybe_handle_location_prompts_during_edit_address_step(fake):
     result = book_bot.maybe_handle_location(PHONE)
     assert result == []
     assert sent["text"]
+
+
+def test_payment_caption_includes_upi_number():
+    order = {"order_code": "XTR-1", "phone": "919999999999",
+             "items": {"malayalam": 1}, "delivery_method": "courier"}
+    cap = book_bot._payment_caption(order)
+    assert "9072034907" in cap
+
+
+def test_parsed_confirm_yes_advances_to_name(fake):
+    db, sent = fake
+    # Seed a confirm-pending order the way _maybe_book_enquiry will.
+    db.create_book_order("XTR-9", "91888", name=None)
+    db.update_book_order("XTR-9", items={"malayalam": 1},
+                         books_total=200, courier=75, grand_total=275)
+    db.save_session("supabase", "91888", step="book_confirm_parsed")
+    out = book_bot.maybe_handle_book("91888", "yes")
+    assert out == []
+    assert db.sessions["91888"]["step"] == "book_name"
+    assert any("full name" in m.lower() or "പേര" in m for m in sent["text"])
+
+
+def test_parsed_confirm_change_reopens_catalog(fake):
+    db, sent = fake
+    db.create_book_order("XTR-8", "91777", name=None)
+    db.update_book_order("XTR-8", items={"hindi": 1})
+    db.save_session("supabase", "91777", step="book_confirm_parsed")
+    out = book_bot.maybe_handle_book("91777", "bk_change")
+    assert out == []
+    assert db.sessions["91777"]["step"] == "book_select"
+    assert sent["list"]        # catalog select list was sent
+
+
+def test_typed_order_creates_confirm(fake):
+    db, sent = fake
+    out = book_bot.maybe_handle_book("91555", "Aksharamrutham 1 copy")
+    assert out == []
+    assert db.sessions["91555"]["step"] == "book_confirm_parsed"
+    order = db.get_active_book_order("91555")
+    assert order["items"] == {"malayalam": 1}
+    assert sent["buttons"] and "ord_yes" in sent["buttons"][-1]
+
+
+def test_price_question_sends_faq(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(book_bot, "_llm_parse_books", lambda text: None)
+    # A price question that names NO specific book (a named book -> confirm, which
+    # itself shows the price). "books" triggers the book flow; "how much" is FAQ.
+    out = book_bot.maybe_handle_book("91556", "how much for the books")
+    assert out == []
+    assert any("3–5 days" in m for m in sent["text"])
+    assert sent["list"]     # catalog opened after the FAQ
+
+
+def test_llm_fallback_used_when_deterministic_misses(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(book_bot, "_llm_parse_books", lambda text: {"english": 2})
+    # 'order books' is a book trigger but names no specific title deterministically.
+    out = book_bot.maybe_handle_book("91557", "order books for me")
+    assert out == []
+    assert db.get_active_book_order("91557")["items"] == {"english": 2}
+
+
+def test_non_book_message_returns_none(fake):
+    db, sent = fake
+    assert book_bot.maybe_handle_book("91558", "hello there") is None

@@ -1,4 +1,4 @@
-﻿"""Book campaign — WhatsApp conversational order flow (button-driven).
+"""Book campaign — WhatsApp conversational order flow (button-driven).
 
 Cloud-only (runs in the Vercel webhook). Order data lives in the `book_orders`
 table; the `bot_sessions.step` column drives state (book_* steps). Pure pricing
@@ -89,7 +89,7 @@ ANU_TEMPLATE = (
     "Delivery: courier / office"
 )
 
-_BOOK_STEPS = {"book_select", "book_qty", "book_name", "book_address", "book_dtdc",
+_BOOK_STEPS = {"book_select", "book_qty", "book_confirm_parsed", "book_name", "book_address", "book_dtdc",
                "book_phone", "book_summary", "book_pay", "book_edit",
                "book_edit_name", "book_edit_address", "book_edit_dtdc",
                "book_edit_phone", "post_order", "post_order_ask"}
@@ -375,7 +375,9 @@ def _payment_caption(order: dict) -> str:
         f"Pay *₹{totals['grand_total']:.0f}* by scanning this UPI QR.\n\n"
         f"ഓർഡർ / Order: {order.get('order_code')}\n\n"
         "പണമടച്ച ശേഷം പേയ്മെന്റ് സ്ക്രീൻഷോട്ട് ഇവിടെ അയക്കൂ. ഞങ്ങൾ വെരിഫൈ ചെയ്ത് ഓർഡർ ഉറപ്പിക്കും. 🙏\n"
-        "After paying, send a screenshot of the confirmation here."
+        "After paying, send a screenshot of the confirmation here.\n\n"
+        "💳 QR സ്കാൻ ചെയ്യാൻ പറ്റുന്നില്ലേ? *9072034907* എന്ന നമ്പറിലേക്ക് UPI അയക്കൂ.\n"
+        "Can't scan? Pay by UPI to *9072034907* (GPay / PhonePe)."
     )
 
 
@@ -613,6 +615,60 @@ _RESUME_SENDERS = {
 }
 
 
+def _llm_parse_books(text: str) -> dict | None:
+    """Haiku fallback: extract {book_key: qty} from a book-ish message the
+    deterministic parser missed. Reuses anu_parser (forced tool-use, never
+    raises). Returns None on no book / any failure."""
+    try:
+        from anu_parser import parse_order_message
+        parsed = parse_order_message(text) or {}
+        items: dict[str, int] = {}
+        for b in parsed.get("books") or []:
+            k = b.get("title")
+            q = int(b.get("qty") or 1)
+            if k in bc.BOOKS and q > 0:
+                items[k] = items.get(k, 0) + q
+        return items or None
+    except Exception as exc:
+        logger.error("book_bot._llm_parse_books failed: %s", exc)
+        return None
+
+
+def _maybe_book_enquiry(phone: str, text: str, name: str | None) -> list[str] | None:
+    """Triage a fresh (not mid-flow) book-ish message:
+      1. a parseable typed order   -> stage + confirm
+      2. a price/delivery question -> FAQ + open catalog
+      3. otherwise                 -> None (caller falls through)
+    """
+    items = bc.parse_customer_order(text)
+    if not items and is_book_trigger(text):
+        items = _llm_parse_books(text)
+
+    if items:
+        active = _dbc.get_active_book_order(phone)
+        # Don't hijack a customer who already owes payment — let _start remind them.
+        if active and active.get("status") in ("awaiting_payment", "payment_review", "partially_paid"):
+            return None
+        code = active["order_code"] if active else _new_order_code()
+        if not active:
+            _dbc.create_book_order(code, phone, name)
+        totals = bc.divya_order_terms(phone, items, "courier")
+        _dbc.update_book_order(code, items=items, flow_cursor={},
+                               books_total=totals["books_total"],
+                               courier=totals["courier"],
+                               grand_total=totals["grand_total"])
+        _dbc.save_session(DB, phone, step="book_confirm_parsed")
+        _send_parsed_confirm(phone, items, totals)
+        return []
+
+    if is_book_trigger(text) and bc.is_book_faq(text):
+        _send_text(phone, bc.book_faq_text())
+        _send_select_list(phone)
+        return []
+
+    return None
+
+
 def _resume(phone: str) -> list[str]:
     """Re-issue the prompt for the step a dropped cart stalled at — WITHOUT
     wiping items/name/address. Lifts any `staff_hold`/SOS so the bot listens
@@ -661,6 +717,46 @@ def resume_order(phone: str) -> list[str]:
     """Public entry for the admin take-over button — continue a customer's
     dropped cart in place (see `_resume`)."""
     return _resume(phone)
+
+
+def _send_parsed_confirm(phone: str, items: dict, totals: dict) -> None:
+    lines = ", ".join(
+        f"{bc.BOOKS[k]['label'].split(' (')[0]} × {q}"
+        for k, q in items.items() if q and k in bc.BOOKS
+    )
+    _send_buttons(
+        phone,
+        f"🛒 {lines}\n"
+        f"പുസ്തകം/Books ₹{totals['books_total']:.0f} + കൊറിയർ/Courier ₹{totals['courier']:.0f} "
+        f"= *₹{totals['grand_total']:.0f}*\n\n"
+        "ഈ ഓർഡർ ഉറപ്പിക്കണോ? / Confirm this order?",
+        [("ord_yes", "✅ Yes / ശരി"), ("bk_change", "✏️ Change / മാറ്റം")],
+    )
+
+
+def _handle_parsed_confirm(phone: str, text: str, order: dict) -> list[str]:
+    t = (text or "").strip().lower()
+    if t == "ord_yes" or t in _AFFIRM:
+        items = order.get("items") or {}
+        if not items:
+            _dbc.save_session(DB, phone, step="book_select")
+            _send_select_list(phone)
+            return []
+        totals = _order_totals(order)
+        _dbc.save_session(DB, phone, step="book_name")
+        _send_text(
+            phone,
+            f"നിങ്ങളുടെ ഓർഡർ ആകെ *₹{totals['grand_total']:.0f}* "
+            f"(₹{totals['courier']:.0f} കൊറിയർ ഉൾപ്പെടെ).\n"
+            f"Your order comes to *₹{totals['grand_total']:.0f}* (incl. ₹{totals['courier']:.0f} courier).\n\n"
+            "👤 പാർസൽ ലഭിക്കുന്ന ആളുടെ *പൂർണ്ണ പേര്* ടൈപ്പ് ചെയ്യൂ.\n"
+            "Type the *full name* of the person receiving the parcel.",
+        )
+        return []
+    # Anything else — change / no / a tapped book id — reopen the catalog.
+    _dbc.save_session(DB, phone, step="book_select")
+    _send_select_list(phone)
+    return []
 
 
 def _handle_select(phone: str, text: str, order: dict) -> list[str]:
@@ -1058,6 +1154,39 @@ def is_tracking_question(text: str) -> bool:
     return bool(set(re.findall(r"\w+", t)) & _TRACKING_WORDS)
 
 
+def _get_courier_slug(courier_name: str) -> str:
+    name = (courier_name or "").strip().lower()
+    if "speed" in name:
+        return "speedpost"
+    if "india" in name:
+        return "indiapost"
+    if "dtdc" in name:
+        return "dtdc"
+    if "delhivery" in name:
+        return "delhivery"
+    return name
+
+
+def _fetch_live_tracking(courier_name: str, tracking_no: str) -> dict | None:
+    api_key = os.environ.get("TRACKCOURIER_API_KEY")
+    if not api_key:
+        return None
+    slug = _get_courier_slug(courier_name)
+    try:
+        import requests
+        url = "https://api.trackcourier.io/v1/track"
+        headers = {"X-API-Key": api_key}
+        params = {"courier": slug, "tracking_number": tracking_no}
+        res = requests.get(url, headers=headers, params=params, timeout=3.0)
+        if res.status_code == 200:
+            body = res.json()
+            if body.get("success") and body.get("data"):
+                return body["data"]
+    except Exception as e:
+        logger.error("TrackCourier fetch error: %s", e)
+    return None
+
+
 def compose_tracking_reply(order: dict) -> str:
     """Build the tracking message for a dispatched order."""
     code = order.get("order_code", "")
@@ -1067,10 +1196,42 @@ def compose_tracking_reply(order: dict) -> str:
         return (f"📦 Your order *{code}* has been *dispatched* via {courier}. "
                 "Your tracking number will be shared shortly — reply here if you "
                 "need help.")
+
+    slug = _get_courier_slug(courier)
+    if slug == "speedpost" or slug == "indiapost":
+        track_url = "https://trackcourier.io/speed-post-tracking/"
+    elif slug == "dtdc":
+        track_url = DTDC_TRACK_URL
+    elif slug == "delhivery":
+        track_url = "https://trackcourier.io/delhivery-tracking/"
+    else:
+        track_url = "https://trackcourier.io"
+
+    live_data = _fetch_live_tracking(courier, tn)
+    if live_data:
+        status = (live_data.get("MostRecentStatus") or live_data.get("ShipmentState") or live_data.get("status") or "").replace("_", " ").title()
+        checkpoints = live_data.get("Checkpoints") or live_data.get("checkpoints") or []
+        latest_msg = ""
+        if checkpoints:
+            latest = checkpoints[0]
+            latest_msg = f"📍 Update: _{latest.get('Activity') or latest.get('message') or ''}_"
+            location = latest.get("Location") or latest.get("location")
+            if location:
+                latest_msg += f" ({location})"
+
+        return (
+            f"📦 *Order Status Update:* {code}\n"
+            f"🚚 Carrier: *{courier}*\n"
+            f"🔖 Tracking No: *{tn}*\n"
+            f"⚡ Current Status: *{status}*\n"
+            f"{latest_msg}\n\n"
+            f"🔗 Track here: {track_url}"
+        )
+
     return (
         f"📦 Your order *{code}* shipped via *{courier}*.\n"
         f"🔖 Tracking / Reference no: *{tn}*\n"
-        f"🔗 Track here: {DTDC_TRACK_URL}\n"
+        f"🔗 Track here: {track_url}\n"
         f"On that page, paste *{tn}* and tap search."
     )
 
@@ -1136,6 +1297,10 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
             track = _maybe_tracking_reply(phone, text)
             if track is not None:
                 return track
+        if not _in_print_flow(session):
+            enquiry = _maybe_book_enquiry(phone, text, name)
+            if enquiry is not None:
+                return enquiry
         if is_book_trigger(text) and not _in_print_flow(session):
             return _start(phone, name)
         return None
@@ -1167,6 +1332,7 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
         "book_edit_dtdc":    _handle_edit_dtdc,
         "book_edit_phone":   _handle_edit_phone,
         "book_pay":          _handle_pay,
+        "book_confirm_parsed": _handle_parsed_confirm,
     }
     handler = handlers.get(step)
     if not handler:
