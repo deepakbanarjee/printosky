@@ -275,8 +275,36 @@ def _open_soc(phone: str, name: str | None) -> None:
         _send_text(phone, msg)
 
 
+_PENDING_PAYMENT_STATES = ("awaiting_payment", "payment_review", "partially_paid")
+
+
+def _pending_payment_reminder(phone: str, name: str | None) -> list[str] | None:
+    """Reminder for a customer who already owes payment on a book order.
+
+    start_catalog yields the reminder WITHOUT opening a fresh catalog when the
+    order is in a payment state (see book_bot._start). Returns None when there is
+    no such order. Never raises.
+    """
+    try:
+        import db_cloud
+        order = db_cloud.get_active_book_order(phone)
+        if order and order.get("status") in _PENDING_PAYMENT_STATES:
+            from book_bot import start_catalog
+            return start_catalog(phone, name) or []
+    except Exception as exc:
+        logger.error("intent_router pending-payment check failed: %s", exc)
+    return None
+
+
 def route_front_door(phone: str, text: str, name: str | None = None) -> None:
     """Decide intent and perform the side effect. Sends everything internally."""
+    # A customer who already owes payment on a book order is reminded first —
+    # never dropped into a generic menu or a fresh catalog.
+    reminder = _pending_payment_reminder(phone, name)
+    if reminder:
+        for msg in reminder:
+            _send_text(phone, msg)
+        return
     intent = decide_intent(text)
     if intent in _LINK_MESSAGES:
         _send_text(phone, _LINK_MESSAGES[intent])
