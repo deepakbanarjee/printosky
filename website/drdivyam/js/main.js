@@ -156,3 +156,119 @@
     moteField.appendChild(g);
   }
 })();
+
+/* ---- Voices: live testimonials from the drdivyam Supabase project ----
+   Separate IIFE so it runs even when the motion engine above early-returns
+   (reduced motion / no GSAP). The anon key is public by design; RLS on the
+   `testimonials` table restricts anonymous reads to status = 'approved'. */
+(function () {
+  "use strict";
+
+  var SB_URL = "https://kygngswtynxaawrpxkuq.supabase.co";
+  var SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt5Z25nc3d0eW54YWF3cnB4a3VxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzNjgyNjQsImV4cCI6MjA5ODk0NDI2NH0.cAG4ncF4J5sGmUUu_AAlm3wRw5GgYN01j5oklWMmGJ4";
+
+  if (typeof fetch === "undefined") return;
+
+  function sbGet(pathAndQuery) {
+    return fetch(SB_URL + "/rest/v1/" + pathAndQuery, {
+      headers: { apikey: SB_ANON, Authorization: "Bearer " + SB_ANON }
+    }).then(function (res) { return res.ok ? res.json() : []; });
+  }
+
+  // ---- Voices (approved testimonials) ----
+  (function () {
+    var wrap = document.getElementById("testimonials");
+    var grid = document.getElementById("testimonialsGrid");
+    if (!wrap || !grid) return;
+
+    sbGet("testimonials?select=author_name,author_role,body_ml,body_en,received_on"
+      + "&status=eq.approved&order=featured.desc,sort_order.asc,received_on.desc.nullslast")
+      .then(function (rows) {
+        if (!Array.isArray(rows) || rows.length === 0) return; // none → stay hidden
+
+        rows.forEach(function (row, idx) {
+          var fig = document.createElement("figure");
+          fig.className = "quote quote--live";
+          fig.style.animationDelay = (idx * 0.12).toFixed(2) + "s";
+
+          var bq = document.createElement("blockquote");
+          bq.setAttribute("lang", "ml");
+          bq.textContent = row.body_ml || "";          // textContent = no HTML injection
+          fig.appendChild(bq);
+
+          var cap = document.createElement("figcaption");
+          cap.appendChild(document.createTextNode("— "));
+          var nm = document.createElement("span");
+          nm.setAttribute("lang", "ml");
+          nm.textContent = row.author_name || "";
+          cap.appendChild(nm);
+          if (row.author_role) cap.appendChild(document.createTextNode(", " + row.author_role));
+          fig.appendChild(cap);
+
+          grid.appendChild(fig);
+        });
+        wrap.hidden = false;
+      })
+      .catch(function () { /* fail quietly: section stays hidden */ });
+  })();
+
+  // ---- Study materials (published) ----
+  (function () {
+    var wrap = document.getElementById("resources");
+    var grid = document.getElementById("resourcesGrid");
+    if (!wrap || !grid) return;
+
+    sbGet("study_materials?select=title,description,subject,class_level,material_type,file_url,external_url"
+      + "&published=eq.true&order=featured.desc,sort_order.asc,created_at.desc")
+      .then(function (rows) {
+        if (!Array.isArray(rows) || rows.length === 0) return; // none → stay hidden
+
+        rows.forEach(function (row, idx) {
+          var card = document.createElement("article");
+          card.className = "material-card material-card--live";
+          card.style.animationDelay = (idx * 0.08).toFixed(2) + "s";
+
+          var h = document.createElement("h4");
+          h.textContent = row.title || "Untitled";
+          card.appendChild(h);
+
+          var metaBits = [];
+          if (row.subject) metaBits.push(row.subject);
+          if (row.class_level) metaBits.push(row.class_level);
+          if (metaBits.length) {
+            var meta = document.createElement("p");
+            meta.className = "material-card__meta";
+            meta.textContent = metaBits.join(" · ");
+            card.appendChild(meta);
+          }
+
+          if (row.description) {
+            var desc = document.createElement("p");
+            desc.className = "material-card__desc";
+            desc.textContent = row.description;
+            card.appendChild(desc);
+          }
+
+          var href = row.file_url || row.external_url;
+          if (href) {
+            var a = document.createElement("a");
+            a.className = "btn";
+            a.href = href;
+            a.rel = "noopener";
+            if (row.material_type === "file") {
+              a.setAttribute("download", "");
+              a.textContent = "Download ↓";
+            } else {
+              a.target = "_blank";
+              a.textContent = "Open ↗";
+            }
+            card.appendChild(a);
+          }
+
+          grid.appendChild(card);
+        });
+        wrap.hidden = false;
+      })
+      .catch(function () { /* fail quietly: section stays hidden */ });
+  })();
+})();
