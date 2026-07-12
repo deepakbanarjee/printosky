@@ -1578,8 +1578,68 @@
     <div id="book-orders-list"></div>
   </div>
 
-  <div id="transcripts-tab" style="display:none; height: calc(100vh - 180px); margin-top: 10px;">
-    <iframe id="transcripts-iframe" src="" style="width: 100%; height: 100%; border: none; border-radius: 8px; background: rgba(0,0,0,0.2);"></iframe>
+  <div id="transcripts-tab" style="display:none">
+    <!-- Stats row -->
+    <div class="stats-grid" style="margin-bottom: 20px;">
+      <div class="stat">
+        <div class="stat-label">Total Documents</div>
+        <div class="stat-value accent" id="tr-total-docs">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Transcribed Pages</div>
+        <div class="stat-value green" id="tr-transcribed-pages">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Projected Cost (Remaining)</div>
+        <div class="stat-value" id="tr-total-cost">₹0.00</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Actual Spent</div>
+        <div class="stat-value green" id="tr-actual-spent">₹0.00</div>
+      </div>
+      <div class="stat" onclick="trEditBalance()" style="cursor:pointer;" title="Click to sync/edit balance">
+        <div class="stat-label">Prepaid Balance ✏️</div>
+        <div class="stat-value" id="tr-balance" style="color: #a855f7;">₹0.00</div>
+      </div>
+    </div>
+
+    <!-- Upload and Actions Row -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+      <div style="font-size:.85rem;color:var(--muted)">Malayalam manuscript transcription powered by Gemini Flash-Lite</div>
+      <div style="display:flex; gap:8px;">
+        <input type="file" id="tr-file-upload" accept=".pdf" style="display:none;" onchange="trHandleFileUpload(event)">
+        <button class="ctrl-btn" onclick="document.getElementById('tr-file-upload').click()">➕ Upload PDF</button>
+        <button class="ctrl-btn" onclick="loadTranscripts()">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Manuscripts Table -->
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>File Name</th>
+            <th style="width:100px; text-align:center;">Total Pages</th>
+            <th style="width:120px;">Status</th>
+            <th style="width:250px;">Mode (Cost/Pg)</th>
+            <th style="width:100px; text-align:right;">Est. Cost</th>
+            <th style="width:100px; text-align:right;">Actual Spent</th>
+            <th style="width:240px; text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tr-table-body">
+          <tr><td colspan="7" style="text-align:center; color:#888;">Loading manuscripts...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Live Logs Console -->
+    <div style="margin-top:20px;">
+      <div style="font-size:.85rem; color:var(--muted); margin-bottom:6px;">Live Watcher Logs</div>
+      <div id="tr-logs" style="background:#0c1015; border:1px solid var(--border); border-radius:6px; padding:10px; font-family:var(--mono); font-size:.78rem; height:120px; overflow-y:auto; color:#a7f3d0; line-height:1.4;">
+        Loading logs...
+      </div>
+    </div>
   </div>
 
   <!-- Walk-in / in-store book order modal -->
@@ -1641,6 +1701,23 @@
       <div id="divya-body"></div>
       <div style="display:flex;justify-content:flex-end;margin-top:14px">
         <button class="ctrl-btn" onclick="closeDivyaStatement()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transcripts Edit Modal -->
+  <div id="tr-edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;width:95%;max-width:900px;height:90vh;display:flex;flex-direction:column;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 id="tr-modal-title" style="font-size:1.1rem;font-weight:600;color:var(--accent);word-break:break-all;">File Name</h3>
+        <button class="ctrl-btn" id="tr-modal-pdf-btn" onclick="trOpenPDFInNewTab()" style="background:#2563eb;color:#fff;">Open PDF in New Tab ↗</button>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;gap:10px;margin-bottom:12px;">
+        <textarea id="tr-modal-textarea" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:.9rem;padding:12px;resize:none;outline:none;line-height:1.5;" placeholder="Transcript text..."></textarea>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="ctrl-btn" style="background:#16a34a;color:#fff;" onclick="trSaveTranscript()">Save Changes</button>
+        <button class="ctrl-btn" style="background:#4b5563;color:#fff;" onclick="trCloseModal()">Close</button>
       </div>
     </div>
   </div>
@@ -4471,11 +4548,10 @@ async function switchTab(tab) {
   document.getElementById("tab-transcripts").classList.toggle("active", tab === "transcripts");
 
   if (tab === "transcripts") {
-    const iframe = document.getElementById("transcripts-iframe");
-    if (iframe && !iframe.src) {
-      const pcUrl = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
-      iframe.src = `${pcUrl}/transcripts`;
-    }
+    loadTranscripts();
+    trStartPolling();
+  } else {
+    trStopPolling();
   }
 
   // Conversations polling — start when tab is active, stop otherwise
@@ -6051,6 +6127,249 @@ async function submitNewAcademicOrder() {
   document.getElementById('academic-modal').style.display = 'none';
   alert(`Order created: ${data.project_id}`);
   loadAcademicOrders();
+}
+
+// ── Transcripts Integration ──────────────────────────────────────────────────
+let trActiveFile = null;
+let trInterval = null;
+
+function trStartPolling() {
+  if (!trInterval) {
+    trInterval = setInterval(loadTranscripts, 5000);
+  }
+}
+
+function trStopPolling() {
+  if (trInterval) {
+    clearInterval(trInterval);
+    trInterval = null;
+  }
+}
+
+async function loadTranscripts() {
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  try {
+    const r = await fetch(`${PC}/api/transcripts`);
+    const data = await r.json();
+    
+    // Update Stats
+    document.getElementById("tr-total-docs").innerText = data.total_docs;
+    document.getElementById("tr-transcribed-pages").innerText = `${data.total_transcribed_pages} / ${data.total_pages}`;
+    document.getElementById("tr-total-cost").innerText = `₹${data.total_cost.toFixed(2)}`;
+    document.getElementById("tr-actual-spent").innerText = `₹${data.total_actual_cost.toFixed(2)}`;
+    document.getElementById("tr-balance").innerText = `₹${data.current_balance.toFixed(2)}`;
+    
+    // Update Table
+    const tbody = document.getElementById("tr-table-body");
+    tbody.innerHTML = "";
+    
+    if (!data.files || data.files.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#888;">No manuscripts uploaded yet.</td></tr>`;
+    } else {
+      data.files.forEach(file => {
+        const tr = document.createElement("tr");
+        
+        // Progress Bar HTML
+        const pct = file.total_pages > 0 ? (file.transcribed_pages / file.total_pages) * 100 : 0;
+        const progressHtml = `
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <span style="font-weight:600; color:var(--accent); word-break:break-all;">${file.filename}</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div style="flex:1; height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
+                <div style="width:${pct}%; height:100%; background:var(--green); border-radius:3px;"></div>
+              </div>
+              <span style="font-size:.7rem; color:var(--muted); font-family:var(--mono);">${file.transcribed_pages}/${file.total_pages} pg</span>
+            </div>
+          </div>
+        `;
+        
+        // Status Badge
+        let statusStyle = "background:rgba(251,191,36,0.1); color:#fbbf24; border:1px solid rgba(251,191,36,0.2);";
+        if (file.status === "completed") {
+          statusStyle = "background:rgba(16,185,129,0.1); color:#10b981; border:1px solid rgba(16,185,129,0.2);";
+        } else if (file.status === "transcribing" || file.status === "resuming") {
+          statusStyle = "background:rgba(59,130,246,0.1); color:#3b82f6; border:1px solid rgba(59,130,246,0.2);";
+        }
+        const statusHtml = `<span style="display:inline-block; padding:2px 8px; border-radius:4px; font-size:.72rem; font-weight:600; font-family:var(--mono); ${statusStyle}">${file.status.toUpperCase()}</span>`;
+        
+        // Mode Selector
+        const modeHtml = `
+          <div style="display:flex; gap:4px;">
+            <button class="ctrl-btn" style="padding:2px 6px; font-size:.7rem; ${file.mode === 'standard' ? 'background:#3b82f6; color:#fff;' : 'background:transparent; border:1px solid var(--border);'}" onclick="trSetMode('${file.filename}', 'standard')">Std (₹0.08)</button>
+            <button class="ctrl-btn" style="padding:2px 6px; font-size:.7rem; ${file.mode === 'urgent' ? 'background:#f59e0b; color:#fff;' : 'background:transparent; border:1px solid var(--border);'}" onclick="trSetMode('${file.filename}', 'urgent')">Urg (₹0.46)</button>
+          </div>
+        `;
+        
+        // Actions
+        let actions = ``;
+        if (file.transcribed_pages > 0) {
+          actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; margin-right:4px;" onclick="trView('${file.filename}')">View/Edit</button>`;
+        }
+        actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; margin-right:4px;" onclick="trTrigger('${file.filename}')">Transcribe</button>`;
+        actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; background:rgba(239,68,68,0.1); color:#ef4444; border:1px solid rgba(239,68,68,0.2);" onclick="trDelete('${file.filename}')">Delete</button>`;
+        
+        tr.innerHTML = `
+          <td>${progressHtml}</td>
+          <td style="text-align:center; font-family:var(--mono);">${file.total_pages}</td>
+          <td>${statusHtml}</td>
+          <td>${modeHtml}</td>
+          <td style="text-align:right; font-family:var(--mono); font-weight:600;">₹${file.est_cost.toFixed(2)}</td>
+          <td style="text-align:right; font-family:var(--mono); font-weight:600; color:#10b981;">₹${file.actual_cost.toFixed(2)}</td>
+          <td style="text-align:right;">${actions}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+  } catch (e) {
+    console.error("loadTranscripts error:", e);
+    document.getElementById("tr-table-body").innerHTML = `<tr><td colspan="7" style="text-align:center; color:#ef4444;">Failed to connect to local print server on port 3005. Make sure the watcher is running!</td></tr>`;
+  }
+  
+  // Fetch Logs
+  try {
+    const logRes = await fetch(`${PC}/api/transcripts/logs`);
+    const logData = await logRes.json();
+    const consoleDiv = document.getElementById("tr-logs");
+    consoleDiv.innerHTML = "";
+    logData.logs.forEach(line => {
+      const div = document.createElement("div");
+      div.innerText = line;
+      consoleDiv.appendChild(div);
+    });
+    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+  } catch (e) {
+    document.getElementById("tr-logs").innerText = "Failed to load logs.";
+  }
+}
+
+async function trSetMode(filename, mode) {
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  try {
+    await fetch(`${PC}/api/transcripts/set-mode`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, mode })
+    });
+    loadTranscripts();
+  } catch (e) { alert("Failed to set mode: " + e.message); }
+}
+
+async function trTrigger(filename) {
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  try {
+    await fetch(`${PC}/api/transcripts/trigger`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename })
+    });
+    loadTranscripts();
+  } catch (e) { alert("Failed to start transcription: " + e.message); }
+}
+
+async function trDelete(filename) {
+  if (!confirm(`Delete "${filename}" and its transcript? This cannot be undone.`)) return;
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  try {
+    const res = await fetch(`${PC}/api/transcripts/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename })
+    });
+    const data = await res.json();
+    if (data.ok) loadTranscripts();
+    else alert("Failed: " + data.error);
+  } catch (e) { alert("Failed to delete file: " + e.message); }
+}
+
+async function trHandleFileUpload(event) {
+  const fileInput = event.target;
+  if (fileInput.files.length === 0) return;
+  const file = fileInput.files[0];
+  const formData = new FormData();
+  formData.append("file", file);
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  try {
+    const res = await fetch(`${PC}/api/transcripts/upload`, {
+      method: "POST",
+      body: formData
+    });
+    const data = await res.json();
+    if (data.ok) {
+      alert("Upload successful! The file will be transcribed shortly.");
+      loadTranscripts();
+    } else {
+      alert(`Upload failed: ${data.error}`);
+    }
+  } catch (err) {
+    alert("Network error occurred during file upload.");
+  } finally {
+    fileInput.value = "";
+  }
+}
+
+async function trEditBalance() {
+  const currentBalStr = document.getElementById("tr-balance").innerText.replace("₹", "");
+  const newBal = prompt("Enter your current Google AI Studio prepaid balance (in ₹):", currentBalStr);
+  if (newBal === null || newBal.trim() === "") return;
+  const parsed = parseFloat(newBal);
+  if (isNaN(parsed)) { alert("Please enter a valid number."); return; }
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  try {
+    const res = await fetch(`${PC}/api/transcripts/balance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ balance: parsed })
+    });
+    const data = await res.json();
+    if (data.ok) loadTranscripts();
+    else alert("Error: " + data.error);
+  } catch (e) { alert("Failed to save balance: " + e.message); }
+}
+
+async function trView(filename) {
+  trActiveFile = filename;
+  document.getElementById("tr-modal-title").innerText = filename;
+  const area = document.getElementById("tr-modal-textarea");
+  area.value = "Loading transcript...";
+  document.getElementById("tr-edit-modal").style.display = "flex";
+  
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  try {
+    const res = await fetch(`${PC}/api/transcripts/view?filename=${encodeURIComponent(filename)}`);
+    const data = await res.json();
+    area.value = data.text;
+  } catch (e) { area.value = "Failed to load transcript."; }
+}
+
+function trOpenPDFInNewTab() {
+  if (!trActiveFile) return;
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  window.open(`${PC}/api/transcripts/pdf?filename=${encodeURIComponent(trActiveFile)}`, "_blank");
+}
+
+async function trSaveTranscript() {
+  if (!trActiveFile) return;
+  const text = document.getElementById("tr-modal-textarea").value;
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  try {
+    const res = await fetch(`${PC}/api/transcripts/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: trActiveFile, text })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      alert("Transcript saved successfully!");
+      trCloseModal();
+    } else {
+      alert("Failed to save: " + data.error);
+    }
+  } catch (e) { alert("Error saving transcript: " + e.message); }
+}
+
+function trCloseModal() {
+  document.getElementById("tr-edit-modal").style.display = "none";
+  trActiveFile = null;
 }
 </script>
 
