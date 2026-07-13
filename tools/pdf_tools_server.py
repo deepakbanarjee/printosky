@@ -214,7 +214,8 @@ def get_last_transcribed_page(out_path):
         content = f.read()
         markers = re.findall(r"=== PAGE (\d+) ===", content)
         if markers:
-            last_page = max(int(m) for m in markers)
+            # markers are 1-indexed (e.g. === PAGE 1 ===), so 0-indexed index is max() - 1
+            last_page = max(int(m) for m in markers) - 1
     return last_page
 
 def is_transcription_complete(pdf_path, transcript_path):
@@ -227,7 +228,8 @@ def is_transcription_complete(pdf_path, transcript_path):
     except:
         return False
     
-    last_marker = f"=== PAGE {total_pages - 1} ==="
+    # 1-indexed last marker
+    last_marker = f"=== PAGE {total_pages} ==="
     with open(transcript_path, "r", encoding="utf-8") as f:
         content = f.read()
         return last_marker in content
@@ -311,7 +313,7 @@ def transcribe_pdf_job(pdf_path, ref_img_path, client, mode):
                     text = "[safety blocked / illegible]"
                 
                 text = text.strip()
-                out_file.write(f"\n\n=== PAGE {idx} ===\n\n")
+                out_file.write(f"\n\n=== PAGE {idx + 1} ===\n\n")
                 out_file.write(text)
                 out_file.write("\n")
                 out_file.flush()
