@@ -13,6 +13,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(me
 log = logging.getLogger("cloud_worker")
 
 # Load environment and configurations
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 load_dotenv(r"d:\PY\printosky\.env")
 from store_config import get_store_config
 
