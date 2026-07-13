@@ -1051,6 +1051,128 @@ def _handle_post_order_ask(phone: str, text: str, name: str | None) -> list[str]
     return []
 
 
+# ── Mid-flow intent resolver ──────────────────────────────────────────────────
+# When a customer in a stateful step (esp. book_pay) sends something the rigid
+# handlers don't recognise, try to UNDERSTAND it before falling back to a canned
+# reply: deterministic parse → Haiku → human. Only tag a human when both machine
+# layers fail. Design:
+# docs/specs/2026-07-13-mid-flow-intent-and-media-forwarding-design.md
+_PRICE_WORDS = ("amount", "price", "how much", "cost", "rate", "total", "balance",
+                "charge", "rs", "rupees", "എത്ര", "വില", "രൂപ", "₹")
+_ADD_BOOK_HINTS = ("book", "one more", "another", "add", "more book",
+                   "പുസ്തകം", "കൂടി", "ഒന്ന് കൂടി")
+
+
+def _is_price_question(text: str) -> bool:
+    t = (text or "").lower()
+    return any(w in t for w in _PRICE_WORDS)
+
+
+def _wants_more_books(text: str) -> bool:
+    t = (text or "").lower()
+    return any(h in t for h in _ADD_BOOK_HINTS)
+
+
+def _balance_reply(order: dict) -> str:
+    code = order.get("order_code") or "—"
+    grand = float(order.get("grand_total") or 0)
+    paid = float(order.get("amount_paid") or 0)
+    bal = grand - paid
+    return (f"🧾 *{code}* — ആകെ ₹{grand:.0f} · അടച്ചത് ₹{paid:.0f} · ബാക്കി ₹{bal:.0f}.\n"
+            f"Total ₹{grand:.0f} · paid ₹{paid:.0f} · balance ₹{bal:.0f}. 🙏")
+
+
+def _escalate_to_human(phone: str, order: dict, customer_msg: str) -> list[str]:
+    """Both machine layers failed — hold the bot and ping Anu. No customer reply."""
+    code = order.get("order_code") or "—"
+    _dbc.save_session(DB, phone, step="book_pay", needs_human=True)
+    try:
+        from routing.intent import decide_intent
+        guess = decide_intent(customer_msg or "")
+    except Exception:
+        guess = "unknown"
+    try:
+        _send_text(
+            VERIFIER_PHONE,
+            "🙋 *Needs a human*\n"
+            f"{order.get('name') or phone} +{re.sub(r'[^0-9]', '', phone or '')}\n"
+            f"Order {code}\n"
+            f"They said: \"{(customer_msg or '').strip()[:300]}\"\n"
+            f"(bot guess: {guess}) — please reply to them directly.")
+    except Exception as exc:
+        logger.error("escalation notify failed for %s: %s", code, exc)
+    return []
+
+
+def _add_books_to_order(phone: str, order: dict, add_items: dict[str, int]) -> list[str]:
+    """Add book(s) to an in-progress order, recompute totals, charge only the delta.
+
+    Guard: never silently re-charge an order that is already confirmed or fully
+    paid — escalate to a human instead.
+    """
+    code = order.get("order_code")
+    grand_now = float(order.get("grand_total") or 0)
+    paid = float(order.get("amount_paid") or 0)
+    if order.get("status") == "confirmed" or (grand_now and paid >= grand_now):
+        return _escalate_to_human(
+            phone, order, f"wants to add {add_items} to an already-completed order")
+
+    new_items = {k: int(v) for k, v in (order.get("items") or {}).items()}
+    for k, q in add_items.items():
+        if k in bc.BOOKS:
+            new_items[k] = new_items.get(k, 0) + int(q)
+
+    terms = bc.divya_order_terms(phone, new_items, order.get("delivery_method") or "courier")
+    _dbc.update_book_order(code, items=new_items,
+                           books_total=terms["books_total"],
+                           courier=terms["courier"],
+                           grand_total=terms["grand_total"])
+    _dbc.save_session(DB, phone, step="book_pay", needs_human=False)
+
+    grand = float(terms["grand_total"])
+    bal = grand - paid
+    added = ", ".join(f"{bc.BOOKS[k]['label'].split(' (')[0]} ×{q}"
+                      for k, q in add_items.items() if k in bc.BOOKS)
+    return [
+        f"➕ ചേർത്തു: {added}.\n"
+        f"പുതിയ ആകെ ₹{grand:.0f} · അടച്ചത് ₹{paid:.0f} · ബാക്കി ₹{bal:.0f}.\n"
+        f"ബാക്കി തുക അടച്ച് സ്ക്രീൻഷോട്ട് അയക്കൂ. 🙏\n\n"
+        f"➕ Added {added}. New total ₹{grand:.0f} · paid ₹{paid:.0f} · balance ₹{bal:.0f}. "
+        f"Pay the balance and send a screenshot."
+    ]
+
+
+def resolve_stuck_message(phone: str, text: str, order: dict) -> list[str] | None:
+    """Understand a mid-flow message before the caller falls back to its canned
+    reply. Ladder: deterministic book parse → Haiku book parse → price question
+    → vague add-a-book (ask which) → escalate. Returns replies when handled, or
+    None to let the caller run its default (safe fall-through)."""
+    if not order or not order.get("order_code"):
+        return None
+
+    items = bc.parse_customer_order(text) or _llm_parse_books(text)
+    if items:
+        return _add_books_to_order(phone, order, items)
+
+    if _is_price_question(text):
+        return [_balance_reply(order)]
+
+    if _wants_more_books(text):
+        return [
+            "📚 ഏത് പുസ്തകം ചേർക്കണം? / Which book to add?\n"
+            "• Aksharamrutham (Malayalam) ₹200\n"
+            "• Vidyamrut (Hindi) ₹150\n"
+            "• Easy English ₹200\n"
+            "പേര് ടൈപ്പ് ചെയ്യൂ / just type the name."
+        ]
+
+    t = (text or "").strip()
+    if len(t) < 6 or t.lower() in _AFFIRM:
+        return None                                     # trivial ack → default reply
+
+    return _escalate_to_human(phone, order, text)
+
+
 def _handle_pay(phone: str, text: str, order: dict) -> list[str]:
     code = order["order_code"]
     t = (text or "").strip().lower()
@@ -1093,6 +1215,13 @@ def _handle_pay(phone: str, text: str, order: dict) -> list[str]:
                    "ഇപ്പോൾ സ്ഥിരീകരിക്കുന്നു — ഉടൻ അപ്ഡേറ്റ് ലഭിക്കും. നന്ദി! 🙏\n"
                    f"We're confirming it now for *{code}* — you'll get an update shortly.")
         return []
+    # Before looping the screenshot prompt, try to understand what they said
+    # (add a book, ask the balance, or escalate to a human).
+    resolved = resolve_stuck_message(phone, text, order)
+    if resolved is not None:
+        for r in resolved:
+            _send_text(phone, r)
+        return resolved
     _send_text(phone, "UPI പേയ്മെന്റ് പൂർത്തിയാക്കി, സ്ഥിരീകരണത്തിന്റെ *സ്ക്രീൻഷോട്ട്* "
                       "ഇവിടെ അയക്കൂ. 🙏\n"
                       "Please complete the UPI payment and send a screenshot here.")

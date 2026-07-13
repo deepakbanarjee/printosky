@@ -1425,3 +1425,149 @@ def test_parsed_confirm_unrecognized_reasks_without_losing_order(fake):
     assert db.sessions["91665"]["step"] == "book_confirm_parsed"      # preserved
     assert db.get_active_book_order("91665")["items"] == {"malayalam": 1}  # not lost
     assert sent["buttons"] and "ord_yes" in sent["buttons"][-1]       # re-asked
+
+
+# ── Mid-flow intent resolver (resolve_stuck_message) ──────────────────────────
+
+def _mk_pay_order(db, items=None, status="partially_paid",
+                  grand=275.0, paid=200.0, code="R1"):
+    db._seq += 1
+    db.orders[code] = {
+        "order_code": code, "phone": PHONE, "name": "Ajeesh",
+        "items": items or {"malayalam": 1}, "status": status,
+        "grand_total": grand, "amount_paid": paid, "_seq": db._seq,
+    }
+    return db.get_book_order(code)
+
+
+@pytest.mark.unit
+def test_add_books_to_order_charges_delta(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(book_bot, "_llm_parse_books", lambda t: None)
+    order = _mk_pay_order(db, {"malayalam": 1})
+    replies = book_bot._add_books_to_order(PHONE, order, {"english": 1})
+    assert db.orders["R1"]["items"] == {"malayalam": 1, "english": 1}
+    assert float(db.orders["R1"]["grand_total"]) == 475.0
+    assert replies and "Added" in replies[0]
+    assert "200" in replies[0]                       # balance line 475-200
+    assert db.sessions.get(PHONE, {}).get("needs_human") is not True
+
+
+@pytest.mark.unit
+def test_add_books_guard_blocks_completed_order(fake, monkeypatch):
+    db, sent = fake
+    import routing.intent as _ri
+    monkeypatch.setattr(_ri, "decide_intent", lambda t: "unknown")
+    calls = []
+    monkeypatch.setattr(book_bot, "_send_text", lambda p, m: calls.append((p, m)))
+    order = _mk_pay_order(db, {"malayalam": 1}, status="confirmed",
+                          grand=275.0, paid=275.0, code="R2")
+    replies = book_bot._add_books_to_order(PHONE, order, {"english": 1})
+    assert db.orders["R2"]["items"] == {"malayalam": 1}      # NOT re-charged
+    assert db.sessions[PHONE]["needs_human"] is True
+    assert replies == []
+    assert any(p == book_bot.VERIFIER_PHONE for p, _ in calls)
+
+
+@pytest.mark.unit
+def test_escalate_to_human_holds_bot_and_pings_anu(fake, monkeypatch):
+    db, sent = fake
+    import routing.intent as _ri
+    monkeypatch.setattr(_ri, "decide_intent", lambda t: "unknown")
+    calls = []
+    monkeypatch.setattr(book_bot, "_send_text", lambda p, m: calls.append((p, m)))
+    order = _mk_pay_order(db, code="R3")
+    replies = book_bot._escalate_to_human(PHONE, order, "Is cash on delivery available")
+    assert replies == []
+    assert db.sessions[PHONE]["needs_human"] is True
+    anu = [m for p, m in calls if p == book_bot.VERIFIER_PHONE]
+    assert anu and "Needs a human" in anu[0]
+    assert "cash on delivery" in anu[0].lower()
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("how much do I owe", True), ("Amount", True), ("എത്ര രൂപ", True),
+    ("Easy English", False), ("send it fast", False),
+])
+def test_is_price_question(text, expected):
+    assert book_bot._is_price_question(text) is expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Need one more book", True), ("add another", True),
+    ("ഒരു പുസ്തകം കൂടി", True),
+    ("Easy English", False), ("ok", False),
+])
+def test_wants_more_books(text, expected):
+    assert book_bot._wants_more_books(text) is expected
+
+
+def test_balance_reply_shows_numbers():
+    order = {"order_code": "C9", "grand_total": 475.0, "amount_paid": 200.0}
+    r = book_bot._balance_reply(order)
+    assert "475" in r and "200" in r and "275" in r
+
+
+@pytest.mark.unit
+def test_resolve_adds_named_book(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(book_bot, "_llm_parse_books", lambda t: None)
+    order = _mk_pay_order(db, {"malayalam": 1})
+    replies = book_bot.resolve_stuck_message(PHONE, "Easy English", order)
+    assert db.orders["R1"]["items"] == {"malayalam": 1, "english": 1}
+    assert "Added" in replies[0]
+
+
+@pytest.mark.unit
+def test_resolve_asks_which_book_on_vague_add(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(book_bot, "_llm_parse_books", lambda t: None)
+    order = _mk_pay_order(db, {"malayalam": 1})
+    replies = book_bot.resolve_stuck_message(PHONE, "Need one more book", order)
+    assert replies and "Which book" in replies[0]
+    assert db.orders["R1"]["items"] == {"malayalam": 1}
+    assert db.sessions.get(PHONE, {}).get("needs_human") is not True
+
+
+@pytest.mark.unit
+def test_resolve_answers_price_question(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(book_bot, "_llm_parse_books", lambda t: None)
+    order = _mk_pay_order(db, {"malayalam": 1})
+    replies = book_bot.resolve_stuck_message(PHONE, "how much balance left", order)
+    assert replies and "balance" in replies[0].lower()
+
+
+@pytest.mark.unit
+def test_resolve_escalates_unknown(fake, monkeypatch):
+    db, sent = fake
+    import routing.intent as _ri
+    monkeypatch.setattr(_ri, "decide_intent", lambda t: "unknown")
+    monkeypatch.setattr(book_bot, "_llm_parse_books", lambda t: None)
+    calls = []
+    monkeypatch.setattr(book_bot, "_send_text", lambda p, m: calls.append((p, m)))
+    order = _mk_pay_order(db)
+    replies = book_bot.resolve_stuck_message(PHONE, "Is cash on delivery available", order)
+    assert replies == []
+    assert db.sessions[PHONE]["needs_human"] is True
+    assert any(p == book_bot.VERIFIER_PHONE for p, _ in calls)
+
+
+@pytest.mark.unit
+def test_resolve_ignores_trivial_ack(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(book_bot, "_llm_parse_books", lambda t: None)
+    order = _mk_pay_order(db)
+    assert book_bot.resolve_stuck_message(PHONE, "ok", order) is None
+    assert db.sessions.get(PHONE, {}).get("needs_human") is not True
+
+
+@pytest.mark.integration
+def test_handle_pay_adds_book_before_screenshot_loop(fake, monkeypatch):
+    db, sent = fake
+    monkeypatch.setattr(book_bot, "_llm_parse_books", lambda t: None)
+    _mk_pay_order(db, {"malayalam": 1}, code="P1")
+    order = db.get_book_order("P1")
+    book_bot._handle_pay(PHONE, "Easy English", order)
+    assert db.orders["P1"]["items"] == {"malayalam": 1, "english": 1}
+    assert float(db.orders["P1"]["grand_total"]) == 475.0
