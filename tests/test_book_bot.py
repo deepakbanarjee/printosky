@@ -1398,3 +1398,30 @@ def test_llm_fallback_used_when_deterministic_misses(fake, monkeypatch):
 def test_non_book_message_returns_none(fake):
     db, sent = fake
     assert book_bot.maybe_handle_book("91558", "hello there") is None
+
+
+def test_parsed_confirm_retyped_order_reconfirms(fake):
+    db, sent = fake
+    db.create_book_order("XTR-7", "91666", name=None)
+    db.update_book_order("XTR-7", items={"malayalam": 1},
+                         books_total=200, courier=75, grand_total=275)
+    db.save_session("supabase", "91666", step="book_confirm_parsed")
+    out = book_bot.maybe_handle_book("91666", "hindi book venam")
+    assert out == []
+    # Still confirming (not dumped to the catalog); items updated; re-confirmed.
+    assert db.sessions["91666"]["step"] == "book_confirm_parsed"
+    assert db.get_active_book_order("91666")["items"] == {"hindi": 1}
+    assert sent["buttons"] and "ord_yes" in sent["buttons"][-1]
+
+
+def test_parsed_confirm_unrecognized_reasks_without_losing_order(fake):
+    db, sent = fake
+    db.create_book_order("XTR-6", "91665", name=None)
+    db.update_book_order("XTR-6", items={"malayalam": 1},
+                         books_total=200, courier=75, grand_total=275)
+    db.save_session("supabase", "91665", step="book_confirm_parsed")
+    out = book_bot.maybe_handle_book("91665", "hmm")
+    assert out == []
+    assert db.sessions["91665"]["step"] == "book_confirm_parsed"      # preserved
+    assert db.get_active_book_order("91665")["items"] == {"malayalam": 1}  # not lost
+    assert sent["buttons"] and "ord_yes" in sent["buttons"][-1]       # re-asked

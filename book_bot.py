@@ -753,9 +753,27 @@ def _handle_parsed_confirm(phone: str, text: str, order: dict) -> list[str]:
             "Type the *full name* of the person receiving the parcel.",
         )
         return []
-    # Anything else — change / no / a tapped book id — reopen the catalog.
-    _dbc.save_session(DB, phone, step="book_select")
-    _send_select_list(phone)
+    # Re-typed a book order at the confirm step — update items and re-confirm,
+    # rather than dumping the customer into the catalog.
+    reparsed = bc.parse_customer_order(text)
+    if reparsed:
+        code = order["order_code"]
+        totals = bc.divya_order_terms(order.get("phone"), reparsed,
+                                      order.get("delivery_method") or "courier")
+        _dbc.update_book_order(code, items=reparsed, flow_cursor={},
+                               books_total=totals["books_total"],
+                               courier=totals["courier"],
+                               grand_total=totals["grand_total"])
+        _send_parsed_confirm(phone, reparsed, totals)
+        return []
+    # Explicit change / no / a tapped book id — reopen the catalog to pick manually.
+    if (t == "bk_change" or t in _NEGATE or "change" in t or "മാറ്റ" in t
+            or t.startswith("bk_") or t.startswith("qty_")):
+        _dbc.save_session(DB, phone, step="book_select")
+        _send_select_list(phone)
+        return []
+    # Anything else — re-ask Yes / Change without losing the staged order.
+    _send_parsed_confirm(phone, order.get("items") or {}, _order_totals(order))
     return []
 
 
