@@ -1732,6 +1732,7 @@
       </div>
       
       <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="ctrl-btn" style="background:#10b981;color:#fff;" onclick="trExportWord(trActiveFile)">Export Word ⬇</button>
         <button class="ctrl-btn" style="background:#16a34a;color:#fff;" onclick="trSaveTranscript()">Save Changes</button>
         <button class="ctrl-btn" style="background:#4b5563;color:#fff;" onclick="trCloseModal()">Close</button>
       </div>
@@ -6224,9 +6225,10 @@ async function loadTranscripts() {
         let actions = ``;
         if (file.transcribed_pages > 0) {
           actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; margin-right:4px;" onclick="trView('${file.filename}')">View/Edit</button>`;
+          actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; margin-right:4px; background:#10b981; color:#fff; border-color:#10b981;" onclick="trExportWord('${file.filename}')">Word ⬇</button>`;
         }
         actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; margin-right:4px;" onclick="trTrigger('${file.filename}')">Transcribe</button>`;
-        actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; background:rgba(239,68,68,0.1); color:#ef4444; border:1px solid rgba(239,68,68,0.2);" onclick="trDelete('${file.filename}')">Delete</button>`;
+        actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; background:rgba(239,68,68,0.1); color:#ef4444; border-color:rgba(239,68,68,0.2);" onclick="trDelete('${file.filename}')">Delete</button>`;
         
         tr.innerHTML = `
           <td>${progressHtml}</td>
@@ -6446,6 +6448,12 @@ function trCloseModal() {
   document.getElementById("tr-edit-modal").style.display = "none";
   trActiveFile = null;
   document.getElementById("tr-modal-img").src = ""; // Clear image
+}
+
+function trExportWord(filename) {
+  if (!filename) return;
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  window.open(`${PC}/api/transcripts/export-docx?filename=${encodeURIComponent(filename)}`, "_blank");
 }
 </script>
 

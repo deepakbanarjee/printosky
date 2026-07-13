@@ -214,7 +214,8 @@ def get_last_transcribed_page(out_path):
         content = f.read()
         markers = re.findall(r"=== PAGE (\d+) ===", content)
         if markers:
-            last_page = max(int(m) for m in markers)
+            # markers are 1-indexed (e.g. === PAGE 1 ===), so 0-indexed index is max() - 1
+            last_page = max(int(m) for m in markers) - 1
     return last_page
 
 def is_transcription_complete(pdf_path, transcript_path):
@@ -227,7 +228,8 @@ def is_transcription_complete(pdf_path, transcript_path):
     except:
         return False
     
-    last_marker = f"=== PAGE {total_pages - 1} ==="
+    # 1-indexed last marker
+    last_marker = f"=== PAGE {total_pages} ==="
     with open(transcript_path, "r", encoding="utf-8") as f:
         content = f.read()
         return last_marker in content
@@ -311,7 +313,7 @@ def transcribe_pdf_job(pdf_path, ref_img_path, client, mode):
                     text = "[safety blocked / illegible]"
                 
                 text = text.strip()
-                out_file.write(f"\n\n=== PAGE {idx} ===\n\n")
+                out_file.write(f"\n\n=== PAGE {idx + 1} ===\n\n")
                 out_file.write(text)
                 out_file.write("\n")
                 out_file.flush()
@@ -595,6 +597,107 @@ def get_page_image():
         return send_file(
             io.BytesIO(img_data),
             mimetype="image/png"
+        )
+    except Exception as e:
+        return f"Error: {e}", 500
+
+def split_malayalam_english(text):
+    # Regex to find blocks of Malayalam characters (Unicode block 0D00-0D7F)
+    # and blocks of non-Malayalam characters
+    pattern = re.compile(r"([\u0d00-\u0d7f]+)")
+    parts = pattern.split(text)
+    
+    segments = []
+    for part in parts:
+        if not part:
+            continue
+        is_mal = any("\u0d00" <= char <= "\u0d7f" for char in part)
+        segments.append((part, is_mal))
+    return segments
+
+@app.route("/api/transcripts/export-docx")
+def export_docx():
+    filename = request.args.get("filename")
+    if not filename:
+        return "Missing filename", 400
+        
+    filename = os.path.basename(filename)
+    base_name = os.path.splitext(filename)[0]
+    transcript_path = os.path.join(WATCH_DIR, f"{base_name}_transcript.txt")
+    
+    if not os.path.exists(transcript_path):
+        return "Transcript not found", 404
+        
+    try:
+        import docx
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from docx.shared import Pt
+        
+        doc = docx.Document()
+        
+        # Read lines
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            
+        first_page = True
+        p = None
+        
+        for line in lines:
+            line_strip = line.strip()
+            if not line_strip:
+                # Add an empty paragraph to represent spacing
+                p = doc.add_paragraph()
+                continue
+                
+            # Page breaks
+            if line_strip.startswith("==="):
+                if not first_page:
+                    doc.add_page_break()
+                else:
+                    first_page = False
+                
+                # Add page header
+                p = doc.add_paragraph()
+                run = p.add_run(line_strip)
+                run.bold = True
+                run.font.size = Pt(11)
+                run.font.color.rgb = docx.shared.RGBColor(128, 0, 128) # purple
+                continue
+                
+            # Normal text line
+            p = doc.add_paragraph()
+            segments = split_malayalam_english(line_strip)
+            
+            for part_text, is_mal in segments:
+                run = p.add_run(part_text)
+                rPr = run._r.get_or_add_rPr()
+                rFonts = OxmlElement('w:rFonts')
+                
+                if is_mal:
+                    # Malayalam Unicode
+                    rFonts.set(qn('w:ascii'), 'AnjaliOldLipi')
+                    rFonts.set(qn('w:hAnsi'), 'AnjaliOldLipi')
+                    rFonts.set(qn('w:cs'), 'AnjaliOldLipi')
+                    run.font.size = Pt(13)
+                else:
+                    # English
+                    rFonts.set(qn('w:ascii'), 'Times New Roman')
+                    rFonts.set(qn('w:hAnsi'), 'Times New Roman')
+                    run.font.size = Pt(11)
+                    
+                rPr.append(rFonts)
+                
+        # Save to memory stream
+        stream = io.BytesIO()
+        doc.save(stream)
+        stream.seek(0)
+        
+        return send_file(
+            stream,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            as_attachment=True,
+            download_name=f"{base_name}_transcript.docx"
         )
     except Exception as e:
         return f"Error: {e}", 500
