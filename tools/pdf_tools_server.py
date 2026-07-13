@@ -679,14 +679,29 @@ def export_docx():
                     rFonts.set(qn('w:ascii'), 'AnjaliOldLipi')
                     rFonts.set(qn('w:hAnsi'), 'AnjaliOldLipi')
                     rFonts.set(qn('w:cs'), 'AnjaliOldLipi')
-                    run.font.size = Pt(13)
+                    rPr.append(rFonts)
+                    
+                    sz = OxmlElement('w:sz')
+                    sz.set(qn('w:val'), '26') # 13 pt (half-points)
+                    rPr.append(sz)
+                    
+                    szCs = OxmlElement('w:szCs')
+                    szCs.set(qn('w:val'), '26') # 13 pt
+                    rPr.append(szCs)
                 else:
                     # English
                     rFonts.set(qn('w:ascii'), 'Times New Roman')
                     rFonts.set(qn('w:hAnsi'), 'Times New Roman')
-                    run.font.size = Pt(11)
+                    rFonts.set(qn('w:cs'), 'Times New Roman')
+                    rPr.append(rFonts)
                     
-                rPr.append(rFonts)
+                    sz = OxmlElement('w:sz')
+                    sz.set(qn('w:val'), '22') # 11 pt
+                    rPr.append(sz)
+                    
+                    szCs = OxmlElement('w:szCs')
+                    szCs.set(qn('w:val'), '22') # 11 pt
+                    rPr.append(szCs)
                 
         # Save to memory stream
         stream = io.BytesIO()
