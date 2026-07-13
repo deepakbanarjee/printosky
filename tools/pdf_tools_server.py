@@ -601,17 +601,30 @@ def get_page_image():
     except Exception as e:
         return f"Error: {e}", 500
 
+CHILLU_MAP = {
+    "\u0d7b": "\u0d23\u0d4d\u200d", # ൺ
+    "\u0d7c": "\u0d33\u0d4d\u200d", # ൾ
+    "\u0d7d": "\u0d30\u0d4d\u200d", # ർ
+    "\u0d7e": "\u0d28\u0d4d\u200d", # ൻ
+    "\u0d7f": "\u0d32\u0d4d\u200d", # ൽ
+    "\u0d7a": "\u0d23\u0d4d\u200d", # ൺ
+}
+
+def replace_chillus(text):
+    for chillu, replacement in CHILLU_MAP.items():
+        text = text.replace(chillu, replacement)
+    return text
+
 def split_malayalam_english(text):
-    # Regex to find blocks of Malayalam characters (Unicode block 0D00-0D7F)
-    # and blocks of non-Malayalam characters
-    pattern = re.compile(r"([\u0d00-\u0d7f]+)")
+    # Regex to find blocks of Malayalam characters (Unicode block 0D00-0D7F and ZWJ 200D)
+    pattern = re.compile(r"([\u0d00-\u0d7f\u200d]+)")
     parts = pattern.split(text)
     
     segments = []
     for part in parts:
         if not part:
             continue
-        is_mal = any("\u0d00" <= char <= "\u0d7f" for char in part)
+        is_mal = any(("\u0d00" <= char <= "\u0d7f") or (char == "\u200d") for char in part)
         segments.append((part, is_mal))
     return segments
 
@@ -667,7 +680,8 @@ def export_docx():
                 
             # Normal text line
             p = doc.add_paragraph()
-            segments = split_malayalam_english(line_strip)
+            processed_line = replace_chillus(line_strip)
+            segments = split_malayalam_english(processed_line)
             
             for part_text, is_mal in segments:
                 run = p.add_run(part_text)
