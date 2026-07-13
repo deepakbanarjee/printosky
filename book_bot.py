@@ -1991,6 +1991,33 @@ def _assemble(parsed: dict) -> dict:
     }
 
 
+_PIN_RE = re.compile(r"\b\d{6}\b")
+_LETTER_RE = re.compile(r"[A-Za-zഀ-ൿ]")   # a Latin or Malayalam letter
+
+
+def _recover_order_from_raw(raw: str) -> dict:
+    """Deterministic safety net for when the LLM misclassifies a clear
+    name+postal-address forward as 'not an order' (leaving no name and dead-
+    ending the intake). Only fires when the text carries a 6-digit PIN — a strong
+    postal-address signal. Uses the first letter-bearing, digit-free line as the
+    name and the remaining lines as the address. Returns {} when there's no PIN
+    to anchor on or no usable name line."""
+    if not raw or not _PIN_RE.search(raw):
+        return {}
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    name = ""
+    rest: list[str] = []
+    for ln in lines:
+        if (not name and not any(c.isdigit() for c in ln)
+                and not ln.lower().startswith("book:") and _LETTER_RE.search(ln)):
+            name = ln
+        else:
+            rest.append(ln)
+    if not name:
+        return {}
+    return {"name": name, "address": ", ".join(rest)}
+
+
 def _send_staged_confirm(o: dict) -> None:
     """Show ONE 'Confirm this order?' prompt for the staged order `o`."""
     totals = bc.divya_order_terms(o["phone"], o["items"], "courier")
@@ -2050,6 +2077,17 @@ def _handle_anu_freeform(text: str) -> None:
         return
 
     o = _assemble(anu_parser.parse_order_message(raw))
+
+    # Deterministic safety net: the LLM occasionally misclassifies a clear
+    # name+postal-address forward as "not an order", leaving no name and dead-
+    # ending the intake (the Kumari Deepthy case). If the raw text carries a
+    # 6-digit PIN, recover the name (and address) so the flow still progresses.
+    if not o["name"]:
+        rec = _recover_order_from_raw(raw)
+        if rec:
+            o["name"] = rec["name"]
+            if not o["address"]:
+                o["address"] = rec["address"]
 
     if not o["name"]:                                   # can't identify a customer yet
         _anu_save_buffer(raw, "anu_intake")

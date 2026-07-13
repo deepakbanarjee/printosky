@@ -1626,3 +1626,38 @@ def test_confirm_staged_creates_with_all_books(fake, monkeypatch):
     _stage_anu_order(items={"malayalam": 1, "english": 1})
     book_bot._confirm_staged()
     assert saved_items == [{"malayalam": 1, "english": 1}]           # both books saved
+
+
+# ── Anu intake: deterministic name recovery when LLM misses it (Bug 2) ────────
+
+_KUMARI = "Kumari Deepthy \nOmkaram\nThanneersala\nAYIROOPPARA\nPothencode po\n695584"
+
+
+def test_recover_order_from_raw_extracts_name_and_address():
+    rec = book_bot._recover_order_from_raw(_KUMARI)
+    assert rec["name"] == "Kumari Deepthy"
+    assert "Omkaram" in rec["address"] and "695584" in rec["address"]
+
+
+def test_recover_order_from_raw_needs_a_pin():
+    # No 6-digit PIN → don't guess a name (could be anything).
+    assert book_bot._recover_order_from_raw("Kumari Deepthy Omkaram") == {}
+
+
+def test_recover_order_from_raw_ignores_book_only():
+    assert book_bot._recover_order_from_raw("Easy English") == {}
+
+
+@pytest.mark.integration
+def test_anu_intake_recovers_name_instead_of_dead_ending(fake, monkeypatch):
+    db, sent = fake
+    # Reproduce the live failure: the LLM says "not an order" for a clear
+    # name+address forward.
+    monkeypatch.setattr(book_bot.anu_parser, "parse_order_message",
+                        lambda t: {"is_order": False})
+    book_bot._handle_anu_freeform(_KUMARI)
+    # The bot now progresses to asking for the phone (name recovered), NOT the
+    # generic "send the rest" dead-end.
+    assert any("phone number" in m.lower() and "Kumari Deepthy" in m for m in sent["text"])
+    assert not any("send the rest" in m.lower() for m in sent["text"])
+    assert db.sessions[book_bot.VERIFIER_PHONE]["step"] == "anu_intake"
