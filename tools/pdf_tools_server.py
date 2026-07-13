@@ -249,8 +249,8 @@ def transcribe_pdf_job(pdf_path, ref_img_path, client, mode):
     active_file = pdf_name
     
     # Select model based on mode
-    # Urgent = gemini-3.5-flash (₹0.46/pg)
-    # Standard = gemini-3.1-flash-lite (₹0.08/pg)
+    # Urgent = gemini-3.5-flash (₹20.00/pg)
+    # Standard = gemini-3.1-flash-lite (₹5.00/pg)
     model_name = "models/gemini-3.5-flash" if mode == "urgent" else "models/gemini-3.1-flash-lite"
     
     log_to_dashboard(f"Starting {mode.upper()} transcription for {pdf_name} using {model_name}...")
@@ -319,7 +319,7 @@ def transcribe_pdf_job(pdf_path, ref_img_path, client, mode):
                 out_file.flush()
                 
                 # Add to actual costs
-                page_cost = 0.46 if mode == "urgent" else 0.08
+                page_cost = 20.0 if mode == "urgent" else 5.0
                 add_actual_cost(pdf_name, page_cost)
                 subtract_balance_cost(page_cost)
                 
@@ -463,8 +463,8 @@ def get_transcripts_status():
             mode = cfg.get(f, "standard")
             actual_cost = actual_costs.get(f, 0.0)
             
-            # Calculate cost (Standard = ₹0.08/pg, Urgent = ₹0.46/pg)
-            rate = 0.46 if mode == "urgent" else 0.08
+            # Calculate cost (Standard = ₹5.00/pg, Urgent = ₹20.00/pg)
+            rate = 20.0 if mode == "urgent" else 5.0
             est_cost = (pdf_pages - transcribed) * rate # projected cost for remaining pages
             
             # Determine status
