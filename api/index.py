@@ -1180,7 +1180,7 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
             # screenshots to print whenever the session drifted or the QR was
             # sent out-of-band.)
             _bo = get_active_book_order(sender) or {}
-            if _bo.get("status") in ("awaiting_payment", "payment_review"):
+            if _bo.get("status") in ("awaiting_payment", "payment_review", "partially_paid"):
                 from whatsapp_notify import _send
                 content = _download_meta_media(media_id)
                 replies = None
@@ -1195,6 +1195,21 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
                 # _send_meta logs the outbound; don't double-log here.
                 for reply in replies:
                     _send(sender, reply)
+                # Return the stored proof path so the inbound image logs a
+                # media_url (was None → payment screenshots were invisible in the
+                # admin transcript). Newest ledger row = the screenshot just saved.
+                try:
+                    from db_cloud import get_book_payments
+                    code = _bo.get("order_code")
+                    pays = sorted(get_book_payments(code) or [],
+                                  key=lambda p: p.get("id") or 0)
+                    if pays:
+                        u = pays[-1].get("proof_url") or ""
+                        mm = re.search(r"/incoming-files/(.+?)(?:\?|$)", u)
+                        if mm:
+                            return mm.group(1)
+                except Exception as e:
+                    logger.error("payment media_url path lookup failed: %s", e)
                 return None
         except Exception as e:
             logger.error(f"Book payment-proof handling failed for {sender}: {e}")
