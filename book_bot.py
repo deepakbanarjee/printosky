@@ -1057,20 +1057,23 @@ def _handle_post_order_ask(phone: str, text: str, name: str | None) -> list[str]
 # reply: deterministic parse → Haiku → human. Only tag a human when both machine
 # layers fail. Design:
 # docs/specs/2026-07-13-mid-flow-intent-and-media-forwarding-design.md
-_PRICE_WORDS = ("amount", "price", "how much", "cost", "rate", "total", "balance",
-                "charge", "rs", "rupees", "എത്ര", "വില", "രൂപ", "₹")
-_ADD_BOOK_HINTS = ("book", "one more", "another", "add", "more book",
-                   "പുസ്തകം", "കൂടി", "ഒന്ന് കൂടി")
+# Word-boundary matched so "of course" doesn't match "rs", "address" doesn't
+# match "add", "totally" doesn't match "total". Malayalam cues stay substring.
+_PRICE_RE = re.compile(
+    r"\b(amount|price|how much|cost|rate|total|balance|charge|rs|rupees)\b", re.I)
+_PRICE_ML = ("എത്ര", "വില", "രൂപ", "₹")
+_ADD_BOOK_RE = re.compile(r"\b(one more|more book|another|book|add)\b", re.I)
+_ADD_BOOK_ML = ("പുസ്തകം", "കൂടി", "ഒന്ന് കൂടി")
 
 
 def _is_price_question(text: str) -> bool:
-    t = (text or "").lower()
-    return any(w in t for w in _PRICE_WORDS)
+    t = text or ""
+    return bool(_PRICE_RE.search(t)) or any(w in t for w in _PRICE_ML)
 
 
 def _wants_more_books(text: str) -> bool:
-    t = (text or "").lower()
-    return any(h in t for h in _ADD_BOOK_HINTS)
+    t = text or ""
+    return bool(_ADD_BOOK_RE.search(t)) or any(h in t for h in _ADD_BOOK_ML)
 
 
 def _balance_reply(order: dict) -> str:
@@ -1150,10 +1153,12 @@ def resolve_stuck_message(phone: str, text: str, order: dict) -> list[str] | Non
     if not order or not order.get("order_code"):
         return None
 
-    items = bc.parse_customer_order(text) or _llm_parse_books(text)
+    # 1. Cheap deterministic book parse (no LLM).
+    items = bc.parse_customer_order(text)
     if items:
         return _add_books_to_order(phone, order, items)
 
+    # 2. Cheap keyword intents (no LLM).
     if _is_price_question(text):
         return [_balance_reply(order)]
 
@@ -1166,10 +1171,18 @@ def resolve_stuck_message(phone: str, text: str, order: dict) -> list[str] | Non
             "പേര് ടൈപ്പ് ചെയ്യൂ / just type the name."
         ]
 
+    # 3. Trivial ack / very short noise → let the default reply stand. Do this
+    #    BEFORE the Haiku call so "ok"/"👍" never spend a model request.
     t = (text or "").strip()
     if len(t) < 6 or t.lower() in _AFFIRM:
-        return None                                     # trivial ack → default reply
+        return None
 
+    # 4. Haiku book extraction — last machine attempt before a human.
+    items = _llm_parse_books(text)
+    if items:
+        return _add_books_to_order(phone, order, items)
+
+    # 5. Both machine layers failed → escalate.
     return _escalate_to_human(phone, order, text)
 
 

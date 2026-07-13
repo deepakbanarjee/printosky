@@ -1488,6 +1488,8 @@ def test_escalate_to_human_holds_bot_and_pings_anu(fake, monkeypatch):
 @pytest.mark.parametrize("text,expected", [
     ("how much do I owe", True), ("Amount", True), ("എത്ര രൂപ", True),
     ("Easy English", False), ("send it fast", False),
+    ("of course", False),      # must not match bare "rs" substring
+    ("totally agree", False),  # must not match "total" substring
 ])
 def test_is_price_question(text, expected):
     assert book_bot._is_price_question(text) is expected
@@ -1497,6 +1499,7 @@ def test_is_price_question(text, expected):
     ("Need one more book", True), ("add another", True),
     ("ഒരു പുസ്തകം കൂടി", True),
     ("Easy English", False), ("ok", False),
+    ("what is your address", False),   # must not match "add" inside "address"
 ])
 def test_wants_more_books(text, expected):
     assert book_bot._wants_more_books(text) is expected
