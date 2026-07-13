@@ -474,11 +474,10 @@ def get_transcripts_status():
             elif transcribed > 0:
                 status = "paused"
                 
-            # Get modification time (transcription activity date)
-            if os.path.exists(transcript_path):
-                mtime = os.path.getmtime(transcript_path)
-            else:
-                mtime = os.path.getmtime(pdf_path)
+            # Get modification time (transcription activity date or upload date)
+            pdf_mtime = os.path.getmtime(pdf_path)
+            tx_mtime = os.path.getmtime(transcript_path) if os.path.exists(transcript_path) else 0
+            mtime = max(pdf_mtime, tx_mtime)
                 
             files_status.append({
                 "filename": f,
