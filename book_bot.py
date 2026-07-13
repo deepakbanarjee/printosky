@@ -1991,12 +1991,54 @@ def _assemble(parsed: dict) -> dict:
     }
 
 
+def _send_staged_confirm(o: dict) -> None:
+    """Show ONE 'Confirm this order?' prompt for the staged order `o`."""
+    totals = bc.divya_order_terms(o["phone"], o["items"], "courier")
+    _send_buttons(
+        VERIFIER_PHONE,
+        "📋 *Confirm this order?*\n"
+        f"{o['name']} · +{o['phone']}\n"
+        f"{o.get('address') or '—'}\n"
+        f"{_cart_line(o['items'])}\n"
+        f"Books ₹{totals['books_total']:.0f} + Courier ₹{totals['courier']:.0f} = "
+        f"*₹{totals['grand_total']:.0f}*\n"
+        f"Divya commission (ML): ₹{totals['commission']:.0f} | "
+        f"Pradeep (HI+EN): ₹{totals['pradeep_commission']:.0f}",
+        [("aok", "✅ Confirm & print"), ("axx", "❌ Cancel")],
+    )
+
+
+def _anu_add_book_to_staged(key: str) -> None:
+    """A 2nd+ book tap on an already-staged order: add the book to that same
+    order and re-show one confirm prompt — never stage a parallel order."""
+    import json
+    sess = _anu_session()
+    try:
+        blob = json.loads(sess.get("saved_json") or "{}")
+    except Exception:
+        blob = {}
+    o = blob.get("order") if isinstance(blob, dict) else None
+    if not o:
+        return
+    items = dict(o.get("items") or {})
+    items[key] = items.get(key, 0) + 1
+    o["items"] = items
+    o["book_explicit"] = True
+    _anu_save_buffer(blob.get("raw", ""), "anu_staged", order=o)
+    _send_staged_confirm(o)
+
+
 def _handle_anu_freeform(text: str) -> None:
     """Auto-combine Anu's messages into one order; ask for gaps; confirm before save."""
     msg = (text or "").strip()
-    # A book-button tap becomes plain text the LLM understands when re-parsed.
+    # A book-button tap: if an order is already staged, ADD this book to it (one
+    # order, one confirm) instead of re-staging a parallel single-book order.
+    # Otherwise turn it into plain text the parser understands (the first book).
     bm = re.match(r"^abook_(malayalam|hindi|english)$", msg)
     if bm:
+        if _anu_session().get("step") == "anu_staged":
+            _anu_add_book_to_staged(bm.group(1))
+            return
         msg = f"Book: {_BOOK_TITLE[bm.group(1)]}"
 
     sess = _anu_session()
@@ -2027,27 +2069,18 @@ def _handle_anu_freeform(text: str) -> None:
 
     # Complete → stage for confirmation (NOT created yet).
     _anu_save_buffer(raw, "anu_staged", order=o)
-    totals     = bc.divya_order_terms(o["phone"], o["items"], "courier")
-    courier    = totals["courier"]
-    grand      = totals["grand_total"]
-    commission = totals["commission"]
-    pradeep_commission = totals["pradeep_commission"]
-    _send_buttons(
-        VERIFIER_PHONE,
-        "📋 *Confirm this order?*\n"
-        f"{o['name']} · +{o['phone']}\n"
-        f"{o['address'] or '—'}\n"
-        f"{_cart_line(o['items'])}\n"
-        f"Books ₹{totals['books_total']:.0f} + Courier ₹{courier:.0f} = *₹{grand:.0f}*\n"
-        f"Divya commission (ML): ₹{commission:.0f} | Pradeep (HI+EN): ₹{pradeep_commission:.0f}",
-        [("aok", "✅ Confirm & print"), ("axx", "❌ Cancel")],
-    )
+    _send_staged_confirm(o)
 
 
 def _confirm_staged() -> None:
-    """Anu tapped Confirm — create the staged order."""
+    """Anu tapped Confirm — create the staged order. Idempotent: a rapid second
+    tap finds no staged order (buffer already cleared) and is a no-op, so a
+    double-tap never creates two orders."""
     import json
     sess = _anu_session()
+    if sess.get("step") != "anu_staged":
+        _send_text(VERIFIER_PHONE, "✅ That order was already saved.")
+        return
     try:
         o = json.loads(sess.get("saved_json") or "{}").get("order")
     except Exception:
@@ -2056,6 +2089,7 @@ def _confirm_staged() -> None:
         _anu_clear_buffer()
         _send_text(VERIFIER_PHONE, "⚠️ That order expired — please forward it again.")
         return
+    # Clear BEFORE creating so a second Confirm tap sees no staged order.
     _anu_clear_buffer()
     _create_divya_confirmed(_new_order_code(), o["name"], o["phone"],
                             o.get("address") or "", o["items"])

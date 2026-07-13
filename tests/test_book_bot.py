@@ -1574,3 +1574,55 @@ def test_handle_pay_adds_book_before_screenshot_loop(fake, monkeypatch):
     book_bot._handle_pay(PHONE, "Easy English", order)
     assert db.orders["P1"]["items"] == {"malayalam": 1, "english": 1}
     assert float(db.orders["P1"]["grand_total"]) == 475.0
+
+
+# ── Anu intake: multi-book accumulation + idempotent confirm (Bug 1) ──────────
+
+def _stage_anu_order(items=None, name="Sheeja R S", phone="9446708675",
+                     address="Anchal 691306"):
+    o = {"name": name, "phone": phone, "address": address, "copies": 1,
+         "items": items or {"malayalam": 1}, "book_explicit": True}
+    book_bot._anu_save_buffer("raw text", "anu_staged", order=o)
+    return o
+
+
+@pytest.mark.integration
+def test_second_book_tap_accumulates_into_one_order(fake, monkeypatch):
+    import json
+    db, sent = fake
+    created = []
+    monkeypatch.setattr(book_bot, "_create_divya_confirmed",
+                        lambda *a, **k: created.append(a))
+    _stage_anu_order(items={"malayalam": 1})
+    # Anu taps a second book button while an order is already staged.
+    book_bot._handle_anu_freeform("abook_english")
+    blob = json.loads(db.sessions[book_bot.VERIFIER_PHONE]["saved_json"])
+    assert blob["order"]["items"] == {"malayalam": 1, "english": 1}   # accumulated
+    assert db.sessions[book_bot.VERIFIER_PHONE]["step"] == "anu_staged"  # still one
+    assert created == []                                             # nothing saved yet
+    assert sent["buttons"] and sent["buttons"][-1][0] == "aok"       # one confirm re-shown
+
+
+@pytest.mark.integration
+def test_confirm_staged_is_idempotent_on_double_tap(fake, monkeypatch):
+    db, sent = fake
+    created = []
+    monkeypatch.setattr(book_bot, "_create_divya_confirmed",
+                        lambda *a, **k: created.append(a))
+    _stage_anu_order(items={"malayalam": 1, "english": 1})
+    book_bot._confirm_staged()      # first Confirm & print tap
+    book_bot._confirm_staged()      # rapid second tap
+    assert len(created) == 1                                         # exactly ONE order
+    assert db.sessions[book_bot.VERIFIER_PHONE].get("step") in ("", None)
+    assert any("already saved" in m.lower() for m in sent["text"])
+
+
+@pytest.mark.integration
+def test_confirm_staged_creates_with_all_books(fake, monkeypatch):
+    db, sent = fake
+    saved_items = []
+    monkeypatch.setattr(book_bot, "_create_divya_confirmed",
+                        lambda code, name, phone, address, items, **k: saved_items.append(items))
+    _stage_anu_order(items={"malayalam": 1, "english": 1})
+    book_bot._confirm_staged()
+    assert saved_items == [{"malayalam": 1, "english": 1}]           # both books saved
