@@ -6330,7 +6330,17 @@ async function trHandleFileUpload(event) {
   const fileInput = event.target;
   if (fileInput.files.length === 0) return;
   const file = fileInput.files[0];
-  const filename = file.name;
+  
+  // Sanitize filename to avoid key restrictions (emojis, non-ASCII characters)
+  const dotIdx = file.name.lastIndexOf(".");
+  const ext = dotIdx !== -1 ? file.name.substring(dotIdx) : "";
+  const nameOnly = dotIdx !== -1 ? file.name.substring(0, dotIdx) : file.name;
+  let cleanName = nameOnly.replace(/[^\w\.\-]/g, "_").replace(/_+/g, "_");
+  if (!cleanName || cleanName === "_") {
+    cleanName = "manuscript_" + Date.now();
+  }
+  const filename = cleanName + ext;
+  
   const storeId = localStorage.getItem("storeId") || "OSP";
   
   try {
