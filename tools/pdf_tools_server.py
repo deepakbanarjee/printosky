@@ -733,7 +733,17 @@ def export_docx():
 
 @app.route("/api/transcripts/logs")
 def get_logs():
-    return jsonify({"logs": console_logs})
+    cloud_log_path = os.path.join(os.path.dirname(__file__), "cloud_worker.log")
+    combined_logs = list(console_logs)
+    if os.path.exists(cloud_log_path):
+        try:
+            with open(cloud_log_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                last_lines = [l.strip() for l in lines[-100:] if l.strip()]
+                combined_logs.extend(last_lines)
+        except Exception:
+            pass
+    return jsonify({"logs": combined_logs})
 
 @app.route("/api/transcripts/trigger", methods=["POST"])
 def trigger_transcription():

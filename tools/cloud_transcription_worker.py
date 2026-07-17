@@ -8,8 +8,17 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai.errors import APIError
 
-# Initialize logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
+# Initialize logging to console and file
+import sys
+log_file = os.path.join(os.path.dirname(__file__), "cloud_worker.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)s  %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    ]
+)
 log = logging.getLogger("cloud_worker")
 
 # Load environment and configurations

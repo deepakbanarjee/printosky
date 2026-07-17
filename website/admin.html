@@ -6263,6 +6263,19 @@ async function loadTranscripts() {
         tbody.appendChild(tr);
       });
     }
+    // Fetch logs from the local server
+    try {
+      const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+      const resLogs = await fetch(`${PC}/api/transcripts/logs`);
+      const logsData = await resLogs.json();
+      if (logsData && logsData.logs) {
+        document.getElementById("tr-logs").innerText = logsData.logs.join("\n");
+        const trLogsDiv = document.getElementById("tr-logs");
+        trLogsDiv.scrollTop = trLogsDiv.scrollHeight;
+      }
+    } catch (logErr) {
+      document.getElementById("tr-logs").innerText = "Local log server is offline.";
+    }
   } catch (e) {
     console.error("loadTranscripts error:", e);
     document.getElementById("tr-table-body").innerHTML = `<tr><td colspan="7" style="text-align:center; color:#ef4444;">Failed to load transcripts from Supabase.</td></tr>`;
