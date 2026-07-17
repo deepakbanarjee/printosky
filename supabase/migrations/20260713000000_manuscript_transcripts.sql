@@ -38,3 +38,25 @@ CREATE POLICY "service_role_all_transcripts" ON manuscript_transcripts
 
 CREATE POLICY "anon_all_transcripts" ON manuscript_transcripts
     FOR ALL TO anon USING (true) WITH CHECK (true);
+
+-- ---------------------------------------------------------------------------
+-- Storage bucket and policies for 'manuscripts'
+-- ---------------------------------------------------------------------------
+
+-- Create the manuscripts bucket
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('manuscripts', 'manuscripts', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Policies for public storage access
+CREATE POLICY "Public Read Access" ON storage.objects
+    FOR SELECT TO public USING (bucket_id = 'manuscripts');
+
+CREATE POLICY "Anyone Can Upload" ON storage.objects
+    FOR INSERT TO public WITH CHECK (bucket_id = 'manuscripts');
+
+CREATE POLICY "Anyone Can Update" ON storage.objects
+    FOR UPDATE TO public USING (bucket_id = 'manuscripts');
+
+CREATE POLICY "Anyone Can Delete" ON storage.objects
+    FOR DELETE TO public USING (bucket_id = 'manuscripts');
