@@ -39,6 +39,28 @@ DIVYA_SELF_ROW = {
 }
 
 
+REPLACEMENT_ROW = {
+    "order_code": "XTR-20260718-RABCDEF", "name": "Sajitha K",
+    "phone": "919400012345", "items": {"malayalam": 1}, "grand_total": 0.0,
+    "commission": 0.0, "payment_collected_by": "oxygen",
+    "delivery_method": "courier", "divya_settled": False,
+    "status": "confirmed", "created_at": "2026-07-18T00:00:00+00:00",
+    "via_divya": False, "is_replacement": True,
+}
+
+
+@pytest.mark.unit
+def test_replacement_reship_excluded_from_ledger(monkeypatch):
+    # A free/goodwill reship (is_replacement) must not inflate book counts or
+    # commission totals — it carries no revenue.
+    _mock_rows(monkeypatch, [NORMAL_ROW, REPLACEMENT_ROW])
+    d = db_cloud.divya_ledger()
+    assert d["total_orders"] == 1        # only the real commission order
+    assert d["total_books"] == 1
+    assert d["total_commission"] == 50.0
+    assert d["books_taken"] == 0
+
+
 @pytest.mark.unit
 def test_normal_orders_unaffected_by_own_use_change(monkeypatch):
     _mock_rows(monkeypatch, [NORMAL_ROW])

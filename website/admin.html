@@ -1580,6 +1580,13 @@
       </div>
     </div>
     <div id="book-orders-list"></div>
+    <div style="margin-top:18px;border-top:1px solid #eee;padding-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:600;font-size:.9rem">↩ Returns &amp; replacements</div>
+        <button class="ctrl-btn" onclick="loadReturns()">Refresh</button>
+      </div>
+      <div id="returns-list"><div style="padding:8px;color:#999;font-size:13px">Tap Refresh to load returns.</div></div>
+    </div>
   </div>
 
   <div id="transcripts-tab" style="display:none">
@@ -1778,6 +1785,89 @@
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
         <button class="ctrl-btn" onclick="closeEditBookOrder()">Cancel</button>
         <button class="ctrl-btn" style="background:#2563eb;color:#fff;border-color:#2563eb" onclick="submitEditBookOrder()">Save changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Return / Replace book order (admin-only) -->
+  <div id="return-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;color:#1a2330;border-radius:12px;padding:20px;max-width:460px;width:92%;max-height:92vh;overflow:auto">
+      <div style="font-weight:600;font-size:16px;margin-bottom:4px">↩ Return / Replace</div>
+      <div id="return-order-label" style="font-size:.78rem;color:#888;margin-bottom:12px"></div>
+      <input type="hidden" id="ret-code">
+      <div style="display:grid;gap:12px;font-size:.9rem">
+
+        <div>
+          <div style="font-weight:600;font-size:.8rem;margin-bottom:5px">📦 Book(s) returned by customer</div>
+          <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Aksharamrutham <span style="color:#888">ML</span>
+            <input id="ret-r-ml" type="number" min="0" value="0" style="width:56px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+          <label style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px">Vidyamrut <span style="color:#888">HI</span>
+            <input id="ret-r-hi" type="number" min="0" value="0" style="width:56px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+          <label style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px">Easy English <span style="color:#888">EN</span>
+            <input id="ret-r-en" type="number" min="0" value="0" style="width:56px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+        </div>
+
+        <select id="ret-reason" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+          <option value="wrong_language">Reason: wrong language</option>
+          <option value="damaged">Reason: damaged in transit</option>
+          <option value="defective">Reason: printing defect</option>
+          <option value="not_needed">Reason: no longer needed</option>
+          <option value="other">Reason: other</option>
+        </select>
+
+        <select id="ret-resolution" onchange="updateReturnFields()" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+          <option value="replacement">Resolution: send a replacement</option>
+          <option value="refund">Resolution: refund only</option>
+          <option value="both">Resolution: replacement + refund</option>
+        </select>
+
+        <div id="ret-replacement-box">
+          <div style="font-weight:600;font-size:.8rem;margin-bottom:5px">🔁 Replacement book(s) to send</div>
+          <label style="display:flex;justify-content:space-between;align-items:center;gap:8px">Aksharamrutham <span style="color:#888">ML</span>
+            <input id="ret-p-ml" type="number" min="0" value="0" style="width:56px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+          <label style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px">Vidyamrut <span style="color:#888">HI</span>
+            <input id="ret-p-hi" type="number" min="0" value="0" style="width:56px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+          <label style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px">Easy English <span style="color:#888">EN</span>
+            <input id="ret-p-en" type="number" min="0" value="0" style="width:56px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
+          <select id="ret-courier" style="padding:7px;border:1px solid #ccc;border-radius:6px;margin-top:8px;width:100%">
+            <option value="store">Courier for reship: store absorbs (goodwill)</option>
+            <option value="customer">Courier for reship: customer pays</option>
+            <option value="na">Courier for reship: not applicable (office pickup)</option>
+          </select>
+        </div>
+
+        <div id="ret-money-box">
+          <div style="font-weight:600;font-size:.8rem;margin-bottom:6px">💰 Money settlement</div>
+          <div style="display:grid;grid-template-columns:1fr 78px;gap:6px 8px;align-items:center;font-size:.8rem">
+            <span>Book price difference <span style="color:#888">(replacement − returned)</span></span>
+            <input id="ret-price-delta" type="number" step="1" value="0" oninput="updateSettleSuggestion()" style="padding:5px;border:1px solid #ccc;border-radius:6px;text-align:right">
+            <span>Inward courier <span style="color:#888">(return the book)</span></span>
+            <input id="ret-inward" type="number" min="0" step="1" value="0" oninput="updateSettleSuggestion()" style="padding:5px;border:1px solid #ccc;border-radius:6px;text-align:right">
+            <span>Outward courier <span style="color:#888">(reship)</span></span>
+            <input id="ret-outward" type="number" min="0" step="1" value="0" oninput="updateSettleSuggestion()" style="padding:5px;border:1px solid #ccc;border-radius:6px;text-align:right">
+          </div>
+          <select id="ret-settle-dir" style="padding:7px;border:1px solid #ccc;border-radius:6px;margin-top:8px;width:100%">
+            <option value="collect">Customer pays the store</option>
+            <option value="refund">Refund to customer</option>
+            <option value="none">No money to settle</option>
+          </select>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <input id="ret-settle-amount" type="number" min="0" step="1" placeholder="Net ₹" style="flex:1;padding:7px;border:1px solid #ccc;border-radius:6px">
+            <select id="ret-settle-mode" style="flex:1;padding:7px;border:1px solid #ccc;border-radius:6px">
+              <option value="qr">QR</option>
+              <option value="upi">UPI</option>
+              <option value="cash">Cash</option>
+            </select>
+          </div>
+          <div style="font-size:.72rem;color:#b45309;margin-top:5px">Money is moved manually over QR / UPI / Cash — this only records it. You can settle later from the returns list.</div>
+        </div>
+
+        <textarea id="ret-notes" placeholder="Notes (optional)" style="padding:7px;border:1px solid #ccc;border-radius:6px;min-height:44px"></textarea>
+        <div id="ret-error" style="color:#dc2626;font-size:.8rem;display:none"></div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <button class="ctrl-btn" style="background:#4b5563;color:#fff;" onclick="document.getElementById('return-modal').style.display='none'">Cancel</button>
+        <button class="ctrl-btn" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="submitReturn()">Create return</button>
       </div>
     </div>
   </div>
@@ -4969,11 +5059,15 @@ function renderBookOrders(rows) {
       actions.push(`<button class="ctrl-btn" onclick="dispatchBookOrder('${o.order_code}')">📦 Mark dispatched</button>`);
     if (o.status === 'dispatched')
       actions.push(`<button class="ctrl-btn" onclick="deliverBookOrder('${o.order_code}')">✅ Mark delivered</button>`);
+    if ((o.status === 'delivered' || o.status === 'dispatched') && !o.is_replacement)
+      actions.push(`<button class="ctrl-btn" onclick="openReturnModal('${o.order_code}')">↩ Return / Replace</button>`);
     if (o.status !== 'cancelled')
       actions.push(`<button class="ctrl-btn" onclick="openEditBookOrder('${o.order_code}')">✏️ Edit</button>`);
     const actionsHtml = actions.length ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${actions.join('')}</div>` : '';
     const addr = (o.address || '').replace(/</g, '&lt;');
-    const srcTag = o.source === 'walk_in'
+    const srcTag = o.is_replacement
+      ? `<span style="background:#dcfce7;color:#166534;border-radius:6px;padding:1px 6px;font-size:.62rem;margin-left:6px;vertical-align:middle" title="Free replacement reship${o.parent_order_code ? ' for ' + o.parent_order_code : ''}">↩ REPLACEMENT</span>`
+      : o.source === 'walk_in'
       ? `<span style="background:#eef2ff;color:#3730a3;border-radius:6px;padding:1px 6px;font-size:.62rem;margin-left:6px;vertical-align:middle">WALK-IN</span>`
       : o.source === 'divya'
       ? `<span style="background:#fef3c7;color:#92400e;border-radius:6px;padding:1px 6px;font-size:.62rem;margin-left:6px;vertical-align:middle">DIVYA</span>`
@@ -4999,6 +5093,219 @@ function renderBookOrders(rows) {
       <div style="margin-top:8px">${proof}</div>
     </div>`;
   }).join('');
+}
+
+// ── Returns / replacements ──────────────────────────────────────────────
+function _retItems(prefix) {
+  const map = { ml: 'malayalam', hi: 'hindi', en: 'english' };
+  const it = {};
+  ['ml', 'hi', 'en'].forEach(k => {
+    const el = document.getElementById(prefix + k);
+    const v = parseInt((el && el.value) || '0', 10);
+    if (v > 0) it[map[k]] = v;
+  });
+  return it;
+}
+
+// Offer prices from book_catalog.py (source of truth for the sell price).
+const _BOOK_PRICES = { malayalam: 200, hindi: 150, english: 200 };
+
+function _itemsValue(it) {
+  return Object.keys(it || {}).reduce((s, k) => s + (_BOOK_PRICES[k] || 0) * it[k], 0);
+}
+
+function openReturnModal(code) {
+  const o = (_bookOrdersCache || []).find(x => x.order_code === code);
+  document.getElementById('ret-code').value = code;
+  document.getElementById('return-order-label').textContent =
+    `Order ${code}${o && o.name ? ' · ' + o.name : ''}${o ? ' · ' + _bookItemsSummary(o.items) : ''}`;
+  ['ret-r-ml', 'ret-r-hi', 'ret-r-en', 'ret-p-ml', 'ret-p-hi', 'ret-p-en'].forEach(id => {
+    const el = document.getElementById(id); el.value = '0'; el.oninput = recomputeReturnMoney;
+  });
+  document.getElementById('ret-inward').value = '0';
+  // Prefill outward courier with what the original order paid (staff can adjust).
+  document.getElementById('ret-outward').value = (o && o.courier) ? o.courier : '0';
+  document.getElementById('ret-price-delta').value = '0';
+  document.getElementById('ret-settle-amount').value = '';
+  document.getElementById('ret-settle-dir').value = 'collect';
+  document.getElementById('ret-settle-mode').value = 'qr';
+  document.getElementById('ret-courier').value = 'customer';
+  document.getElementById('ret-notes').value = '';
+  document.getElementById('ret-reason').value = 'wrong_language';
+  document.getElementById('ret-resolution').value = 'replacement';
+  document.getElementById('ret-error').style.display = 'none';
+  updateReturnFields();
+  document.getElementById('return-modal').style.display = 'flex';
+}
+
+function updateReturnFields() {
+  const res = document.getElementById('ret-resolution').value;
+  document.getElementById('ret-replacement-box').style.display = (res === 'refund') ? 'none' : 'block';
+  recomputeReturnMoney();
+}
+
+// Recompute the book price difference from the qty inputs, then re-suggest the net.
+function recomputeReturnMoney() {
+  const res = document.getElementById('ret-resolution').value;
+  const returnedVal = _itemsValue(_retItems('ret-r-'));
+  const replacementVal = (res === 'refund') ? 0 : _itemsValue(_retItems('ret-p-'));
+  document.getElementById('ret-price-delta').value = replacementVal - returnedVal;
+  updateSettleSuggestion();
+}
+
+// Net = price difference + inward + outward courier. Positive → customer pays.
+function updateSettleSuggestion() {
+  const delta = parseFloat(document.getElementById('ret-price-delta').value || '0');
+  const inward = parseFloat(document.getElementById('ret-inward').value || '0');
+  const outward = parseFloat(document.getElementById('ret-outward').value || '0');
+  const net = delta + inward + outward;
+  document.getElementById('ret-settle-amount').value = Math.abs(net) || '';
+  document.getElementById('ret-settle-dir').value = net > 0 ? 'collect' : (net < 0 ? 'refund' : 'none');
+}
+
+async function submitReturn() {
+  const code = document.getElementById('ret-code').value;
+  const res = document.getElementById('ret-resolution').value;
+  const err = document.getElementById('ret-error');
+  const returned = _retItems('ret-r-');
+  if (!Object.keys(returned).length) {
+    err.textContent = 'Enter at least one returned book.'; err.style.display = 'block'; return;
+  }
+  const dir = document.getElementById('ret-settle-dir').value;
+  const amount = parseFloat(document.getElementById('ret-settle-amount').value || '0');
+  if (dir !== 'none' && !(amount > 0)) {
+    err.textContent = 'Enter a settlement amount, or choose “No money to settle”.';
+    err.style.display = 'block'; return;
+  }
+  const body = {
+    order_code: code, returned_items: returned,
+    reason: document.getElementById('ret-reason').value, resolution: res,
+    price_delta: parseFloat(document.getElementById('ret-price-delta').value || '0'),
+    inward_courier: parseFloat(document.getElementById('ret-inward').value || '0'),
+    outward_courier: parseFloat(document.getElementById('ret-outward').value || '0'),
+    settlement_direction: dir,
+    settlement_amount: (dir === 'none') ? 0 : amount,
+    settlement_mode: document.getElementById('ret-settle-mode').value,
+    courier_borne_by: document.getElementById('ret-courier').value,
+    notes: document.getElementById('ret-notes').value || '',
+  };
+  if (res !== 'refund') {
+    const rep = _retItems('ret-p-');
+    if (!Object.keys(rep).length) {
+      err.textContent = 'Enter at least one replacement book.'; err.style.display = 'block'; return;
+    }
+    body.replacement_items = rep;
+  }
+  try {
+    const r = await fetch(`${ACAD_API}/admin/returns/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Password': _convPw() },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) {
+      err.textContent = data.error || ('HTTP ' + r.status); err.style.display = 'block'; return;
+    }
+    document.getElementById('return-modal').style.display = 'none';
+    let msg = `Return logged: ${data.return_code}`;
+    if (data.replacement_order_code)
+      msg += `\n\nReplacement order ${data.replacement_order_code} created (status: confirmed).\nDispatch it from the list above to ship the correct book.`;
+    if (dir === 'collect' && amount > 0)
+      msg += `\n\n💰 Collect ₹${amount} from the customer (${document.getElementById('ret-settle-mode').value.toUpperCase()}), then tap “Settle” in the returns list.`;
+    else if (dir === 'refund' && amount > 0)
+      msg += `\n\n💰 Refund ₹${amount} to the customer (${document.getElementById('ret-settle-mode').value.toUpperCase()}), then tap “Settle” in the returns list.`;
+    alert(msg);
+    loadBookOrders();
+    loadReturns();
+  } catch (e) {
+    err.textContent = String(e); err.style.display = 'block';
+  }
+}
+
+async function loadReturns() {
+  const list = document.getElementById('returns-list');
+  if (!list) return;
+  if (!_convPw()) { await _adminPwPrompt(false); if (!_convPw()) return; }
+  list.innerHTML = `<div style="padding:8px;color:#999;font-size:13px">Loading…</div>`;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/returns`, { headers: { 'X-Admin-Password': _convPw() } });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      list.innerHTML = `<div style="padding:8px;color:#dc2626;font-size:13px">${data.error || ('HTTP ' + r.status)}</div>`;
+      return;
+    }
+    renderReturns(data.returns || []);
+  } catch (e) {
+    list.innerHTML = `<div style="padding:8px;color:#dc2626;font-size:13px">${e}</div>`;
+  }
+}
+
+function renderReturns(rows) {
+  const list = document.getElementById('returns-list');
+  if (!rows.length) {
+    list.innerHTML = `<div style="padding:8px;color:#999;font-size:13px">No returns logged.</div>`;
+    return;
+  }
+  const color = { requested: '#d97706', item_received: '#2563eb', resolved: '#15803d', closed: '#666', cancelled: '#999' };
+  list.innerHTML = rows.map(t => {
+    const c = color[t.status] || '#666';
+    const acts = [];
+    if (t.status === 'requested')
+      acts.push(`<button class="ctrl-btn" onclick="returnAction('${t.return_code}','received')">📥 Book received</button>`);
+    if (t.settlement_status === 'pending')
+      acts.push(`<button class="ctrl-btn" onclick="returnSettle('${t.return_code}','${t.settlement_direction}',${t.settlement_amount || 0},'${t.settlement_mode || 'qr'}')">💰 Settle</button>`);
+    if (t.status !== 'closed' && t.status !== 'cancelled')
+      acts.push(`<button class="ctrl-btn" onclick="returnAction('${t.return_code}','close')">✔ Close</button>`);
+    const rep = t.replacement_order_code ? ` · reship <strong>${t.replacement_order_code}</strong>` : '';
+    const money = (t.settlement_direction && t.settlement_direction !== 'none' && t.settlement_amount > 0)
+      ? ` · ${t.settlement_direction === 'collect' ? 'collect' : 'refund'} ₹${t.settlement_amount} (${t.settlement_status})` : '';
+    return `<div style="border:1px solid #e6e6e6;border-radius:8px;padding:10px;margin-bottom:8px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>${t.return_code}</strong>
+        <span style="color:${c};font-weight:700;text-transform:uppercase;font-size:.66rem;letter-spacing:.05em">${(t.status || '').replace('_', ' ')}</span>
+      </div>
+      <div style="font-size:.8rem;color:#555;margin-top:4px">order ${t.order_code}${t.name ? ' · ' + t.name : ''}</div>
+      <div style="font-size:.8rem;color:#555;margin-top:2px">returned ${_bookItemsSummary(t.returned_items)} · ${t.resolution}${rep}${money}</div>
+      ${t.reason ? `<div style="font-size:.75rem;color:#888;margin-top:2px">${t.reason}${t.courier_borne_by ? ' · courier: ' + t.courier_borne_by : ''}</div>` : ''}
+      ${acts.length ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${acts.join('')}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function returnAction(code, action) {
+  if (action === 'close' && !confirm(`Close return ${code}?`)) return;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/returns/${encodeURIComponent(code)}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Password': _convPw() },
+      body: '{}',
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) { alert(data.error || ('HTTP ' + r.status)); return; }
+    loadReturns();
+  } catch (e) { alert(String(e)); }
+}
+
+async function returnSettle(code, dir, amount, mode) {
+  const label = dir === 'refund' ? 'refund to customer' : 'collect from customer';
+  const a = prompt(`Record settlement for ${code} (${label}).\n\nAmount ₹:`, amount || '');
+  if (a === null) return;
+  const n = parseFloat(a);
+  if (!(n > 0)) { alert('Enter an amount greater than 0.'); return; }
+  const m = (prompt('Mode (qr / upi / cash):', mode || 'qr') || 'qr').toLowerCase();
+  try {
+    const r = await fetch(`${ACAD_API}/admin/returns/${encodeURIComponent(code)}/settle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Password': _convPw() },
+      body: JSON.stringify({
+        settlement_direction: dir === 'refund' ? 'refund' : 'collect',
+        settlement_amount: n, settlement_mode: m,
+      }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) { alert(data.error || ('HTTP ' + r.status)); return; }
+    loadReturns();
+  } catch (e) { alert(String(e)); }
 }
 
 async function confirmBookOrder(code, skipPrompt) {

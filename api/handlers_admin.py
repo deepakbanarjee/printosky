@@ -1467,3 +1467,277 @@ def _handle_admin_notes_moderate(h, body: bytes, note_code: str, action: str) ->
     except Exception as exc:
         logger.error("admin notes moderate %s/%s: %s", note_code, action, exc, exc_info=True)
         _json_response(h, 500, {"error": str(exc)})
+
+
+# ── book returns / replacements (admin-only) ────────────────────────────────
+def _new_return_code() -> str:
+    from datetime import datetime
+    return f"RET-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
+
+
+def _new_replacement_code() -> str:
+    from datetime import datetime
+    return f"XTR-{datetime.now().strftime('%Y%m%d')}-R{os.urandom(3).hex().upper()}"
+
+
+def _norm_book_items(raw) -> dict:
+    """Coerce an items payload to {lang: positive-int} over the known languages."""
+    out = {}
+    for k in ("malayalam", "hindi", "english"):
+        try:
+            q = int((raw or {}).get(k) or 0)
+        except (TypeError, ValueError):
+            q = 0
+        if q > 0:
+            out[k] = q
+    return out
+
+
+def _handle_admin_return_create(h, body) -> None:
+    """POST /admin/returns/create — log a return + optionally create a reship.
+
+    Body (JSON): {
+      order_code (required), returned_items {lang:qty} (required),
+      reason, condition, resolution: replacement|refund|both (default replacement),
+      replacement_items {lang:qty}, courier_borne_by: store|customer|na,
+      refund_amount, refund_mode, notes, created_by
+    }
+    Creates the book_returns row. When resolution includes a replacement, also
+    creates a linked replacement book_orders row (status 'confirmed') that rides
+    the normal dispatch/deliver pipeline. Money (pricier book + inward/outward
+    courier, or a refund) is recorded as a net settlement over QR/UPI/Cash and is
+    never auto-processed.
+
+    Extra money fields (JSON): price_delta, inward_courier, outward_courier,
+    settlement_direction (collect|refund|none), settlement_amount, settlement_mode
+    (qr|upi|cash). price_delta / outward_courier default to catalog figures when
+    omitted; settlement values come from what staff actually agreed with the buyer.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        data = {}
+
+    order_code = (data.get("order_code") or "").strip()
+    if not order_code:
+        _json_response(h, 400, {"error": "order_code is required"})
+        return
+
+    returned_items = _norm_book_items(data.get("returned_items"))
+    if not returned_items:
+        _json_response(h, 400, {"error": "returned_items must include at least one book"})
+        return
+
+    resolution = (data.get("resolution") or "replacement").strip().lower()
+    if resolution not in ("replacement", "refund", "both"):
+        resolution = "replacement"
+    replacement_items = _norm_book_items(data.get("replacement_items"))
+    if resolution in ("replacement", "both") and not replacement_items:
+        _json_response(h, 400, {"error": "replacement_items required for a replacement"})
+        return
+
+    courier_borne_by = (data.get("courier_borne_by") or "customer").strip().lower()
+    if courier_borne_by not in ("store", "customer", "na"):
+        courier_borne_by = "customer"
+    reason     = (data.get("reason") or "").strip() or None
+    condition  = (data.get("condition") or "").strip().lower() or None
+    notes      = (data.get("notes") or "").strip() or None
+    created_by = (data.get("created_by") or "").strip() or None
+
+    def _money(key):
+        try:
+            return float(data.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    inward_courier = _money("inward_courier")
+    settlement_direction = (data.get("settlement_direction") or "none").strip().lower()
+    if settlement_direction not in ("collect", "refund", "none"):
+        settlement_direction = "none"
+    settlement_amount = _money("settlement_amount")
+    settlement_mode = (data.get("settlement_mode") or "").strip().lower() or None
+    if settlement_mode and settlement_mode not in ("qr", "upi", "cash"):
+        settlement_mode = None
+    settlement_note = (data.get("settlement_note") or "").strip() or None
+
+    try:
+        import book_catalog as bc
+        from db_cloud import (get_book_order, create_book_return,
+                              create_replacement_order)
+
+        order = get_book_order(order_code)
+        if not order:
+            _json_response(h, 404, {"error": f"Order {order_code} not found"})
+            return
+
+        returned_value = float(bc.compute_totals(returned_items).get("books_total") or 0)
+        replacement_value = 0.0
+        outward_courier = 0.0
+        replacement_order_code = None
+
+        if resolution in ("replacement", "both"):
+            rt = bc.compute_totals(replacement_items)
+            replacement_value = float(rt.get("books_total") or 0)
+            delivery_method = order.get("delivery_method") or "courier"
+            no_courier = delivery_method == "xtraa_office" or courier_borne_by == "na"
+            outward_courier = 0.0 if no_courier else float(rt.get("courier") or 0)
+
+        # Catalog-derived defaults; body overrides what staff actually charged.
+        price_delta = replacement_value - returned_value
+        if data.get("price_delta") is not None:
+            price_delta = _money("price_delta")
+        if data.get("outward_courier") is not None:
+            outward_courier = _money("outward_courier")
+
+        return_code = _new_return_code()
+
+        if resolution in ("replacement", "both"):
+            rep_code = _new_replacement_code()
+            rep = create_replacement_order(
+                rep_code, order_code, return_code,
+                order.get("name"), order.get("phone"), order.get("address"),
+                replacement_items, courier=outward_courier,
+                courier_borne_by=courier_borne_by,
+                delivery_method=order.get("delivery_method") or "courier")
+            if not rep:
+                _json_response(h, 500, {"error": "Could not create replacement order"})
+                return
+            replacement_order_code = rep_code
+
+        ret = create_book_return(
+            return_code, order_code, order.get("phone"), order.get("name"),
+            returned_items, reason, resolution=resolution,
+            replacement_items=replacement_items or None,
+            replacement_order_code=replacement_order_code,
+            price_delta=price_delta, inward_courier=inward_courier,
+            outward_courier=outward_courier,
+            settlement_direction=settlement_direction,
+            settlement_amount=settlement_amount, settlement_mode=settlement_mode,
+            settlement_note=settlement_note, courier_borne_by=courier_borne_by,
+            condition=condition, notes=notes, created_by=created_by)
+        if not ret:
+            _json_response(h, 500, {"error": "Could not log return"})
+            return
+
+        _json_response(h, 200, {"ok": True, "return_code": return_code,
+                                "replacement_order_code": replacement_order_code,
+                                "price_delta": price_delta,
+                                "outward_courier": outward_courier})
+    except Exception as exc:
+        logger.error("return create error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_returns_list(h) -> None:
+    """GET /admin/returns[?status=requested|item_received|resolved|closed|all]"""
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(h.path).query)
+        status_filter = (qs.get("status", [None])[0] or "").strip() or None
+        if status_filter == "all":
+            status_filter = None
+        from db_cloud import list_book_returns
+        rows = list_book_returns(status=status_filter, limit=200)
+        _json_response(h, 200, {"returns": rows})
+    except Exception as exc:
+        logger.error("returns list error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_return_received(h, body, return_code: str) -> None:
+    """POST /admin/returns/<code>/received — mark the returned book physically in.
+    Body: {condition?}"""
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        data = {}
+    condition = (data.get("condition") or "").strip().lower() or None
+    try:
+        from db_cloud import get_book_return, update_book_return
+        if not get_book_return(return_code):
+            _json_response(h, 404, {"error": "Return not found"})
+            return
+        fields = {"status": "item_received"}
+        if condition:
+            fields["condition"] = condition
+        update_book_return(return_code, **fields)
+        _json_response(h, 200, {"ok": True})
+    except Exception as exc:
+        logger.error("return received error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_return_settle(h, body, return_code: str) -> None:
+    """POST /admin/returns/<code>/settle — record money changing hands.
+    Body: {settlement_direction: collect|refund, settlement_amount (required),
+           settlement_mode: qr|upi|cash, settlement_note?}
+    'collect' = customer paid the store (pricier book / courier); 'refund' = store
+    paid the customer. Records money moved manually over QR/UPI/Cash — nothing is
+    auto-processed (no Razorpay on this account).
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        data = {}
+    direction = (data.get("settlement_direction") or "").strip().lower()
+    if direction not in ("collect", "refund"):
+        _json_response(h, 400, {"error": "settlement_direction must be collect or refund"})
+        return
+    try:
+        amount = float(data.get("settlement_amount") or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    if amount <= 0:
+        _json_response(h, 400, {"error": "settlement_amount must be greater than 0"})
+        return
+    mode = (data.get("settlement_mode") or "").strip().lower() or None
+    if mode and mode not in ("qr", "upi", "cash"):
+        mode = None
+    note = (data.get("settlement_note") or "").strip() or None
+    try:
+        from db_cloud import get_book_return, update_book_return
+        ret = get_book_return(return_code)
+        if not ret:
+            _json_response(h, 404, {"error": "Return not found"})
+            return
+        fields = {"settlement_direction": direction, "settlement_amount": amount,
+                  "settlement_mode": mode, "settlement_status": "done"}
+        if note:
+            fields["settlement_note"] = note
+        # A refund/settlement-only return with no pending reship is now resolved.
+        if ret.get("resolution") == "refund" and ret.get("status") in ("requested", "item_received"):
+            fields["status"] = "resolved"
+        update_book_return(return_code, **fields)
+        _json_response(h, 200, {"ok": True})
+    except Exception as exc:
+        logger.error("return settle error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_return_close(h, return_code: str) -> None:
+    """POST /admin/returns/<code>/close — close out a return."""
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from db_cloud import get_book_return, update_book_return
+        if not get_book_return(return_code):
+            _json_response(h, 404, {"error": "Return not found"})
+            return
+        update_book_return(return_code, status="closed")
+        _json_response(h, 200, {"ok": True})
+    except Exception as exc:
+        logger.error("return close error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})

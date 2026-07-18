@@ -1571,6 +1571,155 @@ def create_walk_in_order(order_code: str, name: str | None, phone: str | None,
         return {}
 
 
+# ── book returns / replacements (admin-only) ────────────────────────────────
+# Statuses that keep a return in the active (not-yet-closed) working set.
+RETURN_ACTIVE_STATUSES = ("requested", "item_received", "resolved")
+
+
+def create_book_return(return_code: str, order_code: str, phone: str | None,
+                       name: str | None, returned_items: dict,
+                       reason: str | None, resolution: str = "replacement",
+                       replacement_items: dict | None = None,
+                       replacement_order_code: str | None = None,
+                       price_delta: float = 0.0, inward_courier: float = 0.0,
+                       outward_courier: float = 0.0,
+                       settlement_direction: str = "none",
+                       settlement_amount: float = 0.0,
+                       settlement_mode: str | None = None,
+                       settlement_note: str | None = None,
+                       courier_borne_by: str = "customer",
+                       condition: str | None = None, notes: str | None = None,
+                       created_by: str | None = None) -> dict:
+    """Insert a book_returns row. Returns the inserted row (or {} on failure).
+
+    Money moves either way: `settlement_direction` is 'collect' (customer pays the
+    store, e.g. pricier book + courier), 'refund' (store pays the customer), or
+    'none'. `settlement_status` starts 'pending' when there is a non-zero amount to
+    settle (staff still has to move the money over QR/UPI/Cash), else 'none'.
+    `price_delta` / `inward_courier` / `outward_courier` keep the breakdown.
+    """
+    has_settlement = settlement_direction in ("collect", "refund") and float(settlement_amount or 0) > 0
+    row = {
+        "return_code":            return_code,
+        "order_code":             order_code,
+        "phone":                  phone or "",
+        "name":                   name,
+        "returned_items":         returned_items or {},
+        "reason":                 reason,
+        "condition":              condition,
+        "resolution":             resolution,
+        "replacement_items":      replacement_items,
+        "replacement_order_code": replacement_order_code,
+        "price_delta":            float(price_delta or 0.0),
+        "inward_courier":         float(inward_courier or 0.0),
+        "outward_courier":        float(outward_courier or 0.0),
+        "settlement_direction":   settlement_direction if has_settlement else "none",
+        "settlement_amount":      float(settlement_amount or 0.0) if has_settlement else 0.0,
+        "settlement_mode":        settlement_mode if has_settlement else None,
+        "settlement_status":      "pending" if has_settlement else "none",
+        "settlement_note":        settlement_note,
+        "courier_borne_by":       courier_borne_by,
+        "status":                 "requested",
+        "notes":                  notes,
+        "created_by":             created_by,
+    }
+    try:
+        result = _client().table("book_returns").insert(row).execute()
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("create_book_return error for %s: %s", return_code, exc)
+        return {}
+
+
+def get_book_return(return_code: str) -> dict:
+    """Fetch a single return by code, or {}."""
+    try:
+        result = (
+            _client().table("book_returns")
+            .select("*")
+            .eq("return_code", return_code)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("get_book_return error for %s: %s", return_code, exc)
+        return {}
+
+
+def list_book_returns(status: str | None = None, limit: int = 100) -> list:
+    """List returns, newest first. Optionally filter by status."""
+    try:
+        q = _client().table("book_returns").select("*")
+        if status:
+            q = q.eq("status", status)
+        return q.order("created_at", desc=True).limit(limit).execute().data or []
+    except Exception as exc:
+        logger.error("list_book_returns error: %s", exc)
+        return []
+
+
+def update_book_return(return_code: str, **fields) -> bool:
+    """Patch fields on a return by code. Stamps updated_at."""
+    if not fields:
+        return False
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        (_client().table("book_returns").update(fields)
+         .eq("return_code", return_code).execute())
+        return True
+    except Exception as exc:
+        logger.error("update_book_return error for %s: %s", return_code, exc)
+        return False
+
+
+def create_replacement_order(order_code: str, parent_order_code: str,
+                             return_code: str, name: str | None,
+                             phone: str | None, address: str | None, items: dict,
+                             courier: float = 0.0, courier_borne_by: str = "store",
+                             delivery_method: str = "courier") -> dict:
+    """Insert a linked replacement (reship) book_orders row.
+
+    A replacement is pure fulfilment — grand_total is always 0 and it carries no
+    commission. Any money (pricier book, inward/outward courier) is settled on the
+    book_returns row, not here. is_replacement=true keeps the reship out of the
+    revenue + Divya commission ledgers while letting it ride the normal
+    dispatch/deliver pipeline (status starts at 'confirmed'). `courier` is stored
+    for the courier slip / reference only.
+    """
+    grand_total = 0.0
+    now = datetime.now(timezone.utc).isoformat()
+    row = {
+        "order_code":           order_code,
+        "phone":                phone or "",
+        "name":                 name,
+        "items":                items or {},
+        "books_total":          0.0,
+        "courier":              float(courier or 0.0),
+        "grand_total":          grand_total,
+        "address":              address,
+        "contact_phone":        phone,
+        "status":               "confirmed",
+        "payment_mode":         "na",
+        "source":               "replacement",
+        "commission":           0.0,
+        "pradeep_commission":   0.0,
+        "payment_collected_by": "oxygen",
+        "delivery_method":      delivery_method,
+        "via_divya":            False,
+        "is_replacement":       True,
+        "parent_order_code":    parent_order_code,
+        "return_code":          return_code,
+        "confirmed_at":         now,
+    }
+    try:
+        result = _client().table("book_orders").insert(row).execute()
+        return result.data[0] if result.data else {}
+    except Exception as exc:
+        logger.error("create_replacement_order error for %s: %s", order_code, exc)
+        return {}
+
+
 # Statuses that count as a real (sold) order for the Divya commission ledger.
 DIVYA_LEDGER_STATUSES = ("confirmed", "dispatched", "delivered")
 
@@ -1601,7 +1750,7 @@ def divya_ledger(include_settled: bool = False,
             _client().table("book_orders")
             .select("order_code,name,phone,items,grand_total,commission,"
                     "payment_collected_by,delivery_method,divya_settled,status,"
-                    "created_at,via_divya")
+                    "created_at,via_divya,is_replacement")
             .in_("status", list(DIVYA_LEDGER_STATUSES))
         )
         if date_from:
@@ -1620,6 +1769,9 @@ def divya_ledger(include_settled: bool = False,
     total_orders = 0
     orders, unsettled = [], []
     for r in rows:
+        # Free/goodwill reships carry no revenue or commission — never a ledger entry.
+        if r.get("is_replacement"):
+            continue
         gt = float(r.get("grand_total") or 0)
         items = r.get("items") or {}
         books = sum(int(v) for k, v in items.items()

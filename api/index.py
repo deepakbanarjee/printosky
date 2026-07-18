@@ -1837,6 +1837,11 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_book_order_edit,
     _handle_admin_book_order_settle_divya,
     _handle_admin_book_orders_list,
+    _handle_admin_return_close,
+    _handle_admin_return_create,
+    _handle_admin_return_received,
+    _handle_admin_return_settle,
+    _handle_admin_returns_list,
     _handle_admin_dispatch_sheet,
     _handle_admin_contacts_seen,
     _handle_admin_contacts_search,
@@ -2616,6 +2621,11 @@ class handler(BaseHTTPRequestHandler):
             _handle_admin_book_orders_list(self)
             return
 
+        # Returns / replacements list (admin-only).
+        if self.path == "/admin/returns" or self.path.startswith("/admin/returns?"):
+            _handle_admin_returns_list(self)
+            return
+
         # Divya teacher settlement statement (admin-only).
         if self.path == "/admin/book-orders/divya-ledger" or self.path.startswith("/admin/book-orders/divya-ledger?"):
             _handle_admin_divya_ledger(self)
@@ -2903,6 +2913,29 @@ class handler(BaseHTTPRequestHandler):
         )
         if _book_edit:
             _handle_admin_book_order_edit(self, body, _book_edit.group(1))
+            return
+
+        # ── book returns / replacements (admin-only) ─────────────────────────
+        if self.path == "/admin/returns/create":
+            _handle_admin_return_create(self, body)
+            return
+        _return_received = re.match(
+            r"^/admin/returns/([A-Za-z0-9\-]+)/received$", self.path,
+        )
+        if _return_received:
+            _handle_admin_return_received(self, body, _return_received.group(1))
+            return
+        _return_settle = re.match(
+            r"^/admin/returns/([A-Za-z0-9\-]+)/settle$", self.path,
+        )
+        if _return_settle:
+            _handle_admin_return_settle(self, body, _return_settle.group(1))
+            return
+        _return_close = re.match(
+            r"^/admin/returns/([A-Za-z0-9\-]+)/close$", self.path,
+        )
+        if _return_close:
+            _handle_admin_return_close(self, _return_close.group(1))
             return
 
         # ── Referral store-credit redemption (staff) ─────────────────────────
