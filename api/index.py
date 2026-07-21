@@ -2199,7 +2199,9 @@ def _handle_cron_sla_check(h) -> None:
 # ── Store-PC liveness watcher ─────────────────────────────────────────────────
 # The store PC writes daily_summary.synced_at (naive IST wall-clock text) every
 # ~5 min. This cron treats that as a heartbeat: if it goes stale the PC is down.
-# PRIOFF is the dev/test box; OSP is the real store PC, so we monitor OSP.
+# We monitor OSP — the customer-facing store PC whose downtime blocks printing.
+# PRIOFF (the Nattika office / back-office box, e.g. manuscript transcription) is
+# not a heartbeating store PC, so it's intentionally not monitored here.
 STORE_PC_MONITOR_ID  = os.environ.get("STORE_PC_MONITOR_ID", "OSP")
 STORE_PC_OFFLINE_MIN = int(os.environ.get("STORE_PC_OFFLINE_MIN", "20"))
 

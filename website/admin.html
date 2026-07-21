@@ -1618,7 +1618,8 @@
     <!-- Upload and Actions Row -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
       <div style="font-size:.85rem;color:var(--muted)">Malayalam manuscript transcription powered by Gemini Flash-Lite</div>
-      <div style="display:flex; gap:8px;">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="ctrl-btn" id="tr-store-btn" onclick="changeStore()" title="Which store / office THIS machine uploads transcripts as. Store PCs set this automatically; offices set it once here.">🏪 Store: —</button>
         <input type="file" id="tr-file-upload" accept=".pdf" style="display:none;" onchange="trHandleFileUpload(event)">
         <button class="ctrl-btn" onclick="document.getElementById('tr-file-upload').click()">➕ Upload PDF</button>
         <button class="ctrl-btn" onclick="loadTranscripts()">↻ Refresh</button>
@@ -6643,8 +6644,43 @@ function trStopPolling() {
 
 let pdfDocInstance = null; // holds the loaded PDFjs document
 
+// ── Store / office identity (which machine this is) ──────────────────────────
+// Never hardcode a brand default here. A store PC (e.g. OSP) self-reports its
+// store_id via fetchStoreConfig() (reads the local print_server /status). An
+// office box with no store PC (e.g. PRIOFF, the Nattika office) sets it once via
+// changeStore(). Everything reads the saved value — differentiating PCs & offices.
+function getStoreId() {
+  return (localStorage.getItem("storeId") || "").trim();
+}
+
+function changeStore() {
+  const cur = getStoreId();
+  const val = (prompt(
+    "Which store / office is THIS machine?\n\n" +
+    "Enter its store code — e.g.\n" +
+    "  OSP     = Oxygen Students Paradise store PC (Thrissur)\n" +
+    "  PRIOFF  = Printosky office (Nattika)",
+    cur
+  ) || "").trim().toUpperCase();
+  if (val) {
+    localStorage.setItem("storeId", val);
+    const b = document.getElementById("tr-store-btn");
+    if (b) b.textContent = "🏪 Store: " + val;
+    if (typeof loadTranscripts === "function") loadTranscripts();
+  }
+  return getStoreId();
+}
+
+// The machine's store id, prompting once if it has never been set.
+function requireStoreId() {
+  return getStoreId() || changeStore();
+}
+
 async function loadTranscripts() {
-  const storeId = localStorage.getItem("storeId") || "OSP";
+  const storeId = requireStoreId();
+  const badge = document.getElementById("tr-store-btn");
+  if (badge) badge.textContent = "🏪 Store: " + (storeId || "(not set)");
+  if (!storeId) return;   // no brand fallback — operator must pick the store
   try {
     const data = await sbFetch("manuscript_transcripts", `uploaded_by_store=eq.${storeId}&order=created_at.desc`);
     trFilesList = data || [];
@@ -6825,7 +6861,8 @@ async function trHandleFileUpload(event) {
   }
   const filename = cleanName + ext;
   
-  const storeId = localStorage.getItem("storeId") || "OSP";
+  const storeId = requireStoreId();
+  if (!storeId) { alert("Set this machine's store / office first (the 🏪 Store button)."); return; }
   
   try {
     const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
