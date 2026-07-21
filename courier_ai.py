@@ -19,8 +19,12 @@ import re
 
 logger = logging.getLogger("api.webhook")
 
-# Same model family the rest of the Vercel app uses (anu_parser).
-MODEL = "claude-haiku-4-5"
+# Transliteration needs name-quality output: Haiku drops trailing vowels
+# (അനില -> "Anil" instead of "Anila", അജിത -> "Ajith" instead of "Ajitha"),
+# while Sonnet gets Kerala names right. The vision parse only reads PRINTED English
+# text off the receipt, so Haiku is fine there and cheaper. Both env-overridable.
+TRANSLITERATE_MODEL = os.environ.get("COURIER_TRANSLITERATE_MODEL", "claude-sonnet-4-6")
+VISION_MODEL = os.environ.get("COURIER_VISION_MODEL", "claude-haiku-4-5")
 
 _ML_START, _ML_END = "ഀ", "ൿ"  # Malayalam Unicode block
 
@@ -79,16 +83,18 @@ def transliterate_fields(values: list[str]) -> list[str]:
     }
     listing = "\n".join(f"{i}: {values[i]}" for i in targets)
     prompt = (
-        "Transliterate each line's text from Malayalam script into readable "
-        "English (Latin script) for a courier address label. Use the common "
-        "English spelling of Kerala names/places (തൃശൂർ -> Thrissur, "
-        "കേരളം -> Kerala). Keep any English text, digits, PIN codes and "
-        "punctuation exactly as-is. Convert script only; do not translate meaning. "
-        "Each line is `<id>: <text>`; return one result per id.\n\n" + listing
+        "Transliterate each line from Malayalam script into English (Latin) for a "
+        "courier address label. Read names letter by letter and PRESERVE EVERY "
+        "VOWEL faithfully — do not drop or shorten trailing vowels or syllables "
+        "(അനില -> Anila, not Anil; അജിത -> Ajitha, not Ajith). Use the standard "
+        "English spelling of Kerala names/places (സജിത -> Sajitha, "
+        "തൃശൂർ -> Thrissur, കേരളം -> Kerala). Keep any English text, digits, PIN "
+        "codes and punctuation exactly as-is. Convert script only; do not translate "
+        "meaning. Each line is `<id>: <text>`; return one result per id.\n\n" + listing
     )
     try:
         msg = client.messages.create(
-            model=MODEL, max_tokens=1024, tools=[tool],
+            model=TRANSLITERATE_MODEL, max_tokens=1024, tools=[tool],
             tool_choice={"type": "tool", "name": "transliterated"},
             messages=[{"role": "user", "content": prompt}],
         )
@@ -147,15 +153,21 @@ def parse_manifest(file_bytes: bytes, mime_type: str) -> list[dict]:
         },
     }
     prompt = (
-        "This is a courier/postal bulk-booking receipt (e.g. India Post). Extract "
-        "every parcel row. For each row return the article/consignment/tracking "
-        "number, the receiver/consignee name, and the 6-digit destination PIN "
-        "code. Ignore the sender, and all totals / tax / summary tables. If a "
-        "value is unreadable use an empty string."
+        "This is an India Post booking record for parcels. It may be EITHER a "
+        "single tabular 'Bulk Booking Receipt' with one row per parcel, OR a photo "
+        "of several individual counter receipts laid out on one page (text may be "
+        "rotated or torn). Extract EVERY parcel.\n\n"
+        "For each parcel return:\n"
+        "- article_number: the consignment/tracking number, format like CL622881144IN\n"
+        "- receiver_name: the addressee after 'To:' / in the Receiver column — NEVER "
+        "the sender (From: PRINTOSKY is the sender, ignore it)\n"
+        "- dest_pin: the 6-digit destination PIN code in the receiver's address\n\n"
+        "Ignore the sender, office name, dates, amounts, and all totals / tax / "
+        "summary blocks. If a value is unreadable use an empty string."
     )
     try:
         msg = client.messages.create(
-            model=MODEL, max_tokens=2048, tools=[tool],
+            model=VISION_MODEL, max_tokens=2048, tools=[tool],
             tool_choice={"type": "tool", "name": "manifest_rows"},
             messages=[{"role": "user",
                        "content": [source_block, {"type": "text", "text": prompt}]}],
