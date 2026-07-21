@@ -1573,6 +1573,7 @@
         </select>
         <button class="ctrl-btn" onclick="openDispatchSheet()" title="Pick list (how many of each book to prepare today) + packing slips — opens a printable sheet for confirmed, undispatched orders">🚚 Dispatch sheet</button>
         <button class="ctrl-btn" onclick="openCourierSlips()" title="Branded A4 courier slips + Thank-You insert — one per parcel, ready to print and stick on the package">🏷️ Courier slips</button>
+        <button class="ctrl-btn" onclick="openManifestModal()" title="Upload the India Post booking receipt (PDF/photo) — auto-fills tracking numbers and marks orders dispatched">📄 Import courier list</button>
         <button class="ctrl-btn" onclick="openWalkInForm()">➕ New order</button>
         <button class="ctrl-btn" onclick="openDivyaStatement()">📊 Divya statement</button>
         <button class="ctrl-btn" onclick="runCartNudge()" title="Send a one-time WhatsApp reminder to customers who started an order but went quiet (carts idle up to 7 days; one nudge per cart)">📣 Nudge stuck carts</button>
@@ -1871,6 +1872,24 @@
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
         <button class="ctrl-btn" style="background:#4b5563;color:#fff;" onclick="document.getElementById('return-modal').style.display='none'">Cancel</button>
         <button class="ctrl-btn" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="submitReturn()">Create return</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import courier manifest (admin-only) -->
+  <div id="manifest-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;color:#1a2330;border-radius:12px;padding:20px;max-width:640px;width:94%;max-height:92vh;overflow:auto">
+      <div style="font-weight:600;font-size:16px;margin-bottom:4px">📄 Import courier list</div>
+      <div style="font-size:.78rem;color:#888;margin-bottom:12px">Upload the India Post booking receipt (PDF or photo). It reads the tracking numbers, matches parcels to orders by PIN + name, and — once you confirm — marks them dispatched and notifies customers.</div>
+      <input id="manifest-file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" style="margin-bottom:10px;font-size:.85rem">
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="ctrl-btn" style="background:#2563eb;color:#fff;border-color:#2563eb" onclick="uploadManifest()">Read file</button>
+        <button class="ctrl-btn" style="background:#4b5563;color:#fff" onclick="document.getElementById('manifest-modal').style.display='none'">Close</button>
+      </div>
+      <div id="manifest-status" style="font-size:.82rem;color:#555;margin-bottom:8px"></div>
+      <div id="manifest-preview"></div>
+      <div id="manifest-apply-bar" style="display:none;margin-top:12px;text-align:right">
+        <button class="ctrl-btn" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="applyManifest()">Confirm &amp; mark dispatched</button>
       </div>
     </div>
   </div>
@@ -2503,9 +2522,24 @@ async function idleLogout() {
   document.addEventListener(ev, () => { if (sessionStorage.getItem("p_auth") === "1") resetIdleTimer(); })
 );
 
+async function fetchStoreConfig() {
+  const pcUrl = localStorage.getItem("storePcUrl");
+  if (!pcUrl) return;
+  try {
+    const res = await fetch(`${pcUrl}/status`);
+    const data = await res.json();
+    if (data && data.store_id) {
+      localStorage.setItem("storeId", data.store_id);
+    }
+  } catch (e) {
+    console.warn("Failed to fetch store configuration:", e);
+  }
+}
+
 // ── Auto-login if session alive ────────────────────────────────────────────
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
   setupPC(); // ensure PC ID + server URL are set
+  await fetchStoreConfig();
   if (sessionStorage.getItem("p_auth") === "1") showDashboard();
 });
 
@@ -5367,6 +5401,94 @@ async function _bookOrderAction(code, action, body) {
     if (!r.ok || !data.ok) { alert(`Failed: ${data.error || ('HTTP ' + r.status)}`); return; }
     loadBookOrders();
   } catch (e) { alert(`Network error: ${e.message}`); }
+}
+
+// ── Import courier manifest ─────────────────────────────────────────────
+let _manifestPreview = null;
+
+function openManifestModal() {
+  document.getElementById('manifest-file').value = '';
+  document.getElementById('manifest-status').textContent = '';
+  document.getElementById('manifest-preview').innerHTML = '';
+  document.getElementById('manifest-apply-bar').style.display = 'none';
+  document.getElementById('manifest-modal').style.display = 'flex';
+}
+
+async function uploadManifest() {
+  const fileEl = document.getElementById('manifest-file');
+  const status = document.getElementById('manifest-status');
+  if (!fileEl.files.length) { status.textContent = 'Choose a file first.'; return; }
+  if (!_convPw()) { await _adminPwPrompt(false); if (!_convPw()) return; }
+  status.textContent = 'Reading the receipt with AI vision… (~2–5s)';
+  document.getElementById('manifest-preview').innerHTML = '';
+  document.getElementById('manifest-apply-bar').style.display = 'none';
+  const fd = new FormData();
+  fd.append('file', fileEl.files[0]);
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/import-manifest`, {
+      method: 'POST', headers: { 'X-Admin-Password': _convPw() }, body: fd,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { status.textContent = data.error || ('HTTP ' + r.status); return; }
+    _manifestPreview = data;
+    renderManifestPreview(data);
+  } catch (e) { status.textContent = String(e); }
+}
+
+function renderManifestPreview(d) {
+  const esc = s => (s || '').replace(/</g, '&lt;');
+  document.getElementById('manifest-status').textContent =
+    `Read ${d.rows} parcel(s): ${d.matched.length} matched, ${d.ambiguous.length} to pick, ${d.unmatched.length} unmatched.`;
+  let html = '';
+  if (d.matched.length) {
+    html += '<div style="font-weight:600;font-size:.82rem;margin:8px 0 4px">✅ Matched — will be dispatched</div>';
+    html += d.matched.map(m => `<label style="display:block;border:1px solid #e6e6e6;border-radius:6px;padding:8px;margin-bottom:6px;font-size:.8rem">
+      <input type="checkbox" class="m-match" data-code="${esc(m.order_code)}" data-tracking="${esc(m.tracking)}" checked>
+      <strong>${esc(m.order_code)}</strong> · ${esc(m.name)} <span style="color:#888">→ ${esc(m.receiver_name)} (${esc(m.pin)})</span><br>
+      <span style="color:#16a34a">📦 ${esc(m.tracking)}</span></label>`).join('');
+  }
+  if (d.ambiguous.length) {
+    html += '<div style="font-weight:600;font-size:.82rem;margin:8px 0 4px">🔀 Pick the right order</div>';
+    html += d.ambiguous.map(a => `<div style="border:1px solid #f0ad4e;border-radius:6px;padding:8px;margin-bottom:6px;font-size:.8rem">
+      <div>${esc(a.receiver_name)} (${esc(a.pin)}) · 📦 ${esc(a.tracking)}</div>
+      <select class="m-ambig" data-tracking="${esc(a.tracking)}" style="margin-top:4px;width:100%;padding:4px;border:1px solid #ccc;border-radius:6px">
+        <option value="">— skip —</option>
+        ${a.candidates.map(c => `<option value="${esc(c.order_code)}">${esc(c.order_code)} · ${esc(c.name)}</option>`).join('')}
+      </select></div>`).join('');
+  }
+  if (d.unmatched.length) {
+    html += '<div style="font-weight:600;font-size:.82rem;margin:8px 0 4px">⚠️ No match — handle manually</div>';
+    html += d.unmatched.map(u => `<div style="border:1px solid #e6e6e6;border-radius:6px;padding:6px 8px;margin-bottom:6px;font-size:.78rem;color:#666">${esc(u.receiver_name)} (${esc(u.pin)}) · 📦 ${esc(u.tracking)}</div>`).join('');
+  }
+  document.getElementById('manifest-preview').innerHTML = html;
+  document.getElementById('manifest-apply-bar').style.display =
+    (d.matched.length || d.ambiguous.length) ? 'block' : 'none';
+}
+
+async function applyManifest() {
+  const assignments = [];
+  document.querySelectorAll('.m-match:checked').forEach(el => {
+    assignments.push({ order_code: el.dataset.code, tracking: el.dataset.tracking });
+  });
+  document.querySelectorAll('.m-ambig').forEach(el => {
+    if (el.value) assignments.push({ order_code: el.value, tracking: el.dataset.tracking });
+  });
+  if (!assignments.length) { alert('Nothing selected to dispatch.'); return; }
+  if (!confirm(`Mark ${assignments.length} order(s) dispatched with these tracking numbers?`)) return;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/import-manifest/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Password': _convPw() },
+      body: JSON.stringify({ assignments }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) { alert(data.error || ('HTTP ' + r.status)); return; }
+    let msg = `Dispatched ${data.dispatched} order(s).`;
+    if (data.skipped && data.skipped.length) msg += `\nSkipped: ${data.skipped.join(', ')}`;
+    alert(msg);
+    document.getElementById('manifest-modal').style.display = 'none';
+    loadBookOrders();
+  } catch (e) { alert(String(e)); }
 }
 
 async function packBookOrder(code) {

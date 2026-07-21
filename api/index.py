@@ -1836,6 +1836,8 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_book_order_dispatch,
     _handle_admin_book_order_edit,
     _handle_admin_book_order_pack,
+    _handle_admin_import_manifest,
+    _handle_admin_import_manifest_apply,
     _handle_admin_book_order_settle_divya,
     _handle_admin_book_orders_list,
     _handle_admin_return_close,
@@ -2409,6 +2411,17 @@ def _handle_admin_courier_slips(h) -> None:
         from dispatch_render import build_courier_slips
         orders  = list_book_orders(status="confirmed", limit=200)
         pending = [o for o in orders if not o.get("dispatched_at")]
+        # Courier slips must read in English even when the customer gave their
+        # name/address in Malayalam. Batch-transliterate; fail soft to originals.
+        try:
+            from courier_ai import transliterate_fields, has_malayalam
+            flat = [v for o in pending for v in (o.get("name") or "", o.get("address") or "")]
+            if any(has_malayalam(v) for v in flat):
+                eng = transliterate_fields(flat)
+                pending = [dict(o, name=eng[2 * i], address=eng[2 * i + 1])
+                           for i, o in enumerate(pending)]
+        except Exception as exc:
+            logger.error("courier-slips transliterate skipped: %s", exc)
         generated = datetime.now(timezone.utc).strftime("%d %b %Y, %I:%M %p UTC")
         html = build_courier_slips(pending, generated=generated)
         encoded = html.encode("utf-8")
@@ -2908,6 +2921,12 @@ class handler(BaseHTTPRequestHandler):
         )
         if _book_pack:
             _handle_admin_book_order_pack(self, _book_pack.group(1))
+            return
+        if self.path == "/admin/book-orders/import-manifest/apply":
+            _handle_admin_import_manifest_apply(self, body)
+            return
+        if self.path == "/admin/book-orders/import-manifest":
+            _handle_admin_import_manifest(self, body)
             return
         _book_settle = re.match(
             r"^/admin/book-orders/([A-Za-z0-9\-]+)/settle-divya$", self.path,

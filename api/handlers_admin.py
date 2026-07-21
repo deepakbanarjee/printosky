@@ -540,6 +540,127 @@ def _handle_admin_book_order_pack(h, order_code: str) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _mime_for_manifest(filename: str | None) -> str | None:
+    fn = (filename or "").lower()
+    if fn.endswith(".pdf"):
+        return "application/pdf"
+    if fn.endswith(".png"):
+        return "image/png"
+    if fn.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    if fn.endswith(".webp"):
+        return "image/webp"
+    return None
+
+
+def _handle_admin_import_manifest(h, body) -> None:
+    """POST /admin/book-orders/import-manifest — parse a courier booking receipt
+    (India Post PDF/photo) via Claude vision and preview matches. Reads only —
+    writes nothing until the operator confirms via the apply endpoint.
+
+    multipart/form-data: file=<manifest>. Rows match orders by destination PIN
+    (manifests carry no phone), disambiguated by name. Returns
+    {matched, ambiguous, unmatched} for confirmation.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        form = _parse_multipart(body, h.headers.get("Content-Type", ""))
+        f = form.get("file")
+        if not isinstance(f, dict) or not f.get("data"):
+            _json_response(h, 400, {"error": "No file uploaded (field 'file')"})
+            return
+        mime = _mime_for_manifest(f.get("filename"))
+        if not mime:
+            _json_response(h, 400, {"error": "Unsupported file — use PDF, JPG or PNG"})
+            return
+
+        from courier_ai import parse_manifest, match_rows
+        from db_cloud import list_book_orders
+
+        rows = parse_manifest(f["data"], mime)
+        if not rows:
+            _json_response(h, 422, {"error": "Could not read any parcels from the file"})
+            return
+
+        orders = [o for o in list_book_orders(status="confirmed", limit=300)
+                  if not o.get("dispatched_at")]
+        res = match_rows(rows, orders)
+
+        def _brief(o):
+            return {"order_code": o.get("order_code"), "name": o.get("name"),
+                    "address": o.get("address")}
+        preview = {
+            "rows": len(rows),
+            "matched": [{"order_code": m["order"].get("order_code"),
+                         "name": m["order"].get("name"),
+                         "address": m["order"].get("address"),
+                         "receiver_name": m["row"].get("receiver_name"),
+                         "pin": m["row"].get("dest_pin"),
+                         "tracking": m["tracking"]} for m in res["matched"]],
+            "ambiguous": [{"receiver_name": a["row"].get("receiver_name"),
+                           "pin": a["row"].get("dest_pin"), "tracking": a["tracking"],
+                           "candidates": [_brief(o) for o in a["candidates"]]}
+                          for a in res["ambiguous"]],
+            "unmatched": [{"receiver_name": u["row"].get("receiver_name"),
+                           "pin": u["row"].get("dest_pin"), "tracking": u["tracking"]}
+                          for u in res["unmatched"]],
+        }
+        _json_response(h, 200, preview)
+    except Exception as exc:
+        logger.error("import-manifest error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_import_manifest_apply(h, body) -> None:
+    """POST /admin/book-orders/import-manifest/apply — apply confirmed tracking
+    assignments: set tracking + mark dispatched (India Post) + notify the customer.
+    Body: {assignments:[{order_code, tracking}]}.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        data = {}
+    assignments = data.get("assignments") or []
+    if not isinstance(assignments, list) or not assignments:
+        _json_response(h, 400, {"error": "assignments required"})
+        return
+    try:
+        from db_cloud import update_book_order, get_book_order
+        from datetime import datetime, timezone
+        done, skipped = 0, []
+        for a in assignments:
+            code = (a.get("order_code") or "").strip()
+            tracking = (a.get("tracking") or "").strip()
+            if not code or not tracking:
+                skipped.append(code or "?")
+                continue
+            order = get_book_order(code)
+            if not order:
+                skipped.append(code)
+                continue
+            update_book_order(code, status="dispatched",
+                              dispatched_at=datetime.now(timezone.utc).isoformat(),
+                              courier_name="India Post", tracking_no=tracking)
+            done += 1
+            try:
+                from whatsapp_notify import _send
+                if order.get("phone"):
+                    _send(order["phone"],
+                          f"📦 *Order dispatched!*\nOrder: {code}\nCourier: India Post"
+                          f"\nTracking: {tracking}\n\nYour books are on the way. 🙏")
+            except Exception:
+                pass
+        _json_response(h, 200, {"ok": True, "dispatched": done, "skipped": skipped})
+    except Exception as exc:
+        logger.error("import-manifest apply error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_admin_book_order_create(h, body) -> None:
     """POST /admin/book-orders/create — staff create a walk-in / in-store order.
     Body: {items:{malayalam,hindi,english}, name, phone, address, payment_mode, handed_over}.
