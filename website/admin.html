@@ -3848,7 +3848,10 @@ async function loadCreditBalance(phone) {
   if (!phone) return;
   try {
     const r = await fetch(`${ACAD_API}/referrals/balance?phone=${encodeURIComponent(phone)}`, {
-      headers: { 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' }
+      headers: {
+        'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '',
+        'X-Admin-Password': _convPw()
+      }
     });
     if (!r.ok) return;
     const d = await r.json();
@@ -3911,8 +3914,11 @@ async function confirmPayment() {
         try {
           await fetch(`${ACAD_API}/referrals/redeem`, {
             method: "POST",
-            headers: { 'Content-Type': 'application/json',
-                       'X-Staff-Pin':  sessionStorage.getItem('staff_pin') || '' },
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Staff-Pin':  sessionStorage.getItem('staff_pin') || '',
+              'X-Admin-Password': _convPw()
+            },
             body: JSON.stringify({
               phone:      cb.dataset.phone,
               order_id:   payJobId,
@@ -4733,7 +4739,10 @@ async function loadReferralsLeaderboard() {
   tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>';
   try {
     const r = await fetch(`${ACAD_API}/referrals/leaderboard`, {
-      headers: { 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' }
+      headers: {
+        'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '',
+        'X-Admin-Password': _convPw()
+      }
     });
     if (!r.ok) {
       tbody.innerHTML = `<tr><td colspan="8" style="padding:24px;color:var(--red);text-align:center">${r.status === 401 ? "Staff PIN required" : "Failed to load (HTTP " + r.status + ")"}</td></tr>`;
@@ -5438,9 +5447,13 @@ async function uploadManifest() {
 
 function renderManifestPreview(d) {
   const esc = s => (s || '').replace(/</g, '&lt;');
+  const cnt = d.stated_count ? ` of ${d.stated_count} on the receipt` : '';
   document.getElementById('manifest-status').textContent =
-    `Read ${d.rows} parcel(s): ${d.matched.length} matched, ${d.ambiguous.length} to pick, ${d.unmatched.length} unmatched.`;
+    `Read ${d.rows} parcel(s)${cnt}: ${d.matched.length} matched, ${d.ambiguous.length} to pick, ${d.unmatched.length} unmatched.`;
   let html = '';
+  if (d.warning) {
+    html += `<div style="background:#fef2f2;border:1px solid #dc2626;color:#991b1b;border-radius:6px;padding:10px;margin-bottom:10px;font-size:.82rem;font-weight:600">⚠️ ${esc(d.warning)}</div>`;
+  }
   if (d.matched.length) {
     html += '<div style="font-weight:600;font-size:.82rem;margin:8px 0 4px">✅ Matched — will be dispatched</div>';
     html += d.matched.map(m => `<label style="display:block;border:1px solid #e6e6e6;border-radius:6px;padding:8px;margin-bottom:6px;font-size:.8rem">
@@ -6147,7 +6160,10 @@ async function openReferrerDetail(code) {
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
   try {
     const r = await fetch(`${ACAD_API}/referrals/credits?code=${encodeURIComponent(code)}`, {
-      headers: { 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' }
+      headers: {
+        'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '',
+        'X-Admin-Password': _convPw()
+      }
     });
     if (!r.ok) { body.innerHTML = `<div style="color:var(--red)">Failed (HTTP ${r.status})</div>`; return; }
     const d = await r.json();

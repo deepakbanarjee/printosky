@@ -1,4 +1,4 @@
-﻿"""
+"""
 PRINTOSKY — Vercel Python Serverless Webhook
 =============================================
 Handles:
@@ -179,6 +179,24 @@ def _credit_referrer(phone: str, order_id: str) -> None:
         # Look up campaign-specific credit amount; default 20 for regular referrers
         ref_row = _client().table("referrers").select("credit_amount").eq("code", code).execute()
         credit_amount = int((ref_row.data[0].get("credit_amount") or 20) if ref_row.data else 20)
+
+        if credit_amount < 0:
+            # Negative amount indicates a dynamic percentage credit (e.g. -10 represents 10%)
+            pct = abs(credit_amount)
+            order_total = 0.0
+            from db_cloud import get_batch, get_job
+            batch = get_batch(order_id)
+            if batch and batch.get("total_amount") is not None:
+                order_total = float(batch["total_amount"])
+            else:
+                job = get_job(order_id)
+                if job and job.get("amount_collected") is not None:
+                    order_total = float(job["amount_collected"])
+                elif job and job.get("amount_quoted") is not None:
+                    order_total = float(job["amount_quoted"])
+            credit_amount = max(0, int(round(order_total * (pct / 100.0))))
+            logger.info(f"Dynamic referral percentage: {pct}% of {order_total} -> {credit_amount} INR")
+
         _client().table("referral_credits").insert({
             "referrer_code": code,
             "customer_phone": phone,
@@ -1879,7 +1897,12 @@ from api.handlers_admin import (  # noqa: E402
 # ── Academic project order endpoints ─────────────────────────────────────────
 
 def _acad_auth_staff(h) -> bool:
-    """Return True if X-Staff-Pin matches any active staff member in Supabase."""
+    """Return True if X-Staff-Pin matches any active staff member in Supabase,
+    or if X-Admin-Password is valid."""
+    admin_pw = h.headers.get("X-Admin-Password", "").strip()
+    if admin_pw and _auth_admin_pw(admin_pw):
+        return True
+
     pin = h.headers.get("X-Staff-Pin", "").strip()
     if not pin:
         return False
