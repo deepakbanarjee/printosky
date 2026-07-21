@@ -1835,6 +1835,7 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_book_order_deliver,
     _handle_admin_book_order_dispatch,
     _handle_admin_book_order_edit,
+    _handle_admin_book_order_pack,
     _handle_admin_book_order_settle_divya,
     _handle_admin_book_orders_list,
     _handle_admin_return_close,
@@ -2901,6 +2902,12 @@ class handler(BaseHTTPRequestHandler):
         )
         if _book_deliver:
             _handle_admin_book_order_deliver(self, _book_deliver.group(1))
+            return
+        _book_pack = re.match(
+            r"^/admin/book-orders/([A-Za-z0-9\-]+)/pack$", self.path,
+        )
+        if _book_pack:
+            _handle_admin_book_order_pack(self, _book_pack.group(1))
             return
         _book_settle = re.match(
             r"^/admin/book-orders/([A-Za-z0-9\-]+)/settle-divya$", self.path,

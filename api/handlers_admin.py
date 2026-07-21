@@ -517,6 +517,29 @@ def _handle_admin_book_order_deliver(h, order_code: str) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_admin_book_order_pack(h, order_code: str) -> None:
+    """POST /admin/book-orders/<code>/pack — mark packed, awaiting courier.
+
+    Stamps packed_at so the order drops off the daily dispatch sheet's pick list
+    (it can't be re-picked and shipped twice) while it waits for pickup. Status
+    stays 'confirmed' until it's actually dispatched, so ledgers are unaffected.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from db_cloud import update_book_order, get_book_order
+        from datetime import datetime, timezone
+        if not get_book_order(order_code):
+            _json_response(h, 404, {"error": "Order not found"})
+            return
+        update_book_order(order_code, packed_at=datetime.now(timezone.utc).isoformat())
+        _json_response(h, 200, {"ok": True})
+    except Exception as exc:
+        logger.error("book-order pack error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_admin_book_order_create(h, body) -> None:
     """POST /admin/book-orders/create — staff create a walk-in / in-store order.
     Body: {items:{malayalam,hindi,english}, name, phone, address, payment_mode, handed_over}.
@@ -637,7 +660,12 @@ def _handle_admin_dispatch_sheet(h) -> None:
         from datetime import datetime, timezone
 
         orders = list_book_orders(status="confirmed", limit=200)
-        pending = [o for o in orders if not o.get("dispatched_at")]
+        undispatched = [o for o in orders if not o.get("dispatched_at")]
+        # A packed order is waiting for the courier: keep it OFF the pick list so
+        # it can't be re-picked and shipped twice, but surface it as a reminder so
+        # it isn't forgotten. Orders still to pack drive the pick list + slips.
+        pending  = [o for o in undispatched if not o.get("packed_at")]
+        awaiting = [o for o in undispatched if o.get("packed_at")]
 
         BOOKS: dict[str, tuple[str, str]] = {
             "malayalam": ("Aksharamrutham", "STOCK"),
@@ -713,6 +741,19 @@ def _handle_admin_dispatch_sheet(h) -> None:
 
         slips_html = "".join(_slip(o) for o in pending)
 
+        # Reminder banner: packed boxes still awaiting courier pickup. Shown on
+        # every print so a packed-but-not-couriered order is never re-picked.
+        awaiting_banner = ""
+        if awaiting:
+            codes = ", ".join(o.get("order_code", "") for o in awaiting)
+            awaiting_banner = (
+                f'<section class="awaiting">'
+                f'<h2>&#9888;&#65039; PACKED &mdash; AWAITING COURIER ({len(awaiting)})</h2>'
+                f'<p>Already packed &amp; off the pick list. Hand these to the courier and '
+                f'mark them dispatched &mdash; do NOT pack again:</p>'
+                f'<p class="codes">{codes}</p></section>'
+            )
+
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -725,6 +766,9 @@ def _handle_admin_dispatch_sheet(h) -> None:
   .meta{{color:#555;font-size:11px;margin-bottom:20px}}
   .pick-list{{border:2px solid #111;padding:12px;margin-bottom:24px;max-width:600px}}
   .pick-list h2{{font-size:15px;margin-bottom:10px}}
+  .awaiting{{border:2px solid #b85c00;background:#fff3cd;padding:12px;margin-bottom:24px;max-width:600px}}
+  .awaiting h2{{font-size:15px;color:#b85c00;margin-bottom:6px}}
+  .awaiting .codes{{font-family:monospace;font-weight:bold;margin-top:6px}}
   table{{width:100%;border-collapse:collapse}}
   th,td{{padding:6px 10px;border:1px solid #ccc;text-align:left}}
   th{{background:#f0f0f0}}
@@ -756,7 +800,8 @@ def _handle_admin_dispatch_sheet(h) -> None:
   </button>
 </div>
 <h1>Dispatch Sheet</h1>
-<p class="meta">Generated: {generated} &nbsp;|&nbsp; Confirmed, undispatched orders only</p>
+<p class="meta">Generated: {generated} &nbsp;|&nbsp; Confirmed orders still to pack (packed-awaiting-courier shown separately)</p>
+{awaiting_banner}
 {pick_section}
 <div class="slips">{slips_html}</div>
 </body>
@@ -1532,7 +1577,7 @@ def _handle_admin_return_create(h, body) -> None:
         return
 
     resolution = (data.get("resolution") or "replacement").strip().lower()
-    if resolution not in ("replacement", "refund", "both"):
+    if resolution not in ("replacement", "refund", "both", "return_only"):
         resolution = "replacement"
     replacement_items = _norm_book_items(data.get("replacement_items"))
     if resolution in ("replacement", "both") and not replacement_items:

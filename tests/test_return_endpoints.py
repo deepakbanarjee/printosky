@@ -147,6 +147,28 @@ def test_create_replacement_collects_price_diff_and_couriers(patched):
     assert cap["replacement"]["courier_borne_by"] == "customer"
 
 
+def test_create_return_only_no_reship_no_settlement(patched):
+    # Duplicate-shipment case: customer sends the extra book back, gets nothing,
+    # money was handled offline. Free-text "other" reason is preserved verbatim.
+    cap = _stub_db(patched)
+    h = _FakeHandler("/admin/returns/create")
+    body = json.dumps({
+        "order_code": ORDER["order_code"],
+        "returned_items": {"malayalam": 1},
+        "resolution": "return_only",
+        "reason": "Sent twice - duplicate dispatch; couriers settled offline",
+    }).encode()
+    ha._handle_admin_return_create(h, body)
+
+    assert h.status == 200
+    assert h.payload["replacement_order_code"] is None
+    assert cap["replacement"] is None                      # no reship
+    assert cap["return"]["resolution"] == "return_only"
+    assert cap["return"]["reason"].startswith("Sent twice")  # free-text reason kept
+    assert cap["return"]["settlement_direction"] == "none"   # no money through the system
+    assert cap["return"]["settlement_amount"] == 0.0
+
+
 def test_create_requires_order_code(patched):
     _stub_db(patched)
     h = _FakeHandler("/admin/returns/create")

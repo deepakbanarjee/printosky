@@ -1807,18 +1807,21 @@
             <input id="ret-r-en" type="number" min="0" value="0" style="width:56px;padding:4px;border:1px solid #ccc;border-radius:6px"></label>
         </div>
 
-        <select id="ret-reason" style="padding:7px;border:1px solid #ccc;border-radius:6px">
+        <select id="ret-reason" onchange="updateReasonOther()" style="padding:7px;border:1px solid #ccc;border-radius:6px">
           <option value="wrong_language">Reason: wrong language</option>
           <option value="damaged">Reason: damaged in transit</option>
           <option value="defective">Reason: printing defect</option>
           <option value="not_needed">Reason: no longer needed</option>
+          <option value="duplicate">Reason: sent twice / duplicate</option>
           <option value="other">Reason: other</option>
         </select>
+        <input id="ret-reason-other" placeholder="Specify the reason *" style="display:none;padding:7px;border:1px solid #ccc;border-radius:6px">
 
         <select id="ret-resolution" onchange="updateReturnFields()" style="padding:7px;border:1px solid #ccc;border-radius:6px">
           <option value="replacement">Resolution: send a replacement</option>
           <option value="refund">Resolution: refund only</option>
           <option value="both">Resolution: replacement + refund</option>
+          <option value="return_only">Resolution: return only (no refund / no replacement)</option>
         </select>
 
         <div id="ret-replacement-box">
@@ -5055,8 +5058,11 @@ function renderBookOrders(rows) {
     const actions = [];
     if (o.status === 'payment_review')
       actions.push(`<button class="ctrl-btn" onclick="confirmBookOrder('${o.order_code}')">✅ Confirm payment</button>`);
-    if (o.status === 'confirmed')
-      actions.push(`<button class="ctrl-btn" onclick="dispatchBookOrder('${o.order_code}')">📦 Mark dispatched</button>`);
+    if (o.status === 'confirmed') {
+      if (!o.packed_at)
+        actions.push(`<button class="ctrl-btn" onclick="packBookOrder('${o.order_code}')">📦 Mark packed</button>`);
+      actions.push(`<button class="ctrl-btn" onclick="dispatchBookOrder('${o.order_code}')">🚚 Mark dispatched</button>`);
+    }
     if (o.status === 'dispatched')
       actions.push(`<button class="ctrl-btn" onclick="deliverBookOrder('${o.order_code}')">✅ Mark delivered</button>`);
     if ((o.status === 'delivered' || o.status === 'dispatched') && !o.is_replacement)
@@ -5079,6 +5085,8 @@ function renderBookOrders(rows) {
     const payTag = o.payment_mode ? `<span style="color:#888;font-size:.7rem;margin-left:6px">${(o.payment_mode||'').toUpperCase()}</span>` : '';
     const shipInfo = (o.courier_name || o.tracking_no)
       ? `<div style="font-size:.78rem;color:#555;margin-top:2px">🚚 ${(o.courier_name || '')}${o.tracking_no ? ' · ' + o.tracking_no : ''}</div>` : '';
+    const packedInfo = (o.packed_at && o.status === 'confirmed')
+      ? `<div style="font-size:.78rem;color:#b45309;margin-top:2px">📦 Packed — awaiting courier</div>` : '';
     return `<div style="border:1px solid #e6e6e6;border-radius:8px;padding:12px;margin-bottom:10px;background:#fff">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <strong style="cursor:pointer;text-decoration:underline;text-underline-offset:3px;text-decoration-color:#bbb" onclick="openBookOrderDetail('${o.order_code}')">${o.order_code}</strong>${srcTag}
@@ -5089,6 +5097,7 @@ function renderBookOrders(rows) {
       <div style="font-size:.8rem;color:#555;margin-top:4px">📞 ${o.contact_phone || o.phone || '—'}${o.name ? ' · ' + o.name : ''}</div>
       <div style="font-size:.8rem;color:#555;margin-top:2px">📍 ${addr || '—'}</div>
       ${shipInfo}
+      ${packedInfo}
       ${actionsHtml}
       <div style="margin-top:8px">${proof}</div>
     </div>`;
@@ -5132,6 +5141,7 @@ function openReturnModal(code) {
   document.getElementById('ret-courier').value = 'customer';
   document.getElementById('ret-notes').value = '';
   document.getElementById('ret-reason').value = 'wrong_language';
+  const rio = document.getElementById('ret-reason-other'); rio.value = ''; rio.style.display = 'none';
   document.getElementById('ret-resolution').value = 'replacement';
   document.getElementById('ret-error').style.display = 'none';
   updateReturnFields();
@@ -5140,15 +5150,29 @@ function openReturnModal(code) {
 
 function updateReturnFields() {
   const res = document.getElementById('ret-resolution').value;
-  document.getElementById('ret-replacement-box').style.display = (res === 'refund') ? 'none' : 'block';
+  const noReship = (res === 'refund' || res === 'return_only');
+  document.getElementById('ret-replacement-box').style.display = noReship ? 'none' : 'block';
   recomputeReturnMoney();
+}
+
+// Show the free-text box only when the reason is "other".
+function updateReasonOther() {
+  const isOther = document.getElementById('ret-reason').value === 'other';
+  document.getElementById('ret-reason-other').style.display = isOther ? 'block' : 'none';
 }
 
 // Recompute the book price difference from the qty inputs, then re-suggest the net.
 function recomputeReturnMoney() {
   const res = document.getElementById('ret-resolution').value;
+  // Return only = customer just sends the book back; no money moves through the system.
+  if (res === 'return_only') {
+    document.getElementById('ret-price-delta').value = 0;
+    document.getElementById('ret-settle-dir').value = 'none';
+    document.getElementById('ret-settle-amount').value = '';
+    return;
+  }
   const returnedVal = _itemsValue(_retItems('ret-r-'));
-  const replacementVal = (res === 'refund') ? 0 : _itemsValue(_retItems('ret-p-'));
+  const replacementVal = (res === 'replacement' || res === 'both') ? _itemsValue(_retItems('ret-p-')) : 0;
   document.getElementById('ret-price-delta').value = replacementVal - returnedVal;
   updateSettleSuggestion();
 }
@@ -5171,6 +5195,12 @@ async function submitReturn() {
   if (!Object.keys(returned).length) {
     err.textContent = 'Enter at least one returned book.'; err.style.display = 'block'; return;
   }
+  let reason = document.getElementById('ret-reason').value;
+  if (reason === 'other') {
+    const other = document.getElementById('ret-reason-other').value.trim();
+    if (!other) { err.textContent = 'Please specify the “other” reason.'; err.style.display = 'block'; return; }
+    reason = other;
+  }
   const dir = document.getElementById('ret-settle-dir').value;
   const amount = parseFloat(document.getElementById('ret-settle-amount').value || '0');
   if (dir !== 'none' && !(amount > 0)) {
@@ -5179,7 +5209,7 @@ async function submitReturn() {
   }
   const body = {
     order_code: code, returned_items: returned,
-    reason: document.getElementById('ret-reason').value, resolution: res,
+    reason: reason, resolution: res,
     price_delta: parseFloat(document.getElementById('ret-price-delta').value || '0'),
     inward_courier: parseFloat(document.getElementById('ret-inward').value || '0'),
     outward_courier: parseFloat(document.getElementById('ret-outward').value || '0'),
@@ -5189,7 +5219,7 @@ async function submitReturn() {
     courier_borne_by: document.getElementById('ret-courier').value,
     notes: document.getElementById('ret-notes').value || '',
   };
-  if (res !== 'refund') {
+  if (res === 'replacement' || res === 'both') {
     const rep = _retItems('ret-p-');
     if (!Object.keys(rep).length) {
       err.textContent = 'Enter at least one replacement book.'; err.style.display = 'block'; return;
@@ -5337,6 +5367,18 @@ async function _bookOrderAction(code, action, body) {
     if (!r.ok || !data.ok) { alert(`Failed: ${data.error || ('HTTP ' + r.status)}`); return; }
     loadBookOrders();
   } catch (e) { alert(`Network error: ${e.message}`); }
+}
+
+async function packBookOrder(code) {
+  if (!confirm(`Mark ${code} as packed?\n\nIt drops off the dispatch sheet's pick list (so it can't be packed twice) and moves to "awaiting courier" until you mark it dispatched.`)) return;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/${encodeURIComponent(code)}/pack`, {
+      method: 'POST', headers: { 'X-Admin-Password': _convPw() },
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) { alert(`Failed to mark packed: ${data.error || ('HTTP ' + r.status)}`); return; }
+    loadBookOrders();
+  } catch (e) { alert(String(e)); }
 }
 
 async function dispatchBookOrder(code) {
