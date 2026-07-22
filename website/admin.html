@@ -5471,12 +5471,19 @@ function renderManifestPreview(d) {
       </select></div>`).join('');
   }
   if (d.unmatched.length) {
-    html += '<div style="font-weight:600;font-size:.82rem;margin:8px 0 4px">⚠️ No match — handle manually</div>';
-    html += d.unmatched.map(u => `<div style="border:1px solid #e6e6e6;border-radius:6px;padding:6px 8px;margin-bottom:6px;font-size:.78rem;color:#666">${esc(u.receiver_name)} (${esc(u.pin)}) · 📦 ${esc(u.tracking)}</div>`).join('');
+    const opts = (d.orders || []).map(o =>
+      `<option value="${esc(o.order_code)}">${esc(o.order_code)} · ${esc(o.name)}</option>`).join('');
+    html += '<div style="font-weight:600;font-size:.82rem;margin:8px 0 4px">⚠️ No auto-match — pick an order or dismiss</div>';
+    html += d.unmatched.map(u => `<div style="border:1px solid #f0ad4e;border-radius:6px;padding:8px;margin-bottom:6px;font-size:.8rem">
+      <div>${esc(u.receiver_name)} (${esc(u.pin)}) · 📦 ${esc(u.tracking)}</div>
+      <select class="m-unmatched" data-tracking="${esc(u.tracking)}" style="margin-top:4px;width:100%;padding:4px;border:1px solid #ccc;border-radius:6px">
+        <option value="">— Dismiss (don't dispatch) —</option>
+        ${opts}
+      </select></div>`).join('');
   }
   document.getElementById('manifest-preview').innerHTML = html;
   document.getElementById('manifest-apply-bar').style.display =
-    (d.matched.length || d.ambiguous.length) ? 'block' : 'none';
+    (d.matched.length || d.ambiguous.length || d.unmatched.length) ? 'block' : 'none';
 }
 
 async function applyManifest() {
@@ -5487,8 +5494,19 @@ async function applyManifest() {
   document.querySelectorAll('.m-ambig').forEach(el => {
     if (el.value) assignments.push({ order_code: el.value, tracking: el.dataset.tracking });
   });
-  if (!assignments.length) { alert('Nothing selected to dispatch.'); return; }
-  if (!confirm(`Mark ${assignments.length} order(s) dispatched with these tracking numbers?`)) return;
+  let dismissed = 0;
+  document.querySelectorAll('.m-unmatched').forEach(el => {
+    if (el.value) assignments.push({ order_code: el.value, tracking: el.dataset.tracking });
+    else dismissed++;
+  });
+  if (!assignments.length && !dismissed) { alert('Nothing to do.'); return; }
+  if (!assignments.length) {
+    alert(`No orders selected — all ${dismissed} unmatched parcel(s) are set to Dismiss.\n\nPick an order for the ones you want to dispatch, or just close the window.`);
+    return;
+  }
+  let msg = `Mark ${assignments.length} order(s) dispatched with these tracking numbers?`;
+  if (dismissed) msg += `\n\n${dismissed} unmatched parcel(s) will be left un-dispatched (dismissed).`;
+  if (!confirm(msg)) return;
   try {
     const r = await fetch(`${ACAD_API}/admin/book-orders/import-manifest/apply`, {
       method: 'POST',

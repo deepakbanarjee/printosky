@@ -609,6 +609,9 @@ def _handle_admin_import_manifest(h, body) -> None:
                            "pin": u["row"].get("dest_pin"), "tracking": u["tracking"]}
                           for u in res["unmatched"]],
             "stated_count": stated,
+            # Full candidate list so the operator can hand-pick an order for any
+            # unmatched parcel (or dismiss it) instead of the window silently closing.
+            "orders": [_brief(o) for o in orders],
         }
         # The receipt states its own parcel total; if we read fewer, some rows were
         # silently dropped — surface it loudly so the operator doesn't miss them.
