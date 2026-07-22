@@ -62,15 +62,16 @@ def test_transliterate_applies_tool_output(monkeypatch):
 # ── parse_manifest ──────────────────────────────────────────────────────────
 def test_parse_manifest_empty_without_client(monkeypatch):
     monkeypatch.setattr(ca, "_client", lambda: None)
-    assert ca.parse_manifest(b"%PDF-1.4 ...", "application/pdf") == []
+    assert ca.parse_manifest(b"%PDF-1.4 ...", "application/pdf") == {"rows": [], "stated_count": None}
 
 
-def test_parse_manifest_returns_rows(monkeypatch):
+def test_parse_manifest_returns_rows_and_count(monkeypatch):
     cap = {}
     rows = [{"article_number": "CL622881144IN", "receiver_name": "SAJITHA K", "dest_pin": "673637"}]
-    monkeypatch.setattr(ca, "_client", lambda: _fake_client(cap, {"rows": rows}))
+    monkeypatch.setattr(ca, "_client", lambda: _fake_client(cap, {"rows": rows, "stated_count": 5}))
     out = ca.parse_manifest(b"imgbytes", "image/jpeg")
-    assert out == rows
+    assert out["rows"] == rows
+    assert out["stated_count"] == 5    # receipt's own total, for the missed-row warning
     # image goes as an image block, pdf as a document block
     assert cap["messages"][0]["content"][0]["type"] == "image"
 

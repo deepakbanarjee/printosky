@@ -19,12 +19,13 @@ import re
 
 logger = logging.getLogger("api.webhook")
 
-# Transliteration needs name-quality output: Haiku drops trailing vowels
-# (അനില -> "Anil" instead of "Anila", അജിത -> "Ajith" instead of "Ajitha"),
-# while Sonnet gets Kerala names right. The vision parse only reads PRINTED English
-# text off the receipt, so Haiku is fine there and cheaper. Both env-overridable.
+# Both tasks use Sonnet. Transliteration: Haiku drops trailing vowels (അനില ->
+# "Anil", അജിത -> "Ajith"); Sonnet gets Kerala names right. Vision parse: Haiku
+# silently dropped rows even on a clean tabular receipt (read 3 of 5), so Sonnet is
+# the safe default — a missed row = a parcel that never gets its tracking. Both
+# env-overridable; cost is a few rupees/manifest either way at this volume.
 TRANSLITERATE_MODEL = os.environ.get("COURIER_TRANSLITERATE_MODEL", "claude-sonnet-4-6")
-VISION_MODEL = os.environ.get("COURIER_VISION_MODEL", "claude-haiku-4-5")
+VISION_MODEL = os.environ.get("COURIER_VISION_MODEL", "claude-sonnet-4-6")
 
 _ML_START, _ML_END = "ഀ", "ൿ"  # Malayalam Unicode block
 
@@ -112,14 +113,17 @@ def transliterate_fields(values: list[str]) -> list[str]:
 
 
 # ── Feature 1: courier manifest import ──────────────────────────────────────
-def parse_manifest(file_bytes: bytes, mime_type: str) -> list[dict]:
+def parse_manifest(file_bytes: bytes, mime_type: str) -> dict:
     """Extract parcel rows from a courier bulk-booking receipt (India Post PDF or
-    photo) via Claude vision. Returns [{article_number, receiver_name, dest_pin}];
-    on any failure returns []. Fails soft.
+    photo) via Claude vision. Returns
+    {"rows": [{article_number, receiver_name, dest_pin}], "stated_count": int|None}
+    where stated_count is the total the receipt itself prints (Grand Total Qty /
+    No. of Articles) — used to warn the operator when rows were missed. On any
+    failure returns {"rows": [], "stated_count": None}. Fails soft.
     """
     client = _client()
     if client is None or not file_bytes:
-        return []
+        return {"rows": [], "stated_count": None}
     b64 = base64.standard_b64encode(file_bytes).decode("ascii")
     if mime_type == "application/pdf":
         source_block = {"type": "document",
@@ -133,6 +137,8 @@ def parse_manifest(file_bytes: bytes, mime_type: str) -> list[dict]:
         "input_schema": {
             "type": "object",
             "properties": {
+                "stated_count": {"type": "integer",
+                                 "description": "Total parcels/articles the receipt itself prints (Grand Total Qty, or 'No. of Articles'); 0 if none is shown"},
                 "rows": {
                     "type": "array",
                     "items": {
@@ -156,29 +162,38 @@ def parse_manifest(file_bytes: bytes, mime_type: str) -> list[dict]:
         "This is an India Post booking record for parcels. It may be EITHER a "
         "single tabular 'Bulk Booking Receipt' with one row per parcel, OR a photo "
         "of several individual counter receipts laid out on one page (text may be "
-        "rotated or torn). Extract EVERY parcel.\n\n"
+        "rotated or torn).\n\n"
+        "Extract EVERY parcel — go row by row through the whole table/page and do "
+        "NOT skip, merge, or stop early. A receipt can have 5, 10, 20 or more rows; "
+        "return them all.\n\n"
         "For each parcel return:\n"
         "- article_number: the consignment/tracking number, format like CL622881144IN\n"
         "- receiver_name: the addressee after 'To:' / in the Receiver column — NEVER "
         "the sender (From: PRINTOSKY is the sender, ignore it)\n"
         "- dest_pin: the 6-digit destination PIN code in the receiver's address\n\n"
-        "Ignore the sender, office name, dates, amounts, and all totals / tax / "
-        "summary blocks. If a value is unreadable use an empty string."
+        "Also return stated_count: the total number of parcels the receipt itself "
+        "prints (e.g. the 'Grand Total' quantity, or 'No. of Articles'). Your rows "
+        "array MUST contain that many entries. Use 0 if no total is shown.\n\n"
+        "Ignore the sender, office name, dates, amounts, and all tax / summary "
+        "blocks. If a value is unreadable use an empty string."
     )
     try:
         msg = client.messages.create(
-            model=VISION_MODEL, max_tokens=2048, tools=[tool],
+            model=VISION_MODEL, max_tokens=4096, tools=[tool],
             tool_choice={"type": "tool", "name": "manifest_rows"},
             messages=[{"role": "user",
                        "content": [source_block, {"type": "text", "text": prompt}]}],
         )
         for block in msg.content:
             if getattr(block, "type", None) == "tool_use":
-                return [r for r in block.input.get("rows", []) if isinstance(r, dict)]
-        return []
+                rows = [r for r in block.input.get("rows", []) if isinstance(r, dict)]
+                sc = block.input.get("stated_count")
+                stated = int(sc) if isinstance(sc, int) and sc > 0 else None
+                return {"rows": rows, "stated_count": stated}
+        return {"rows": [], "stated_count": None}
     except Exception as exc:
         logger.error("parse_manifest error: %s", exc)
-        return []
+        return {"rows": [], "stated_count": None}
 
 
 def _extract_pin(text: str | None) -> str | None:

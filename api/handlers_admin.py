@@ -579,7 +579,9 @@ def _handle_admin_import_manifest(h, body) -> None:
         from courier_ai import parse_manifest, match_rows
         from db_cloud import list_book_orders
 
-        rows = parse_manifest(f["data"], mime)
+        parsed = parse_manifest(f["data"], mime)
+        rows = parsed.get("rows") or []
+        stated = parsed.get("stated_count")
         if not rows:
             _json_response(h, 422, {"error": "Could not read any parcels from the file"})
             return
@@ -606,7 +608,15 @@ def _handle_admin_import_manifest(h, body) -> None:
             "unmatched": [{"receiver_name": u["row"].get("receiver_name"),
                            "pin": u["row"].get("dest_pin"), "tracking": u["tracking"]}
                           for u in res["unmatched"]],
+            "stated_count": stated,
         }
+        # The receipt states its own parcel total; if we read fewer, some rows were
+        # silently dropped — surface it loudly so the operator doesn't miss them.
+        if stated and stated != len(rows):
+            preview["warning"] = (
+                f"The receipt lists {stated} parcels but only {len(rows)} could be "
+                f"read. Re-upload a clearer scan (PDF is best), or dispatch the "
+                f"missing ones manually.")
         _json_response(h, 200, preview)
     except Exception as exc:
         logger.error("import-manifest error: %s", exc)
