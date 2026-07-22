@@ -686,20 +686,23 @@ def _handle_admin_payments_to_verify(h) -> None:
     try:
         from db_cloud import list_book_orders, get_book_payments, book_amount_paid
         out = []
-        for o in list_book_orders(status="payment_review", limit=200):
-            code = o.get("order_code")
-            pending = [p for p in get_book_payments(code) if p.get("status") == "pending"]
-            if not pending:
-                continue
-            grand = float(o.get("grand_total") or 0)
-            paid = book_amount_paid(code)
-            for p in pending:
+        # Keep an order in the panel until its payment is fully cleared (confirmed):
+        # payment_review = a screenshot to act on; partially_paid = money in but a
+        # balance still owed, kept as a reference so it isn't lost.
+        for status in ("payment_review", "partially_paid"):
+            for o in list_book_orders(status=status, limit=200):
+                code = o.get("order_code")
+                pending = [{"payid": p.get("id"), "proof_url": p.get("proof_url"),
+                            "created_at": p.get("created_at")}
+                           for p in get_book_payments(code)
+                           if p.get("status") == "pending"]
+                grand = float(o.get("grand_total") or 0)
+                paid = book_amount_paid(code)
                 out.append({
-                    "payid": p.get("id"), "proof_url": p.get("proof_url"),
-                    "created_at": p.get("created_at"), "order_code": code,
-                    "name": o.get("name"), "phone": o.get("phone"),
-                    "items": o.get("items"), "grand_total": grand,
-                    "paid": paid, "balance": grand - paid,
+                    "order_code": code, "name": o.get("name"), "phone": o.get("phone"),
+                    "items": o.get("items"), "status": status,
+                    "grand_total": grand, "paid": paid, "balance": grand - paid,
+                    "pending": pending,
                 })
         _json_response(h, 200, {"payments": out})
     except Exception as exc:

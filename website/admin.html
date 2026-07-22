@@ -5060,25 +5060,29 @@ function renderPayments(rows) {
   if (!box) return;
   if (!rows.length) { box.innerHTML = ''; return; }        // nothing pending → hide
   const esc = s => (s || '').replace(/</g, '&lt;');
-  const cards = rows.map(p => {
-    const bal = `Total ₹${p.grand_total || 0} · Paid ₹${p.paid || 0} · <strong>Balance ₹${p.balance || 0}</strong>`;
-    const proof = p.proof_url
-      ? `<a href="${esc(p.proof_url)}" target="_blank" rel="noopener" title="Open full screenshot">
-           <img src="${esc(p.proof_url)}" alt="payment" loading="lazy" style="max-width:150px;max-height:200px;border-radius:8px;border:1px solid #ddd;object-fit:cover;display:block;cursor:zoom-in"></a>`
-      : '<span style="color:#999;font-size:.75rem">No screenshot</span>';
-    return `<div style="border:1px solid #f0ad4e;border-radius:8px;padding:12px;margin-bottom:8px;background:#fffdf5;display:flex;gap:12px">
-      <div>${proof}</div>
-      <div style="flex:1;font-size:.85rem">
-        <div><strong>${esc(p.order_code)}</strong> · ${esc(p.name)} <span style="color:#888">${esc((p.phone || '').replace(/^91/, ''))}</span></div>
-        <div style="color:#555;margin-top:2px">${_bookItemsSummary(p.items)}</div>
-        <div style="color:#555;margin-top:2px">${bal}</div>
-        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="ctrl-btn" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="verifyPayment(${p.payid},'full')">✅ Full ₹${p.balance || 0}</button>
+  const proofImg = url => url
+    ? `<a href="${esc(url)}" target="_blank" rel="noopener" title="Open full screenshot"><img src="${esc(url)}" alt="payment" loading="lazy" style="max-width:130px;max-height:170px;border-radius:8px;border:1px solid #ddd;object-fit:cover;display:block;cursor:zoom-in"></a>`
+    : '<span style="color:#999;font-size:.75rem">No screenshot</span>';
+  const cards = rows.map(o => {
+    const bal = `Total ₹${o.grand_total || 0} · Paid ₹${o.paid || 0} · <strong>Balance ₹${o.balance || 0}</strong>`;
+    const head = `<div><strong>${esc(o.order_code)}</strong> · ${esc(o.name)} <span style="color:#888">${esc((o.phone || '').replace(/^91/, ''))}</span></div>
+      <div style="color:#555;margin-top:2px">${_bookItemsSummary(o.items)}</div>
+      <div style="color:#555;margin-top:2px">${bal}</div>`;
+    let body;
+    if (o.pending && o.pending.length) {
+      // A screenshot to act on — one Full/Part/Not-received set per pending payment.
+      body = o.pending.map(p => `<div style="display:flex;gap:12px;margin-top:8px;border-top:1px dashed #e6c98a;padding-top:8px">
+        <div>${proofImg(p.proof_url)}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start">
+          <button class="ctrl-btn" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="verifyPayment(${p.payid},'full')">✅ Full ₹${o.balance || 0}</button>
           <button class="ctrl-btn" onclick="verifyPayment(${p.payid},'part')">➗ Part</button>
           <button class="ctrl-btn" style="background:#dc2626;color:#fff;border-color:#dc2626" onclick="verifyPayment(${p.payid},'reject')">❌ Not received</button>
-        </div>
-      </div>
-    </div>`;
+        </div></div>`).join('');
+    } else {
+      // Partially paid, no new screenshot — a reference so the balance isn't lost.
+      body = `<div style="margin-top:8px;color:#b45309;font-size:.8rem">⏳ ₹${o.balance || 0} balance — waiting for the customer to pay the rest.</div>`;
+    }
+    return `<div style="border:1px solid #f0ad4e;border-radius:8px;padding:12px;margin-bottom:8px;background:#fffdf5;font-size:.85rem">${head}${body}</div>`;
   }).join('');
   box.innerHTML = `<div style="font-weight:600;font-size:.9rem;margin-bottom:6px">💳 Payments to verify (${rows.length})</div>${cards}`;
 }

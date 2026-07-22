@@ -8,6 +8,48 @@ with what amount) and the guards.
 import pytest
 
 import book_bot
+import api.index  # noqa: F401  (import first: handlers_admin <-> api.index is circular)
+import api.handlers_admin as ha
+
+
+class _H:
+    def __init__(self):
+        self.status = None
+        self.payload = None
+        self.headers = {}
+        self.path = "/admin/book-orders/payments-to-verify"
+
+
+def test_panel_keeps_partially_paid_as_reference(monkeypatch):
+    monkeypatch.setattr(ha, "_auth_admin_pw", lambda pw: True)
+    monkeypatch.setattr(ha, "_admin_pw_from_request", lambda h: "x")
+    monkeypatch.setattr(ha, "_json_response",
+                        lambda h, s, p: (setattr(h, "status", s), setattr(h, "payload", p)))
+    import db_cloud
+    orders = {
+        "payment_review": [{"order_code": "XTR-PR", "name": "A", "phone": "911",
+                            "items": {"malayalam": 1}, "grand_total": 275}],
+        "partially_paid": [{"order_code": "XTR-PP", "name": "B", "phone": "912",
+                            "items": {"malayalam": 1}, "grand_total": 275}],
+    }
+    pays = {
+        "XTR-PR": [{"id": 10, "status": "pending", "proof_url": "u", "created_at": "t"}],
+        "XTR-PP": [{"id": 11, "status": "verified", "amount": 200, "proof_url": "u2", "created_at": "t"}],
+    }
+    monkeypatch.setattr(db_cloud, "list_book_orders", lambda status=None, limit=200: orders.get(status, []))
+    monkeypatch.setattr(db_cloud, "get_book_payments", lambda code: pays.get(code, []))
+    monkeypatch.setattr(db_cloud, "book_amount_paid", lambda code: 200.0 if code == "XTR-PP" else 0.0)
+
+    h = _H()
+    ha._handle_admin_payments_to_verify(h)
+    assert h.status == 200
+    rows = {r["order_code"]: r for r in h.payload["payments"]}
+    assert set(rows) == {"XTR-PR", "XTR-PP"}
+    # payment_review → an actionable pending screenshot
+    assert [p["payid"] for p in rows["XTR-PR"]["pending"]] == [10]
+    # partially_paid → kept as a reference (no pending), balance still shown
+    assert rows["XTR-PP"]["pending"] == []
+    assert rows["XTR-PP"]["balance"] == 75.0
 
 
 @pytest.fixture
