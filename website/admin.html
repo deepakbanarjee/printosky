@@ -1580,6 +1580,7 @@
         <button class="ctrl-btn" onclick="loadBookOrders()">↻ Refresh</button>
       </div>
     </div>
+    <div id="payments-to-verify" style="margin-bottom:14px"></div>
     <div id="book-orders-list"></div>
     <div style="margin-top:18px;border-top:1px solid #eee;padding-top:12px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -5040,11 +5041,80 @@ async function openDispatchSheet() {
   }
 }
 
+// ── Payments to verify (dashboard replacement for Anu's WhatsApp taps) ───────
+async function loadPaymentsToVerify() {
+  const box = document.getElementById('payments-to-verify');
+  if (!box || !_convPw()) return;
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/payments-to-verify`, {
+      headers: { 'X-Admin-Password': _convPw() },
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { box.innerHTML = ''; return; }
+    renderPayments(data.payments || []);
+  } catch (e) { box.innerHTML = ''; }
+}
+
+function renderPayments(rows) {
+  const box = document.getElementById('payments-to-verify');
+  if (!box) return;
+  if (!rows.length) { box.innerHTML = ''; return; }        // nothing pending → hide
+  const esc = s => (s || '').replace(/</g, '&lt;');
+  const cards = rows.map(p => {
+    const bal = `Total ₹${p.grand_total || 0} · Paid ₹${p.paid || 0} · <strong>Balance ₹${p.balance || 0}</strong>`;
+    const proof = p.proof_url
+      ? `<a href="${esc(p.proof_url)}" target="_blank" rel="noopener" title="Open full screenshot">
+           <img src="${esc(p.proof_url)}" alt="payment" loading="lazy" style="max-width:150px;max-height:200px;border-radius:8px;border:1px solid #ddd;object-fit:cover;display:block;cursor:zoom-in"></a>`
+      : '<span style="color:#999;font-size:.75rem">No screenshot</span>';
+    return `<div style="border:1px solid #f0ad4e;border-radius:8px;padding:12px;margin-bottom:8px;background:#fffdf5;display:flex;gap:12px">
+      <div>${proof}</div>
+      <div style="flex:1;font-size:.85rem">
+        <div><strong>${esc(p.order_code)}</strong> · ${esc(p.name)} <span style="color:#888">${esc((p.phone || '').replace(/^91/, ''))}</span></div>
+        <div style="color:#555;margin-top:2px">${_bookItemsSummary(p.items)}</div>
+        <div style="color:#555;margin-top:2px">${bal}</div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="ctrl-btn" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="verifyPayment(${p.payid},'full')">✅ Full ₹${p.balance || 0}</button>
+          <button class="ctrl-btn" onclick="verifyPayment(${p.payid},'part')">➗ Part</button>
+          <button class="ctrl-btn" style="background:#dc2626;color:#fff;border-color:#dc2626" onclick="verifyPayment(${p.payid},'reject')">❌ Not received</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  box.innerHTML = `<div style="font-weight:600;font-size:.9rem;margin-bottom:6px">💳 Payments to verify (${rows.length})</div>${cards}`;
+}
+
+async function verifyPayment(payid, kind) {
+  let amount = null;
+  if (kind === 'part') {
+    const a = prompt('Part payment — how much was actually paid (₹)?', '');
+    if (a === null) return;
+    amount = parseFloat(a);
+    if (!(amount > 0)) { alert('Enter an amount greater than 0.'); return; }
+  } else if (kind === 'reject') {
+    if (!confirm('Mark this payment as NOT received?\n\nThe customer will be asked to re-send a valid screenshot.')) return;
+  } else {
+    if (!confirm('Confirm this screenshot as FULL payment of the balance?')) return;
+  }
+  try {
+    const r = await fetch(`${ACAD_API}/admin/book-orders/payments/${payid}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Password': _convPw() },
+      body: JSON.stringify({ kind, amount }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) { alert(data.error || ('HTTP ' + r.status)); return; }
+    alert(`Recorded — order ${data.order_code} is now ${data.status} (paid ₹${data.amount_paid}).`);
+    loadPaymentsToVerify();
+    loadBookOrders();
+  } catch (e) { alert(String(e)); }
+}
+
 async function loadBookOrders() {
   if (!_convPw()) {
     const pw = await _adminPwPrompt(false);
     if (pw) sessionStorage.setItem('admin_pw_cache', pw); else return;
   }
+  loadPaymentsToVerify();
   const status = document.getElementById('book-status-filter')?.value || '';
   const list = document.getElementById('book-orders-list');
   try {

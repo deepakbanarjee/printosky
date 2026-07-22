@@ -1856,6 +1856,8 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_book_order_pack,
     _handle_admin_import_manifest,
     _handle_admin_import_manifest_apply,
+    _handle_admin_payments_to_verify,
+    _handle_admin_verify_payment,
     _handle_admin_book_order_settle_divya,
     _handle_admin_book_orders_list,
     _handle_admin_return_close,
@@ -2665,6 +2667,11 @@ class handler(BaseHTTPRequestHandler):
             _handle_admin_returns_list(self)
             return
 
+        # Payments awaiting Full/Part/Not-received verification (admin-only).
+        if self.path == "/admin/book-orders/payments-to-verify" or self.path.startswith("/admin/book-orders/payments-to-verify?"):
+            _handle_admin_payments_to_verify(self)
+            return
+
         # Divya teacher settlement statement (admin-only).
         if self.path == "/admin/book-orders/divya-ledger" or self.path.startswith("/admin/book-orders/divya-ledger?"):
             _handle_admin_divya_ledger(self)
@@ -2952,6 +2959,12 @@ class handler(BaseHTTPRequestHandler):
             return
         if self.path == "/admin/book-orders/import-manifest":
             _handle_admin_import_manifest(self, body)
+            return
+        _verify_payment = re.match(
+            r"^/admin/book-orders/payments/(\d+)/verify$", self.path,
+        )
+        if _verify_payment:
+            _handle_admin_verify_payment(self, body, _verify_payment.group(1))
             return
         _book_settle = re.match(
             r"^/admin/book-orders/([A-Za-z0-9\-]+)/settle-divya$", self.path,

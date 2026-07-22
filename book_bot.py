@@ -2111,6 +2111,40 @@ def _handle_payment_action(kind: str, payid: int) -> None:
                    f"Reply just the amount (e.g. 500). Balance is ₹{balance:.0f}.")
 
 
+def verify_payment_from_admin(payid: int, kind: str, amount: float | None = None) -> dict:
+    """Apply a payment verdict from the admin dashboard — the same effect as Anu
+    tapping Full / Part / Not-received on WhatsApp, but with NO dependency on her
+    24-hour window. `kind` is 'full' | 'part' | 'reject'; part takes the amount
+    directly instead of a WhatsApp round-trip. Drives the order status and notifies
+    the customer via _after_payment_change. Returns a result dict.
+    """
+    pay = _dbc.get_book_payment(payid)
+    if not pay:
+        return {"ok": False, "error": "Payment not found"}
+    if pay.get("status") != "pending":
+        return {"ok": False, "error": f"Already {pay.get('status')}"}
+    code = pay["order_code"]
+    order = _dbc.get_book_order(code) or {}
+    balance = _order_totals(order)["grand_total"] - _dbc.book_amount_paid(code)
+    if kind == "reject":
+        _dbc.reject_book_payment(payid)
+        _after_payment_change(code, rejected=True)
+    elif kind == "full":
+        _dbc.verify_book_payment(payid, max(0.0, balance))
+        _after_payment_change(code)
+    elif kind == "part":
+        amt = float(amount or 0)
+        if amt <= 0:
+            return {"ok": False, "error": "Enter an amount for a part payment"}
+        _dbc.verify_book_payment(payid, amt)
+        _after_payment_change(code)
+    else:
+        return {"ok": False, "error": "kind must be full, part or reject"}
+    fresh = _dbc.get_book_order(code) or {}
+    return {"ok": True, "order_code": code, "status": fresh.get("status"),
+            "amount_paid": _dbc.book_amount_paid(code)}
+
+
 def _assemble(parsed: dict) -> dict:
     """Normalise an LLM parse into order fields."""
     copies = int(parsed.get("copies") or 1) or 1

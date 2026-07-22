@@ -674,6 +674,72 @@ def _handle_admin_import_manifest_apply(h, body) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_admin_payments_to_verify(h) -> None:
+    """GET /admin/book-orders/payments-to-verify — pending payment screenshots
+    awaiting a Full / Part / Not-received decision. This is the dashboard-side
+    replacement for the WhatsApp-to-Anu forward, which silently fails whenever
+    Anu's 24-hour window is closed.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from db_cloud import list_book_orders, get_book_payments, book_amount_paid
+        out = []
+        for o in list_book_orders(status="payment_review", limit=200):
+            code = o.get("order_code")
+            pending = [p for p in get_book_payments(code) if p.get("status") == "pending"]
+            if not pending:
+                continue
+            grand = float(o.get("grand_total") or 0)
+            paid = book_amount_paid(code)
+            for p in pending:
+                out.append({
+                    "payid": p.get("id"), "proof_url": p.get("proof_url"),
+                    "created_at": p.get("created_at"), "order_code": code,
+                    "name": o.get("name"), "phone": o.get("phone"),
+                    "items": o.get("items"), "grand_total": grand,
+                    "paid": paid, "balance": grand - paid,
+                })
+        _json_response(h, 200, {"payments": out})
+    except Exception as exc:
+        logger.error("payments-to-verify error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_admin_verify_payment(h, body, payid: str) -> None:
+    """POST /admin/book-orders/payments/<payid>/verify — record a payment verdict
+    from the dashboard. Body: {kind: full|part|reject, amount?}. Same effect as
+    Anu's WhatsApp tap: verifies/rejects the screenshot, drives the order status,
+    and notifies the customer.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        data = {}
+    kind = (data.get("kind") or "").strip().lower()
+    if kind not in ("full", "part", "reject"):
+        _json_response(h, 400, {"error": "kind must be full, part or reject"})
+        return
+    try:
+        pid = int(payid)
+    except (TypeError, ValueError):
+        _json_response(h, 400, {"error": "bad payment id"})
+        return
+    amount = data.get("amount")
+    try:
+        from book_bot import verify_payment_from_admin
+        res = verify_payment_from_admin(
+            pid, kind, amount=float(amount) if amount not in (None, "") else None)
+        _json_response(h, 200 if res.get("ok") else 400, res)
+    except Exception as exc:
+        logger.error("verify-payment error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_admin_book_order_create(h, body) -> None:
     """POST /admin/book-orders/create — staff create a walk-in / in-store order.
     Body: {items:{malayalam,hindi,english}, name, phone, address, payment_mode, handed_over}.
