@@ -837,8 +837,147 @@ def _handle_qty(phone: str, text: str, order: dict) -> list[str]:
     return []
 
 
+# Words that mark where a name ends and the address begins in a front-loaded
+# blob ("Manoj Nadakkavu Cheramanglam pin 678703 palakkad"). Includes the same
+# building/house-number terms as _HOUSE_NUM_PREFIX_RE (kept in sync) plus the
+# place/postal markers, so "Manoj Flat 3B ..." stops the name at "Manoj".
+_ADDR_KEYWORDS = {
+    "pin", "pincode", "po", "p.o", "post", "dist", "distric", "district", "dt",
+    "near", "road", "rd", "street", "st", "colony", "nagar", "junction", "villa",
+    # building/house-number terms — mirror of _HOUSE_NUM_PREFIX_RE
+    "door", "flat", "house", "plot", "survey", "room", "floor", "building",
+    "blk", "block", "no", "no.",
+}
+
+# Minimum shape for a message to be treated as a front-loaded address rather than
+# a plain name: enough tokens to be a real address, and an explicit address
+# signal (a comma or an address keyword) — NOT merely a stray 6-digit number, so
+# an amount/reference like "Cost 145000 is fine" falls back to the normal
+# re-prompt instead of being silently committed as garbage.
+_FRONTLOAD_MIN_LEN = 15
+_FRONTLOAD_MIN_TOKENS = 4
+
+
+def _worth_address_parse(t: str) -> bool:
+    """Loose gate: is `t` worth attempting a front-loaded-address parse at all
+    (including a Haiku call)? A PIN plus enough text — cheap enough that plain
+    names and short chatter never trigger it, loose enough that the model can
+    judge borderline phrasings that lack a comma/keyword separator."""
+    return (_has_pincode(t) and len(t) >= _FRONTLOAD_MIN_LEN
+            and len(t.split(" ")) >= _FRONTLOAD_MIN_TOKENS)
+
+
+def _looks_like_frontloaded_address(t: str) -> bool:
+    """Strict gate for the DETERMINISTIC split, which has no model to sanity-check
+    its output: on top of `_worth_address_parse`, demand an explicit separator (a
+    comma or an `_ADDR_KEYWORDS` term) so a bare 6-digit amount/reference like
+    "Cost 145000 is fine" is never sliced into a garbage address."""
+    if not _worth_address_parse(t):
+        return False
+    return "," in t or any(w.lower().strip(".,()[]") in _ADDR_KEYWORDS
+                           for w in t.split(" "))
+
+
+def _split_name_address(text: str) -> dict:
+    """Split a front-loaded 'name + full address' blob the customer typed at the
+    name prompt into a recipient name and a delivery address.
+
+    The name is the leading run of letter words up to the first token that
+    carries a digit, is an address keyword, or ends a comma-delimited segment;
+    the address is the whole normalized blob (PIN retained). Returns {} unless
+    the text has a clear address shape (`_looks_like_frontloaded_address`) and a
+    usable (>=3 char) name — callers fall back to the normal field-by-field flow.
+
+    NOTE: `_recover_order_from_raw` solves the same problem for the multi-line
+    staff-intake path; keep the two heuristics in mind when changing either.
+    """
+    t = " ".join((text or "").split())
+    if not _looks_like_frontloaded_address(t):
+        return {}
+    name_words: list[str] = []
+    for w in t.split(" "):
+        core = w.split(",")[0]                    # part before any comma
+        if any(c.isdigit() for c in core) or core.lower().strip(".()[]") in _ADDR_KEYWORDS:
+            break
+        if core:
+            name_words.append(core)
+        if "," in w:                              # a comma ends the name segment
+            break
+    name = " ".join(name_words).strip(" ,.")
+    if len(name) < 3 or not _LETTER_RE.search(name):
+        return {}
+    return {"name": name, "address": t}
+
+
+def _llm_split_name_address(text: str) -> dict:
+    """Precise name/address split via the Haiku order parser (same model used for
+    Anu's intake). Returns {'name','address'} only when the model yields a name
+    and an address that still carries a PIN; {} on a missing API key, model
+    error, or unusable output — so the caller falls back to the deterministic
+    word-boundary split. Never raises."""
+    try:
+        from anu_parser import parse_order_message
+        r = parse_order_message(text) or {}
+    except Exception as exc:                       # pragma: no cover - defensive
+        logger.error("book_bot._llm_split_name_address failed: %s", exc)
+        return {}
+    name = (r.get("name") or "").strip(" ,.")
+    if not name or not _LETTER_RE.search(name):
+        return {}
+    # The model returns the address WITHOUT the PIN — recombine into one line and
+    # require the PIN to have survived (the whole point of the capture); else fall
+    # back rather than store a PIN-less address.
+    addr = (r.get("address") or "").strip(" ,.")
+    pin = (r.get("pincode") or "").strip()
+    full = ", ".join(p for p in (addr, pin) if p)
+    if not _has_pincode(full):
+        return {}
+    return {"name": name, "address": full}
+
+
+def _capture_frontloaded_order(text: str) -> dict:
+    """Return {'name','address'} when `text` is a front-loaded 'name + full
+    address' blob the customer typed at the name prompt, else {}.
+
+    The loose guard (`_worth_address_parse`) decides WHETHER to attempt capture,
+    so a plain name never spends a model request. When it's worth a look, the
+    Haiku parser gives the precise split; a stub / missing key / API error falls
+    back to the deterministic word split, which applies its own stricter
+    comma/keyword guard so it never fabricates an address from stray digits.
+    """
+    t = " ".join((text or "").split())
+    if not _worth_address_parse(t):
+        return {}
+    return _llm_split_name_address(t) or _split_name_address(t)
+
+
+def _address_captured_ack(name: str, address: str) -> str:
+    # Echo BOTH the parsed name and address so a mis-parse of either is visible
+    # immediately, not only at the final summary.
+    return (
+        "👍 ലഭിച്ചു / Got it:\n"
+        f"👤 {name}\n"
+        f"📍 {address}\n"
+        "_തെറ്റുണ്ടെങ്കിൽ അവസാനം തിരുത്താം / you can fix it at the final "
+        "summary._"
+    )
+
+
 def _handle_name(phone: str, text: str, order: dict) -> list[str]:
     name = (text or "").strip()
+    # Customers routinely type their whole address — house, PO, PIN, district —
+    # in one line at the name prompt. Don't discard it and then interrogate them
+    # field-by-field (the "we keep asking for the PIN they already gave" bug):
+    # capture name + address in one shot, echo both back, and skip straight to
+    # the courier step. The final summary is the confirm-back for any mis-parse.
+    rec = _capture_frontloaded_order(name)
+    if rec:
+        _dbc.update_book_order(order["order_code"],
+                               name=rec["name"], address=rec["address"])
+        _dbc.save_session(DB, phone, step="book_dtdc")
+        _send_text(phone, _address_captured_ack(rec["name"], rec["address"]))
+        _send_dtdc_prompt(phone)
+        return []
     if not _is_valid_name(name):
         _send_text(phone, _name_prompt())
         return []

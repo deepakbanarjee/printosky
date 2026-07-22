@@ -1661,3 +1661,183 @@ def test_anu_intake_recovers_name_instead_of_dead_ending(fake, monkeypatch):
     assert any("phone number" in m.lower() and "Kumari Deepthy" in m for m in sent["text"])
     assert not any("send the rest" in m.lower() for m in sent["text"])
     assert db.sessions[book_bot.VERIFIER_PHONE]["step"] == "anu_intake"
+
+
+
+# ── front-loaded address in the NAME step (the "keeps asking for PIN" bug) ─────
+# Real incident: a customer typed their whole address — house, PO, PIN, district —
+# in one line at the name prompt. The bot discarded it and then nagged for the
+# PIN four times (a PIN already in that first line). The name step must instead
+# capture name + address in one shot and move on to the courier choice.
+
+_FRONTLOAD = "Manoj Nadakkavu Cheramanglam pin 678703 palakkad"
+
+
+def _seed_at_name(db, code="XTR-FL-1"):
+    db.create_book_order(code, PHONE, name=None)
+    db.orders[code]["items"] = {"malayalam": 1}
+    db.save_session(None, PHONE, step="book_name")
+    return code
+
+
+@pytest.fixture
+def no_llm(monkeypatch):
+    """Opt-in: stub the Haiku front-load splitter to 'no result' so a capture
+    routed through maybe_handle_book exercises the deterministic fallback without
+    any real network call. (Only affects `_llm_split_name_address`.)"""
+    monkeypatch.setattr(book_bot, "_llm_split_name_address", lambda t: {})
+
+
+@pytest.mark.integration
+def test_frontloaded_address_in_name_step_is_captured(fake, no_llm):
+    db, sent = fake
+    code = _seed_at_name(db)
+
+    book_bot.maybe_handle_book(PHONE, _FRONTLOAD)
+
+    order = db.orders[code]
+    assert order["name"] == "Manoj Nadakkavu Cheramanglam"
+    assert "678703" in (order["address"] or "")        # PIN retained
+    assert db.sessions[PHONE]["step"] == "book_dtdc"     # skipped the address nag
+    assert not any("include your" in m.lower() and "pin" in m.lower()
+                   for m in sent["text"])
+
+
+@pytest.mark.integration
+def test_frontloaded_echoes_both_name_and_address(fake, no_llm):
+    """Confirm-back: both parsed fields are shown so a mis-parse is visible."""
+    db, sent = fake
+    _seed_at_name(db, code="XTR-FL-2")
+
+    book_bot.maybe_handle_book(PHONE, _FRONTLOAD)
+
+    echoed = "\n".join(sent["text"])
+    assert "678703" in echoed and "Manoj" in echoed
+
+
+@pytest.mark.integration
+def test_plain_name_still_advances_to_address(fake):
+    """Regression: an ordinary name (no PIN) keeps the normal 2-step flow."""
+    db, sent = fake
+    code = _seed_at_name(db, code="XTR-FL-3")
+
+    book_bot.maybe_handle_book(PHONE, "Priya Krishnan")
+
+    assert db.sessions[PHONE]["step"] == "book_address"
+    assert db.orders[code]["name"] == "Priya Krishnan"
+
+
+@pytest.mark.integration
+def test_stray_six_digit_number_is_not_treated_as_address(fake, no_llm):
+    """A bare 6-digit amount/reference at the name prompt must NOT be silently
+    committed as an address — it falls back to the normal name re-prompt."""
+    db, sent = fake
+    code = _seed_at_name(db, code="XTR-FL-4")
+
+    book_bot.maybe_handle_book(PHONE, "Cost 145000 is fine")
+
+    assert db.sessions[PHONE]["step"] == "book_name"     # did NOT skip ahead
+    assert not db.orders[code].get("address")
+
+
+@pytest.mark.integration
+def test_too_short_frontload_is_not_captured(fake):
+    """"A 678684" has a PIN but no address shape → not a fast-path capture."""
+    db, sent = fake
+    code = _seed_at_name(db, code="XTR-FL-5")
+
+    book_bot.maybe_handle_book(PHONE, "A 678684")
+
+    assert db.sessions[PHONE]["step"] == "book_name"
+    assert not db.orders[code].get("address")
+
+
+@pytest.mark.integration
+def test_frontload_prefers_haiku_split_when_available(fake, monkeypatch):
+    """When the Haiku parser returns a clean split, it wins over the deterministic
+    one — and the model's separated address + pincode are recombined into one
+    line with the PIN retained."""
+    db, sent = fake
+    code = _seed_at_name(db, code="XTR-FL-7")
+    monkeypatch.setattr(book_bot, "_llm_split_name_address",
+                        lambda t: {"name": "Manoj",
+                                   "address": "Nadakkavu, Cheramanglam, Palakkad, 678703"})
+
+    book_bot.maybe_handle_book(PHONE, _FRONTLOAD)
+
+    order = db.orders[code]
+    assert order["name"] == "Manoj"                    # cleaner than deterministic
+    assert order["address"] == "Nadakkavu, Cheramanglam, Palakkad, 678703"
+    assert db.sessions[PHONE]["step"] == "book_dtdc"
+
+
+def test_llm_split_recombines_address_and_pincode(monkeypatch):
+    """_llm_split_name_address stitches the model's separate address + pincode
+    into one PIN-bearing line, and rejects output where the PIN didn't survive."""
+    import anu_parser
+    monkeypatch.setattr(anu_parser, "parse_order_message",
+                        lambda t: {"is_order": True, "name": "Manoj",
+                                   "address": "Nadakkavu, Cheramanglam", "pincode": "678703"})
+    rec = book_bot._llm_split_name_address(_FRONTLOAD)
+    assert rec["name"] == "Manoj"
+    assert "678703" in rec["address"] and "Cheramanglam" in rec["address"]
+
+    # No PIN anywhere → reject (don't store a PIN-less address).
+    monkeypatch.setattr(anu_parser, "parse_order_message",
+                        lambda t: {"is_order": True, "name": "Manoj",
+                                   "address": "Nadakkavu, Cheramanglam", "pincode": ""})
+    assert book_bot._llm_split_name_address(_FRONTLOAD) == {}
+
+
+def test_split_keeps_full_multiword_name_no_truncation():
+    """No fixed word cap: a 4-word name before the PIN is kept whole."""
+    rec = book_bot._split_name_address("Priya Lakshmi Krishnan Nair pin 678684")
+    assert rec["name"] == "Priya Lakshmi Krishnan Nair"
+    assert "678684" in rec["address"]
+
+
+def test_split_stops_name_at_comma():
+    rec = book_bot._split_name_address(
+        "Anjana, Kaniyampal House, Punnayurkulam, Thrissur 680568")
+    assert rec["name"] == "Anjana"
+    assert "680568" in rec["address"]
+
+
+def test_split_stops_name_at_house_number_word():
+    """'Flat' (a building term now in _ADDR_KEYWORDS) ends the name."""
+    rec = book_bot._split_name_address("Manoj Flat 3B Green Villa, Kochi 682016")
+    assert rec["name"] == "Manoj"
+    assert "682016" in rec["address"]
+
+
+def test_split_needs_address_signal_not_just_a_pin():
+    assert book_bot._split_name_address("Cost 145000 is fine") == {}
+    assert book_bot._split_name_address("A 678684") == {}
+
+
+def test_split_needs_a_pin():
+    assert book_bot._split_name_address("Manoj Nadakkavu Cheramanglam") == {}
+
+
+def test_split_handles_malayalam_name():
+    rec = book_bot._split_name_address("മനോജ്, ചെറമംഗലം, പാലക്കാട് 678703")
+    assert "മനോജ്" in rec["name"]
+    assert "678703" in rec["address"]
+
+
+@pytest.mark.integration
+def test_edit_name_is_unaffected_by_frontload_capture(fake):
+    """The fast path lives only in _handle_name; editing the name must not
+    trigger address capture even if the new text carries a PIN-like blob."""
+    db, sent = fake
+    code = _seed_at_name(db, code="XTR-FL-6")
+    db.orders[code]["name"] = "Old Name"
+    db.orders[code]["address"] = "Old addr, Thrissur 680001"
+    db.save_session(None, PHONE, step="book_edit_name")
+
+    # Even a PIN-bearing blob at the edit-name step must NOT hit the fast path:
+    # it should not overwrite the address or jump to the courier step.
+    book_bot.maybe_handle_book(PHONE, _FRONTLOAD)
+
+    assert db.sessions[PHONE]["step"] != "book_dtdc"          # not the fast path
+    assert db.orders[code]["address"] == "Old addr, Thrissur 680001"  # untouched
