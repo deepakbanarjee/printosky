@@ -1606,6 +1606,25 @@ def _process_razorpay_payment(data: dict) -> None:
         if phone:
             send_payment_confirmed(phone, ref_id, amount)
             _credit_referrer(phone, ref_id)
+        # Alert staff so a paid order can't sit unnoticed. Best-effort: a failed
+        # alert must never block payment processing.
+        try:
+            from whatsapp_notify import send_staff_alert
+            codes = []
+            for jid in job_ids:
+                j = get_job(jid) or {}
+                if j.get("pickup_code"):
+                    codes.append(j["pickup_code"])
+            pk = ", ".join(codes) if codes else "—"
+            send_staff_alert(
+                f"🖨️ *New paid print order*\n\n"
+                f"📋 {len(job_ids)} job(s)\n"
+                f"🎟️ Pickup: {pk}\n"
+                f"💵 ₹{amount:.2f}\n\n"
+                f"Print it and mark *Ready* to notify the customer."
+            )
+        except Exception as sa_exc:
+            logger.warning("staff alert (paid batch %s) failed: %s", ref_id, sa_exc)
         logger.info(f"Batch {ref_id}: {len(job_ids)} jobs marked Paid")
         return
 
@@ -1621,6 +1640,22 @@ def _process_razorpay_payment(data: dict) -> None:
             _maybe_credit_note_uploader(job)
         except Exception as _nc_exc:
             logger.error("notes credit error for job %s: %s", ref_id, _nc_exc)
+    # Alert staff so a paid order can't sit unnoticed. Best-effort: never blocks
+    # payment processing.
+    try:
+        from whatsapp_notify import send_staff_alert
+        nm = (job or {}).get("customer_name") or (job or {}).get("sender") or "customer"
+        pk = (job or {}).get("pickup_code") or "—"
+        send_staff_alert(
+            f"🖨️ *New paid print job*\n\n"
+            f"👤 {nm}\n"
+            f"📋 {ref_id}\n"
+            f"🎟️ Pickup: {pk}\n"
+            f"💵 ₹{amount:.2f}\n\n"
+            f"Print it and mark *Ready* to notify the customer."
+        )
+    except Exception as sa_exc:
+        logger.warning("staff alert (paid job %s) failed: %s", ref_id, sa_exc)
     logger.info(f"Job {ref_id} marked Paid")
 
 
