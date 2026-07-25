@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Print queue — Printosky</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <!-- PDF.js — same version order-v2 uses (its preview works; admin's iframe does not) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    :root{
+      --bg:#f6f7f9; --card:#fff; --ink:#1c1e21; --muted:#6b7280; --line:#e5e7eb;
+      --pri:#111827; --pri-ink:#fff; --amber-bg:#fef3c7; --amber-ink:#92400e;
+      --green-bg:#dcfce7; --green-ink:#166534; --blue-bg:#dbeafe; --blue-ink:#1e40af;
+      --danger:#b91c1c; --mono:'SF Mono','Consolas',monospace;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;background:var(--bg);color:var(--ink);
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px}
+    header{display:flex;align-items:center;justify-content:space-between;
+      padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+    header h1{font-size:17px;margin:0;font-weight:600}
+    .counts{display:flex;gap:8px;font-size:13px}
+    .pill{padding:3px 10px;border-radius:20px;font-weight:600}
+    .pill.amber{background:var(--amber-bg);color:var(--amber-ink)}
+    .pill.green{background:var(--green-bg);color:var(--green-ink)}
+    .wrap{max-width:820px;margin:0 auto;padding:16px}
+    .sec-label{font-size:13px;color:var(--muted);font-weight:600;margin:18px 4px 8px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+      padding:14px 16px;display:flex;align-items:center;gap:14px;margin-bottom:10px}
+    .card .info{flex:1;min-width:0}
+    .card .name{font-weight:600;font-size:15px}
+    .card .sub{color:var(--muted);font-size:13px;margin-top:2px;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .card .spec{color:var(--muted);font-size:12px;margin-top:2px}
+    .code{background:var(--green-bg);color:var(--green-ink);border-radius:10px;
+      padding:8px 12px;text-align:center;min-width:82px}
+    .code b{font-family:var(--mono);font-size:18px;display:block}
+    .code span{font-size:11px}
+    .amt{font-weight:600;font-size:16px;text-align:right;white-space:nowrap}
+    button{font:inherit;cursor:pointer;border-radius:10px;padding:9px 14px;border:1px solid var(--line);background:var(--card)}
+    button.primary{background:var(--pri);color:var(--pri-ink);border-color:var(--pri);font-weight:600}
+    button:disabled{opacity:.5;cursor:default}
+    button.link{border:none;background:none;color:var(--blue-ink);padding:6px}
+    .empty{color:var(--muted);text-align:center;padding:28px;font-size:14px}
+    #login{max-width:340px;margin:12vh auto;background:var(--card);border:1px solid var(--line);
+      border-radius:16px;padding:28px 24px;text-align:center}
+    #login h2{margin:0 0 4px;font-size:18px}
+    #login p{color:var(--muted);font-size:13px;margin:0 0 18px}
+    #login input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;margin-bottom:10px}
+    #login button{width:100%}
+    .err{color:var(--danger);font-size:13px;min-height:18px;margin-top:6px}
+    #modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;
+      align-items:center;justify-content:center;z-index:20;padding:16px}
+    #modal .box{background:var(--card);border-radius:16px;max-width:640px;width:100%;
+      max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
+    #modal .top{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
+    #modal .pv{overflow:auto;padding:12px;background:#f0f0f0;flex:1;text-align:center}
+    #modal canvas,#modal img{max-width:100%;box-shadow:0 1px 4px rgba(0,0,0,.15);margin-bottom:8px}
+    #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+      background:var(--pri);color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;display:none;z-index:30}
+  </style>
+</head>
+<body>
+
+<div id="login">
+  <h2>Print queue</h2>
+  <p>Staff sign-in</p>
+  <input id="pw" type="password" placeholder="Admin password" autocomplete="current-password">
+  <button class="primary" onclick="doLogin()">Sign in</button>
+  <div class="err" id="loginErr"></div>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <h1>Print queue</h1>
+    <div class="counts">
+      <span class="pill amber" id="cToDo">0 to do</span>
+      <span class="pill green" id="cPickup">0 for pickup</span>
+    </div>
+  </header>
+  <div class="wrap">
+    <div class="sec-label">To print and notify</div>
+    <div id="todo"></div>
+    <div class="sec-label">Ready for pickup</div>
+    <div id="pickup"></div>
+    <div style="text-align:center;margin-top:16px">
+      <button class="link" onclick="loadQueue()">Refresh</button>
+      <span id="updated" style="color:var(--muted);font-size:12px"></span>
+    </div>
+  </div>
+</div>
+
+<div id="modal" onclick="if(event.target.id==='modal')closeModal()">
+  <div class="box">
+    <div class="top"><b id="mTitle">Preview</b><button class="link" onclick="closeModal()">Close</button></div>
+    <div class="pv" id="mBody"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI";
+const STORE_PC_URL = (localStorage.getItem("storePcUrl") || "").replace(/\/$/, "");
+const STAFF_ID = "operator";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+function esc(s){return (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.style.display="block";setTimeout(()=>t.style.display="none",2600)}
+
+async function doLogin(){
+  const pw=document.getElementById("pw").value;
+  const err=document.getElementById("loginErr"); err.textContent="";
+  try{
+    const r=await fetch("/.netlify/functions/auth",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"admin",password:pw})});
+    const d=await r.json();
+    if(!d.ok){err.textContent="Wrong password";return}
+    if(d.supabase_jwt)sessionStorage.setItem("supabase_jwt",d.supabase_jwt);
+    sessionStorage.setItem("p_auth","1");
+    showApp();
+  }catch{err.textContent="Can't reach sign-in. Check connection."}
+}
+
+function showApp(){
+  document.getElementById("login").style.display="none";
+  document.getElementById("app").style.display="block";
+  loadQueue(); setInterval(loadQueue,30000);
+}
+
+async function sbFetch(params){
+  const jwt=sessionStorage.getItem("supabase_jwt")||SUPABASE_KEY;
+  const r=await fetch(`${SUPABASE_URL}/rest/v1/jobs?${params}`,
+    {headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${jwt}`}});
+  if(r.status===401){sessionStorage.clear();location.reload();return[]}
+  if(!r.ok)throw new Error("HTTP "+r.status);
+  return r.json();
+}
+
+function specLine(j){
+  const bits=[];
+  if(j.page_count)bits.push(j.page_count+(j.page_count==1?" page":" pages"));
+  if(j.colour)bits.push(j.colour);
+  if(j.copies)bits.push(j.copies+(j.copies==1?" copy":" copies"));
+  if(j.finishing&&j.finishing!=="None")bits.push(j.finishing);
+  return bits.join(" · ");
+}
+
+let JOBS=[];
+async function loadQueue(){
+  try{
+    const since=new Date(Date.now()-14*864e5).toISOString();
+    const sel="select=job_id,status,received_at,sender,customer_name,filename,file_url,page_count,amount_collected,pickup_code,colour,copies,finishing";
+    JOBS=await sbFetch(`${sel}&status=in.(Paid,Printed,Ready)&received_at=gte.${since}&order=received_at.asc`);
+    render();
+  }catch(e){toast("Load failed: "+e.message)}
+}
+
+function render(){
+  const todo=JOBS.filter(j=>j.status==="Paid"||j.status==="Printed");
+  const pick=JOBS.filter(j=>j.status==="Ready");
+  document.getElementById("cToDo").textContent=todo.length+" to do";
+  document.getElementById("cPickup").textContent=pick.length+" for pickup";
+
+  document.getElementById("todo").innerHTML = todo.length ? todo.map(j=>`
+    <div class="card">
+      <div class="info">
+        <div class="name">${esc(j.customer_name||j.sender||"Customer")}</div>
+        <div class="sub">${esc(j.filename||j.job_id)}</div>
+        <div class="spec">${esc(specLine(j))||"&nbsp;"}</div>
+      </div>
+      ${j.file_url?`<button class="link" onclick="preview('${esc(j.job_id)}')">View</button>`:""}
+      <div class="amt">₹${(j.amount_collected||0).toFixed(0)}</div>
+      <button class="primary" onclick="act('${esc(j.job_id)}','mark-ready',this)">Ready and notify</button>
+    </div>`).join("") : `<div class="empty">Nothing to print right now.</div>`;
+
+  document.getElementById("pickup").innerHTML = pick.length ? pick.map(j=>`
+    <div class="card">
+      <div class="code"><span>pickup</span><b>${esc(j.pickup_code||"—")}</b></div>
+      <div class="info">
+        <div class="name">${esc(j.customer_name||j.sender||"Customer")}</div>
+        <div class="sub">${esc(j.filename||j.job_id)} · ₹${(j.amount_collected||0).toFixed(0)}</div>
+      </div>
+      <button class="primary" onclick="act('${esc(j.job_id)}','complete-job',this)">Collected</button>
+    </div>`).join("") : `<div class="empty">No one waiting for pickup.</div>`;
+
+  document.getElementById("updated").textContent=" · updated "+new Date().toLocaleTimeString();
+}
+
+async function act(jobId,endpoint,btn){
+  if(!STORE_PC_URL){toast("Store PC URL not set — open the admin panel once to configure it.");return}
+  const verb=endpoint==="mark-ready"?"mark ready and notify the customer":"mark collected";
+  if(!confirm(`This will ${verb}. Continue?`))return;
+  btn.disabled=true;
+  try{
+    const r=await fetch(`${STORE_PC_URL}/${endpoint}`,{method:"POST",
+      headers:{"Content-Type":"application/json","X-Store-Token":localStorage.getItem("storeToken")||""},
+      body:JSON.stringify({job_id:jobId,staff_id:STAFF_ID})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok&&d.ok!==false){toast(endpoint==="mark-ready"?"Customer notified":"Marked collected");loadQueue();}
+    else{toast("Failed: "+(d.error||("HTTP "+r.status)));btn.disabled=false;}
+  }catch(e){toast("Can't reach store PC. Is it on?");btn.disabled=false;}
+}
+
+async function preview(jobId){
+  const j=JOBS.find(x=>x.job_id===jobId); if(!j||!j.file_url)return;
+  document.getElementById("mTitle").textContent=j.filename||"Preview";
+  const body=document.getElementById("mBody"); body.innerHTML="Loading…";
+  document.getElementById("modal").style.display="flex";
+  const url=j.file_url;
+  if(/\.(png|jpe?g|gif|webp)(\?|$)/i.test(url)){
+    body.innerHTML=`<img src="${esc(url)}" alt="preview">`;return;
+  }
+  try{
+    const pdf=await pdfjsLib.getDocument(url).promise;
+    body.innerHTML="";
+    for(let p=1;p<=Math.min(pdf.numPages,10);p++){
+      const page=await pdf.getPage(p);
+      const vp=page.getViewport({scale:1.2});
+      const cv=document.createElement("canvas");cv.width=vp.width;cv.height=vp.height;
+      body.appendChild(cv);
+      await page.render({canvasContext:cv.getContext("2d"),viewport:vp}).promise;
+    }
+    if(pdf.numPages>10)body.insertAdjacentHTML("beforeend",`<div style="color:#6b7280;font-size:13px">…${pdf.numPages-10} more pages</div>`);
+  }catch(e){body.innerHTML=`<div style="padding:20px;color:#6b7280">Couldn't load preview.<br><a href="${esc(url)}" target="_blank">Open file</a></div>`;}
+}
+function closeModal(){document.getElementById("modal").style.display="none";document.getElementById("mBody").innerHTML="";}
+
+if(sessionStorage.getItem("p_auth")==="1")showApp();
+</script>
+</body>
+</html>
