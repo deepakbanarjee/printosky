@@ -6826,6 +6826,7 @@ async function loadTranscripts() {
     } else {
       trFilesList.forEach(file => {
         const tr = document.createElement("tr");
+        const rate = file.mode === "urgent" ? 20.0 : 5.0;
         const pct = file.total_pages > 0 ? (file.transcribed_pages / file.total_pages) * 100 : 0;
         const progressHtml = `
           <div style="display:flex; flex-direction:column; gap:4px;">
