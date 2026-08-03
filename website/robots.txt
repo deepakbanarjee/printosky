@@ -1,4 +1,14 @@
 User-agent: *
 Allow: /
 
+# Allow AI crawlers
+User-agent: Google-Extended
+Allow: /
+User-agent: GPTBot
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: Claude-Web
+Allow: /
+
 Sitemap: https://printosky.com/sitemap.xml
