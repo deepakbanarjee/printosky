@@ -30,7 +30,9 @@ function includedList(included) {
 function colourListFn(colourPages) {
   return Object.keys(colourPages).filter(p => colourPages[p]).map(Number).sort((a,b)=>a-b);
 }
-const FINISHING_LABEL = { none:'No binding', staple:'Staple', spiral:'Spiral', wiro:'Wiro' };
+const FINISHING_LABEL = { none:'No binding', staple:'Staple', spiral:'Spiral', wiro:'Wiro', soft:'Soft', perfect:'Perfect', project:'Project', record:'Record', thesis:'Thesis' };
+
+const ORIENTATION_LABEL = { auto:'Auto orientation', portrait:'Portrait', landscape:'Landscape' };
 
 export function buildPrintSpec(s) {
   const inc = includedList(s.included);
@@ -40,6 +42,7 @@ export function buildPrintSpec(s) {
     file_name: s.fileName, file_ext: s.fileExt, total_pages: s.totalPages,
     pages_included: inc, colour_mode: s.colourMode, colour_pages: col,
     nup: s.nup, copies: s.copies, paper_size: s.paperSize, sides: s.sides,
+    orientation: s.orientation || 'auto',
     binding: s.binding, sheet_count, amount_estimated: s.amountEstimated, price_exact: s.priceExact,
   };
 }
@@ -59,6 +62,7 @@ export function buildOperatorNote(s) {
   }
   if (s.nup !== 1) parts.push(`${s.nup}-up`);
   parts.push(s.sides === 'duplex' ? 'Duplex' : 'Single-sided');
+  if (s.orientation && s.orientation !== 'auto') parts.push(ORIENTATION_LABEL[s.orientation] || s.orientation);
   parts.push(FINISHING_LABEL[s.binding] || s.binding);
   if (!s.priceExact) parts.push('(page count ESTIMATED — non-PDF; confirm before print)');
   return parts.join(' · ');
@@ -71,6 +75,7 @@ export function mapToJobColumns(s, amountQuoted) {
     finishing: s.binding,
     size: s.paperSize,
     colour: s.colourMode,
+    orientation: s.orientation || 'auto',
     layout: `${s.nup}up-${sidesCode}`,
     amount_quoted: amountQuoted,
   };

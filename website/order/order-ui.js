@@ -35,7 +35,8 @@ const state = {
   copies: 1,
   paperSize: 'A4',
   sides: 'single',   // 'single' | 'duplex'
-  binding: 'none',   // 'none' | 'staple' | 'spiral' | 'wiro'
+  orientation: 'auto', // 'auto' | 'portrait' | 'landscape'
+  binding: 'none',   // 'none' | 'staple' | 'spiral' | 'wiro' | 'soft' | 'perfect' | 'project' | 'record' | 'thesis'
   amountEstimated: 0,
   priceExact: true,
 };
@@ -386,6 +387,14 @@ function setSides(mode) {
   requestQuote();
 }
 
+function setOrientation(mode) {
+  state.orientation = mode;
+  document.querySelectorAll('[data-orientation]').forEach((el) => {
+    el.classList.toggle('active', el.dataset.orientation === mode);
+  });
+  updateSummary();
+}
+
 function setBinding(mode) {
   state.binding = mode;
   document.querySelectorAll('[data-binding]').forEach((el) => {
@@ -440,7 +449,13 @@ function updateSummary() {
   $('ov2-s-paper').textContent = state.paperSize;
   $('ov2-s-sides').textContent = state.sides === 'single' ? 'Single-sided' : 'Duplex';
 
-  const bMap = { none: 'No binding', staple: 'Stapled', spiral: 'Spiral bound', wiro: 'Wiro bound' };
+  const orientTag = $('ov2-s-orient');
+  if (orientTag) {
+    if (state.orientation === 'auto') { orientTag.style.display = 'none'; }
+    else { orientTag.style.display = ''; orientTag.textContent = state.orientation === 'landscape' ? 'Landscape' : 'Portrait'; }
+  }
+
+  const bMap = { none: 'No binding', staple: 'Stapled', spiral: 'Spiral bound', wiro: 'Wiro bound', soft: 'Soft bound', perfect: 'Perfect bound', project: 'Project bound', record: 'Record bound', thesis: 'Thesis bound' };
   $('ov2-s-bind').textContent = bMap[state.binding] || state.binding;
 
   const sheets = computeSheets({ pages: inc, nup: state.nup, duplex: state.sides === 'duplex', copies: state.copies });
@@ -544,7 +559,8 @@ function buildRecap() {
   pills.push(spec.copies === 1 ? '1 copy' : spec.copies + ' copies');
   pills.push(spec.paper_size);
   pills.push(spec.sides === 'duplex' ? 'Duplex' : 'Single-sided');
-  const bMap = { none: 'No binding', staple: 'Staple', spiral: 'Spiral', wiro: 'Wiro' };
+  if (spec.orientation && spec.orientation !== 'auto') pills.push(spec.orientation === 'landscape' ? 'Landscape' : 'Portrait');
+  const bMap = { none: 'No binding', staple: 'Staple', spiral: 'Spiral', wiro: 'Wiro', soft: 'Soft', perfect: 'Perfect', project: 'Project', record: 'Record', thesis: 'Thesis' };
   pills.push(bMap[spec.binding] || spec.binding);
   pills.push(spec.sheet_count + (spec.sheet_count === 1 ? ' sheet' : ' sheets'));
   if (state.amountEstimated) pills.push(priceLabel(state.amountEstimated));
@@ -776,6 +792,8 @@ function wire() {
   $('ov2-paper').addEventListener('change', (e) => { state.paperSize = e.target.value; updateSummary(); requestQuote(); });
   document.querySelectorAll('[data-sides]').forEach((el) =>
     el.addEventListener('click', () => setSides(el.dataset.sides)));
+  document.querySelectorAll('[data-orientation]').forEach((el) =>
+    el.addEventListener('click', () => setOrientation(el.dataset.orientation)));
   document.querySelectorAll('[data-binding]').forEach((el) =>
     el.addEventListener('click', () => setBinding(el.dataset.binding)));
 

@@ -351,6 +351,7 @@
               <option value="A4">A4</option>
               <option value="A3">A3</option>
               <option value="A5">A5</option>
+              <option value="Legal">Legal</option>
               <option value="Letter">Letter</option>
             </select>
           </div>
@@ -374,6 +375,15 @@
             </div>
           </div>
 
+          <div class="ov2-card">
+            <div class="ov2-card-label">Orientation</div>
+            <div class="ov2-tog-group">
+              <div class="ov2-tog active" data-orientation="auto" id="ov2-or-auto">Auto</div>
+              <div class="ov2-tog" data-orientation="portrait" id="ov2-or-portrait">📄 Portrait</div>
+              <div class="ov2-tog" data-orientation="landscape" id="ov2-or-landscape">🖼️ Landscape</div>
+            </div>
+          </div>
+
           <div class="ov2-card full">
             <div class="ov2-card-label">Binding</div>
             <div class="ov2-tog-group">
@@ -381,6 +391,11 @@
               <div class="ov2-tog" data-binding="staple" id="ov2-bd-staple">📎 Staple</div>
               <div class="ov2-tog" data-binding="spiral" id="ov2-bd-spiral">🌀 Spiral</div>
               <div class="ov2-tog" data-binding="wiro" id="ov2-bd-wiro">🔗 Wiro</div>
+              <div class="ov2-tog" data-binding="soft" id="ov2-bd-soft">📕 Soft</div>
+              <div class="ov2-tog" data-binding="perfect" id="ov2-bd-perfect">📗 Perfect</div>
+              <div class="ov2-tog" data-binding="project" id="ov2-bd-project">📘 Project</div>
+              <div class="ov2-tog" data-binding="record" id="ov2-bd-record">📔 Record</div>
+              <div class="ov2-tog" data-binding="thesis" id="ov2-bd-thesis">🎓 Thesis</div>
             </div>
           </div>
 
@@ -394,6 +409,7 @@
           <span class="ov2-tag" id="ov2-s-copies">1 copy</span>
           <span class="ov2-tag" id="ov2-s-paper">A4</span>
           <span class="ov2-tag" id="ov2-s-sides">Single-sided</span>
+          <span class="ov2-tag" id="ov2-s-orient" style="display:none;">Portrait</span>
           <span class="ov2-tag" id="ov2-s-bind">No binding</span>
           <span class="ov2-tag sheets" id="ov2-s-sheets">0 sheets</span>
           <span class="ov2-tag price" id="ov2-s-price" style="display:none;">₹0</span>
