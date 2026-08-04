@@ -49,6 +49,7 @@ const runtime = {
   rendered: {},         // { pageNo: true } once a thumbnail canvas is painted
   observer: null,       // IntersectionObserver for lazy thumbnails
   delivery: 0,
+  pickup_store: 'thriprayar',  // which location fulfils — 'thriprayar' | 'nattika'
   lastTotal: null,      // last successful quote total (kept on network error)
 };
 
@@ -605,6 +606,12 @@ function setDelivery(d) {
   validateStep2();
 }
 
+function setStore(s) {
+  runtime.pickup_store = s;
+  $('ov2-st-thriprayar').classList.toggle('active', s === 'thriprayar');
+  $('ov2-st-nattika').classList.toggle('active', s === 'nattika');
+}
+
 // ── Submit flow ───────────────────────────────────────────────────────────────
 function showError(html) {
   const box = $('ov2-error');
@@ -707,6 +714,7 @@ async function submitOrder() {
       name: $('ov2-name').value.trim(),
       whatsapp: $('ov2-whatsapp').value.trim(),
       delivery: runtime.delivery,
+      pickup_store: runtime.pickup_store,
     };
     if (runtime.delivery === 1) customer.address = $('ov2-address').value.trim();
 
@@ -802,6 +810,8 @@ function wire() {
 
   document.querySelectorAll('[data-delivery]').forEach((el) =>
     el.addEventListener('click', () => setDelivery(parseInt(el.dataset.delivery, 10))));
+  document.querySelectorAll('[data-store]').forEach((el) =>
+    el.addEventListener('click', () => setStore(el.dataset.store)));
   $('ov2-name').addEventListener('input', validateStep2);
   $('ov2-whatsapp').addEventListener('input', validateStep2);
   $('ov2-address').addEventListener('input', validateStep2);

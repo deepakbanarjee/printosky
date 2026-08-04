@@ -73,7 +73,59 @@ def test_create_inserts_job_and_settings(monkeypatch):
     assert calls["settings"]["page_count"] == 4          # len(pages_included [1,3,4,5])
     assert calls["settings"]["customer_name"] == "Asha"
     assert "PICKUP" in calls["settings"]["operator_note"]  # delivery=0 folded into note
+    assert calls["settings"]["orientation"] == "auto"      # default when spec omits it
     assert calls.get("wa") is True
+
+
+def test_create_accepts_legal_and_persists_orientation(monkeypatch):
+    import api.handlers_order as ho
+    captured, calls = {}, {}
+    monkeypatch.setattr(ho, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(ho, "_insert_job", lambda **kw: calls.setdefault("insert", kw))
+    monkeypatch.setattr(ho, "_persist_settings", lambda job_id, **kw: calls.setdefault("settings", kw))
+    monkeypatch.setattr(ho, "_send_confirmation", lambda *a, **k: calls.setdefault("wa", True))
+    monkeypatch.setattr(ho, "_quote_total", lambda items, fin, size: 120.0)
+    monkeypatch.setattr(ho, "_resolve_request_account", lambda h: {})  # guest order
+    payload = {
+        "customer": {"name": "Ravi", "whatsapp": "919495706405", "delivery": 0},
+        "file_url": "https://x/orders/u/thesis.pdf", "file_name": "thesis.pdf",
+        "print_spec": {
+            "file_ext": "pdf", "total_pages": 40, "pages_included": list(range(1, 41)),
+            "colour_mode": "bw", "nup": 1, "copies": 1,
+            "paper_size": "Legal", "sides": "duplex", "orientation": "landscape",
+            "binding": "thesis", "sheet_count": 20, "price_exact": True,
+        },
+        "operator_note": "40 of 40 pages · Duplex · Landscape · Thesis",
+    }
+    ho._handle_order_create(_fake_h(), json.dumps(payload).encode())
+    assert captured["status"] == 200                       # Legal no longer rejected
+    assert calls["settings"]["size"] == "Legal"
+    assert calls["settings"]["finishing"] == "thesis"      # new binding not coerced to none
+    assert calls["settings"]["orientation"] == "landscape"
+
+
+def test_create_bad_orientation_falls_back_to_auto(monkeypatch):
+    import api.handlers_order as ho
+    captured, calls = {}, {}
+    monkeypatch.setattr(ho, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(ho, "_insert_job", lambda **kw: calls.setdefault("insert", kw))
+    monkeypatch.setattr(ho, "_persist_settings", lambda job_id, **kw: calls.setdefault("settings", kw))
+    monkeypatch.setattr(ho, "_send_confirmation", lambda *a, **k: calls.setdefault("wa", True))
+    monkeypatch.setattr(ho, "_quote_total", lambda items, fin, size: 10.0)
+    monkeypatch.setattr(ho, "_resolve_request_account", lambda h: {})
+    payload = {
+        "customer": {"name": "X", "whatsapp": "919495706405", "delivery": 0},
+        "file_url": "https://x/orders/u/a.pdf", "file_name": "a.pdf",
+        "print_spec": {
+            "total_pages": 1, "pages_included": [1], "colour_mode": "bw",
+            "nup": 1, "copies": 1, "paper_size": "A4", "sides": "single",
+            "orientation": "sideways", "binding": "none",
+        },
+        "operator_note": "1 of 1 pages",
+    }
+    ho._handle_order_create(_fake_h(), json.dumps(payload).encode())
+    assert captured["status"] == 200
+    assert calls["settings"]["orientation"] == "auto"      # invalid value sanitised
 
 
 def test_create_rejects_bad_phone(monkeypatch):
@@ -196,3 +248,60 @@ def test_reorder_requires_login(monkeypatch):
     ho._handle_order_reorder(_fake_h(), json.dumps({"job_id": "OSP-20260610-0031"}).encode())
 
     assert captured["status"] == 401
+
+
+# ── location picker → assigned_store_id ───────────────────────────────────────
+
+def test_resolve_store_id_maps_and_defaults():
+    import api.handlers_order as ho
+    assert ho._resolve_store_id("thriprayar") == "OSP"
+    assert ho._resolve_store_id("nattika") == "PRINTK"
+    assert ho._resolve_store_id("NATTIKA") == "PRINTK"   # case-insensitive
+    assert ho._resolve_store_id("  nattika  ") == "PRINTK"  # trimmed
+    assert ho._resolve_store_id(None) == "OSP"           # absent -> default
+    assert ho._resolve_store_id("mars") == "OSP"         # unknown -> default
+
+
+def _order_payload(pickup_store=None):
+    cust = {"name": "Asha", "whatsapp": "919495706405", "delivery": 0}
+    if pickup_store is not None:
+        cust["pickup_store"] = pickup_store
+    return {
+        "customer": cust,
+        "file_url": "https://x/orders/u/report.pdf", "file_name": "report.pdf",
+        "print_spec": {
+            "file_ext": "pdf", "total_pages": 2, "pages_included": [1, 2],
+            "colour_mode": "bw", "nup": 1, "copies": 1,
+            "paper_size": "A4", "sides": "single", "binding": "none",
+            "sheet_count": 2, "price_exact": True,
+        },
+        "operator_note": "2 of 2 pages",
+    }
+
+
+def _run_create(monkeypatch, pickup_store):
+    import api.handlers_order as ho
+    captured, calls = {}, {}
+    monkeypatch.setattr(ho, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(ho, "_insert_job", lambda **kw: calls.setdefault("insert", kw))
+    monkeypatch.setattr(ho, "_persist_settings", lambda job_id, **kw: calls.setdefault("settings", kw))
+    monkeypatch.setattr(ho, "_send_confirmation", lambda *a, **k: None)
+    monkeypatch.setattr(ho, "_quote_total", lambda items, fin, size: 10.0)
+    monkeypatch.setattr(ho, "_resolve_request_account", lambda h: {})
+    ho._handle_order_create(_fake_h(), json.dumps(_order_payload(pickup_store)).encode())
+    return captured, calls
+
+
+def test_create_routes_to_nattika(monkeypatch):
+    captured, calls = _run_create(monkeypatch, "nattika")
+    assert captured["status"] == 200
+    assert calls["settings"]["assigned_store_id"] == "PRINTK"
+    assert "Nattika" in calls["settings"]["operator_note"]
+
+
+def test_create_defaults_store_to_osp(monkeypatch):
+    # No pickup_store on the order (older client, or Thriprayar default).
+    captured, calls = _run_create(monkeypatch, None)
+    assert captured["status"] == 200
+    assert calls["settings"]["assigned_store_id"] == "OSP"
+    assert "Thriprayar" in calls["settings"]["operator_note"]

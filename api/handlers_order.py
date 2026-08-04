@@ -65,7 +65,8 @@ def _handle_order_upload_sign(h, body: bytes) -> None:
 
 # ── /order/quote ─────────────────────────────────────────────────────────────
 
-_VALID_FINISHING = {"none", "staple", "spiral", "wiro"}
+_VALID_FINISHING = {"none", "staple", "spiral", "wiro",
+                    "soft", "perfect", "project", "record", "thesis"}
 
 
 def _handle_order_quote(h, body: bytes) -> None:
@@ -105,7 +106,8 @@ def _insert_job(job_id, sender, filename, file_url):
 
 
 def _persist_settings(job_id, *, amount_quoted, copies, finishing, size, colour,
-                      page_count, operator_note, customer_name):
+                      page_count, operator_note, customer_name, orientation="auto",
+                      assigned_store_id="OSP"):
     """Persist print settings + web-order metadata onto the job row.
 
     Writes ONLY columns that exist on the live `jobs` schema. Notably there is
@@ -113,6 +115,9 @@ def _persist_settings(job_id, *, amount_quoted, copies, finishing, size, colour,
     is folded into the human-readable `notes` field, which is what the operator
     reads. (Do NOT route this through db_cloud.update_job_settings: that writes a
     non-existent `layout` column, which makes the whole PostgREST update fail.)
+
+    `orientation` ('auto' | 'portrait' | 'landscape') has a dedicated column
+    (added 2026-07-14); it also still appears in `notes` for at-a-glance reading.
     """
     from db_cloud import _client
     _client().table("jobs").update({
@@ -120,11 +125,13 @@ def _persist_settings(job_id, *, amount_quoted, copies, finishing, size, colour,
         "finishing":     finishing,
         "size":          size,
         "colour":        colour,          # 'bw' | 'col' | 'mixed'
+        "orientation":   orientation,     # 'auto' | 'portrait' | 'landscape'
         "amount_quoted": amount_quoted,
         "page_count":    page_count,
         "notes":         operator_note,   # carries colour/skipped pages + delivery
         "source":        "web",
         "customer_name": customer_name,
+        "assigned_store_id": assigned_store_id,  # which store fulfils (manual picker)
     }).eq("job_id", job_id).execute()
 
 
@@ -169,8 +176,25 @@ def _resolve_request_account(h) -> dict:
     except Exception as _e:
         logger.debug("order account resolve skipped: %r", str(_e))
         return {}
-_VALID_SIZE = {"A4", "A3", "A5", "Letter"}
+_VALID_SIZE = {"A4", "A3", "A5", "Legal", "Letter"}
 _VALID_COLOUR = {"bw", "col", "mixed"}
+_VALID_ORIENTATION = {"auto", "portrait", "landscape"}
+
+# Customer pickup-location choice -> fulfilling store_id. This is the manual
+# routing path: the order page asks which of our locations should handle the
+# job, and we stamp assigned_store_id directly (no distance/capacity engine).
+# The store PC's store_puller polls Supabase for jobs assigned to its store_id.
+# Unknown/absent -> Oxygen (OSP), the default single-store behaviour.
+_PICKUP_STORE_MAP = {"thriprayar": "OSP", "nattika": "PRINTK"}
+_STORE_LABEL = {"OSP": "Thriprayar", "PRINTK": "Nattika"}
+_DEFAULT_STORE_ID = "OSP"
+
+
+def _resolve_store_id(pickup_store) -> str:
+    """Map a pickup-location choice to a fulfilling store_id (default OSP)."""
+    return _PICKUP_STORE_MAP.get(
+        str(pickup_store or "").strip().lower(), _DEFAULT_STORE_ID
+    )
 
 
 def _handle_order_create(h, body: bytes) -> None:
@@ -224,19 +248,27 @@ def _handle_order_create(h, body: bytes) -> None:
     finishing = spec.get("binding", "none")
     if finishing not in _VALID_FINISHING:
         finishing = "none"
+    orientation = spec.get("orientation", "auto")
+    if orientation not in _VALID_ORIENTATION:
+        orientation = "auto"
 
     try:
         total = _quote_total(items, finishing, size)
     except Exception:
         total = 0.0
 
-    # Fold delivery/pickup (no dedicated column) into the operator-facing note.
+    # Which store fulfils this job (manual location picker on the order page).
+    assigned_store_id = _resolve_store_id(cust.get("pickup_store"))
+
+    # Fold delivery/pickup + fulfilling store (no dedicated note column) into
+    # the operator-facing note.
     note = str(data.get("operator_note", "")).strip()
     if int(cust.get("delivery", 0)):
         addr = str(cust.get("address", "")).strip()
         note = (note + " · DELIVERY" + (f": {addr}" if addr else "")).strip(" ·")
     else:
         note = (note + " · PICKUP").strip(" ·")
+    note = (note + " · " + _STORE_LABEL.get(assigned_store_id, assigned_store_id)).strip(" ·")
     page_count = len(spec.get("pages_included") or []) or int(spec.get("total_pages", 0))
 
     job_id = f"OSP-{datetime.now().strftime('%Y%m%d')}-{phone[-4:]}-{_uuid.uuid4().hex[:4]}"
@@ -245,8 +277,9 @@ def _handle_order_create(h, body: bytes) -> None:
         _persist_settings(
             job_id=job_id, amount_quoted=total, copies=copies, finishing=finishing,
             size=size, colour=colour, page_count=page_count,
-            operator_note=note,
+            operator_note=note, orientation=orientation,
             customer_name=account_name or str(cust.get("name", "")).strip(),
+            assigned_store_id=assigned_store_id,
         )
     except Exception as exc:
         logger.error("order create db error %s: %r", type(exc).__name__, str(exc))
@@ -311,7 +344,7 @@ def _handle_order_reorder(h, body: bytes) -> None:
             size=str(src.get("size") or "A4"),
             colour=str(src.get("colour") or "bw"),
             page_count=int(src.get("page_count") or 0),
-            operator_note=note,
+            operator_note=note, orientation=str(src.get("orientation") or "auto"),
             customer_name=str(src.get("customer_name") or acct.get("name") or "").strip(),
         )
     except Exception as exc:
