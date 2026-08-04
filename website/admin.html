@@ -1329,6 +1329,7 @@
       <div class="panel-hdr">
         <div class="panel-title">Job Log</div>
         <span class="panel-badge" id="job-count">Loading…</span>
+        <button class="ctrl-btn" id="jobs-store-badge" onclick="changeStore()" title="Which store's jobs this page shows. Store PCs set this automatically; offices pick it once.">🏪 —</button>
         <button class="nj-btn-new-job" style="margin-left:auto" onclick="openNewJobModal()" title="Add walk-in or manual job (N)">+ New Job</button>
         <button class="filter-btn" onclick="openPhotocopyModal()">+ Photocopy</button>
       </div>
@@ -2575,12 +2576,29 @@ let activeFilter = "all";
 let isDemo = false;
 
 // ── Load everything ─────────────────────────────────────────────────────────
+// Store-scoped: this page shows ONLY the jobs belonging to THIS machine's store.
+// A job belongs to a store if it was routed there (assigned_store_id) OR it
+// originated there and was never routed away (store_id + assigned_store_id null).
+// Store identity comes from getStoreId() — auto on a store PC, 🏪 picker on an
+// office box. No store set → no fetch (never silently fall back to all-stores).
+function storeJobsFilter(s) {
+  return `or=(assigned_store_id.eq.${s},and(store_id.eq.${s},assigned_store_id.is.null))`;
+}
+
 async function loadAll() {
   setSyncState("loading");
+  const storeId = getStoreId();
+  updateJobsStoreBadge(storeId);
+  if (!storeId) {
+    setSyncState("err", "Set this machine's store (🏪 button) to load its jobs");
+    const tbody = document.getElementById("jobs-tbody");
+    if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="empty">No store selected — click the 🏪 Store button above to choose which store this machine is.</td></tr>`;
+    return;
+  }
   try {
     const [jobs, summary] = await Promise.all([
-      sbFetch("jobs", "order=received_at.desc&limit=200"),
-      sbFetch("daily_summary", `date=eq.${today()}&order=synced_at.desc&limit=1`),
+      sbFetch("jobs", `${storeJobsFilter(storeId)}&order=received_at.desc&limit=200`),
+      sbFetch("daily_summary", `store_id=eq.${storeId}&date=eq.${today()}&order=synced_at.desc&limit=1`),
     ]);
 
     isDemo = jobs.length === 0;
@@ -2760,9 +2778,15 @@ async function loadPrinterJobs() {
     dateParam = `&job_date=gte.${weekAgo}T00:00:00`;
   }
 
+  // Store-scoped: printers are physical to a store, so show only this store's
+  // Konica/Epson attribution feeds. No store set → nothing to show.
+  const storeId = getStoreId();
+  if (!storeId) return;
+  const storeParam = `&store_id=eq.${storeId}`;
+
   const [konicaRows, epsonRows] = await Promise.all([
-    sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}`).catch(() => []),
-    sbFetch("epson_jobs",  `source=eq.weblog&order=job_date.desc&limit=200${dateParam}`).catch(() => []),
+    sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}${storeParam}`).catch(() => []),
+    sbFetch("epson_jobs",  `source=eq.weblog&order=job_date.desc&limit=200${dateParam}${storeParam}`).catch(() => []),
   ]);
 
   // Konica table
@@ -6761,12 +6785,19 @@ function getStoreId() {
   return (localStorage.getItem("storeId") || "").trim();
 }
 
+// Reflect the active store on the Jobs page badge. Empty → a "pick me" prompt.
+function updateJobsStoreBadge(storeId) {
+  const b = document.getElementById("jobs-store-badge");
+  if (b) b.textContent = "🏪 " + (storeId || "Set store");
+}
+
 function changeStore() {
   const cur = getStoreId();
   const val = (prompt(
     "Which store / office is THIS machine?\n\n" +
     "Enter its store code — e.g.\n" +
     "  OSP     = Oxygen Students Paradise store PC (Thrissur)\n" +
+    "  PRINTK  = Printosky Nattika store PC\n" +
     "  PRIOFF  = Printosky office (Nattika)",
     cur
   ) || "").trim().toUpperCase();
@@ -6774,7 +6805,9 @@ function changeStore() {
     localStorage.setItem("storeId", val);
     const b = document.getElementById("tr-store-btn");
     if (b) b.textContent = "🏪 Store: " + val;
+    updateJobsStoreBadge(val);
     if (typeof loadTranscripts === "function") loadTranscripts();
+    if (typeof loadAll === "function") loadAll();  // refresh jobs for the new store
   }
   return getStoreId();
 }
