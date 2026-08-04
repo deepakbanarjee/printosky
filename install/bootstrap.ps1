@@ -229,7 +229,7 @@ $konicaIp  = Ask "    Konica printer IP (leave blank if this store has no Konica
 if ([string]::IsNullOrWhiteSpace($konicaIp)) {
     $konicaIp = $null
     $konicaQ  = $null
-    Write-Skip "no Konica on this node — finishing/collection-only (matches Nattika-style stores)"
+    Write-Skip "no Konica on this node - finishing/collection-only (matches Nattika-style stores)"
 } else {
     $konicaQ = Ask "    Konica Windows print queue name" "KONICA MINOLTA 1100 PS"
 }
