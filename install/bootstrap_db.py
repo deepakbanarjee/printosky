@@ -114,23 +114,21 @@ def bootstrap(db_path: str) -> int:
         conn = sqlite3.connect(db_path)
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS staff (
-                staff_id        TEXT PRIMARY KEY,
+                id              TEXT PRIMARY KEY,
                 name            TEXT NOT NULL,
                 pin_hash        TEXT NOT NULL,
-                pin_salt        TEXT NOT NULL,
-                is_active       INTEGER DEFAULT 1,
-                created_at      TEXT,
-                last_login_at   TEXT,
-                last_login_pc   TEXT
+                pin_salt        TEXT,
+                active          INTEGER DEFAULT 1,
+                created_at      TEXT DEFAULT (datetime('now'))
             );
             CREATE TABLE IF NOT EXISTS staff_sessions (
-                session_id      TEXT PRIMARY KEY,
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 staff_id        TEXT NOT NULL,
-                pc_id           TEXT NOT NULL,
+                pc_id           TEXT,
                 login_at        TEXT NOT NULL,
                 logout_at       TEXT,
-                last_seen_at    TEXT,
-                FOREIGN KEY (staff_id) REFERENCES staff(staff_id)
+                idle_logout     INTEGER DEFAULT 0,
+                FOREIGN KEY (staff_id) REFERENCES staff(id)
             );
             CREATE TABLE IF NOT EXISTS print_items (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
