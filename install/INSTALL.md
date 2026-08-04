@@ -34,7 +34,6 @@ These don't run on the store PC. They're configured once by the owner.
   - `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`, `META_SYSTEM_USER_TOKEN`, `META_PHONE_NUMBER_ID`
   - `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`
   - `ANTHROPIC_API_KEY`
-  - `ADMIN_PBKDF2_SALT`, `ADMIN_PBKDF2_HASH`
 - Deploy: `vercel --prod` from the repo root.
 
 ### A3. Meta WhatsApp Cloud API
@@ -54,10 +53,15 @@ These don't run on the store PC. They're configured once by the owner.
 - Set up a named tunnel from `store.printosky.com` to the store PC.
 - The `SETUP_NAMED_TUNNEL.bat` script handles the store-side install.
 
-### A6. Netlify (admin UI hosting — optional)
+### A6. Netlify (admin UI hosting)
 - Deploy `website/` to Netlify.
-- Set `ADMIN_PASSWORD_HASH`, `SUPERADMIN_SHA256_HASH`, etc. in
-  Netlify env vars.
+- Set these in **Netlify → Site configuration → Environment variables**
+  (read by `netlify/functions/auth.js`, which verifies admin/superadmin/
+  store/mis logins server-side — these do NOT live in Vercel):
+  - `ADMIN_PBKDF2_HASH`, `ADMIN_PBKDF2_SALT`
+  - `SUPERADMIN_SHA256_HASH`, `STORE_SHA256_HASH`, `MIS_SHA256_HASH`
+  - `ADMIN_PASSWORD_HASH` (separate, simpler SHA256 check used elsewhere)
+  - `SUPABASE_URL`, `SUPABASE_KEY` (auth.js also talks to Supabase directly)
 
 When all the above are done, each new store just needs Part B.
 
@@ -68,7 +72,7 @@ When all the above are done, each new store just needs Part B.
 ### B1. Prerequisites on the store PC
 
 - **Windows 10/11** (PowerShell 5.1+ comes pre-installed)
-- **Python 3.13+** — download from https://python.org/downloads.
+- **Python 3.12+** — download from https://python.org/downloads.
   **Tick "Add Python to PATH"** during install.
 - **Git** — `winget install Git.Git` or download from https://git-scm.com.
 - **The store's Windows printer queues** must be set up first:
@@ -83,8 +87,17 @@ HQ ships **one file** containing all the shared backend secrets:
 hq-secrets.env
 ```
 
-This file contains: `META_*`, `SUPABASE_*`, `ANTHROPIC_API_KEY`,
-`RAZORPAY_*`, `ADMIN_PBKDF2_*`, `SUPERADMIN/STORE/MIS_SHA256_HASH`.
+This file contains only the keys a store PC actually reads:
+`META_*`, `SUPABASE_*`, `RAZORPAY_*`, `ANTHROPIC_API_KEY`.
+(`STORE_TOKEN` and `STORE_WHATSAPP_PHONE` are generated / prompted by
+the installer, not shipped in this file.)
+
+> **Do NOT put the website login hashes here.** `ADMIN_PBKDF2_HASH`,
+> `ADMIN_PBKDF2_SALT`, `SUPERADMIN_SHA256_HASH`, `STORE_SHA256_HASH`,
+> `MIS_SHA256_HASH` are **Netlify-only** — they power the website admin
+> login (`netlify/functions/auth.js`), not the store PC. No store-PC
+> code reads them, and the installer explicitly ignores them.
+
 It is **never** committed to git and must be transferred securely
 (encrypted email, USB stick, password-protected zip).
 

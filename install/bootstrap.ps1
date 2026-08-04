@@ -111,7 +111,7 @@ try {
     Write-OK "Python: $pyVer"
 } catch {
     Write-Fail "Python not found on PATH."
-    Write-Host "        Install Python 3.13+ from https://python.org/downloads" -ForegroundColor Yellow
+    Write-Host "        Install Python 3.12+ from https://python.org/downloads" -ForegroundColor Yellow
     Write-Host "        IMPORTANT: tick 'Add Python to PATH' during install." -ForegroundColor Yellow
     exit 1
 }
@@ -225,9 +225,15 @@ $storeName = Ask "    Store name (e.g. 'Printosky Trivandrum')"
 $suggested = Suggest-StoreId $storeName
 $storeId = (Ask "    store_id (short code)" $suggested).ToUpper()
 $city      = Ask "    City / location"      "Thrissur"
-$konicaIp  = Ask "    Konica printer IP"     "192.168.55.110"
+$konicaIp  = Ask "    Konica printer IP (leave blank if this store has no Konica)" ""
+if ([string]::IsNullOrWhiteSpace($konicaIp)) {
+    $konicaIp = $null
+    $konicaQ  = $null
+    Write-Skip "no Konica on this node — finishing/collection-only (matches Nattika-style stores)"
+} else {
+    $konicaQ = Ask "    Konica Windows print queue name" "KONICA MINOLTA 1100 PS"
+}
 $epsonIp   = Ask "    Epson printer IP"      "192.168.55.202"
-$konicaQ   = Ask "    Konica Windows print queue name" "KONICA MINOLTA 1100 PS"
 $epsonQ    = Ask "    Epson Windows print queue name"  "WF-C21000 Series(Network)"
 $waPhone   = Ask "    Store WhatsApp number (with country code, no +)" "919495706405"
 $epsonUser = Ask "    Epson web admin username"        "Oxygen"
