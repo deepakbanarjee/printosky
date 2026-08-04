@@ -25,7 +25,7 @@ timeout /t 5 /nobreak >nul
 
 :: 0. Env pre-flight (TASK-015) -- abort early on missing/malformed secrets
 ::    instead of failing deep inside a handler at runtime.
-echo  [0/4] Checking environment variables...
+echo  [0/5] Checking environment variables...
 python "%REPO_DIR%\scripts\check_env.py" store_pc --dotenv "%REPO_DIR%\.env"
 if errorlevel 1 (
     echo.
@@ -39,22 +39,29 @@ echo.
 :: 1. Watcher (Python) -- ports 3002/3003
 :: `start /D <dir>` sets the working directory for the new window cleanly,
 :: which avoids the nested-quote escape hell that `cd /d && python` causes.
-echo  [1/4] Starting Watcher on ports 3002/3003...
+echo  [1/5] Starting Watcher on ports 3002/3003...
 start "Printosky Watcher" /D "%REPO_DIR%" cmd /k python watcher.py
 timeout /t 3 /nobreak >nul
 
 :: 2. Print Server (Python) -- port 3005
-echo  [2/4] Starting Print Server on port 3005...
+echo  [2/5] Starting Print Server on port 3005...
 start "Printosky Print Server" /D "%REPO_DIR%" cmd /k python print_server.py
 timeout /t 2 /nobreak >nul
 
-:: 3. Academic Pipeline Worker (Python) -- polls Supabase for generation tasks
-echo  [3/4] Starting Academic Pipeline Worker...
+:: 3. Store Job Puller (Python) -- polls Supabase for multi-store routed jobs
+::    assigned to THIS store and downloads them into Jobs\Assigned for staff
+::    to print. Store-specific: reads its own store_id from store_config.json.
+echo  [3/5] Starting Store Job Puller...
+start "Printosky Job Puller" /D "%REPO_DIR%" cmd /k python store_puller.py
+timeout /t 2 /nobreak >nul
+
+:: 4. Academic Pipeline Worker (Python) -- polls Supabase for generation tasks
+echo  [4/5] Starting Academic Pipeline Worker...
 start "Printosky Academic Worker" /D "%REPO_DIR%" cmd /k python academic_pipeline_worker.py
 timeout /t 2 /nobreak >nul
 
-:: 4. WhatsApp Bot (Meta Cloud API / Webhook Receiver) -- runs inside Watcher
-echo  [4/4] Meta WhatsApp Webhook active inside Watcher on port 3002
+:: 5. WhatsApp Bot (Meta Cloud API / Webhook Receiver) -- runs inside Watcher
+echo  [5/5] Meta WhatsApp Webhook active inside Watcher on port 3002
 
 echo.
 echo  All services started. Check the CMD windows for status.
