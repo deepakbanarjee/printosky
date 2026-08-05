@@ -134,7 +134,8 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                 pdf_bytes, cols=cols, rows=rows,
                 paper_size=paper_size or "A4",
                 orientation=nup_orient,
-                is_duplex=(sides == "ds")
+                is_duplex=(sides == "ds"),
+                layout_direction=spec.get("nup_direction", "horizontal")
             )
             
             imposed_path = os.path.join(temp_dir, "imposed.pdf")
@@ -156,8 +157,7 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
 
         # 3. Mixed Colour Grouping & Splitting
         if colour_mode == "mixed":
-            bw_pages = []
-            col_pages = []
+            sheet_modes = [] # list of (mode, list_of_pages)
             current_colour_pages = set(current_colour_pages)
 
             if sides == "ds":
@@ -167,79 +167,59 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                     p1 = i
                     p2 = i + 1
                     is_sheet_colour = (p1 in current_colour_pages) or (p2 <= total_pages and p2 in current_colour_pages)
-                    
-                    if is_sheet_colour:
-                        col_pages.append(p1)
-                        if p2 <= total_pages:
-                            col_pages.append(p2)
-                    else:
-                        bw_pages.append(p1)
-                        if p2 <= total_pages:
-                            bw_pages.append(p2)
+                    mode = "colour" if is_sheet_colour else "bw"
+                    pages = [p1]
+                    if p2 <= total_pages:
+                        pages.append(p2)
+                    sheet_modes.append((mode, pages))
             else:
                 # Simplex
                 for i in range(1, total_pages + 1):
-                    if i in current_colour_pages:
-                        col_pages.append(i)
+                    mode = "colour" if i in current_colour_pages else "bw"
+                    sheet_modes.append((mode, [i]))
+
+            # Group consecutive sheets of the same mode
+            sections = [] # list of (mode, list_of_pages)
+            if sheet_modes:
+                curr_mode, curr_pages = sheet_modes[0]
+                for mode, pages in sheet_modes[1:]:
+                    if mode == curr_mode:
+                        curr_pages.extend(pages)
                     else:
-                        bw_pages.append(i)
+                        sections.append((curr_mode, curr_pages))
+                        curr_mode = mode
+                        curr_pages = list(pages)
+                sections.append((curr_mode, curr_pages))
 
-            # Check if all pages belong to one group
-            if not col_pages:
+            # If there is only one section, return it directly
+            if len(sections) == 1:
                 return [{
                     "pdf_path": current_pdf,
-                    "colour_mode": "bw",
+                    "colour_mode": sections[0][0],
                     "copies": copies,
                     "sides": sides,
                     "paper_size": paper_size,
                     "orientation": orientation
                 }], temp_dir
-            elif not bw_pages:
-                return [{
-                    "pdf_path": current_pdf,
-                    "colour_mode": "colour",
+
+            # Otherwise, split into multiple sequential PDF files
+            actions = []
+            for idx, (mode, pages) in enumerate(sections):
+                sub_pdf_path = os.path.join(temp_dir, f"sub_job_{idx+1}_{mode}.pdf")
+                doc = fitz.open(current_pdf)
+                doc.select([p - 1 for p in pages])
+                doc.save(sub_pdf_path)
+                doc.close()
+
+                actions.append({
+                    "pdf_path": sub_pdf_path,
+                    "colour_mode": mode,
                     "copies": copies,
                     "sides": sides,
                     "paper_size": paper_size,
                     "orientation": orientation
-                }], temp_dir
-            else:
-                # Split physically
-                bw_pdf_path = os.path.join(temp_dir, "bw.pdf")
-                col_pdf_path = os.path.join(temp_dir, "colour.pdf")
-
-                # B&W PDF
-                doc = fitz.open(current_pdf)
-                doc.select([p - 1 for p in bw_pages])
-                doc.save(bw_pdf_path)
-                doc.close()
-
-                # Colour PDF
-                doc = fitz.open(current_pdf)
-                doc.select([p - 1 for p in col_pages])
-                doc.save(col_pdf_path)
-                doc.close()
-
-                # Return two print actions in document order
-                # For duplex: keep both actions duplex. SumatraPDF handles it.
-                return [
-                    {
-                        "pdf_path": bw_pdf_path,
-                        "colour_mode": "bw",
-                        "copies": copies,
-                        "sides": sides,
-                        "paper_size": paper_size,
-                        "orientation": orientation
-                    },
-                    {
-                        "pdf_path": col_pdf_path,
-                        "colour_mode": "colour",
-                        "copies": copies,
-                        "sides": sides,
-                        "paper_size": paper_size,
-                        "orientation": orientation
-                    }
-                ], temp_dir
+                })
+            return actions, temp_dir
 
         else:
             # Plain B&W or Color
@@ -274,25 +254,20 @@ def get_imposed_colour_sheets(total_logical_pages: int, current_colour_pages: se
     if slots_per_page < 1:
         slots_per_page = 1; cols = 1; rows = 1
         
-    if not is_duplex:
-        page_indices = list(range(total_logical_pages))
-        sheets = []
-        for i in range(0, len(page_indices), slots_per_page):
-            sheets.append(page_indices[i:i+slots_per_page])
-    else:
-        front_indices = []
-        back_indices = []
-        for p in range(total_logical_pages):
-            if p % 2 == 0: front_indices.append(p)
-            else: back_indices.append(p)
-        while len(back_indices) < len(front_indices):
-            back_indices.append(-1)
-        sheets = []
-        for i in range(0, len(front_indices), slots_per_page):
-            sheets.append(front_indices[i:i+slots_per_page])
-            back_chunk = back_indices[i:i+slots_per_page]
-            if back_chunk:
-                sheets.append(back_chunk)
+    page_indices = list(range(total_logical_pages))
+    sheets = []
+    idx = 0
+    while idx < len(page_indices):
+        # Front Page
+        front_chunk = page_indices[idx : idx + slots_per_page]
+        sheets.append(front_chunk)
+        idx += slots_per_page
+        
+        if is_duplex:
+            # Back Page (sequential next chunk)
+            back_chunk = page_indices[idx : idx + slots_per_page]
+            sheets.append(back_chunk)
+            idx += slots_per_page
                 
     colour_sheets = []
     for sheet_idx, chunk in enumerate(sheets):

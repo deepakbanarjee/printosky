@@ -100,6 +100,8 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
         return True, "spooled"
 
     monkeypatch.setattr(print_server, "send_to_printer", fake_send)
+    monkeypatch.setitem(print_server.PRINTER_IPS, "konica", "192.168.1.100")
+    monkeypatch.setitem(print_server.PRINTERS, "konica", "KONICA MINOLTA 1100 PS")
 
     import print_planner
     monkeypatch.setattr(print_planner, "cleanup_temp_dir", lambda path: None)
@@ -124,38 +126,24 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
 
     assert pulled == ["OSP-E2E-TEST"]
     
-    # We expect 2 separate print spools (one B&W, one Colour)
+    # We expect 2 separate print spools (one Colour, one B&W)
     # The 6 logical pages in 2-up duplex:
-    #   - Sheet 1 front (imposed page 1) contains logical pages 0 and 2.
-    #   - Sheet 1 back (imposed page 2) contains logical pages 1 and 3.
-    #   - Sheet 2 front (imposed page 3) contains logical pages 4 and -1 (blank padding).
-    #   - Sheet 2 back (imposed page 4) contains logical pages 5 and -1 (blank padding).
+    #   - Sheet 1 front (imposed page 1) contains logical pages 0 and 1.
+    #   - Sheet 1 back (imposed page 2) contains logical pages 2 and 3.
+    #   - Sheet 2 front (imposed page 3) contains logical pages 4 and 5.
+    #   - Sheet 2 back (imposed page 4) contains logical pages -1 and -1 (blank padding).
     # Total imposed sheets: 2 (4 pages in output PDF).
     #
     # Since logical page 1 (0-based page 0) is colour, Sheet 1 is Colour.
     # Sheet 2 has no colour, so Sheet 2 is B&W.
     #
     # Splitting results in:
-    #   - B&W sub-job: Sheet 2 (imposed pages 3-4, total 2 pages).
-    #   - Colour sub-job: Sheet 1 (imposed pages 1-2, total 2 pages).
+    #   - Colour sub-job (first): Sheet 1 (imposed pages 1-2, total 2 pages).
+    #   - B&W sub-job (second): Sheet 2 (imposed pages 3-4, total 2 pages).
     assert len(captured_calls) == 2
 
-    # Check B&W sub-job
-    bw_call = captured_calls[0]
-    assert bw_call["job_id"] == "OSP-E2E-TEST"
-    assert bw_call["printer_key"] == "konica"
-    assert bw_call["colour_mode"] == "bw"
-    assert bw_call["copies"] == 3
-    assert bw_call["sides"] == "ds"
-    assert bw_call["paper_size"] == "A4"
-    assert bw_call["orientation"] == "landscape"  # 2-up landscape
-    
-    doc_bw = fitz.open(bw_call["filepath"])
-    assert len(doc_bw) == 2  # exactly 2 pages
-    doc_bw.close()
-
     # Check Colour sub-job
-    col_call = captured_calls[1]
+    col_call = captured_calls[0]
     assert col_call["job_id"] == "OSP-E2E-TEST"
     assert col_call["printer_key"] == "epson"
     assert col_call["colour_mode"] == "colour"
@@ -167,6 +155,20 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
     doc_col = fitz.open(col_call["filepath"])
     assert len(doc_col) == 2  # exactly 2 pages
     doc_col.close()
+
+    # Check B&W sub-job
+    bw_call = captured_calls[1]
+    assert bw_call["job_id"] == "OSP-E2E-TEST"
+    assert bw_call["printer_key"] == "konica"
+    assert bw_call["colour_mode"] == "bw"
+    assert bw_call["copies"] == 3
+    assert bw_call["sides"] == "ds"
+    assert bw_call["paper_size"] == "A4"
+    assert bw_call["orientation"] == "landscape"  # 2-up landscape
+    
+    doc_bw = fitz.open(bw_call["filepath"])
+    assert len(doc_bw) == 2  # exactly 2 pages
+    doc_bw.close()
 
     # Verify temp workspace directory exists (since we mocked cleanup)
     temp_workspace_dir = os.path.join(str(tmp_path / "Assigned"), "temp_OSP-E2E-TEST")

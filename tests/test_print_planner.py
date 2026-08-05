@@ -72,30 +72,50 @@ def test_nup_imposition(temp_pdf, tmp_path):
     print_planner.cleanup_temp_dir(temp_dir)
 
 def test_mixed_colour_simplex_splitting(temp_pdf, tmp_path):
-    """Mixed colour simplex splits by exact colour pages."""
+    """Mixed colour simplex splits by consecutive colour page sections."""
     spec = {
         "colour_mode": "mixed",
         "colour_pages": [2, 5],  # pages 2 and 5 are color (1-based)
         "sides": "simplex"
     }
     actions, temp_dir = print_planner.plan_print_job("J_MIX_SIM", temp_pdf, spec, str(tmp_path))
-    assert len(actions) == 2
+    assert len(actions) == 5
     assert temp_dir is not None
     
-    # Action 0: B&W (pages 1, 3, 4, 6, 7, 8, 9, 10)
+    # Action 0: B&W (page 1)
     assert actions[0]["colour_mode"] == "bw"
     doc = fitz.open(actions[0]["pdf_path"])
-    assert len(doc) == 8
+    assert len(doc) == 1
     assert "Page 1" in doc[0].get_text()
-    assert "Page 3" in doc[1].get_text()
     doc.close()
 
-    # Action 1: Colour (pages 2, 5)
+    # Action 1: Colour (page 2)
     assert actions[1]["colour_mode"] == "colour"
     doc = fitz.open(actions[1]["pdf_path"])
-    assert len(doc) == 2
+    assert len(doc) == 1
     assert "Page 2" in doc[0].get_text()
-    assert "Page 5" in doc[1].get_text()
+    doc.close()
+
+    # Action 2: B&W (pages 3, 4)
+    assert actions[2]["colour_mode"] == "bw"
+    doc = fitz.open(actions[2]["pdf_path"])
+    assert len(doc) == 2
+    assert "Page 3" in doc[0].get_text()
+    assert "Page 4" in doc[1].get_text()
+    doc.close()
+
+    # Action 3: Colour (page 5)
+    assert actions[3]["colour_mode"] == "colour"
+    doc = fitz.open(actions[3]["pdf_path"])
+    assert len(doc) == 1
+    assert "Page 5" in doc[0].get_text()
+    doc.close()
+
+    # Action 4: B&W (pages 6-10)
+    assert actions[4]["colour_mode"] == "bw"
+    doc = fitz.open(actions[4]["pdf_path"])
+    assert len(doc) == 5
+    assert "Page 6" in doc[0].get_text()
     doc.close()
     
     print_planner.cleanup_temp_dir(temp_dir)
@@ -108,7 +128,7 @@ def test_mixed_colour_duplex_splitting(temp_pdf, tmp_path):
         "sides": "duplex"
     }
     actions, temp_dir = print_planner.plan_print_job("J_MIX_DUP", temp_pdf, spec, str(tmp_path))
-    assert len(actions) == 2
+    assert len(actions) == 3
     assert temp_dir is not None
     
     # Sheet 1: [1, 2] -> B&W
@@ -117,23 +137,30 @@ def test_mixed_colour_duplex_splitting(temp_pdf, tmp_path):
     # Sheet 4: [7, 8] -> B&W
     # Sheet 5: [9, 10] -> B&W
     
-    # B&W sub-job: sheets 1, 3, 4, 5 (pages 1, 2, 5, 6, 7, 8, 9, 10)
+    # Section 1: B&W sheets 1 (pages 1, 2)
     assert actions[0]["colour_mode"] == "bw"
     assert actions[0]["sides"] == "ds"
     doc = fitz.open(actions[0]["pdf_path"])
-    assert len(doc) == 8
+    assert len(doc) == 2
     assert "Page 1" in doc[0].get_text()
     assert "Page 2" in doc[1].get_text()
-    assert "Page 5" in doc[2].get_text()
     doc.close()
 
-    # Colour sub-job: sheet 2 (pages 3, 4)
+    # Section 2: Colour sheet 2 (pages 3, 4)
     assert actions[1]["colour_mode"] == "colour"
     assert actions[1]["sides"] == "ds"
     doc = fitz.open(actions[1]["pdf_path"])
     assert len(doc) == 2
     assert "Page 3" in doc[0].get_text()
     assert "Page 4" in doc[1].get_text()
+    doc.close()
+
+    # Section 3: B&W sheets 3, 4, 5 (pages 5, 6, 7, 8, 9, 10)
+    assert actions[2]["colour_mode"] == "bw"
+    assert actions[2]["sides"] == "ds"
+    doc = fitz.open(actions[2]["pdf_path"])
+    assert len(doc) == 6
+    assert "Page 5" in doc[0].get_text()
     doc.close()
     
     print_planner.cleanup_temp_dir(temp_dir)
@@ -150,26 +177,24 @@ def test_mixed_colour_imposition_duplex(temp_pdf, tmp_path):
     assert len(actions) == 2
     
     # Logical page 1 (0-based page 0) is colour.
-    # Imposition:
+    # Imposition (Sequential):
     # 2-up duplex:
-    # front-chunk page indices: [0, 2, 4, 6, 8] -> Sheet 1 front [0, 2], Sheet 2 front [4, 6], Sheet 3 front [8, -1]
-    # back-chunk page indices: [1, 3, 5, 7, 9] -> Sheet 1 back [1, 3], Sheet 2 back [5, 7], Sheet 3 back [9, -1]
     # Sheet 1:
-    #   - Front (imposed page 1): contains logical pages 0 and 2. (Logical page 0 is colour!)
-    #   - Back (imposed page 2): contains logical pages 1 and 3.
+    #   - Front (imposed page 1): contains logical pages 0 and 1. (Logical page 0 is colour!)
+    #   - Back (imposed page 2): contains logical pages 2 and 3.
     # Therefore imposed Sheet 1 (pages 1-2 of imposed PDF) is Colour.
     # Other sheets have no colour pages, so they are B&W.
     
-    # B&W sub-job: sheets 2, 3 (imposed pages 3, 4, 5, 6)
-    assert actions[0]["colour_mode"] == "bw"
+    # Colour sub-job first: sheet 1 (imposed pages 1, 2)
+    assert actions[0]["colour_mode"] == "colour"
     doc = fitz.open(actions[0]["pdf_path"])
-    assert len(doc) == 4
+    assert len(doc) == 2
     doc.close()
 
-    # Colour sub-job: sheet 1 (imposed pages 1, 2)
-    assert actions[1]["colour_mode"] == "colour"
+    # B&W sub-job: sheets 2, 3 (imposed pages 3, 4, 5, 6)
+    assert actions[1]["colour_mode"] == "bw"
     doc = fitz.open(actions[1]["pdf_path"])
-    assert len(doc) == 2
+    assert len(doc) == 4
     doc.close()
     
     print_planner.cleanup_temp_dir(temp_dir)

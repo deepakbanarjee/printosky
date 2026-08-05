@@ -15,7 +15,8 @@ def perform_nup(
     paper_size: str = "A4", orientation: str = "Portrait", custom_width: float = 595.28, custom_height: float = 841.89,
     is_duplex: bool = False, scale_behavior: str = "Auto-Fit", maintain_aspect: bool = True, is_centered: bool = True,
     custom_scale_width: float = 200.0, custom_scale_height: float = 200.0,
-    n_repeat: int = 1, is_collate: bool = False, draw_crop_marks: bool = False
+    n_repeat: int = 1, is_collate: bool = False, draw_crop_marks: bool = False,
+    layout_direction: str = "horizontal"
 ) -> io.BytesIO:
     """Perform N-up imposition on input PDF bytes.
     
@@ -46,47 +47,35 @@ def perform_nup(
         slot_width = out_width / cols
         slot_height = out_height / rows
 
-    # 6. Build Sheet Page Mapping
-    if not is_duplex:
-        page_indices = []
-        if is_collate:
-            for _ in range(n_repeat):
-                for p in range(len(doc_in)): page_indices.append(p)
-        else:
-            for p in range(len(doc_in)):
-                for _ in range(n_repeat): page_indices.append(p)
-
-        sheets = []
-        for i in range(0, len(page_indices), slots_per_page):
-            sheets.append((page_indices[i:i+slots_per_page], False))
-    else:
-        front_indices = []
-        back_indices = []
-        doc_len = len(doc_in)
-        
-        if is_collate:
-            for _ in range(n_repeat):
-                for p in range(doc_len):
-                    if p % 2 == 0: front_indices.append(p)
-                    else: back_indices.append(p)
-        else:
+    # 6. Build Sheet Page Mapping (Sequential order)
+    doc_len = len(doc_in)
+    page_indices = []
+    if is_collate:
+        for _ in range(n_repeat):
             for p in range(doc_len):
-                if p % 2 == 0:
-                    for _ in range(n_repeat): front_indices.append(p)
-                else:
-                    for _ in range(n_repeat): back_indices.append(p)
-                
-        # Pad back_indices if odd number of total pages
-        while len(back_indices) < len(front_indices):
-            back_indices.append(-1)
-            
-        sheets = []
-        for i in range(0, len(front_indices), slots_per_page):
-            front_chunk = front_indices[i:i+slots_per_page]
-            back_chunk = back_indices[i:i+slots_per_page]
-            sheets.append((front_chunk, False))
-            if back_chunk:
-                sheets.append((back_chunk, True))
+                page_indices.append(p)
+    else:
+        for p in range(doc_len):
+            for _ in range(n_repeat):
+                page_indices.append(p)
+
+    sheets = []
+    idx = 0
+    while idx < len(page_indices):
+        # Front Page
+        front_chunk = page_indices[idx : idx + slots_per_page]
+        while len(front_chunk) < slots_per_page:
+            front_chunk.append(-1)
+        sheets.append((front_chunk, False))
+        idx += slots_per_page
+
+        if is_duplex:
+            # Back Page (sequential next chunk)
+            back_chunk = page_indices[idx : idx + slots_per_page]
+            while len(back_chunk) < slots_per_page:
+                back_chunk.append(-1)
+            sheets.append((back_chunk, True))
+            idx += slots_per_page
 
     # Draw loop
     for sheet_indices, is_back_page in sheets:
@@ -100,8 +89,12 @@ def perform_nup(
             if in_pg_idx == -1:
                 pass # blank slot (e.g. padding odd page duplex)
             
-            row = slot // cols
-            col = slot % cols
+            if layout_direction.lower() == "vertical":
+                row = slot % rows
+                col = slot // rows
+            else:
+                row = slot // cols
+                col = slot % cols
 
             # 3. Double Sided (Duplex Mirroring horizontally)
             eff_col = col
