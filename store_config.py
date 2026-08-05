@@ -112,8 +112,8 @@ def _build(raw: dict[str, Any], source: str | None) -> StoreConfig:
         store_id=str(raw["store_id"]),
         store_name=str(raw["store_name"]),
         printers=PrinterConfig(
-            konica_ip=str(printers_raw["konica_ip"]),
-            epson_ip=str(printers_raw["epson_ip"]),
+            konica_ip=str(printers_raw["konica_ip"]) if printers_raw.get("konica_ip") is not None else "",
+            epson_ip=str(printers_raw["epson_ip"]) if printers_raw.get("epson_ip") is not None else "",
         ),
         hot_folder=str(raw["hot_folder"]),
         db_path=str(raw["db_path"]),

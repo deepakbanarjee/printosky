@@ -557,7 +557,7 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
     # the inherited OSP queue name — a queue that does not exist on this PC, so
     # SumatraPDF prints nothing. Redirect any konica request to the Epson (the
     # only printer present); its monochrome mode handles B&W fine.
-    if printer_key == "konica" and not PRINTER_IPS.get("konica"):
+    if printer_key == "konica" and (not PRINTER_IPS.get("konica") or PRINTER_IPS.get("konica") == "None"):
         logging.info(
             "send_to_printer: no Konica on this store — routing job %s to epson", job_id
         )
