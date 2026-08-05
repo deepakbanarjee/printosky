@@ -292,3 +292,38 @@ class TestSumatraPaper:
         assert _sumatra_paper(None) is None
         assert _sumatra_paper("") is None
         assert _sumatra_paper("A0") is None
+
+
+class TestAutoPrintCleanup:
+    """The planner's temp dir must be removed even when a sub-job FAILS."""
+
+    def _make_pdf(self, path, pages=4):
+        import fitz
+        doc = fitz.open()
+        for i in range(pages):
+            doc.new_page(width=595, height=842).insert_text((72, 72), f"P{i+1}")
+        doc.save(path)
+        doc.close()
+
+    def test_temp_dir_removed_on_failure(self, tmp_path, monkeypatch):
+        import print_server
+        from store_puller import auto_print
+
+        dest = str(tmp_path / "JOBX.pdf")
+        self._make_pdf(dest, pages=4)
+
+        # Fail every spool so the sub-job loop breaks on the first action.
+        monkeypatch.setattr(print_server, "send_to_printer",
+                            lambda *a, **k: (False, "boom"))
+
+        # Mixed spec → planner splits into sub-jobs under a temp_<job> dir.
+        spec = {"colour_mode": "mixed", "sides": "ss", "copies": 1,
+                "paper_size": "A4", "colour_pages": [2]}
+        ok = auto_print("JOBX", dest, "mixed", 1, print_spec=spec)
+
+        assert ok is False
+        # No leftover temp working dir anywhere under the dest folder.
+        leftovers = [p.name for p in tmp_path.iterdir() if p.name.startswith("temp_")]
+        assert leftovers == []
+        # The original download is untouched for manual printing.
+        assert (tmp_path / "JOBX.pdf").exists()

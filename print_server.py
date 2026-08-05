@@ -542,7 +542,7 @@ def _sumatra_paper(size: str | None) -> str | None:
 def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 1,
                     colour_mode: str = "auto", staff_id: str = None,
                     sides: str = None, paper_size: str = None,
-                    orientation: str = None):
+                    orientation: str = None, update_status: bool = True):
     """
     Execute print command via SumatraPDF (silent, no UI).
     Returns (success: bool, message: str)
@@ -638,7 +638,10 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
     try:
         result = subprocess.run(cmd, timeout=60, capture_output=True, text=True)
         if result.returncode == 0:
-            update_job_status(job_id, "Printed", printer_name, staff_id)
+            # Skipped for multi-sub-job orders (caller marks Printed once, after
+            # ALL sub-jobs succeed) so a later-section failure isn't masked.
+            if update_status:
+                update_job_status(job_id, "Printed", printer_name, staff_id)
             return True, f"Sent to {printer_name} ({copies} cop{'y' if copies==1 else 'ies'})"
         else:
             err = result.stderr or result.stdout or "Unknown error"

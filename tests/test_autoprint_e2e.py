@@ -151,20 +151,26 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
     assert col_call["sides"] == "ds"
     assert col_call["paper_size"] == "A4"
     assert col_call["orientation"] == "landscape"  # 2-up landscape
-    
+    # Not the final sub-job → must NOT mark the job Printed yet (HIGH-1).
+    assert col_call["update_status"] is False
+
     doc_col = fitz.open(col_call["filepath"])
     assert len(doc_col) == 2  # exactly 2 pages
     doc_col.close()
 
-    # Check B&W sub-job
+    # Check B&W sub-job. Mixed jobs force EVERY sub-job to the Epson (even the
+    # B&W section, despite a Konica being present) so the two sections stay in
+    # one output tray and keep document order.
     bw_call = captured_calls[1]
     assert bw_call["job_id"] == "OSP-E2E-TEST"
-    assert bw_call["printer_key"] == "konica"
+    assert bw_call["printer_key"] == "epson"
     assert bw_call["colour_mode"] == "bw"
     assert bw_call["copies"] == 3
     assert bw_call["sides"] == "ds"
     assert bw_call["paper_size"] == "A4"
     assert bw_call["orientation"] == "landscape"  # 2-up landscape
+    # Final sub-job → marks the job Printed exactly once (HIGH-1).
+    assert bw_call["update_status"] is True
     
     doc_bw = fitz.open(bw_call["filepath"])
     assert len(doc_bw) == 2  # exactly 2 pages

@@ -166,6 +166,7 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
     ``paper_size`` and ``orientation`` come off the cloud jobs row so the Epson
     gets the right sheet/orientation instead of the queue default.
     """
+    temp_dir = None
     try:
         try:
             n = int(copies)
@@ -183,7 +184,7 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
                 c_mode = "col"
             elif c == "mixed":
                 c_mode = "mixed"
-                
+
             print_spec = {
                 "copies": max(1, n),
                 "paper_size": paper_size,
@@ -192,11 +193,17 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
                 "sides": "simplex"
             }
 
+        # Mixed-colour jobs are split into ordered B&W/colour sub-jobs; they MUST
+        # all print on ONE device (the Epson, which does both) or the sections
+        # land in two trays and lose their order. Non-mixed jobs route normally.
+        is_mixed = str(print_spec.get("colour_mode", "")).strip().lower() == "mixed"
+
         dest_dir = os.path.dirname(os.path.abspath(dest_path))
         actions, temp_dir = print_planner.plan_print_job(job_id, dest_path, print_spec, dest_dir)
 
         success = True
         printed_actions = 0
+        n_actions = len(actions)
 
         for idx, action in enumerate(actions):
             sub_pdf = action["pdf_path"]
@@ -207,22 +214,27 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
             sub_orient = action["orientation"]
 
             send_colour = "colour" if sub_colour == "colour" else ("bw" if sub_colour == "bw" else colour_mode_for(colour))
+            printer_key = "epson" if is_mixed else printer_key_for(sub_colour)
+
+            # Mark the job "Printed" only on the FINAL sub-job. The loop breaks on
+            # any failure, so this last (status-updating) call is reached only when
+            # every prior sub-job succeeded — a mid-order failure leaves the job
+            # un-marked for manual attention instead of falsely showing Printed.
+            is_last = (idx == n_actions - 1)
 
             ok, msg = send_to_printer(
-                job_id, sub_pdf, printer_key_for(sub_colour),
+                job_id, sub_pdf, printer_key,
                 copies=max(1, sub_copies), colour_mode=send_colour, staff_id=None,
                 sides=sub_sides, paper_size=sub_paper, orientation=sub_orient,
+                update_status=is_last,
             )
             if ok:
                 printed_actions += 1
-                logger.info("store_puller: auto-printed sub-job %d/%d (%s)", idx + 1, len(actions), msg)
+                logger.info("store_puller: auto-printed sub-job %d/%d (%s)", idx + 1, n_actions, msg)
             else:
                 success = False
-                logger.warning("store_puller: auto-print sub-job %d/%d failed: %s", idx + 1, len(actions), msg)
+                logger.warning("store_puller: auto-print sub-job %d/%d failed: %s", idx + 1, n_actions, msg)
                 break
-
-        if success and temp_dir:
-            print_planner.cleanup_temp_dir(temp_dir)
 
         return success and printed_actions > 0
     except Exception as exc:
@@ -231,6 +243,16 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
             job_id, exc, dest_path,
         )
         return False
+    finally:
+        # Always remove the planner's temp working dir (sliced/imposed/sub PDFs) —
+        # even on failure. It never holds the original download, so the original
+        # stays in Jobs/Assigned for manual printing.
+        if temp_dir:
+            try:
+                import print_planner as _pp
+                _pp.cleanup_temp_dir(temp_dir)
+            except Exception:
+                pass
 
 
 # -- orchestration -------------------------------------------------------------
