@@ -40,8 +40,8 @@ POLL_SECONDS = int(os.environ.get("STORE_PULLER_POLL_SECONDS", "60"))
 # has not yet been paid, or is already delivered, must not be pulled.
 PULLABLE_STATUSES = ("Paid",)
 
-# Columns we need off each job row.
-_JOB_COLUMNS = "job_id,filename,file_url,status,assigned_store_id,pickup_code"
+# Columns we need off each job row (colour/copies drive auto-print).
+_JOB_COLUMNS = "job_id,filename,file_url,status,assigned_store_id,pickup_code,colour,copies"
 
 
 # -- local tracking table ------------------------------------------------------
@@ -133,6 +133,58 @@ def download_url(url: str, dest_path: str) -> int:
     return len(resp.content)
 
 
+# ── auto-print (best-effort) ──────────────────────────────────────────────────
+
+def printer_key_for(colour: str | None) -> str:
+    """Colour → epson; everything else → konica. A store with no Konica has its
+    print server redirect konica→epson, so this is safe on Epson-only nodes."""
+    c = (colour or "").strip().lower()
+    return "epson" if c in ("col", "colour", "color") else "konica"
+
+
+def colour_mode_for(colour: str | None) -> str:
+    """Map the job's colour field to a SumatraPDF colour mode."""
+    c = (colour or "").strip().lower()
+    if c in ("col", "colour", "color"):
+        return "colour"
+    if c in ("bw", "b&w", "mono", "monochrome"):
+        return "bw"
+    return "auto"
+
+
+def auto_print(job_id: str, dest_path: str, colour: str | None, copies) -> bool:
+    """Print a freshly-pulled job on this store's printer. Best-effort — never
+    raises. On failure the file is left in Jobs/Assigned for manual printing.
+
+    Reuses print_server.send_to_printer, which resolves the printer (incl. the
+    no-Konica konica→epson redirect), prints via SumatraPDF, and marks the job
+    Printed in Supabase. print_server only starts its HTTP server under
+    __main__, so importing it here has no side effects.
+    """
+    try:
+        try:
+            n = int(copies)
+        except (TypeError, ValueError):
+            n = 1
+        from print_server import send_to_printer
+
+        ok, msg = send_to_printer(
+            job_id, dest_path, printer_key_for(colour),
+            copies=max(1, n), colour_mode=colour_mode_for(colour), staff_id=None,
+        )
+        if ok:
+            logger.info("store_puller: auto-printed %s (%s)", job_id, msg)
+        else:
+            logger.warning("store_puller: auto-print failed for %s: %s", job_id, msg)
+        return bool(ok)
+    except Exception as exc:
+        logger.warning(
+            "store_puller: auto-print error for %s: %s (file in %s for manual print)",
+            job_id, exc, dest_path,
+        )
+        return False
+
+
 # -- orchestration -------------------------------------------------------------
 
 def pull_once(
@@ -141,12 +193,17 @@ def pull_once(
     dest_dir: str,
     conn: sqlite3.Connection,
     downloader=download_url,
+    on_pulled=None,
 ) -> list[str]:
     """Run one poll cycle. Returns the job_ids downloaded this pass.
 
     ``downloader`` is injectable so tests can drive this without real HTTP.
     A download failure for one job is logged and skipped; it will be retried
     next cycle because it is only recorded as pulled on success.
+
+    ``on_pulled(row, dest_path)`` is an optional best-effort hook run after a
+    successful download (used for auto-print). It must not raise; if it does,
+    the job still counts as pulled.
     """
     ensure_pulled_table(conn)
     try:
@@ -166,11 +223,17 @@ def pull_once(
         dest = os.path.join(dest_dir, safe_filename(job_id, row.get("filename")))
         try:
             n = downloader(row["file_url"], dest)
-            record_pulled(conn, job_id, dest)
-            pulled.append(job_id)
-            logger.info("store_puller: pulled %s -> %s (%s bytes)", job_id, dest, n)
         except Exception as exc:
             logger.error("store_puller: download failed for %s: %s", job_id, exc)
+            continue
+        record_pulled(conn, job_id, dest)
+        pulled.append(job_id)
+        logger.info("store_puller: pulled %s -> %s (%s bytes)", job_id, dest, n)
+        if on_pulled:
+            try:
+                on_pulled(row, dest)
+            except Exception as exc:
+                logger.warning("store_puller: on_pulled hook failed for %s: %s", job_id, exc)
     return pulled
 
 
@@ -211,12 +274,20 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("store_puller: startup failed: %s", exc)
         return 1
 
+    # Auto-print each pulled job on this store's printer. On by default; set
+    # STORE_PULLER_AUTOPRINT=0 to only download (staff print manually).
+    autoprint = os.environ.get("STORE_PULLER_AUTOPRINT", "1").lower() in ("1", "true", "yes")
+    on_pulled = None
+    if autoprint:
+        def on_pulled(row, dest):
+            auto_print(row.get("job_id"), dest, row.get("colour"), row.get("copies"))
+
     logger.info(
-        "store_puller: store=%s dest=%s poll=%ss mode=%s",
-        store_id, dest_dir, POLL_SECONDS, "once" if once else "loop",
+        "store_puller: store=%s dest=%s poll=%ss mode=%s autoprint=%s",
+        store_id, dest_dir, POLL_SECONDS, "once" if once else "loop", autoprint,
     )
     while True:
-        pull_once(client, store_id, dest_dir, conn)
+        pull_once(client, store_id, dest_dir, conn, on_pulled=on_pulled)
         if once:
             return 0
         time.sleep(POLL_SECONDS)

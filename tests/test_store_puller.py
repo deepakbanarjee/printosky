@@ -13,6 +13,8 @@ from store_puller import (
     select_pullable,
     fetch_assigned_paid,
     pull_once,
+    printer_key_for,
+    colour_mode_for,
 )
 
 
@@ -196,3 +198,45 @@ class TestPullOnce:
                            conn, downloader=lambda u, d: 1)
         assert "X" not in pulled
         assert set(pulled) == {"J1", "J2"}
+
+    def test_on_pulled_hook_called_per_job(self, tmp_path):
+        conn = _mem_conn()
+        seen = []
+        pull_once(_FakeClient(self._rows()), "NTK", str(tmp_path), conn,
+                  downloader=lambda u, d: 1,
+                  on_pulled=lambda row, dest: seen.append((row["job_id"], dest)))
+        assert sorted(j for j, _ in seen) == ["J1", "J2"]
+        assert all(d.endswith(".pdf") for _, d in seen)
+
+    def test_on_pulled_failure_does_not_break_pull(self, tmp_path):
+        conn = _mem_conn()
+
+        def boom(row, dest):
+            raise RuntimeError("printer offline")
+
+        # A raising hook must not stop the job counting as pulled.
+        pulled = pull_once(_FakeClient(self._rows()), "NTK", str(tmp_path), conn,
+                           downloader=lambda u, d: 1, on_pulled=boom)
+        assert set(pulled) == {"J1", "J2"}
+        assert load_pulled_ids(conn) == {"J1", "J2"}
+
+
+# ---------- auto-print helpers -------------------------------------------------
+
+class TestPrinterRouting:
+    def test_printer_key_colour_to_epson(self):
+        assert printer_key_for("col") == "epson"
+        assert printer_key_for("colour") == "epson"
+        assert printer_key_for("COLOR") == "epson"
+
+    def test_printer_key_bw_to_konica(self):
+        # konica is redirected to epson by the print server on no-Konica stores
+        assert printer_key_for("bw") == "konica"
+        assert printer_key_for("mixed") == "konica"
+        assert printer_key_for(None) == "konica"
+
+    def test_colour_mode_mapping(self):
+        assert colour_mode_for("col") == "colour"
+        assert colour_mode_for("bw") == "bw"
+        assert colour_mode_for("mixed") == "auto"
+        assert colour_mode_for(None) == "auto"
