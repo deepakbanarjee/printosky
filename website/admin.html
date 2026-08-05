@@ -1337,6 +1337,11 @@
         <button class="filter-btn" onclick="setFilter('Completed', this)">Completed</button>
         <button class="filter-btn" onclick="setFilter('Received', this)">Pending</button>
         <button class="filter-btn" onclick="setFilter('today', this)">Today</button>
+        <select class="filter-btn" id="storeFilter" onchange="setStoreFilter(this.value)" style="cursor:pointer" title="Which location's jobs to show">
+          <option value="all">All locations</option>
+          <option value="OSP">Thriprayar</option>
+          <option value="PRINTK">Nattika</option>
+        </select>
         <input class="search-input" id="search" placeholder="Search job ID / file…" oninput="renderTable()">
       </div>
       <div class="table-wrap">
@@ -2572,6 +2577,8 @@ const DEMO_SUMMARY = { total_jobs:4, completed:2, pending:2, revenue:140, cash:6
 // ── State ──────────────────────────────────────────────────────────────────
 let allJobs = [];
 let activeFilter = "all";
+let storeFilter = "all";        // "all" | "OSP" | "PRINTK" — which location's jobs to show
+let storeFilterInited = false;  // default set once from this PC's store, then user-controlled
 let isDemo = false;
 
 // ── Load everything ─────────────────────────────────────────────────────────
@@ -2585,6 +2592,7 @@ async function loadAll() {
 
     isDemo = jobs.length === 0;
     allJobs = isDemo ? DEMO_JOBS : jobs;
+    initStoreFilter();
     renderStats(isDemo ? DEMO_SUMMARY : (summary[0] || {}));
     renderTable();
     renderPrinterBreakdown();
@@ -2625,11 +2633,30 @@ function setFilter(f, btn) {
   renderTable();
 }
 
+function setStoreFilter(v) {
+  storeFilter = v;
+  renderTable();
+}
+
+// Default the store filter once, to THIS PC's store (the 🏪 Store setting):
+// a store's own machine opens pre-filtered to its jobs; the office/owner box
+// (any other store_id) opens to "All". The user can override via the dropdown
+// afterwards — we only auto-set on the first load.
+function initStoreFilter() {
+  if (storeFilterInited) return;
+  storeFilterInited = true;
+  const machine = getStoreId();
+  storeFilter = (machine === "OSP" || machine === "PRINTK") ? machine : "all";
+  const sel = document.getElementById("storeFilter");
+  if (sel) sel.value = storeFilter;
+}
+
 function renderTable() {
   const search = (document.getElementById("search").value || "").toLowerCase();
   const todayStr = today();
 
   let rows = allJobs.filter(j => {
+    if (storeFilter !== "all" && (j.assigned_store_id || "OSP") !== storeFilter) return false;
     if (activeFilter === "Completed" && j.status !== "Completed") return false;
     if (activeFilter === "Received"  && !["Received","In Progress","Printed","Queued","Draft"].includes(j.status)) return false;
     if (activeFilter === "today"     && !j.received_at?.startsWith(todayStr)) return false;
