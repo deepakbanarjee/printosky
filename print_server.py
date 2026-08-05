@@ -523,10 +523,34 @@ def _push_job_status_supabase(job_id: str, status: str, printer: str):
         logging.warning("Supabase status push failed for %s: %s", job_id, e)
 
 
-def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 1, colour_mode: str = "auto", staff_id: str = None):
+def _sumatra_paper(size: str | None) -> str | None:
+    """Map a Printosky paper size to a SumatraPDF ``paper=`` token.
+
+    Returns None for unknown/empty sizes so the caller omits ``paper=`` and the
+    printer queue's own default is used (the pre-existing behaviour). SumatraPDF
+    accepts A-series uppercase (``A4``) and named sizes lowercase (``legal``).
+    """
+    if not size:
+        return None
+    u = size.strip().upper()
+    if u in ("A2", "A3", "A4", "A5", "A6"):
+        return u
+    return {"LEGAL": "legal", "LETTER": "letter", "TABLOID": "tabloid",
+            "STATEMENT": "statement"}.get(u)
+
+
+def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 1,
+                    colour_mode: str = "auto", staff_id: str = None,
+                    sides: str = None, paper_size: str = None,
+                    orientation: str = None):
     """
     Execute print command via SumatraPDF (silent, no UI).
     Returns (success: bool, message: str)
+
+    ``sides``       : 'ds'/'duplex' -> long-edge duplex, 'ss'/'simplex' -> simplex,
+                      None -> leave to the queue default.
+    ``paper_size``  : e.g. 'A4'/'A3'/'Legal'; None -> queue default.
+    ``orientation`` : 'portrait'/'landscape'; 'auto'/None -> per-page (queue default).
     """
     # Finishing/collection-only stores (e.g. Nattika) have no Konica. A B&W job
     # is routed to "konica" by default, but PRINTERS["konica"] here still holds
@@ -562,12 +586,31 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
     # -print-to <printer>  : print to named printer silently
     # -print-settings      : copies, colour settings
     # -exit-when-done      : close after printing
-    settings = f"{copies}x"
+    settings_parts = [f"{copies}x"]
     if colour_mode == "bw":
-        settings += ",monochrome"
+        settings_parts.append("monochrome")
     elif colour_mode == "colour":
-        settings += ",color"
+        settings_parts.append("color")
     # "auto" = let printer decide
+
+    # Duplex — only emit when explicitly known; else leave to the queue default.
+    s = (sides or "").strip().lower()
+    if s in ("ds", "duplex", "double", "duplexlong"):
+        settings_parts.append("duplexlong")
+    elif s in ("ss", "simplex", "single"):
+        settings_parts.append("simplex")
+
+    # Paper size (e.g. A4/A3/Legal). Unknown/empty -> queue default.
+    paper_tok = _sumatra_paper(paper_size)
+    if paper_tok:
+        settings_parts.append(f"paper={paper_tok}")
+
+    # Orientation — 'auto' means honour each page; only force when told to.
+    o = (orientation or "").strip().lower()
+    if o in ("portrait", "landscape"):
+        settings_parts.append(o)
+
+    settings = ",".join(settings_parts)
 
     file_dir  = os.path.dirname(os.path.abspath(filepath))
     file_name = os.path.basename(filepath)
@@ -1712,16 +1755,25 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None) -> di
     if sides == "ds":
         settings_parts.append("duplexlong")   # long-edge duplex
 
-    # Layout / n-up
+    # Layout / n-up. NOTE: SumatraPDF's -print-settings has no N-up token, so
+    # these are no-ops today; kept to record intent until N-up is done another way.
     if layout == "2-up":
         settings_parts.append("nup2")
     elif layout == "4-up":
         settings_parts.append("nup4")
 
-    # Page range
+    # Paper size — read off the job row (guarded: legacy rows may lack the col).
+    job_size = job["size"] if "size" in job.keys() else None
+    paper_tok = _sumatra_paper(job_size)
+    if paper_tok:
+        settings_parts.append(f"paper={paper_tok}")
+
+    # Page range — SumatraPDF wants the bare range (e.g. "1-5,10"), NOT a
+    # "pagerange:" prefix (an unknown token is dropped, silently printing ALL
+    # pages). Fixed from the previous "pagerange:{range}" form.
     page_range = _build_page_range_arg(page_list, job["page_count"] or 0)
     if page_range:
-        settings_parts.append(f"pagerange:{page_range}")
+        settings_parts.append(page_range)
 
     settings_str = ",".join(settings_parts)
 

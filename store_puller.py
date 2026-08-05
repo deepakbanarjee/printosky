@@ -41,7 +41,7 @@ POLL_SECONDS = int(os.environ.get("STORE_PULLER_POLL_SECONDS", "60"))
 PULLABLE_STATUSES = ("Paid",)
 
 # Columns we need off each job row (colour/copies drive auto-print).
-_JOB_COLUMNS = "job_id,filename,file_url,status,assigned_store_id,pickup_code,colour,copies"
+_JOB_COLUMNS = "job_id,filename,file_url,status,assigned_store_id,pickup_code,colour,copies,size,orientation"
 
 
 # -- local tracking table ------------------------------------------------------
@@ -152,7 +152,8 @@ def colour_mode_for(colour: str | None) -> str:
     return "auto"
 
 
-def auto_print(job_id: str, dest_path: str, colour: str | None, copies) -> bool:
+def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
+               paper_size: str | None = None, orientation: str | None = None) -> bool:
     """Print a freshly-pulled job on this store's printer. Best-effort — never
     raises. On failure the file is left in Jobs/Assigned for manual printing.
 
@@ -160,6 +161,11 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies) -> bool:
     no-Konica konica→epson redirect), prints via SumatraPDF, and marks the job
     Printed in Supabase. print_server only starts its HTTP server under
     __main__, so importing it here has no side effects.
+
+    ``paper_size`` and ``orientation`` come off the cloud jobs row so the Epson
+    gets the right sheet/orientation instead of the queue default. Duplex is NOT
+    threaded: the cloud `jobs` table has no `sides` column (web-order duplex is
+    only in the human-readable `notes`), so it falls back to the queue default.
     """
     try:
         try:
@@ -171,6 +177,7 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies) -> bool:
         ok, msg = send_to_printer(
             job_id, dest_path, printer_key_for(colour),
             copies=max(1, n), colour_mode=colour_mode_for(colour), staff_id=None,
+            paper_size=paper_size, orientation=orientation,
         )
         if ok:
             logger.info("store_puller: auto-printed %s (%s)", job_id, msg)
@@ -280,7 +287,10 @@ def main(argv: list[str] | None = None) -> int:
     on_pulled = None
     if autoprint:
         def on_pulled(row, dest):
-            auto_print(row.get("job_id"), dest, row.get("colour"), row.get("copies"))
+            auto_print(
+                row.get("job_id"), dest, row.get("colour"), row.get("copies"),
+                paper_size=row.get("size"), orientation=row.get("orientation"),
+            )
 
     logger.info(
         "store_puller: store=%s dest=%s poll=%ss mode=%s autoprint=%s",
