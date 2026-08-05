@@ -56,12 +56,17 @@ start "Printosky Job Puller" /D "%REPO_DIR%" cmd /k python store_puller.py
 timeout /t 2 /nobreak >nul
 
 :: 4. Academic Pipeline Worker (Python) -- polls Supabase for generation tasks
-echo  [4/5] Starting Academic Pipeline Worker...
+echo  [4/6] Starting Academic Pipeline Worker...
 start "Printosky Academic Worker" /D "%REPO_DIR%" cmd /k python academic_pipeline_worker.py
 timeout /t 2 /nobreak >nul
 
-:: 5. WhatsApp Bot (Meta Cloud API / Webhook Receiver) -- runs inside Watcher
-echo  [5/5] Meta WhatsApp Webhook active inside Watcher on port 3002
+:: 5. Cloud Transcription Worker (Python) -- polls Supabase for manuscript transcription
+echo  [5/6] Starting Cloud Transcription Worker...
+start "Printosky Transcription Worker" /D "%REPO_DIR%" cmd /k python tools/cloud_transcription_worker.py
+timeout /t 2 /nobreak >nul
+
+:: 6. WhatsApp Bot (Meta Cloud API / Webhook Receiver) -- runs inside Watcher
+echo  [6/6] Meta WhatsApp Webhook active inside Watcher on port 3002
 
 echo.
 echo  All services started. Check the CMD windows for status.
