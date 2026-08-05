@@ -175,6 +175,7 @@ def _verify_pin(pin: str, stored_hash: str, stored_salt: str | None) -> bool:
 _PRINT_ALLOWED_DIRS = [
     Path(r"C:\Printosky\Jobs\Incoming"),
     Path(r"C:\Printosky\Jobs\Archive"),
+    Path(r"C:\Printosky\Jobs\Assigned"),  # multi-store: files pulled by store_puller
 ]
 
 def _is_allowed_filepath(filepath: str) -> bool:
@@ -323,7 +324,9 @@ def check_internet(host="8.8.8.8", port=53, timeout=3) -> bool:
     except Exception:
         return False
 
-def check_printer_reachable(ip: str, timeout=2) -> bool:
+def check_printer_reachable(ip: str | None, timeout=2) -> bool:
+    if not ip:  # finishing-only nodes have no Konica → treat as unreachable
+        return False
     try:
         socket.setdefaulttimeout(timeout)
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -525,6 +528,17 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
     Execute print command via SumatraPDF (silent, no UI).
     Returns (success: bool, message: str)
     """
+    # Finishing/collection-only stores (e.g. Nattika) have no Konica. A B&W job
+    # is routed to "konica" by default, but PRINTERS["konica"] here still holds
+    # the inherited OSP queue name — a queue that does not exist on this PC, so
+    # SumatraPDF prints nothing. Redirect any konica request to the Epson (the
+    # only printer present); its monochrome mode handles B&W fine.
+    if printer_key == "konica" and PRINTER_IPS.get("konica") is None:
+        logging.info(
+            "send_to_printer: no Konica on this store — routing job %s to epson", job_id
+        )
+        printer_key = "epson"
+
     printer_name = PRINTERS.get(printer_key)
     if not printer_name:
         return False, f"Unknown printer key: {printer_key}"
@@ -1905,6 +1919,7 @@ class PrintHandler(BaseHTTPRequestHandler):
             sumatra = find_sumatra()
             self._json(200, {
                 "ok": True,
+                "store_id": get_store_config().store_id,
                 "sumatra": sumatra or "not found (will use shell fallback)",
                 "printers": PRINTERS,
                 "db": os.path.exists(DB_PATH),
