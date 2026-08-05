@@ -41,7 +41,7 @@ POLL_SECONDS = int(os.environ.get("STORE_PULLER_POLL_SECONDS", "60"))
 PULLABLE_STATUSES = ("Paid",)
 
 # Columns we need off each job row (colour/copies drive auto-print).
-_JOB_COLUMNS = "job_id,filename,file_url,status,assigned_store_id,pickup_code,colour,copies,size,orientation"
+_JOB_COLUMNS = "job_id,filename,file_url,status,assigned_store_id,pickup_code,colour,copies,size,orientation,print_spec"
 
 
 # -- local tracking table ------------------------------------------------------
@@ -153,7 +153,8 @@ def colour_mode_for(colour: str | None) -> str:
 
 
 def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
-               paper_size: str | None = None, orientation: str | None = None) -> bool:
+               paper_size: str | None = None, orientation: str | None = None,
+               print_spec: dict | None = None) -> bool:
     """Print a freshly-pulled job on this store's printer. Best-effort — never
     raises. On failure the file is left in Jobs/Assigned for manual printing.
 
@@ -163,27 +164,67 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
     __main__, so importing it here has no side effects.
 
     ``paper_size`` and ``orientation`` come off the cloud jobs row so the Epson
-    gets the right sheet/orientation instead of the queue default. Duplex is NOT
-    threaded: the cloud `jobs` table has no `sides` column (web-order duplex is
-    only in the human-readable `notes`), so it falls back to the queue default.
+    gets the right sheet/orientation instead of the queue default.
     """
     try:
         try:
             n = int(copies)
         except (TypeError, ValueError):
             n = 1
+
+        import print_planner
         from print_server import send_to_printer
 
-        ok, msg = send_to_printer(
-            job_id, dest_path, printer_key_for(colour),
-            copies=max(1, n), colour_mode=colour_mode_for(colour), staff_id=None,
-            paper_size=paper_size, orientation=orientation,
-        )
-        if ok:
-            logger.info("store_puller: auto-printed %s (%s)", job_id, msg)
-        else:
-            logger.warning("store_puller: auto-print failed for %s: %s", job_id, msg)
-        return bool(ok)
+        if not print_spec:
+            # Map legacy colour format ('bw' -> 'bw', 'col'/'colour' -> 'col', 'mixed' -> 'mixed')
+            c_mode = "bw"
+            c = (colour or "").strip().lower()
+            if c in ("col", "colour", "color"):
+                c_mode = "col"
+            elif c == "mixed":
+                c_mode = "mixed"
+                
+            print_spec = {
+                "copies": max(1, n),
+                "paper_size": paper_size,
+                "orientation": orientation,
+                "colour_mode": c_mode,
+                "sides": "simplex"
+            }
+
+        dest_dir = os.path.dirname(os.path.abspath(dest_path))
+        actions, temp_dir = print_planner.plan_print_job(job_id, dest_path, print_spec, dest_dir)
+
+        success = True
+        printed_actions = 0
+
+        for idx, action in enumerate(actions):
+            sub_pdf = action["pdf_path"]
+            sub_colour = action["colour_mode"]
+            sub_copies = action["copies"]
+            sub_sides = action["sides"]
+            sub_paper = action["paper_size"]
+            sub_orient = action["orientation"]
+
+            send_colour = "colour" if sub_colour == "colour" else ("bw" if sub_colour == "bw" else colour_mode_for(colour))
+
+            ok, msg = send_to_printer(
+                job_id, sub_pdf, printer_key_for(sub_colour),
+                copies=max(1, sub_copies), colour_mode=send_colour, staff_id=None,
+                sides=sub_sides, paper_size=sub_paper, orientation=sub_orient,
+            )
+            if ok:
+                printed_actions += 1
+                logger.info("store_puller: auto-printed sub-job %d/%d (%s)", idx + 1, len(actions), msg)
+            else:
+                success = False
+                logger.warning("store_puller: auto-print sub-job %d/%d failed: %s", idx + 1, len(actions), msg)
+                break
+
+        if success and temp_dir:
+            print_planner.cleanup_temp_dir(temp_dir)
+
+        return success and printed_actions > 0
     except Exception as exc:
         logger.warning(
             "store_puller: auto-print error for %s: %s (file in %s for manual print)",
@@ -290,6 +331,7 @@ def main(argv: list[str] | None = None) -> int:
             auto_print(
                 row.get("job_id"), dest, row.get("colour"), row.get("copies"),
                 paper_size=row.get("size"), orientation=row.get("orientation"),
+                print_spec=row.get("print_spec"),
             )
 
     logger.info(

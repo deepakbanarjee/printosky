@@ -107,7 +107,7 @@ def _insert_job(job_id, sender, filename, file_url):
 
 def _persist_settings(job_id, *, amount_quoted, copies, finishing, size, colour,
                       page_count, operator_note, customer_name, orientation="auto",
-                      assigned_store_id="OSP"):
+                      assigned_store_id="OSP", print_spec=None):
     """Persist print settings + web-order metadata onto the job row.
 
     Writes ONLY columns that exist on the live `jobs` schema. Notably there is
@@ -132,6 +132,7 @@ def _persist_settings(job_id, *, amount_quoted, copies, finishing, size, colour,
         "source":        "web",
         "customer_name": customer_name,
         "assigned_store_id": assigned_store_id,  # which store fulfils (manual picker)
+        "print_spec":    print_spec,
     }).eq("job_id", job_id).execute()
 
 
@@ -280,6 +281,7 @@ def _handle_order_create(h, body: bytes) -> None:
             operator_note=note, orientation=orientation,
             customer_name=account_name or str(cust.get("name", "")).strip(),
             assigned_store_id=assigned_store_id,
+            print_spec=spec,
         )
     except Exception as exc:
         logger.error("order create db error %s: %r", type(exc).__name__, str(exc))
@@ -346,6 +348,7 @@ def _handle_order_reorder(h, body: bytes) -> None:
             page_count=int(src.get("page_count") or 0),
             operator_note=note, orientation=str(src.get("orientation") or "auto"),
             customer_name=str(src.get("customer_name") or acct.get("name") or "").strip(),
+            print_spec=src.get("print_spec"),
         )
     except Exception as exc:
         logger.error("order reorder db error %s: %r", type(exc).__name__, str(exc))
