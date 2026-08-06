@@ -222,16 +222,14 @@ def main():
 
     while True:
         try:
-            # 1. Ensure we have a reference PDF to extract handwriting visual sample
-            ref_pdf = find_reference_pdf(WATCH_DIR)
-            if not ref_pdf:
-                print("Warning: Reference PDF (containing 'By DM') not found in watch folder. Waiting...", flush=True)
-                time.sleep(10)
-                continue
-                
-            # Extract reference image once
-            ref_img_path = os.path.join(TEMP_DIR, "ref_page.png")
+            # 1. Use static reference image from assets
+            ref_img_path = os.path.join(os.path.dirname(__file__), "assets", "ref_page.png")
             if not os.path.exists(ref_img_path):
+                ref_pdf = find_reference_pdf(WATCH_DIR)
+                if not ref_pdf:
+                    print("Warning: Reference PDF (containing 'By DM') not found in watch folder. Waiting...", flush=True)
+                    time.sleep(10)
+                    continue
                 print(f"Extracting visual reference page from {os.path.basename(ref_pdf)}...")
                 ref_doc = fitz.open(ref_pdf)
                 ref_page = ref_doc[REF_PAGE_IDX]

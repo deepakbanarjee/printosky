@@ -148,23 +148,17 @@ def process_transcription_job(job):
         sb.table("manuscript_transcripts").update({"status": "failed"}).eq("id", job_id).execute()
         return
 
-    # 2. Extract reference page (Page 9)
-    ref_img_path = os.path.join(TEMP_DIR, f"ref_page_{job_id}.png")
+    # 2. Load static reference page
+    ref_img_path = os.path.join(os.path.dirname(__file__), "assets", "ref_page.png")
     try:
         doc = fitz.open(pdf_temp_path)
         total_pages = len(doc)
         
-        # Check if PDF has enough pages for reference index
-        ref_idx = min(REF_PAGE_IDX, total_pages - 1)
-        ref_page = doc[ref_idx]
-        pix = ref_page.get_pixmap(dpi=150)
-        pix.save(ref_img_path)
-        
         img_ref = Image.open(ref_img_path)
         img_ref.thumbnail((768, 768))
-        log.info(f"Extracted reference page at index {ref_idx}")
+        log.info("Loaded static reference page from assets.")
     except Exception as e:
-        log.error(f"Failed to extract reference page: {e}")
+        log.error(f"Failed to load reference page: {e}")
         sb.table("manuscript_transcripts").update({"status": "failed"}).eq("id", job_id).execute()
         if 'doc' in locals():
             doc.close()
@@ -256,7 +250,6 @@ def process_transcription_job(job):
         doc.close()
         try:
             os.remove(pdf_temp_path)
-            os.remove(ref_img_path)
         except:
             pass
 
