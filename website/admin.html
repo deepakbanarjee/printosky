@@ -3498,7 +3498,13 @@ function renderJobPanel() {
   const iframe = document.getElementById("jp-preview-iframe");
   const footer = document.getElementById("jp-preview-footer");
   if (iframe && j.job_id) {
-    iframe.src = `${PC}/file?job_id=${encodeURIComponent(j.job_id)}`;
+    // Prefer the Supabase file_url — it exists from upload, so a Pending web
+    // order previews BEFORE the puller downloads the file to the store PC. Fall
+    // back to the store PC's local /file for local WhatsApp/walk-in jobs that
+    // have no cloud URL.
+    iframe.src = (j.file_url && /^https?:\/\//i.test(j.file_url))
+      ? j.file_url
+      : `${PC}/file?job_id=${encodeURIComponent(j.job_id)}`;
     if (footer) footer.textContent = j.filename || j.job_id;
   }
 
