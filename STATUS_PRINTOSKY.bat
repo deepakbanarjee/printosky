@@ -24,12 +24,14 @@ if %errorlevel% equ 0 (
     echo  [!!] WhatsApp capture ^(Node^) is STOPPED
 )
 
-:: Check cloudflared
-tasklist /FI "IMAGENAME eq cloudflared.exe" 2>nul | find /I "cloudflared.exe" >nul
-if %errorlevel% equ 0 (
-    echo  [OK] Cloudflare tunnel is RUNNING
-) else (
-    echo  [!!] Cloudflare tunnel is STOPPED
+:: Check cloudflared (only if installed)
+if exist "%~dp0cloudflared.exe" (
+    tasklist /FI "IMAGENAME eq cloudflared.exe" 2>nul | find /I "cloudflared.exe" >nul
+    if %errorlevel% equ 0 (
+        echo  [OK] Cloudflare tunnel is RUNNING
+    ) else (
+        echo  [!!] Cloudflare tunnel is STOPPED
+    )
 )
 
 echo.
@@ -47,10 +49,12 @@ if exist "%LOGS%\watcher.log" (
     echo  No watcher.log found yet.
 )
 
-if exist "%LOGS%\tunnel.log" (
-    echo.
-    echo  -- tunnel.log (last 3 lines) --
-    powershell -command "Get-Content '%LOGS%\tunnel.log' -Tail 3"
+if exist "%~dp0cloudflared.exe" (
+    if exist "%LOGS%\tunnel.log" (
+        echo.
+        echo  -- tunnel.log (last 3 lines) --
+        powershell -command "Get-Content '%LOGS%\tunnel.log' -Tail 3"
+    )
 )
 
 echo.

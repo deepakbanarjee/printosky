@@ -12,8 +12,11 @@ echo  [1] Python (watcher + bot) stopped.
 taskkill /F /IM node.exe /T >nul 2>&1
 echo  [2] Node.js (WhatsApp capture) stopped.
 
-taskkill /F /IM cloudflared.exe /T >nul 2>&1
-echo  [3] Cloudflare tunnel stopped.
+tasklist /FI "IMAGENAME eq cloudflared.exe" 2>nul | find /I "cloudflared.exe" >nul
+if %errorlevel% equ 0 (
+    taskkill /F /IM cloudflared.exe /T >nul 2>&1
+    echo  [3] Cloudflare tunnel stopped.
+)
 
 echo.
 echo  All services stopped.
