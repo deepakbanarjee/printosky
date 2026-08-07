@@ -75,7 +75,7 @@ def download_pdf_from_storage(filename):
         
     return sb.storage.from_("manuscripts").download(filename)
 MY_STORE_ID = cfg.store_id
-WATCH_DIR = cfg.hot_folder  # Or use a fallback path like r"D:\Divya teacher\Preeksha sahayi"
+WATCH_DIR = r"D:\Divya teacher\Preeksha sahayi"
 TEMP_DIR = r"d:\PY\printosky\_tmp_watcher"
 
 if not os.path.exists(TEMP_DIR):
