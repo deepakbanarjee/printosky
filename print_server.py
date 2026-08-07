@@ -539,6 +539,22 @@ def _sumatra_paper(size: str | None) -> str | None:
             "STATEMENT": "statement"}.get(u)
 
 
+def _effective_printer_key(printer_key: str, job_id: str = "") -> str:
+    """Resolve the printer to actually use, applying the no-Konica redirect.
+
+    Finishing/collection-only stores (e.g. Nattika) have no Konica: PRINTERS
+    still carries the inherited OSP Konica queue name — a queue that does not
+    exist on this PC — so a 'konica' dispatch prints nothing. Redirect it to the
+    Epson (the only printer present; its monochrome mode handles B&W). Shared by
+    every print path so they cannot drift. No-op for any other key, or when a
+    real Konica IP is configured.
+    """
+    if printer_key == "konica" and (not PRINTER_IPS.get("konica") or PRINTER_IPS.get("konica") == "None"):
+        logging.info("no Konica on this store — routing job %s to epson", job_id or "?")
+        return "epson"
+    return printer_key
+
+
 def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 1,
                     colour_mode: str = "auto", staff_id: str = None,
                     sides: str = None, paper_size: str = None,
@@ -552,16 +568,8 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
     ``paper_size``  : e.g. 'A4'/'A3'/'Legal'; None -> queue default.
     ``orientation`` : 'portrait'/'landscape'; 'auto'/None -> per-page (queue default).
     """
-    # Finishing/collection-only stores (e.g. Nattika) have no Konica. A B&W job
-    # is routed to "konica" by default, but PRINTERS["konica"] here still holds
-    # the inherited OSP queue name — a queue that does not exist on this PC, so
-    # SumatraPDF prints nothing. Redirect any konica request to the Epson (the
-    # only printer present); its monochrome mode handles B&W fine.
-    if printer_key == "konica" and (not PRINTER_IPS.get("konica") or PRINTER_IPS.get("konica") == "None"):
-        logging.info(
-            "send_to_printer: no Konica on this store — routing job %s to epson", job_id
-        )
-        printer_key = "epson"
+    # No-Konica stores: redirect a 'konica' dispatch to the Epson (shared helper).
+    printer_key = _effective_printer_key(printer_key, job_id)
 
     printer_name = PRINTERS.get(printer_key)
     if not printer_name:
@@ -1738,6 +1746,9 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None) -> di
 
     # Read item settings from DB (trust DB, NOT frontend)
     printer_key = item["printer"] or ("epson" if item["colour"] == "col" else "konica")
+    # No-Konica stores (e.g. Nattika): a B&W item defaults to 'konica', which does
+    # not exist here — redirect to the Epson (same helper the auto-print path uses).
+    printer_key = _effective_printer_key(printer_key, job_id)
     printer_name = PRINTERS.get(printer_key)
     if not printer_name:
         return {"ok": False, "error": f"Unknown printer: {printer_key}"}
@@ -2013,23 +2024,37 @@ class PrintHandler(BaseHTTPRequestHandler):
             conn = _db()
             job  = conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
             conn.close()
-            if not job:
-                self._json(404, {"error": "Job not found"})
-                return
-            # Resolve filepath
+            # Resolve the file. A puller-downloaded cloud job (multi-store) may
+            # have NO local jobs row and lives in Jobs\Assigned named <job_id>*,
+            # so we do not hard-require a row and we search Assigned/Incoming too.
+            _JOB_DIRS = (r"C:\Printosky\Jobs\Assigned",
+                         r"C:\Printosky\Jobs\Archive",
+                         r"C:\Printosky\Jobs\Incoming")
             fp = ""
-            try:    fp = job["filepath"] or ""
-            except: pass
-            if not fp:
-                try:    fp = job["file_path"] or ""
-                except: pass
-            if not fp and job["filename"]:
-                fp = os.path.join(r"C:\Printosky\Jobs\Archive", job["filename"])
+            if job:
+                try:    fp = job["filepath"] or ""
+                except Exception: pass
+                if not fp:
+                    try: fp = job["file_path"] or ""
+                    except Exception: pass
+                fname = job["filename"] if "filename" in job.keys() else ""
+                if (not fp or not os.path.exists(fp)) and fname:
+                    for base in _JOB_DIRS:
+                        cand = os.path.join(base, fname)
+                        if os.path.exists(cand):
+                            fp = cand
+                            break
+            # Fallback: match by job_id prefix in the job dirs (covers pulled
+            # jobs with no local row). job_id is sanitised to prevent traversal.
             if not fp or not os.path.exists(fp):
-                if job["filename"]:
-                    arc = os.path.join(r"C:\Printosky\Jobs\Archive", job["filename"])
-                    if os.path.exists(arc):
-                        fp = arc
+                import glob as _glob, re as _re
+                safe_id = _re.sub(r"[^A-Za-z0-9_-]", "", job_id)
+                if safe_id:
+                    for base in _JOB_DIRS:
+                        matches = _glob.glob(os.path.join(base, safe_id + "*"))
+                        if matches:
+                            fp = matches[0]
+                            break
             if not fp or not os.path.exists(fp):
                 self._json(404, {"error": "File not found on disk"})
                 return

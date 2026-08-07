@@ -294,6 +294,30 @@ class TestSumatraPaper:
         assert _sumatra_paper("A0") is None
 
 
+class TestEffectivePrinterKey:
+    """Shared no-Konica redirect used by BOTH the auto-print and staff paths."""
+
+    def test_konica_redirects_when_ip_empty(self, monkeypatch):
+        import print_server
+        monkeypatch.setitem(print_server.PRINTER_IPS, "konica", "")
+        assert print_server._effective_printer_key("konica", "J1") == "epson"
+
+    def test_konica_redirects_when_ip_none_string(self, monkeypatch):
+        import print_server
+        monkeypatch.setitem(print_server.PRINTER_IPS, "konica", "None")
+        assert print_server._effective_printer_key("konica") == "epson"
+
+    def test_konica_kept_with_real_ip(self, monkeypatch):
+        import print_server
+        monkeypatch.setitem(print_server.PRINTER_IPS, "konica", "192.168.55.110")
+        assert print_server._effective_printer_key("konica") == "konica"
+
+    def test_epson_untouched(self, monkeypatch):
+        import print_server
+        monkeypatch.setitem(print_server.PRINTER_IPS, "konica", "")
+        assert print_server._effective_printer_key("epson") == "epson"
+
+
 class TestAutoPrintCleanup:
     """The planner's temp dir must be removed even when a sub-job FAILS."""
 
