@@ -10,6 +10,12 @@ from google.genai.errors import APIError
 
 # Initialize logging to console and file
 import sys
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 log_file = os.path.join(os.path.dirname(__file__), "cloud_worker.log")
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +54,26 @@ else:
 
 # Configuration defaults
 cfg = get_store_config()
+
+def download_pdf_from_storage(filename):
+    """Download PDF from storage, supporting unicode/special characters in URLs."""
+    import urllib.parse
+    import httpx
+    
+    encoded_filename = urllib.parse.quote(filename)
+    public_url = f"{url}/storage/v1/object/public/manuscripts/{encoded_filename}"
+    
+    try:
+        with httpx.Client(http2=True) as client_http:
+            resp = client_http.get(public_url)
+            if resp.status_code == 200:
+                return resp.content
+            else:
+                log.warning(f"Public URL download returned status {resp.status_code}, falling back to supabase client")
+    except Exception as e:
+        log.warning(f"Public URL download failed: {e}, falling back to supabase client")
+        
+    return sb.storage.from_("manuscripts").download(filename)
 MY_STORE_ID = cfg.store_id
 WATCH_DIR = cfg.hot_folder  # Or use a fallback path like r"D:\Divya teacher\Preeksha sahayi"
 TEMP_DIR = r"d:\PY\printosky\_tmp_watcher"
@@ -115,7 +141,7 @@ def process_transcription_job(job):
     pdf_temp_path = os.path.join(TEMP_DIR, filename)
     try:
         log.info(f"Downloading {filename} from Supabase Storage...")
-        res = sb.storage.from_("manuscripts").download(filename)
+        res = download_pdf_from_storage(filename)
         with open(pdf_temp_path, "wb") as f:
             f.write(res)
         log.info("Download completed.")
@@ -329,7 +355,7 @@ def sync_completed_jobs():
             if not os.path.exists(local_pdf_path):
                 log.info(f"Downloading completed PDF locally: {local_pdf_path}")
                 try:
-                    pdf_bytes = sb.storage.from_("manuscripts").download(filename)
+                    pdf_bytes = download_pdf_from_storage(filename)
                     with open(local_pdf_path, "wb") as f:
                         f.write(pdf_bytes)
                 except Exception as e:
