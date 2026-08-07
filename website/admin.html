@@ -2987,6 +2987,8 @@ function panelHTML() {
             <button class="jp-btn vendor"  id="jp-btn-vendor"  onclick="openVendorModal()" style="display:none">Send to Vendor →</button>
             <button class="jp-btn notify"  id="jp-btn-notify"  onclick="markReady()" style="display:none">Notify Customer Ready →</button>
             <button class="jp-btn collect" id="jp-btn-collect" onclick="openPaymentModal()" style="display:none">Collect Payment</button>
+            <button class="jp-btn collect" id="jp-btn-paid-cash" onclick="markPaid('cash')" style="display:none" title="Customer paid CASH in store — mark Paid so it prints">💵 Paid: Cash</button>
+            <button class="jp-btn save"    id="jp-btn-paid-upi"  onclick="markPaid('upi')"  style="display:none" title="Customer paid by UPI/Paytm QR — mark Paid so it prints">📲 Paid: UPI</button>
           </div>
         </div>
       </div>
@@ -3510,9 +3512,15 @@ function renderJobPanel() {
   const done       = j.status === "Completed";
   const printed    = ["Printed","Ready","At Vendor"].includes(j.status);
   const outsourced = OUTSOURCED_FINISHING.includes(editFinishing);
+  // A job is "awaiting payment" until it reaches Paid/print/pickup — that's when
+  // the manual cash/UPI mark-paid applies (it flips Pending→Paid so the store
+  // puller pulls + prints). Inverse of the post-print "Collect Payment" step.
+  const paidOrLater = ["Paid","Printed","Ready","At Vendor","Completed","Delivered"].includes(j.status);
   document.getElementById("jp-btn-vendor").style.display  = (outsourced && !done) ? "block" : "none";
   document.getElementById("jp-btn-notify").style.display  = (printed && !done) ? "block" : "none";
   document.getElementById("jp-btn-collect").style.display = (printed && !done) ? "block" : "none";
+  document.getElementById("jp-btn-paid-cash").style.display = paidOrLater ? "none" : "block";
+  document.getElementById("jp-btn-paid-upi").style.display  = paidOrLater ? "none" : "block";
 
   scheduleQuote();
 }
@@ -3876,6 +3884,43 @@ async function confirmVendorSend() {
     } else { alert("Error: " + (d.error || "unknown")); }
   } catch(e) { alert("Network error"); }
   btn.disabled = false; btn.textContent = "Send →";
+}
+
+// Pre-print manual payment: flip a Pending job to Paid (cash / UPI collected in
+// store) so the store puller pulls + auto-prints it. Distinct from the post-print
+// "Collect Payment" (openPaymentModal) which marks a printed job Completed.
+async function markPaid(method) {
+  if (!selectedJob) return;
+  const jobId = selectedJob.job_id;
+  let amount = Math.ceil(selectedJob.amount_quoted || 0);
+  if (!amount) {
+    const a = prompt(`Amount collected for ${jobId} (${method.toUpperCase()}):`, "");
+    if (a === null) return;
+    amount = parseFloat(a);
+  }
+  if (!(amount >= 0)) { alert("Enter a valid amount"); return; }
+  if (!confirm(`Mark ${jobId} PAID — ₹${amount} via ${method.toUpperCase()}?\nThis sends it to the store printer.`)) return;
+  let pw = _convPw();
+  if (!pw) { pw = await _adminPwPrompt(); if (!pw) return; sessionStorage.setItem("admin_pw_cache", pw); }
+  try {
+    const r = await fetch(`${ACAD_API}/admin/mark-paid`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Password": _convPw() },
+      body:    JSON.stringify({ job_id: jobId, amount, method }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 403) { sessionStorage.removeItem("admin_pw_cache"); alert("Admin password rejected — try again"); return; }
+    if (!r.ok || data.error) { alert(data.error || `Failed (HTTP ${r.status})`); return; }
+    if (data.already) {
+      alert(`${jobId} is already ${data.already} — left unchanged.`);
+    } else {
+      alert(`${jobId} marked PAID (${method.toUpperCase()}) · pickup ${data.pickup_code || "—"}.\nThe store will print it shortly.`);
+    }
+    selectedJob.status = data.status || "Paid";
+    loadAll();
+  } catch (e) {
+    alert("Network error: " + e.message);
+  }
 }
 
 function openPaymentModal() {

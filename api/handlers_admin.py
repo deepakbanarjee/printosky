@@ -743,6 +743,49 @@ def _handle_admin_verify_payment(h, body, payid: str) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_admin_mark_paid(h, body) -> None:
+    """POST /admin/mark-paid — staff records a manual in-store payment (cash or
+    UPI QR not tracked by a gateway) for a print job, flipping it to Paid so the
+    store puller pulls + auto-prints it.
+
+    Body: {admin_password, job_id, amount, method: cash|upi}.
+    """
+    try:
+        data = json.loads(body or b"{}")
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+    pw = (data.get("admin_password") or "").strip() or _admin_pw_from_request(h)
+    if not _auth_admin_pw(pw):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    job_id = (data.get("job_id") or "").strip()
+    method = (data.get("method") or "").strip().lower()
+    if not job_id:
+        _json_response(h, 400, {"error": "job_id required"})
+        return
+    if method not in ("cash", "upi"):
+        _json_response(h, 400, {"error": "method must be cash or upi"})
+        return
+    try:
+        amount = float(data.get("amount"))
+    except (TypeError, ValueError):
+        _json_response(h, 400, {"error": "amount must be a number"})
+        return
+    if amount < 0:
+        _json_response(h, 400, {"error": "amount must be >= 0"})
+        return
+    try:
+        from db_cloud import mark_job_paid_manual
+        res = mark_job_paid_manual(job_id, amount, method)
+        _json_response(h, 200, res)
+    except ValueError as ve:
+        _json_response(h, 404, {"error": str(ve)})
+    except Exception as exc:
+        logger.error("mark-paid error for %s: %s", job_id, exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_admin_book_order_create(h, body) -> None:
     """POST /admin/book-orders/create — staff create a walk-in / in-store order.
     Body: {items:{malayalam,hindi,english}, name, phone, address, payment_mode, handed_over}.

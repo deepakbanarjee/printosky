@@ -1893,6 +1893,7 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_import_manifest_apply,
     _handle_admin_payments_to_verify,
     _handle_admin_verify_payment,
+    _handle_admin_mark_paid,
     _handle_admin_book_order_settle_divya,
     _handle_admin_book_orders_list,
     _handle_admin_return_close,
@@ -2905,6 +2906,10 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/admin/reset-pin":
             _handle_admin_reset_pin(self, body)
+            return
+
+        if self.path == "/admin/mark-paid":
+            _handle_admin_mark_paid(self, body)
             return
 
         if self.path == "/staff/resume":

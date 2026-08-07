@@ -268,6 +268,68 @@ def update_job_paid(job_id: str, amount: float, method: str, pay_id: str) -> Non
         logger.error(f"update_job_paid error for {job_id}: {e}")
 
 
+# Statuses at or past "paid" — a manual mark-paid must not clobber these (esp.
+# a real gateway payment already recorded on the row).
+_PAID_OR_LATER = ("Paid", "Printed", "Ready", "Completed", "Delivered")
+
+
+def mark_job_paid_manual(job_id: str, amount: float, method: str) -> dict:
+    """Record an in-store manual payment (cash / UPI QR not tracked by a gateway
+    webhook) and flip the job to Paid so the store puller pulls + prints it.
+
+    Unlike update_job_paid this deliberately does NOT run the routing engine
+    (the fulfilling store was already chosen by the pickup picker) and does NOT
+    touch razorpay_payment_id (this isn't a Razorpay payment). Claims a
+    pickup_code if the row lacks one. Idempotent: if the job is already Paid or
+    beyond, it is left untouched (so a manual tap can't overwrite a real gateway
+    payment) and the current state is returned.
+
+    Returns {"ok", "status", "pickup_code", "payment_mode", "already"?}.
+    Raises ValueError if the job_id does not exist.
+    """
+    method = (method or "").strip().lower()
+    if method not in ("cash", "upi"):
+        raise ValueError("method must be 'cash' or 'upi'")
+
+    client = _client()
+    existing = (
+        client.table("jobs")
+        .select("status,pickup_code")
+        .eq("job_id", job_id)
+        .limit(1)
+        .execute()
+    )
+    rows = getattr(existing, "data", None) or []
+    if not rows:
+        raise ValueError(f"job {job_id} not found")
+
+    cur_status = rows[0].get("status") or ""
+    pickup_code = rows[0].get("pickup_code")
+    if cur_status in _PAID_OR_LATER:
+        return {"ok": True, "already": cur_status, "status": cur_status,
+                "pickup_code": pickup_code, "payment_mode": method}
+
+    payload: dict[str, object] = {
+        "status":           "Paid",
+        "amount_collected": amount,
+        "payment_mode":     method,
+    }
+    if not pickup_code:
+        try:
+            from pickup_code import claim_unique_pickup_code
+            pickup_code = claim_unique_pickup_code(client)
+            payload["pickup_code"] = pickup_code
+        except Exception as e:
+            logger.error(
+                f"mark_job_paid_manual: could not claim pickup_code for {job_id}: {e}; "
+                "payment recorded but no pickup code assigned"
+            )
+
+    client.table("jobs").update(payload).eq("job_id", job_id).execute()
+    return {"ok": True, "status": "Paid", "pickup_code": pickup_code,
+            "payment_mode": method}
+
+
 def update_jobs_payment_link(job_ids: list, link_id: str, link_sent_at: str) -> None:
     """Set the Razorpay link ID on multiple jobs (single batched query)."""
     if not job_ids:
