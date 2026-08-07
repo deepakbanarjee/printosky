@@ -37,6 +37,19 @@ except Exception as e:
 
 WATCH_DIR = r"D:\Divya teacher\Preeksha sahayi"
 cfg = get_store_config()
+import re
+import time
+
+def sanitize_filename(filename):
+    base, ext = os.path.splitext(filename)
+    # Replace non-ASCII and special characters with underscore
+    clean_base = re.sub(r'[^\w\.\-]', '_', base)
+    # Collapse multiple underscores
+    clean_base = re.sub(r'_+', '_', clean_base).strip('_')
+    if not clean_base:
+        clean_base = f"manuscript_{int(time.time())}"
+    return clean_base + ext
+
 store_id = cfg.store_id
 
 def sync():
@@ -49,10 +62,30 @@ def sync():
     
     for f in files:
         if f.lower().endswith(".pdf"):
+            sanitized_f = sanitize_filename(f)
             pdf_path = os.path.join(WATCH_DIR, f)
             base_name = os.path.splitext(f)[0]
             txt_path = os.path.join(WATCH_DIR, f"{base_name}_transcript.txt")
             
+            if sanitized_f != f:
+                log.info(f"Renaming local files to sanitize: '{f}' -> '{sanitized_f}'")
+                new_pdf_path = os.path.join(WATCH_DIR, sanitized_f)
+                new_base_name = os.path.splitext(sanitized_f)[0]
+                new_txt_path = os.path.join(WATCH_DIR, f"{new_base_name}_transcript.txt")
+                
+                try:
+                    os.rename(pdf_path, new_pdf_path)
+                    pdf_path = new_pdf_path
+                    f = sanitized_f
+                    base_name = new_base_name
+                    
+                    if os.path.exists(txt_path):
+                        os.rename(txt_path, new_txt_path)
+                        txt_path = new_txt_path
+                except Exception as rename_err:
+                    log.error(f"Failed to rename local files: {rename_err}")
+                    continue
+                    
             log.info(f"Processing: {f}")
             
             # Get pages
