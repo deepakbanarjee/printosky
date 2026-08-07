@@ -1342,6 +1342,7 @@
           <option value="OSP">Thriprayar</option>
           <option value="PRINTK">Nattika</option>
         </select>
+        <span id="store-diag" style="font-family:var(--mono);font-size:11px;color:var(--muted);align-self:center" title="This machine's store_id (from its print_server /status) and where the admin read it from — this decides the default location filter."></span>
         <input class="search-input" id="search" placeholder="Search job ID / file…" oninput="renderTable()">
       </div>
       <div class="table-wrap">
@@ -2646,6 +2647,7 @@ function setFilter(f, btn) {
 function setStoreFilter(v) {
   storeFilter = v;
   renderTable();
+  updateStoreDiag();
 }
 
 // Default the store filter once, to THIS PC's store (the 🏪 Store setting):
@@ -2659,6 +2661,25 @@ function initStoreFilter() {
   storeFilter = (machine === "OSP" || machine === "PRINTK") ? machine : "all";
   const sel = document.getElementById("storeFilter");
   if (sel) sel.value = storeFilter;
+  updateStoreDiag();
+}
+
+// Diagnostic: surface THIS machine's resolved store_id and where it was read
+// from (storePcUrl /status), so a store PC showing the wrong jobs is obvious at
+// a glance. Green when it maps to a filterable store (OSP/PRINTK); amber when it
+// does not (the filter then correctly falls back to "all").
+function updateStoreDiag() {
+  const el = document.getElementById("store-diag");
+  if (!el) return;
+  const machine = getStoreId();
+  let host = "";
+  try { host = new URL(localStorage.getItem("storePcUrl") || "").host; } catch (e) {}
+  const known = (machine === "OSP" || machine === "PRINTK");
+  el.textContent = `🖥 ${machine || "(unknown)"} · src ${host || "(storePcUrl unset)"}`;
+  el.style.color = known ? "var(--green)" : "var(--amber)";
+  el.title = known
+    ? `This PC reports store_id="${machine}" (from ${host}); jobs are default-filtered to it. Override with the dropdown.`
+    : `This PC's store_id=${machine || "(unknown)"} is not a filterable store (expected OSP or PRINTK), so the filter shows ALL jobs. If this IS a store PC, set store_config.json store_id and point storePcUrl (⚙ PC Setup) at this PC's own :3005.`;
 }
 
 function renderTable() {
