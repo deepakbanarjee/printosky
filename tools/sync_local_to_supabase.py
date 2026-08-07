@@ -42,8 +42,8 @@ import time
 
 def sanitize_filename(filename):
     base, ext = os.path.splitext(filename)
-    # Replace non-ASCII and special characters with underscore
-    clean_base = re.sub(r'[^\w\.\-]', '_', base)
+    # Replace non-ASCII-alphanumeric, non-dot, non-hyphen with underscore
+    clean_base = re.sub(r'[^a-zA-Z0-9\.\-]', '_', base)
     # Collapse multiple underscores
     clean_base = re.sub(r'_+', '_', clean_base).strip('_')
     if not clean_base:
