@@ -36,6 +36,7 @@ const state = {
   paperSize: 'A4',
   sides: 'single',   // 'single' | 'duplex'
   orientation: 'auto', // 'auto' | 'portrait' | 'landscape'
+  direction: 'horizontal', // 'horizontal' | 'vertical' (N-up page fill order)
   binding: 'none',   // 'none' | 'staple' | 'spiral' | 'wiro' | 'soft' | 'perfect' | 'project' | 'record' | 'thesis'
   amountEstimated: 0,
   priceExact: true,
@@ -341,21 +342,51 @@ function setNup(n) {
   document.querySelectorAll('[data-nup]').forEach((el) => {
     el.classList.toggle('active', parseInt(el.dataset.nup, 10) === n);
   });
+  renderNupSheet();
+  updateSummary();
+  requestQuote();
+}
+
+// Redraws the little N-up preview so it symbolically reflects the CURRENT
+// n / direction / orientation: the sheet takes a portrait or landscape shape,
+// and each slot is numbered (and pops in) in the page fill order — left-to-right
+// per row for "horizontal", top-to-bottom per column for "vertical".
+function renderNupSheet() {
+  const n = state.nup;
   const sheet = $('ov2-nupSheet');
+  if (!sheet) return;
   const [rows, cols] = NUP_LAYOUT[n] || [1, 1];
+  const landscape = state.orientation === 'landscape';
+  sheet.style.width  = landscape ? '74px' : '56px';
+  sheet.style.height = landscape ? '56px' : '74px';
   sheet.style.gridTemplateColumns = 'repeat(' + cols + ',1fr)';
   sheet.style.gridTemplateRows = 'repeat(' + rows + ',1fr)';
   sheet.innerHTML = '';
-  for (let i = 1; i <= n; i++) {
-    const c = document.createElement('div');
-    c.className = 'ov2-nup-cell';
-    c.textContent = n <= 6 ? i : '';
-    c.style.animationDelay = (i * 0.03) + 's';
-    sheet.appendChild(c);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = state.direction === 'vertical'
+        ? (c * rows + r + 1)   // column-major fill
+        : (r * cols + c + 1);  // row-major fill
+      const cell = document.createElement('div');
+      cell.className = 'ov2-nup-cell';
+      cell.textContent = n <= 6 ? idx : '';
+      cell.style.animationDelay = (idx * 0.03) + 's';
+      sheet.appendChild(cell);
+    }
   }
-  $('ov2-nupLabel').textContent = n === 1 ? '1 / sheet' : n + ' / sheet';
+  const dirSym = state.direction === 'vertical' ? ' · ↓' : ' · →';
+  $('ov2-nupLabel').textContent = (n === 1 ? '1 / sheet' : n + ' / sheet') + (n > 1 ? dirSym : '');
+  const dirRow = $('ov2-dir-row');
+  if (dirRow) dirRow.style.display = n > 1 ? 'flex' : 'none';
+}
+
+function setDirection(mode) {
+  state.direction = mode;
+  document.querySelectorAll('[data-direction]').forEach((el) => {
+    el.classList.toggle('active', el.dataset.direction === mode);
+  });
+  renderNupSheet();
   updateSummary();
-  requestQuote();
 }
 
 function changeCopies(d) {
@@ -393,6 +424,7 @@ function setOrientation(mode) {
   document.querySelectorAll('[data-orientation]').forEach((el) => {
     el.classList.toggle('active', el.dataset.orientation === mode);
   });
+  renderNupSheet();   // reshape the preview to portrait/landscape
   updateSummary();
 }
 
@@ -795,6 +827,8 @@ function wire() {
     el.addEventListener('click', () => setColourMode(el.dataset.colour)));
   document.querySelectorAll('[data-nup]').forEach((el) =>
     el.addEventListener('click', () => setNup(parseInt(el.dataset.nup, 10))));
+  document.querySelectorAll('[data-direction]').forEach((el) =>
+    el.addEventListener('click', () => setDirection(el.dataset.direction)));
   $('ov2-copiesMinus').addEventListener('click', () => changeCopies(-1));
   $('ov2-copiesPlus').addEventListener('click', () => changeCopies(1));
   $('ov2-paper').addEventListener('change', (e) => { state.paperSize = e.target.value; updateSummary(); requestQuote(); });

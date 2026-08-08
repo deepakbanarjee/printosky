@@ -43,6 +43,7 @@ export function buildPrintSpec(s) {
     pages_included: inc, colour_mode: s.colourMode, colour_pages: col,
     nup: s.nup, copies: s.copies, paper_size: s.paperSize, sides: s.sides,
     orientation: s.orientation || 'auto',
+    nup_direction: s.direction || 'horizontal',   // 'horizontal' | 'vertical' (N-up fill order)
     binding: s.binding, sheet_count, amount_estimated: s.amountEstimated, price_exact: s.priceExact,
   };
 }
