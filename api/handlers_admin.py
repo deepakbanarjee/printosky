@@ -21,6 +21,7 @@ from api.index import (  # noqa: E402
     _json_response,
     _send_cors_headers,
     _auth_admin_pw,
+    _acad_auth_staff,
     _hash_pin,
     _fmt_phone,
     _sha256,
@@ -748,15 +749,16 @@ def _handle_admin_mark_paid(h, body) -> None:
     UPI QR not tracked by a gateway) for a print job, flipping it to Paid so the
     store puller pulls + auto-prints it.
 
-    Body: {admin_password, job_id, amount, method: cash|upi}.
+    Auth: a valid staff PIN (X-Staff-Pin) OR the admin password (X-Admin-Password)
+    — counter staff can record a payment without the admin password.
+    Body: {job_id, amount, method: cash|upi}.
     """
     try:
         data = json.loads(body or b"{}")
     except Exception:
         _json_response(h, 400, {"error": "Invalid JSON"})
         return
-    pw = (data.get("admin_password") or "").strip() or _admin_pw_from_request(h)
-    if not _auth_admin_pw(pw):
+    if not _acad_auth_staff(h):
         _json_response(h, 403, {"error": "Unauthorized"})
         return
     job_id = (data.get("job_id") or "").strip()

@@ -3258,16 +3258,18 @@ async function markPaid(method) {
   }
   if (!(amount >= 0)) { alert("Enter a valid amount"); return; }
   if (!confirm(`Mark ${jobId} PAID — ₹${amount} via ${method.toUpperCase()}?\nThis sends it to the store printer.`)) return;
-  let pw = _convPw();
-  if (!pw) { pw = await _adminPwPrompt(); if (!pw) return; sessionStorage.setItem("admin_pw_cache", pw); }
   try {
     const r = await fetch(`${ACAD_API}/admin/mark-paid`, {
       method:  "POST",
-      headers: { "Content-Type": "application/json", "X-Admin-Password": _convPw() },
+      headers: {
+        "Content-Type":     "application/json",
+        "X-Staff-Pin":      sessionStorage.getItem("staff_pin") || "",
+        "X-Admin-Password": _convPw(),   // owner/admin-override fallback
+      },
       body:    JSON.stringify({ job_id: jobId, amount, method }),
     });
     const data = await r.json().catch(() => ({}));
-    if (r.status === 403) { sessionStorage.removeItem("admin_pw_cache"); alert("Admin password rejected — try again"); return; }
+    if (r.status === 403) { alert("Not authorized — log out and back in with your staff PIN."); return; }
     if (!r.ok || data.error) { alert(data.error || `Failed (HTTP ${r.status})`); return; }
     if (data.already) {
       alert(`${jobId} is already ${data.already} — left unchanged.`);
