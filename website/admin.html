@@ -2885,6 +2885,34 @@ function set(id,val)  { const el=document.getElementById(id); if(el) el.textCont
 function today()      { return new Date().toISOString().slice(0,10); }
 function now()        { return new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}); }
 
+// Lightweight non-blocking toast. Types: "ok" (green), "error" (red), else neutral.
+// The DTP timer handlers (and others) call this; there is no toast markup in the
+// page, so the container is created lazily on first use.
+function showToast(msg, type = "ok") {
+  let host = document.getElementById("toast-host");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "toast-host";
+    host.style.cssText = "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);"
+      + "z-index:10000;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none";
+    document.body.appendChild(host);
+  }
+  const colour = type === "error" ? "var(--red, #ff5252)"
+               : type === "ok"    ? "var(--green, #00e676)"
+               : "var(--muted, #888)";
+  const t = document.createElement("div");
+  t.textContent = msg;
+  t.style.cssText = "background:#1a1a1a;color:" + colour + ";border:1px solid " + colour + ";"
+    + "border-radius:8px;padding:8px 14px;font-family:var(--mono,monospace);font-size:.8rem;"
+    + "box-shadow:0 4px 16px rgba(0,0,0,.4);opacity:0;transition:opacity .18s;max-width:80vw";
+  host.appendChild(t);
+  requestAnimationFrame(() => { t.style.opacity = "1"; });
+  setTimeout(() => {
+    t.style.opacity = "0";
+    setTimeout(() => t.remove(), 220);
+  }, 2600);
+}
+
 function colourBadge(j) {
   if (!j.colour_page_map) return "";
   try {
