@@ -176,7 +176,38 @@ Do NOT big-bang. Move one self-contained tab at a time, verify, then strip.
     + pdf.js. mis.html was reverted to reporting-only (the tab shell from `62860d7`
     removed). Verified in Chromium.
   - Net: the earlier mis tab-shell approach for Transcripts is **superseded**.
-- **NEXT — decide per remaining area: standalone page vs. keep in admin.**
+- **2026-08-08 — PIVOT: extract Jobs into a per-store page (owner direction).**
+  Instead of the subtractive "strip admin down to Jobs," go **extractive**: pull the
+  store console *out* into its own page each store logs into individually. Rationale:
+  the store console is the critical path — building it fresh/small is safer than
+  reverse-engineering a strip, per-store login is a real correctness win (no wrong-
+  store filter), and the back-office monolith stays working untouched meanwhile.
+  - **`website/jobs.html`** (`14f13ec`), route `/jobs`. Built as a **stripped copy**
+    of admin.html (build-alongside — admin.html left fully intact). Removed all
+    back-office (conv/academic/referrals/pb/books/opq tabs + modals + ~2.9k JS lines
+    + tab bar); kept the whole store flow (queue, job panel, colour, DTP, quote,
+    print, mark-paid/collect, notify, New Job, photocopy, printer breakdown, staff
+    PIN login, PC setup) and the admin-pw cluster+modal (store payments use it).
+  - **Per-store auto-scope:** store dropdown/diag removed; page scopes to the
+    machine's `store_id` (from print_server `/status`). Verified: an OSP PC shows
+    only OSP jobs (a PRINTK job is filtered out of both the queue and the breakdown).
+  - Verified in Chromium: login→dashboard, scoped queue, job panel, all store fns,
+    no errors.
+  - **admin.html stays the owner back-office** (unchanged); tools keep peeling off it
+    into standalone pages (chat ✓, transcripts ✓). A later cleanup can retire admin's
+    now-duplicated Jobs code once jobs.html is proven on the real store PC.
+- **FOLLOW-UPS surfaced by the Jobs extraction:**
+  - **Payments need the admin password.** `markPaid`/`confirmPayment` send
+    `X-Admin-Password` via `_convPw()`/`_adminPwPrompt()`. Since the admin password
+    isn't shared with staff, staff currently can't mark-paid/collect without it.
+    Decide: switch payment auth to the store/staff token (backend change) so counter
+    staff can take payment without the admin pw. (Own workstream.)
+  - **Remaining per-store scoping:** the stats strip (Today's Jobs/Revenue) and the
+    Printer Job Log come from pre-aggregated `daily_summary` / `konica_jobs`/
+    `epson_jobs` tables that aren't store-scoped — they still show all-store totals.
+    Scope these to the machine's store (query or client-side) in a follow-up.
+  - Pre-existing `trScrollToPage`/`trEditBalance` (now only in transcripts.html).
+- **REMAINING back-office (still in admin.html): decide standalone page vs. keep.**
   - **Book Orders** (+ payments-verify/dispatch/courier/Divya): heavy → likely its own
     page (`book-orders.html`?). Uses admin-pw → the `_adminPwPrompt` + `admin-pw-modal`
     cluster goes to `admin-shared.js` when the first admin-pw page is built.
