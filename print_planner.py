@@ -124,6 +124,11 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
             }
             grid = nup_map.get(nup, (2, 2, "Portrait")) # default 4-up shape if unknown
             cols, rows, nup_orient = grid
+            nup_dir = str(spec.get("nup_direction", "horizontal")).lower()
+            # 2-up: horizontal = two side-by-side (landscape); vertical = two
+            # stacked, page 1 on top (1 col x 2 rows, portrait).
+            if nup == 2 and nup_dir == "vertical":
+                cols, rows, nup_orient = 1, 2, "Portrait"
             orientation = nup_orient.lower() # force landscape/portrait
 
             # Read sliced file bytes
@@ -135,7 +140,7 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                 paper_size=paper_size or "A4",
                 orientation=nup_orient,
                 is_duplex=(sides == "ds"),
-                layout_direction=spec.get("nup_direction", "horizontal")
+                layout_direction=nup_dir
             )
             
             imposed_path = os.path.join(temp_dir, "imposed.pdf")

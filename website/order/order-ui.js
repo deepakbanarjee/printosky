@@ -296,7 +296,9 @@ function applyThumbColourClass(pg) {
     state.colourMode === 'col' ||
     (state.colourMode === 'mixed' && state.colourPages[pg]);
   el.classList.toggle('colour-on', isColour);
-  el.classList.toggle('mixed-bw', state.colourMode === 'mixed' && !state.colourPages[pg]);
+  // Any page that will print B&W shows a monochrome preview — all pages in
+  // 'bw' mode, and the non-colour pages in 'mixed'. ('col' mode → never.)
+  el.classList.toggle('bw-mono', !isColour);
   el.classList.toggle('dot-colour', isColour && state.included[pg]);
   el.classList.toggle('dot-bw', state.colourMode === 'mixed' && state.included[pg] && !state.colourPages[pg]);
 }
@@ -355,7 +357,9 @@ function renderNupSheet() {
   const n = state.nup;
   const sheet = $('ov2-nupSheet');
   if (!sheet) return;
-  const [rows, cols] = NUP_LAYOUT[n] || [1, 1];
+  let [rows, cols] = NUP_LAYOUT[n] || [1, 1];
+  // 2-up: horizontal = two side-by-side; vertical = two stacked (1 on top, 2 below).
+  if (n === 2 && state.direction === 'vertical') { rows = 2; cols = 1; }
   const landscape = state.orientation === 'landscape';
   sheet.style.width  = landscape ? '74px' : '56px';
   sheet.style.height = landscape ? '56px' : '74px';
