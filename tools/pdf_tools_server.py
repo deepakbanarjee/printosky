@@ -786,16 +786,22 @@ def save_transcript():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/transcripts/balance", methods=["POST"])
-def set_balance():
-    data = request.json
-    try:
-        new_balance = float(data.get("balance", 0.0))
-        update_current_balance(new_balance)
-        log_to_dashboard(f"Operator manually synchronized prepaid balance to: ₹{new_balance:.2f}")
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+@app.route("/api/transcripts/balance", methods=["GET", "POST"])
+def manage_balance():
+    if request.method == "POST":
+        data = request.json or {}
+        try:
+            new_balance = float(data.get("balance", 0.0))
+            update_current_balance(new_balance)
+            log_to_dashboard(f"Operator manually synchronized prepaid balance to: ₹{new_balance:.2f}")
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    else:
+        try:
+            return jsonify({"ok": True, "balance": get_current_balance()})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
 @app.route("/api/transcripts/upload", methods=["POST"])
 def upload_pdf():

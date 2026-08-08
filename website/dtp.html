@@ -452,8 +452,20 @@ async function loadTranscripts() {
       total_actual_cost += file.transcribed_pages * rate;
     });
     
-    // Fallback static balance since we don't have local server requirements
+    // Fetch balance from the local server
     let current_balance = 500.0;
+    try {
+      const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+      const resBal = await fetch(`${PC}/api/transcripts/balance`);
+      if (resBal.ok) {
+        const balData = await resBal.json();
+        if (balData && balData.balance !== undefined) {
+          current_balance = balData.balance;
+        }
+      }
+    } catch (balErr) {
+      console.warn("Failed to fetch balance from local server:", balErr);
+    }
     
     // Update Stats
     document.getElementById("tr-total-docs").innerText = total_docs;
@@ -787,6 +799,49 @@ function trExportWord(filename) {
   if (!filename) return;
   const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
   window.open(`${PC}/api/transcripts/export-docx?filename=${encodeURIComponent(filename)}`, "_blank");
+}
+
+function trEditBalance() {
+  const currentVal = document.getElementById("tr-balance").innerText.replace("₹", "").trim();
+  const val = prompt("Enter new Prepaid Balance (₹):", currentVal);
+  if (val === null) return;
+  const num = parseFloat(val);
+  if (isNaN(num)) { alert("Invalid number"); return; }
+  
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  fetch(`${PC}/api/transcripts/balance`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ balance: num })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.ok) {
+      alert("Balance updated successfully!");
+      loadTranscripts();
+    } else {
+      alert("Failed to update balance: " + (data.error || "unknown error"));
+    }
+  })
+  .catch(e => {
+    alert("Error communicating with local server: " + e.message);
+  });
+}
+
+function trScrollToPage(pageIdx) {
+  const textarea = document.getElementById("tr-modal-textarea");
+  if (!textarea) return;
+  const text = textarea.value;
+  const marker = `=== PAGE ${pageIdx + 1} ===`;
+  const idx = text.indexOf(marker);
+  if (idx !== -1) {
+    textarea.focus();
+    textarea.setSelectionRange(idx, idx + marker.length);
+    
+    const linesBefore = text.substring(0, idx).split("\n").length;
+    const lineHeight = parseFloat(window.getComputedStyle(textarea).lineHeight || "24");
+    textarea.scrollTop = (linesBefore - 1) * lineHeight;
+  }
 }
 
 function trCloseModal() {
