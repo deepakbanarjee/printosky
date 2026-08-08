@@ -127,3 +127,32 @@ Do NOT big-bang. Move one self-contained tab at a time, verify, then strip.
   `api/handlers_pb.py`, academic routes in `api/index.py`
 - Prior context: `docs/MASTER_PLAN.md` (auth tiers, staff MIS dashboard),
   `SPRINT_BACKLOG.md` S8-2 (mis.html never live-tested)
+
+## 9. Progress log
+- **2026-08-08 — Decisions locked** (owner input):
+  - **A:** Expand `mis.html` into a tabbed back-office console (reporting stays as
+    first tab; ops tabs join it).
+  - **B:** MIS tier gates the *page*; ops **actions keep the existing admin-pw
+    prompt** → zero backend change. Note: the admin password is **not shared with
+    any staff yet**, so only the owner performs back-office ops for now — nobody is
+    blocked by this. If staff back-office access is ever wanted, either share the
+    admin pw or change the backend to accept MIS auth (`handlers_admin.py` currently
+    hard-checks `admin_password` against `ADMIN_PASSWORD_HASH`).
+  - **C:** Extract shared helpers into `website/admin-shared.js` (both pages include).
+- **2026-08-08 — Step 0 done** (branch `claude/session-recap-pending-4vp603`):
+  - `fix(admin): define showToast()` (`5e3e212`) — the DTP timer handlers called an
+    undefined `showToast`, throwing ReferenceError on every start/pause/resume.
+  - `refactor(web): extract shared sbFetch + showToast → admin-shared.js` (`f666449`).
+    The two pages' `sbFetch` differed only in the 401 branch; unified into one file,
+    with each page supplying a `sbAuthFail()` hook (admin → `logout()`;
+    mis → `sessionStorage.clear(); location.reload()`). Behaviour-preserving; verified
+    in Chromium that both pages resolve `sbFetch`/`showToast`/`sbAuthFail` cleanly.
+- **NEXT — move Transcripts tab first** (most self-contained). Its admin-pw modal
+  markup + `_convPw`/`_adminPwPrompt` cluster travels to mis.html with the first ops
+  tab that needs it. Then Conversations → Book Orders (+courier/dispatch/Divya) →
+  Academic/Project Orders/Referrals → strip admin to Jobs-only → fix nav/redirects.
+- **DEFERRED (separate workstream):** admin **New Job → order-v2 fidelity**. The
+  `nj*` walk-in wizard posts a thin payload with no `print_spec`, so walk-in jobs
+  skip the full-fidelity auto-print pipeline that customer `order-v2.html` orders get.
+  To be done as its own branch/PR **before the final admin strip**, not folded into
+  the relocation work. (Owner: "tackle it later.")
