@@ -164,10 +164,26 @@ Do NOT big-bang. Move one self-contained tab at a time, verify, then strip.
     until the wrapper `<main>` took over visibility.
   - Pre-existing latent bugs carried over verbatim (fix in follow-up): `trScrollToPage`
     and `trEditBalance` are referenced but never defined (both harmless/cosmetic).
-- **NEXT — move Conversations** (chat inspector). This is the first ops tab that uses
-  the admin-pw cluster, so `_convPw`/`_adminPwPrompt` + the `admin-pw-modal` markup
-  go to `admin-shared.js` / mis with it. Then Book Orders (+courier/dispatch/Divya) →
-  Academic/Project Orders/Referrals → strip admin to Jobs-only → fix nav/redirects.
+- **2026-08-08 — ARCHITECTURE REVISION (owner):** heavy single-purpose ops tools get
+  their **own standalone page/window** (like `chat.html`), NOT a tab inside mis.html.
+  This refines Decision A: mis.html stays a **reporting-only** dashboard; back-office
+  *tools* become dedicated pages. Implications:
+  - **Conversations is already done** — it's the standalone `website/chat.html`
+    (admin-pw auth). So the admin `#conv-panel` is **deleted** (not moved) at strip time.
+  - **Transcripts → standalone `website/transcripts.html`** (`7df5142`). Auto-auths via
+    the machine's `storeToken` (auth.js `staff` type → Supabase JWT, no password
+    prompt); ⚙ Setup captures storeToken/storeId/storePcUrl. Reuses `admin-shared.js`
+    + pdf.js. mis.html was reverted to reporting-only (the tab shell from `62860d7`
+    removed). Verified in Chromium.
+  - Net: the earlier mis tab-shell approach for Transcripts is **superseded**.
+- **NEXT — decide per remaining area: standalone page vs. keep in admin.**
+  - **Book Orders** (+ payments-verify/dispatch/courier/Divya): heavy → likely its own
+    page (`book-orders.html`?). Uses admin-pw → the `_adminPwPrompt` + `admin-pw-modal`
+    cluster goes to `admin-shared.js` when the first admin-pw page is built.
+  - **Academic Projects / Project Orders / Referrals**: lighter; decide standalone vs.
+    a small back-office page.
+  - Then **strip admin.html to Jobs-only** (delete conv-panel + any moved tabs) and fix
+    nav links so the store console links out to chat.html / transcripts.html / mis.html.
 - **DEFERRED (separate workstream):** admin **New Job → order-v2 fidelity**. The
   `nj*` walk-in wizard posts a thin payload with no `print_spec`, so walk-in jobs
   skip the full-fidelity auto-print pipeline that customer `order-v2.html` orders get.
