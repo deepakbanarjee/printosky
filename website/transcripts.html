@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- printosky-favicons -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+  <link rel="apple-touch-icon" href="/apple-touch-180.png">
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Printosky Transcripts</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:      #0a0e13;
+    --surface: #111820;
+    --card:    #161d26;
+    --border:  #1e2a36;
+    --accent:  #00c8ff;
+    --green:   #00e676;
+    --amber:   #ffab40;
+    --red:     #ff5252;
+    --text:    #e0eaf5;
+    --muted:   #5a7080;
+    --mono:    'IBM Plex Mono', monospace;
+    --sans:    'IBM Plex Sans', sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+
+  /* ── Login ─────────────────────────────────────── */
+  #login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh;
+    background: radial-gradient(ellipse at 40% 50%, #001a2e 0%, var(--bg) 70%); }
+  .login-box { background: var(--surface); border: 1px solid var(--border);
+    border-top: 2px solid var(--amber); padding: 2.5rem; width: 360px; animation: fadeUp .4s ease; }
+  .login-logo { font-family: var(--mono); font-size: 1.3rem; font-weight: 600;
+    color: var(--amber); letter-spacing: .15em; margin-bottom: .25rem; }
+  .login-sub  { font-size: .75rem; color: var(--muted); font-family: var(--mono);
+    margin-bottom: 2rem; letter-spacing: .05em; }
+  label { display: block; font-size: .7rem; color: var(--muted); font-family: var(--mono);
+    letter-spacing: .1em; text-transform: uppercase; margin-bottom: .4rem; }
+  input[type="password"] { width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); font-family: var(--mono); font-size: .9rem; padding: .65rem .8rem;
+    outline: none; transition: border-color .2s; }
+  input[type="password"]:focus { border-color: var(--amber); }
+  .login-btn { display: block; width: 100%; margin-top: 1.2rem; padding: .7rem;
+    background: var(--amber); color: #000; font-family: var(--mono); font-weight: 600;
+    font-size: .85rem; letter-spacing: .1em; border: none; cursor: pointer; transition: opacity .2s; }
+  .login-btn:hover { opacity: .85; }
+  .login-err { margin-top: .8rem; font-size: .75rem; color: var(--red); font-family: var(--mono); display: none; }
+
+  /* ── Dashboard ─────────────────────────────────── */
+  #dashboard { display: none; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: .8rem 1.5rem; display: flex; align-items: center;
+    justify-content: space-between; position: sticky; top: 0; z-index: 10; }
+  .hdr-logo { font-family: var(--mono); font-size: 1rem; font-weight: 600;
+    color: var(--amber); letter-spacing: .12em; }
+  .hdr-sub  { font-family: var(--mono); font-size: .68rem; color: var(--muted); margin-top: .1rem; }
+  .hdr-right { display: flex; align-items: center; gap: 1rem; }
+  .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted);
+    display: inline-block; transition: background .3s; }
+  .sync-dot.ok  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .sync-dot.err { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+  .sync-label { font-family: var(--mono); font-size: .68rem; color: var(--muted); }
+  .refresh-btn { background: none; border: 1px solid var(--border); color: var(--muted);
+    font-family: var(--mono); font-size: .7rem; padding: .3rem .7rem; cursor: pointer; transition: all .2s; }
+  .refresh-btn:hover { border-color: var(--amber); color: var(--amber); }
+  .logout-btn { background: none; border: none; color: var(--muted); font-family: var(--mono);
+    font-size: .7rem; cursor: pointer; text-decoration: underline; }
+
+  main { padding: 1.5rem; max-width: 1400px; margin: 0 auto; }
+
+  /* ── Panel ─────────────────────────────────────── */
+  .panel { background: var(--card); border: 1px solid var(--border); border-top: 2px solid var(--border); margin-bottom: 1rem; }
+  .panel-hdr { display: flex; align-items: center; justify-content: space-between;
+    padding: .8rem 1rem; border-bottom: 1px solid var(--border); }
+  .panel-title { font-family: var(--mono); font-size: .72rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--text); }
+  .panel-sub { font-family: var(--mono); font-size: .62rem; color: var(--muted); }
+
+  /* ── Supply bars ───────────────────────────────── */
+  .supply-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+  @media (max-width: 700px) { .supply-grid { grid-template-columns: 1fr; } }
+
+  .supply-card { background: var(--card); border: 1px solid var(--border); padding: 1.2rem; }
+  .supply-printer-name { font-family: var(--mono); font-size: .72rem; font-weight: 600;
+    letter-spacing: .08em; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; }
+  .change-badge { font-size: .6rem; background: #1a2a1a; border: 1px solid var(--green);
+    color: var(--green); padding: .15rem .5rem; border-radius: 2px; }
+
+  .supply-row { margin-bottom: .9rem; }
+  .supply-label-row { display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: .68rem; margin-bottom: .3rem; }
+  .supply-name  { color: var(--muted); }
+  .supply-pct   { font-weight: 600; }
+  .supply-track { background: var(--border); height: 6px; border-radius: 3px; overflow: hidden; }
+  .supply-fill  { height: 100%; border-radius: 3px; transition: width .4s ease; }
+
+  /* Colour classes for ink bars */
+  .ink-black    { background: #888; }
+  .ink-black2   { background: #555; }
+  .ink-cyan     { background: #00bcd4; }
+  .ink-magenta  { background: #e91e8c; }
+  .ink-yellow   { background: #ffd600; }
+  .ink-lc       { background: #80deea; }
+  .ink-lm       { background: #f48fb1; }
+  .ink-toner    { background: var(--accent); }
+  .ink-drum     { background: var(--amber); }
+  .ink-maint    { background: #9c27b0; }
+  .ink-default  { background: var(--green); }
+
+  .supply-unknown { font-family: var(--mono); font-size: .68rem; color: var(--muted); font-style: italic; }
+
+  /* ── Period tabs ────────────────────────────────── */
+  .tab-bar { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  .tab-btn { background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--muted); font-family: var(--mono); font-size: .68rem; letter-spacing: .08em;
+    text-transform: uppercase; padding: .55rem .9rem; cursor: pointer; transition: all .15s; margin-bottom: -1px; }
+  .tab-btn:hover  { color: var(--text); }
+  .tab-btn.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+  /* ── Tables ─────────────────────────────────────── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: .72rem; }
+  thead th { text-align: left; padding: .5rem 1rem; background: var(--surface);
+    color: var(--muted); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase;
+    white-space: nowrap; font-weight: 500; border-bottom: 1px solid var(--border); }
+  tbody td { padding: .5rem 1rem; border-bottom: 1px solid #141c24; white-space: nowrap; }
+  tbody tr:hover td { background: #1a2430; }
+
+  .delta { font-size: .65rem; color: var(--green); }
+  .delta.neg { color: var(--red); }
+
+  /* ── Summary stats ──────────────────────────────── */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px; background: var(--border); margin-bottom: 1rem; border: 1px solid var(--border); }
+  .stat { background: var(--card); padding: 1rem 1.2rem; }
+  .stat-label { font-family: var(--mono); font-size: .63rem; color: var(--muted);
+    letter-spacing: .12em; text-transform: uppercase; margin-bottom: .4rem; }
+  .stat-value { font-family: var(--mono); font-size: 1.6rem; font-weight: 600; line-height: 1; }
+  .stat-sub   { font-family: var(--mono); font-size: .62rem; color: var(--muted); margin-top: .2rem; }
+  .green  { color: var(--green); }
+  .amber  { color: var(--amber); }
+  .accent { color: var(--accent); }
+
+  /* ── Konica jobs grid ───────────────────────────── */
+  .jobs-period-content { display: none; padding: 1rem; }
+  .jobs-period-content.active { display: block; }
+  .kj-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr));
+    gap: 1px; background: var(--border); margin-bottom: 1rem; border: 1px solid var(--border); }
+  .kj-stat { background: var(--card); padding: .9rem 1rem; }
+  .kj-label { font-family: var(--mono); font-size: .6rem; color: var(--muted);
+    letter-spacing: .1em; text-transform: uppercase; margin-bottom: .3rem; }
+  .kj-value { font-family: var(--mono); font-size: 1.3rem; font-weight: 600; }
+  .kj-sub   { font-family: var(--mono); font-size: .6rem; color: var(--muted); margin-top: .15rem; }
+
+  .kj-split { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 700px) { .kj-split { grid-template-columns: 1fr; } }
+
+  .kj-sub-panel { background: var(--surface); border: 1px solid var(--border); padding: .8rem 1rem; }
+  .kj-sub-title { font-family: var(--mono); font-size: .62rem; color: var(--muted);
+    letter-spacing: .1em; text-transform: uppercase; margin-bottom: .7rem; }
+  .kj-bar-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .5rem;
+    font-family: var(--mono); font-size: .65rem; }
+  .kj-bar-label { width: 60px; color: var(--muted); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; flex-shrink: 0; }
+  .kj-bar-track { flex: 1; background: var(--border); height: 5px; border-radius: 2px; overflow: hidden; }
+  .kj-bar-fill  { height: 100%; border-radius: 2px; }
+  .kj-bar-val   { width: 55px; text-align: right; color: var(--text); flex-shrink: 0; }
+
+  /* ── Staff performance ──────────────────────────── */
+  .staff-online { color: var(--green); }
+  .staff-offline { color: var(--muted); }
+  .staff-perf-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(120px,1fr));
+    gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 1rem; }
+  .sp-stat { background: var(--card); padding: .7rem 1rem; }
+  .sp-label { font-family: var(--mono); font-size: .58rem; color: var(--muted);
+    letter-spacing: .1em; text-transform: uppercase; margin-bottom: .25rem; }
+  .sp-value { font-family: var(--mono); font-size: 1.2rem; font-weight: 600; }
+
+  @keyframes spin   { to { transform: rotate(360deg); } }
+  @keyframes fadeUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:none; } }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border);
+    border-top-color: var(--amber); border-radius: 50%; animation: spin .7s linear infinite;
+    vertical-align: middle; margin-right: .4rem; }
+  .empty { text-align: center; padding: 2rem; color: var(--muted); font-family: var(--mono); font-size: .75rem; }
+  /* ── Back-office tabs + control buttons (transcripts et al.) ── */
+  .ctrl-btn { padding:6px 14px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; cursor:pointer; font-size:.7rem; font-family:var(--sans); }
+  .ctrl-btn:hover { border-color:var(--accent); }
+  .mis-tabs { max-width:1400px; margin:0 auto; padding:1rem 1.5rem 0; display:flex; gap:.25rem; border-bottom:1px solid var(--border); }
+  .mis-tab { background:none; border:none; border-bottom:2px solid transparent; color:var(--muted); font-family:var(--mono); font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; padding:.55rem .9rem; cursor:pointer; margin-bottom:-1px; }
+  .mis-tab:hover { color:var(--text); }
+  .mis-tab.active { color:var(--amber); border-bottom-color:var(--amber); }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <div>
+      <div class="hdr-logo"><img src="assets/printosky-wordmark-reverse.svg" alt="Printosky" style="height:18px;width:auto;display:inline-block;vertical-align:middle"> Transcripts</div>
+      <div class="hdr-sub">Malayalam manuscript OCR</div>
+    </div>
+    <div class="hdr-right">
+      <span class="sync-label" id="tr-auth-state">…</span>
+      <button class="refresh-btn" onclick="trSetup()">⚙ Setup</button>
+      <button class="refresh-btn" onclick="loadTranscripts()">↻ Refresh</button>
+    </div>
+  </header>
+
+  <main>
+  <div id="transcripts-tab">
+    <!-- Stats row -->
+    <div class="stats-grid" style="margin-bottom: 20px;">
+      <div class="stat">
+        <div class="stat-label">Total Documents</div>
+        <div class="stat-value accent" id="tr-total-docs">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Transcribed Pages</div>
+        <div class="stat-value green" id="tr-transcribed-pages">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Projected Cost (Remaining)</div>
+        <div class="stat-value" id="tr-total-cost">₹0.00</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Actual Spent</div>
+        <div class="stat-value green" id="tr-actual-spent">₹0.00</div>
+      </div>
+      <div class="stat" onclick="trEditBalance()" style="cursor:pointer;" title="Click to sync/edit balance">
+        <div class="stat-label">Prepaid Balance ✏️</div>
+        <div class="stat-value" id="tr-balance" style="color: #a855f7;">₹0.00</div>
+      </div>
+    </div>
+
+    <!-- Upload and Actions Row -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+      <div style="font-size:.85rem;color:var(--muted)">Malayalam manuscript transcription powered by Gemini Flash-Lite</div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="ctrl-btn" id="tr-store-btn" onclick="changeStore()" title="Which store / office THIS machine uploads transcripts as. Store PCs set this automatically; offices set it once here.">🏪 Store: —</button>
+        <input type="file" id="tr-file-upload" accept=".pdf" style="display:none;" onchange="trHandleFileUpload(event)">
+        <button class="ctrl-btn" onclick="document.getElementById('tr-file-upload').click()">➕ Upload PDF</button>
+        <button class="ctrl-btn" onclick="loadTranscripts()">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Manuscripts Table -->
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>File Name</th>
+            <th style="width:100px; text-align:center;">Total Pages</th>
+            <th style="width:120px;">Status</th>
+            <th style="width:250px;">Mode (Cost/Pg)</th>
+            <th style="width:100px; text-align:right;">Est. Cost</th>
+            <th style="width:100px; text-align:right;">Actual Spent</th>
+            <th style="width:240px; text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tr-table-body">
+          <tr><td colspan="7" style="text-align:center; color:#888;">Loading manuscripts...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Live Logs Console -->
+    <div style="margin-top:20px;">
+      <div style="font-size:.85rem; color:var(--muted); margin-bottom:6px;">Live Watcher Logs</div>
+      <div id="tr-logs" style="background:#0c1015; border:1px solid var(--border); border-radius:6px; padding:10px; font-family:var(--mono); font-size:.78rem; height:120px; overflow-y:auto; color:#a7f3d0; line-height:1.4;">
+        Loading logs...
+      </div>
+    </div>
+  </div>
+  </main>
+</div>
+
+  <div id="tr-edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:var(--surface);padding:20px;width:100vw;height:100vh;display:flex;flex-direction:column;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 id="tr-modal-title" style="font-size:1.1rem;font-weight:600;color:var(--accent);word-break:break-all;max-width:50%;">File Name</h3>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <button class="ctrl-btn" onclick="trPrevPage()">◀ Prev</button>
+          <span id="tr-page-indicator" style="font-family:var(--mono); font-size:.9rem; color:var(--text)">Page 1 of 1</span>
+          <button class="ctrl-btn" onclick="trNextPage()">Next ▶</button>
+        </div>
+        <button class="ctrl-btn" id="tr-modal-pdf-btn" onclick="trOpenPDFInNewTab()" style="background:#2563eb;color:#fff;">Open PDF ↗</button>
+      </div>
+      
+      <!-- Side-by-Side layout -->
+      <div style="flex:1; display:flex; gap:15px; min-height:0; margin-bottom:12px;">
+        <!-- Left: Image Viewer -->
+        <div style="flex:1; border:1px solid var(--border); border-radius:6px; background:#0c1015; overflow:auto; position:relative;">
+          <!-- Floating zoom controls -->
+          <div style="position: absolute; top: 10px; left: 10px; z-index: 10; display: flex; gap: 5px;">
+            <button class="ctrl-btn" onclick="trZoomOut()" style="padding: 4px 10px; font-weight: bold; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; cursor: pointer;">-</button>
+            <span id="tr-zoom-label" style="background: rgba(0,0,0,0.7); color: #fff; padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; display: flex; align-items: center; border: 1px solid rgba(255,255,255,0.2); font-family: var(--mono);">100%</span>
+            <button class="ctrl-btn" onclick="trZoomIn()" style="padding: 4px 10px; font-weight: bold; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; cursor: pointer;">+</button>
+            <button class="ctrl-btn" onclick="trZoomReset()" style="padding: 4px 8px; font-size: 0.8rem; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; cursor: pointer;">Reset</button>
+          </div>
+          <!-- Centered wrapper for image -->
+          <div id="tr-img-wrapper" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; min-height: 100%;">
+            <img id="tr-modal-img" src="" style="max-width:100%; max-height:100%; object-fit:contain; display:block;" alt="Manuscript Page scan">
+          </div>
+        </div>
+        
+        <!-- Right: Text Editor -->
+        <div style="flex:1; display:flex; flex-direction:column;">
+          <textarea id="tr-modal-textarea" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--sans);font-size:1rem;padding:12px;resize:none;outline:none;line-height:1.6;" placeholder="Transcript text..."></textarea>
+        </div>
+      </div>
+      
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="ctrl-btn" style="background:#10b981;color:#fff;" onclick="trExportWord(trActiveFile)">Export Word ⬇</button>
+        <button class="ctrl-btn" style="background:#16a34a;color:#fff;" onclick="trSaveTranscript()">Save Changes</button>
+        <button class="ctrl-btn" style="background:#4b5563;color:#fff;" onclick="trCloseModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+</script>
+<script src="admin-shared.js"></script>
+<script>
+// ── Config ───────────────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1saHV3bG53d3d4ZG5xYWZlbGtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTcwODksImV4cCI6MjA4ODg3MzA4OX0.2qrM3-BFDnSSICRMR8-pE6VdvVSJVhxG_cGZtBMDEnI";
+
+// sbFetch()/showToast()/getStoreId() come from admin-shared.js.
+// On a 401, re-auth via the store token, then retry.
+async function sbAuthFail() {
+  sessionStorage.removeItem("supabase_jwt");
+  const ok = await ensureAuth();
+  if (ok) loadTranscripts();
+  else setAuthState(false);
+}
+
+// ── Store-token auto-auth ────────────────────────────────────────────────────
+// This machine already holds a storeToken (set on the store PC / PRIOFF office
+// box). auth.js "staff" type verifies it and returns a Supabase JWT for the
+// RLS-protected transcript tables — no password prompt needed.
+function setAuthState(ok) {
+  const el = document.getElementById("tr-auth-state");
+  if (!el) return;
+  el.textContent = ok ? "● authenticated" : "○ not authenticated — click ⚙ Setup";
+  el.style.color = ok ? "var(--green)" : "var(--amber)";
+}
+
+async function ensureAuth() {
+  const token = (localStorage.getItem("storeToken") || "").trim();
+  if (!token) { setAuthState(false); return false; }
+  try {
+    const r = await fetch("/.netlify/functions/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "staff", password: token }),
+    });
+    const d = await r.json();
+    if (d && d.supabase_jwt) {
+      sessionStorage.setItem("supabase_jwt", d.supabase_jwt);
+      setAuthState(true);
+      return true;
+    }
+  } catch (e) {}
+  setAuthState(false);
+  return false;
+}
+
+// Setup: capture the store token / store code / store PC URL on a fresh machine.
+function trSetup() {
+  const token = prompt("Store token (from the store PC / office setup):", localStorage.getItem("storeToken") || "");
+  if (token !== null) localStorage.setItem("storeToken", token.trim());
+  const sid = prompt("Store / office code (e.g. OSP, PRIOFF):", localStorage.getItem("storeId") || "");
+  if (sid !== null) localStorage.setItem("storeId", (sid || "").trim().toUpperCase());
+  const url = prompt("Store PC URL for logs/export (e.g. http://localhost:3005):", localStorage.getItem("storePcUrl") || "");
+  if (url !== null) localStorage.setItem("storePcUrl", url.trim());
+  init();
+}
+
+// ── Transcripts Integration ──────────────────────────────────────────────────
+let trActiveFile = null;
+let trInterval = null;
+let trFilesList = [];
+let trCurrentPage = 0;
+let trTotalPages = 1;
+
+function trStartPolling() {
+  if (!trInterval) {
+    trInterval = setInterval(loadTranscripts, 5000);
+  }
+}
+
+function trStopPolling() {
+  if (trInterval) {
+    clearInterval(trInterval);
+    trInterval = null;
+  }
+}
+
+let pdfDocInstance = null; // holds the loaded PDFjs document
+
+function changeStore() {
+  const cur = getStoreId();
+  const val = (prompt(
+    "Which store / office is THIS machine?\n\n" +
+    "Enter its store code — e.g.\n" +
+    "  OSP     = Oxygen Students Paradise store PC (Thrissur)\n" +
+    "  PRIOFF  = Printosky office (Nattika)",
+    cur
+  ) || "").trim().toUpperCase();
+  if (val) {
+    localStorage.setItem("storeId", val);
+    const b = document.getElementById("tr-store-btn");
+    if (b) b.textContent = "🏪 Store: " + val;
+    if (typeof loadTranscripts === "function") loadTranscripts();
+  }
+  return getStoreId();
+}
+
+// The machine's store id, prompting once if it has never been set.
+function requireStoreId() {
+  return getStoreId() || changeStore();
+}
+
+async function loadTranscripts() {
+  const storeId = requireStoreId();
+  const badge = document.getElementById("tr-store-btn");
+  if (badge) badge.textContent = "🏪 Store: " + (storeId || "(not set)");
+  if (!storeId) return;   // no brand fallback — operator must pick the store
+  try {
+    const data = await sbFetch("manuscript_transcripts", `uploaded_by_store=eq.${storeId}&order=created_at.desc`);
+    trFilesList = data || [];
+    
+    const total_docs = trFilesList.length;
+    let total_pages = 0;
+    let total_transcribed_pages = 0;
+    let total_cost = 0.0;
+    let total_actual_cost = 0.0;
+    
+    trFilesList.forEach(file => {
+      total_pages += file.total_pages;
+      total_transcribed_pages += file.transcribed_pages;
+      const rate = file.mode === "urgent" ? 20.0 : 5.0;
+      total_cost += (file.total_pages - file.transcribed_pages) * rate;
+      total_actual_cost += file.transcribed_pages * rate;
+    });
+    
+    // Fallback static balance since we don't have local server requirements
+    let current_balance = 500.0;
+    
+    // Update Stats
+    document.getElementById("tr-total-docs").innerText = total_docs;
+    document.getElementById("tr-transcribed-pages").innerText = `${total_transcribed_pages} / ${total_pages}`;
+    document.getElementById("tr-total-cost").innerText = `₹${total_cost.toFixed(2)}`;
+    document.getElementById("tr-actual-spent").innerText = `₹${total_actual_cost.toFixed(2)}`;
+    document.getElementById("tr-balance").innerText = `₹${current_balance.toFixed(2)}`;
+    
+    // Update Table
+    const tbody = document.getElementById("tr-table-body");
+    tbody.innerHTML = "";
+    
+    if (trFilesList.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#888;">No manuscripts uploaded yet.</td></tr>`;
+    } else {
+      trFilesList.forEach(file => {
+        const tr = document.createElement("tr");
+        const rate = file.mode === "urgent" ? 20.0 : 5.0;
+        const pct = file.total_pages > 0 ? (file.transcribed_pages / file.total_pages) * 100 : 0;
+        const progressHtml = `
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <span style="font-weight:600; color:var(--accent); word-break:break-all;">${file.filename}</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div style="flex:1; height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
+                <div style="width:${pct}%; height:100%; background:var(--green); border-radius:3px;"></div>
+              </div>
+              <span style="font-size:.7rem; color:var(--muted); font-family:var(--mono);">${file.transcribed_pages}/${file.total_pages} pg</span>
+            </div>
+          </div>
+        `;
+        
+        let statusStyle = "background:rgba(251,191,36,0.1); color:#fbbf24; border:1px solid rgba(251,191,36,0.2);";
+        if (file.status === "completed") {
+          statusStyle = "background:rgba(16,185,129,0.1); color:#10b981; border:1px solid rgba(16,185,129,0.2);";
+        } else if (file.status === "transcribing") {
+          statusStyle = "background:rgba(59,130,246,0.1); color:#3b82f6; border:1px solid rgba(59,130,246,0.2);";
+        } else if (file.status === "failed") {
+          statusStyle = "background:rgba(239,68,68,0.1); color:#ef4444; border:1px solid rgba(239,68,68,0.2);";
+        }
+        const statusHtml = `<span style="display:inline-block; padding:2px 8px; border-radius:4px; font-size:.72rem; font-weight:600; font-family:var(--mono); ${statusStyle}">${file.status.toUpperCase()}</span>`;
+        
+        const modeHtml = `
+          <div style="display:flex; gap:4px;">
+            <button class="ctrl-btn" style="padding:2px 6px; font-size:.7rem; ${file.mode === 'standard' ? 'background:#3b82f6; color:#fff;' : 'background:transparent; border:1px solid var(--border);'}" onclick="trSetMode('${file.id}', 'standard')">Std (₹5)</button>
+            <button class="ctrl-btn" style="padding:2px 6px; font-size:.7rem; ${file.mode === 'urgent' ? 'background:#f59e0b; color:#fff;' : 'background:transparent; border:1px solid var(--border);'}" onclick="trSetMode('${file.id}', 'urgent')">Urg (₹20)</button>
+          </div>
+        `;
+        
+        let actions = ``;
+        if (file.transcribed_pages > 0) {
+          actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; margin-right:4px;" onclick="trView('${file.filename}')">View/Edit</button>`;
+          actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; margin-right:4px; background:#10b981; color:#fff; border-color:#10b981;" onclick="trExportWord('${file.filename}')">Word ⬇</button>`;
+        }
+        if (file.status !== "transcribing" && file.status !== "completed") {
+          actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; margin-right:4px;" onclick="trTrigger('${file.id}')">Transcribe</button>`;
+        }
+        actions += `<button class="ctrl-btn" style="padding:2px 8px; font-size:.75rem; background:rgba(239,68,68,0.1); color:#ef4444; border-color:rgba(239,68,68,0.2);" onclick="trDelete('${file.id}', '${file.filename}')">Delete</button>`;
+        
+        tr.innerHTML = `
+          <td>${progressHtml}</td>
+          <td style="text-align:center; font-family:var(--mono);">${file.total_pages}</td>
+          <td>${statusHtml}</td>
+          <td>${modeHtml}</td>
+          <td style="text-align:right; font-family:var(--mono); font-weight:600;">₹${((file.total_pages - file.transcribed_pages) * rate).toFixed(2)}</td>
+          <td style="text-align:right; font-family:var(--mono); font-weight:600; color:#10b981;">₹${(file.transcribed_pages * rate).toFixed(2)}</td>
+          <td style="text-align:right;">${actions}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+    // Fetch logs from the local server
+    try {
+      const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+      const resLogs = await fetch(`${PC}/api/transcripts/logs`);
+      const logsData = await resLogs.json();
+      if (logsData && logsData.logs) {
+        document.getElementById("tr-logs").innerText = logsData.logs.join("\n");
+        const trLogsDiv = document.getElementById("tr-logs");
+        trLogsDiv.scrollTop = trLogsDiv.scrollHeight;
+      }
+    } catch (logErr) {
+      document.getElementById("tr-logs").innerText = "Local log server is offline.";
+    }
+  } catch (e) {
+    console.error("loadTranscripts error:", e);
+    document.getElementById("tr-table-body").innerHTML = `<tr><td colspan="7" style="text-align:center; color:#ef4444;">Failed to load transcripts from Supabase.</td></tr>`;
+  }
+}
+
+async function trSetMode(jobId, mode) {
+  try {
+    const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
+    await fetch(`${SUPABASE_URL}/rest/v1/manuscript_transcripts?id=eq.${jobId}`, {
+      method: "PATCH",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${jwt}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ mode })
+    });
+    loadTranscripts();
+  } catch (e) { alert("Failed to set mode: " + e.message); }
+}
+
+async function trTrigger(jobId) {
+  try {
+    const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
+    await fetch(`${SUPABASE_URL}/rest/v1/manuscript_transcripts?id=eq.${jobId}`, {
+      method: "PATCH",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${jwt}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ status: "pending" })
+    });
+    loadTranscripts();
+  } catch (e) { alert("Failed to start transcription: " + e.message); }
+}
+
+async function trDelete(jobId, filename) {
+  if (!confirm(`Delete "${filename}" and its transcript? This cannot be undone.`)) return;
+  try {
+    const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
+    
+    await fetch(`${SUPABASE_URL}/rest/v1/manuscript_transcripts?id=eq.${jobId}`, {
+      method: "DELETE",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${jwt}`
+      }
+    });
+    
+    await fetch(`${SUPABASE_URL}/storage/v1/object/manuscripts/${filename}`, {
+      method: "DELETE",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${jwt}`
+      }
+    });
+    
+    loadTranscripts();
+  } catch (e) { alert("Failed to delete file: " + e.message); }
+}
+
+async function trHandleFileUpload(event) {
+  const fileInput = event.target;
+  if (fileInput.files.length === 0) return;
+  const file = fileInput.files[0];
+  
+  // Sanitize filename to avoid key restrictions (emojis, non-ASCII characters)
+  const dotIdx = file.name.lastIndexOf(".");
+  const ext = dotIdx !== -1 ? file.name.substring(dotIdx) : "";
+  const nameOnly = dotIdx !== -1 ? file.name.substring(0, dotIdx) : file.name;
+  let cleanName = nameOnly.replace(/[^\w\.\-]/g, "_").replace(/_+/g, "_");
+  if (!cleanName || cleanName === "_") {
+    cleanName = "manuscript_" + Date.now();
+  }
+  const filename = cleanName + ext;
+  
+  const storeId = requireStoreId();
+  if (!storeId) { alert("Set this machine's store / office first (the 🏪 Store button)."); return; }
+  
+  try {
+    const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
+    
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+    const totalPages = pdf.numPages;
+    
+    const uploadUrl = `${SUPABASE_URL}/storage/v1/object/manuscripts/${encodeURIComponent(filename)}`;
+    const uploadRes = await fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${jwt}`,
+        "Content-Type": file.type
+      },
+      body: file
+    });
+    
+    if (!uploadRes.ok) {
+      const errData = await uploadRes.json();
+      throw new Error(errData.message || "Storage upload failed");
+    }
+    
+    await fetch(`${SUPABASE_URL}/rest/v1/manuscript_transcripts`, {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${jwt}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal"
+      },
+      body: JSON.stringify({
+        filename: filename,
+        pdf_url: `${SUPABASE_URL}/storage/v1/object/public/manuscripts/${filename}`,
+        total_pages: totalPages,
+        transcribed_pages: 0,
+        status: "pending",
+        mode: "standard",
+        uploaded_by_store: storeId
+      })
+    });
+    
+    alert("Upload successful! The file will be transcribed shortly.");
+    loadTranscripts();
+    
+  } catch (err) {
+    alert("Error occurred during file upload: " + err.message);
+  } finally {
+    fileInput.value = "";
+  }
+}
+
+async function trView(filename) {
+  trActiveFile = filename;
+  const fileObj = trFilesList.find(f => f.filename === filename);
+  trTotalPages = fileObj ? fileObj.total_pages : 1;
+  trCurrentPage = 0;
+  pdfDocInstance = null;
+  trZoomReset();
+  
+  document.getElementById("tr-modal-title").innerText = filename;
+  const area = document.getElementById("tr-modal-textarea");
+  area.value = "Loading transcript...";
+  document.getElementById("tr-edit-modal").style.display = "flex";
+  
+  trUpdatePageIndicator();
+  
+  try {
+    const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/public/manuscripts/${encodeURIComponent(filename)}`);
+    if (!res.ok) throw new Error("Failed to load PDF file from Storage");
+    const blob = await res.blob();
+    const pdfData = new Uint8Array(await blob.arrayBuffer());
+    pdfDocInstance = await pdfjsLib.getDocument({ data: pdfData }).promise;
+    trLoadPageImage();
+  } catch (e) {
+    console.error("PDF load error:", e);
+    alert("Failed to render PDF preview: " + e.message);
+  }
+  
+  if (fileObj) {
+    area.value = fileObj.content || "";
+    setTimeout(() => trScrollToPage(0), 100);
+  } else {
+    area.value = "No transcript content found.";
+  }
+}
+
+function trUpdatePageIndicator() {
+  document.getElementById("tr-page-indicator").innerText = `Page ${trCurrentPage + 1} of ${trTotalPages}`;
+}
+
+async function trLoadPageImage() {
+  if (!pdfDocInstance) return;
+  const imgElement = document.getElementById("tr-modal-img");
+  
+  try {
+    const page = await pdfDocInstance.getPage(trCurrentPage + 1);
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    const viewport = page.getViewport({ scale: 1.5 });
+    
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+    
+    await page.render({ canvasContext: context, viewport: viewport }).promise;
+    imgElement.src = canvas.toDataURL();
+  } catch (e) {
+    console.error("PDF page render error:", e);
+  }
+}
+
+function trPrevPage() {
+  if (trCurrentPage > 0) {
+    trCurrentPage--;
+    trUpdatePageIndicator();
+    trLoadPageImage();
+    trScrollToPage(trCurrentPage);
+  }
+}
+
+function trNextPage() {
+  if (trCurrentPage < trTotalPages - 1) {
+    trCurrentPage++;
+    trUpdatePageIndicator();
+    trLoadPageImage();
+    trScrollToPage(trCurrentPage);
+  }
+}
+
+function trOpenPDFInNewTab() {
+  if (!trActiveFile) return;
+  const url = `${SUPABASE_URL}/storage/v1/object/public/manuscripts/${encodeURIComponent(trActiveFile)}`;
+  window.open(url, "_blank");
+}
+
+async function trSaveTranscript() {
+  if (!trActiveFile) return;
+  const text = document.getElementById("tr-modal-textarea").value;
+  const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
+  const fileObj = trFilesList.find(f => f.filename === trActiveFile);
+  
+  if (!fileObj) return;
+  
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/manuscript_transcripts?id=eq.${fileObj.id}`, {
+      method: "PATCH",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${jwt}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ content: text })
+    });
+    
+    if (res.ok) {
+      alert("Transcript saved successfully!");
+      trCloseModal();
+      loadTranscripts();
+    } else {
+      alert("Failed to save to database");
+    }
+  } catch (e) { alert("Error saving transcript: " + e.message); }
+}
+
+function trExportWord(filename) {
+  if (!filename) return;
+  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
+  window.open(`${PC}/api/transcripts/export-docx?filename=${encodeURIComponent(filename)}`, "_blank");
+}
+
+function trCloseModal() {
+  trZoomReset();
+  document.getElementById("tr-edit-modal").style.display = "none";
+  trActiveFile = null;
+  document.getElementById("tr-modal-img").src = "";
+  pdfDocInstance = null;
+}
+
+let trZoom = 1.0;
+
+function trZoomIn() {
+  trZoom += 0.25;
+  trUpdateZoom();
+}
+
+function trZoomOut() {
+  if (trZoom > 0.5) {
+    trZoom -= 0.25;
+    trUpdateZoom();
+  }
+}
+
+function trZoomReset() {
+  trZoom = 1.0;
+  trUpdateZoom();
+}
+
+function trUpdateZoom() {
+  const img = document.getElementById("tr-modal-img");
+  const wrapper = document.getElementById("tr-img-wrapper");
+  const label = document.getElementById("tr-zoom-label");
+  
+  if (label) label.innerText = Math.round(trZoom * 100) + "%";
+  
+  if (trZoom === 1.0) {
+    wrapper.style.display = "flex";
+    wrapper.style.alignItems = "center";
+    wrapper.style.justifyContent = "center";
+    wrapper.style.overflow = "hidden";
+    img.style.maxWidth = "100%";
+    img.style.maxHeight = "100%";
+    img.style.width = "auto";
+    img.style.height = "auto";
+  } else {
+    wrapper.style.display = "block";
+    wrapper.style.overflow = "visible";
+    img.style.maxWidth = "none";
+    img.style.maxHeight = "none";
+    img.style.width = (trZoom * 100) + "%";
+    img.style.height = "auto";
+    img.style.margin = "20px auto";
+  }
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+async function init() {
+  const ok = await ensureAuth();
+  if (!ok) {
+    const tb = document.getElementById("tr-table-body");
+    if (tb) tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--amber);">Not authenticated — click \u2699 Setup to enter this machine\u2019s store token.</td></tr>';
+    return;
+  }
+  loadTranscripts();
+  trStartPolling();
+}
+window.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>
