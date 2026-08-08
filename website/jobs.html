@@ -1229,119 +1229,22 @@
       <div class="stat"><div class="stat-label">Revenue Today</div><div class="stat-value green" id="s-rev">—</div><div class="stat-sub" id="s-rev-sub">—</div></div>
     </div>
 
-    <!-- Printer breakdown -->
-    <div class="printer-breakdown">
-      <!-- Konica -->
-      <div class="panel">
-        <div class="panel-hdr">
-          <div class="panel-title">▣ Konica — B&amp;W Jobs</div>
-          <span class="panel-badge" id="konica-count">—</span>
-        </div>
-        <div class="pb-stat-row"><span class="k">Received Today</span><span class="v accent" id="konica-received">—</span></div>
-        <div class="pb-stat-row"><span class="k">Printed</span><span class="v green" id="konica-printed">—</span></div>
-        <div class="pb-stat-row"><span class="k">Pending Print</span><span class="v amber" id="konica-pending">—</span></div>
-        <div class="pb-files" id="konica-files">
-          <div class="pb-file-row"><span class="fn" style="color:var(--muted)">No jobs yet today</span></div>
-        </div>
-      </div>
-      <!-- Epson -->
-      <div class="panel">
-        <div class="panel-hdr">
-          <div class="panel-title" style="color:var(--green)">▣ Epson — Colour Jobs</div>
-          <span class="panel-badge" id="epson-count">—</span>
-        </div>
-        <div class="pb-stat-row"><span class="k">Received Today</span><span class="v accent" id="epson-received">—</span></div>
-        <div class="pb-stat-row"><span class="k">Printed</span><span class="v green" id="epson-printed">—</span></div>
-        <div class="pb-stat-row"><span class="k">Pending Print</span><span class="v amber" id="epson-pending">—</span></div>
-        <div class="pb-files" id="epson-files">
-          <div class="pb-file-row"><span class="fn" style="color:var(--muted)">No jobs yet today</span></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Printer Job Log panel -->
-    <div class="panel" id="printer-jobs-panel">
-      <div class="panel-hdr">
-        <div class="panel-title">▣ Printer Job Log</div>
-        <select id="pjl-filter" style="margin-left:auto;background:var(--bg2);color:var(--fg);border:1px solid var(--border);padding:2px 6px;font-size:.75rem;border-radius:4px" onchange="loadPrinterJobs()">
-          <option value="today">Today</option>
-          <option value="week">This Week</option>
-          <option value="all">All</option>
-        </select>
-      </div>
-      <!-- Konica job log -->
-      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:6px 0 4px">Konica — B&amp;W</div>
-      <div class="table-wrap" style="max-height:220px">
-        <table>
-          <thead><tr>
-            <th style="width:56px">#</th>
-            <th>Date</th>
-            <th>User</th>
-            <th>File</th>
-            <th>Pages</th>
-            <th>Mono</th>
-            <th>Colour</th>
-            <th>Copies</th>
-            <th>Result</th>
-          </tr></thead>
-          <tbody id="konica-jobs-tbody">
-            <tr><td colspan="9" class="empty"><span class="spinner"></span></td></tr>
-          </tbody>
-        </table>
-      </div>
-      <!-- Epson job log -->
-      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px">Epson — Colour</div>
-      <div class="table-wrap" style="max-height:220px">
-        <table>
-          <thead><tr>
-            <th>Date</th>
-            <th>Source</th>
-            <th>Job / Attribution</th>
-            <th>Pages</th>
-            <th>Mono</th>
-            <th>Colour</th>
-            <th>Type</th>
-          </tr></thead>
-          <tbody id="epson-jobs-tbody">
-            <tr><td colspan="7" class="empty"><span class="spinner"></span></td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Jobs panel -->
+    <!-- Per-staff summary (today) -->
     <div class="panel">
       <div class="panel-hdr">
-        <div class="panel-title">Job Log</div>
-        <span class="panel-badge" id="job-count">Loading…</span>
-        <button class="nj-btn-new-job" style="margin-left:auto" onclick="openNewJobModal()" title="Add walk-in or manual job (N)">+ New Job</button>
-        <button class="filter-btn" onclick="openPhotocopyModal()">+ Photocopy</button>
-      </div>
-      <div class="filter-bar">
-        <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
-        <button class="filter-btn" onclick="setFilter('Completed', this)">Completed</button>
-        <button class="filter-btn" onclick="setFilter('Received', this)">Pending</button>
-        <button class="filter-btn" onclick="setFilter('today', this)">Today</button>
-        <input class="search-input" id="search" placeholder="Search job ID / file…" oninput="renderTable()">
+        <div class="panel-title">By Staff — Today</div>
+        <span class="panel-badge" id="staff-sum-badge">—</span>
       </div>
       <div class="table-wrap">
         <table>
-          <thead>
-            <tr>
-              <th>Job ID</th>
-              <th>Received</th>
-              <th>Phone</th>
-              <th>File</th>
-              <th>Source</th>
-              <th>Status</th>
-              <th>Service</th>
-              <th>Amount</th>
-              <th>Payment</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="jobs-tbody">
-            <tr><td colspan="10" class="empty"><span class="spinner"></span> Loading jobs…</td></tr>
+          <thead><tr>
+            <th>Staff</th>
+            <th style="text-align:right">Jobs</th>
+            <th style="text-align:right">Pages</th>
+            <th style="text-align:right">Revenue</th>
+          </tr></thead>
+          <tbody id="staff-sum-tbody">
+            <tr><td colspan="4" class="empty"><span class="spinner"></span> Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -1952,9 +1855,7 @@ async function loadAll() {
     allJobs = isDemo ? DEMO_JOBS : jobs;
     initStoreFilter();
     renderStats(isDemo ? DEMO_SUMMARY : (summary[0] || {}));
-    renderTable();
-    renderPrinterBreakdown();
-    loadPrinterJobs();
+    renderStaffSummary();
     setSyncState(isDemo ? "demo" : "ok");
   } catch (e) {
     setSyncState("err", e.message);
@@ -2115,6 +2016,53 @@ async function printJob(jobId, filepath, printerKey, copies, colourMode) {
 }
 
 // ── Printer Breakdown ─────────────────────────────────────────────────────────
+// ── Per-staff summary (today, this store) ────────────────────────────────────
+// Aggregates the store-scoped jobs by printed_by (the staff who printed the
+// job). Konica's own attribution table is dead (0/4507), so pages come from the
+// job's own page_count and revenue from amount_collected.
+let _staffNames = null;
+async function renderStaffSummary() {
+  const tb = document.getElementById("staff-sum-tbody");
+  if (!tb) return;
+  if (!_staffNames) {
+    try {
+      const rows = await sbFetch("staff", "select=id,name");
+      _staffNames = {};
+      (rows || []).forEach(r => { _staffNames[String(r.id)] = r.name || String(r.id); });
+    } catch (e) { _staffNames = {}; }
+  }
+  const todayStr = today();
+  const jobs = allJobs.filter(j =>
+    (j.received_at || "").startsWith(todayStr) &&
+    (storeFilter === "all" || (j.assigned_store_id || "OSP") === storeFilter) &&
+    j.printed_by);
+  const stats = {};
+  jobs.forEach(j => {
+    const id = String(j.printed_by);
+    if (!stats[id]) stats[id] = { jobs: 0, pages: 0, revenue: 0 };
+    stats[id].jobs++;
+    stats[id].pages   += (j.page_count || 0);
+    stats[id].revenue += (j.amount_collected || 0);
+  });
+  const ids = Object.keys(stats).sort((x, y) => stats[y].revenue - stats[x].revenue);
+  const badge = document.getElementById("staff-sum-badge");
+  if (badge) badge.textContent = `${ids.length} staff · ${jobs.length} job${jobs.length !== 1 ? "s" : ""}`;
+  if (!ids.length) {
+    tb.innerHTML = `<tr><td colspan="4" class="empty">No staff activity yet today</td></tr>`;
+    return;
+  }
+  tb.innerHTML = ids.map(id => {
+    const s = stats[id];
+    const name = (_staffNames && _staffNames[id]) || id;
+    return `<tr>
+      <td><strong>${esc(name)}</strong></td>
+      <td style="text-align:right" class="accent">${s.jobs}</td>
+      <td style="text-align:right">${s.pages.toLocaleString()}</td>
+      <td style="text-align:right" class="green">${s.revenue ? "Rs." + s.revenue.toLocaleString() : "—"}</td>
+    </tr>`;
+  }).join("");
+}
+
 function renderPrinterBreakdown() {
   const todayStr = today();
   // Per-store console: scope the breakdown to this machine's store, same as the queue.
