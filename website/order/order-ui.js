@@ -23,6 +23,9 @@ const SUPABASE_PUBLIC =
   'https://mlhuwlnwwwxdnqafelko.supabase.co/storage/v1/object/public/incoming-files/';
 const WA_NUMBER = '919495706405';
 
+// ── Staff mode (launched from jobs.html with ?staff=1) ────────────────────────
+const STAFF = new URLSearchParams(location.search).get('staff') === '1';
+
 // ── Application state (shape matches order-logic.js expectations) ──────────────
 const state = {
   fileName: '',
@@ -651,8 +654,12 @@ function setStore(s) {
 // ── Submit flow ───────────────────────────────────────────────────────────────
 function showError(html) {
   const box = $('ov2-error');
-  const wa = 'https://wa.me/' + WA_NUMBER;
-  box.innerHTML = html + ' <br>Please <a href="' + wa + '" target="_blank" rel="noopener">message us on WhatsApp</a> and we\'ll sort it out.';
+  if (STAFF) {
+    box.innerHTML = html;
+  } else {
+    const wa = 'https://wa.me/' + WA_NUMBER;
+    box.innerHTML = html + ' <br>Please <a href="' + wa + '" target="_blank" rel="noopener">message us on WhatsApp</a> and we\'ll sort it out.';
+  }
   box.classList.add('show');
 }
 
@@ -743,41 +750,76 @@ async function submitOrder() {
   }
 
   // 3. create the order
-  try {
-    setBusy(true, 'Placing your order…');
-    const fileUrl = SUPABASE_PUBLIC + signed.storage_path;
-    const customer = {
-      name: $('ov2-name').value.trim(),
-      whatsapp: $('ov2-whatsapp').value.trim(),
-      delivery: runtime.delivery,
-      pickup_store: runtime.pickup_store,
-    };
-    if (runtime.delivery === 1) customer.address = $('ov2-address').value.trim();
+  const fileUrl = SUPABASE_PUBLIC + signed.storage_path;
 
-    const note = withExtraInstructions(buildOperatorNote(state));
-    // Attach the logged-in account's token so the backend uses its trusted
-    // phone identity; absent for guests (header simply omitted).
-    const createHeaders = { 'Content-Type': 'application/json' };
-    const tok = authToken();
-    if (tok) createHeaders['Authorization'] = 'Bearer ' + tok;
-    const res = await fetch(API + '/order/create', {
-      method: 'POST',
-      headers: createHeaders,
-      body: JSON.stringify({
-        customer,
-        file_url: fileUrl,
-        file_name: state.fileName,
-        print_spec: buildPrintSpec(state),
-        operator_note: note,
-      }),
-    });
-    if (!res.ok) throw new Error('create http ' + res.status);
-    const data = await res.json();
-    if (!data.job_id) throw new Error('no job id');
-    onSuccess(data.job_id);
-  } catch (err) {
-    setBusy(false);
-    showError('We couldn\'t place your order.');
+  if (STAFF) {
+    // ── Staff mode: POST to /order/staff-create ──
+    try {
+      setBusy(true, 'Adding to queue…');
+      const res = await fetch(API + '/order/staff-create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '',
+        },
+        body: JSON.stringify({
+          file_url: fileUrl,
+          file_name: state.fileName,
+          print_spec: buildPrintSpec(state),
+          store_id: localStorage.getItem('storeId') || '',
+          customer_name: $('ov2-name').value.trim(),
+          phone: $('ov2-whatsapp') && !$('ov2-field-wa').classList.contains('ov2-hidden')
+            ? $('ov2-whatsapp').value.trim() : '',
+        }),
+      });
+      if (res.status === 403) {
+        setBusy(false);
+        showError('Open this from the jobs page (log in with your PIN first).');
+        return;
+      }
+      if (!res.ok) throw new Error('staff-create http ' + res.status);
+      const data = await res.json();
+      if (!data.job_id) throw new Error('no job id');
+      onStaffSuccess(data.job_id, data.total);
+    } catch (err) {
+      setBusy(false);
+      showError('Couldn\'t add the job to the queue.');
+    }
+  } else {
+    // ── Customer mode: POST to /order/create ──
+    try {
+      setBusy(true, 'Placing your order…');
+      const customer = {
+        name: $('ov2-name').value.trim(),
+        whatsapp: $('ov2-whatsapp').value.trim(),
+        delivery: runtime.delivery,
+        pickup_store: runtime.pickup_store,
+      };
+      if (runtime.delivery === 1) customer.address = $('ov2-address').value.trim();
+
+      const note = withExtraInstructions(buildOperatorNote(state));
+      const createHeaders = { 'Content-Type': 'application/json' };
+      const tok = authToken();
+      if (tok) createHeaders['Authorization'] = 'Bearer ' + tok;
+      const res = await fetch(API + '/order/create', {
+        method: 'POST',
+        headers: createHeaders,
+        body: JSON.stringify({
+          customer,
+          file_url: fileUrl,
+          file_name: state.fileName,
+          print_spec: buildPrintSpec(state),
+          operator_note: note,
+        }),
+      });
+      if (!res.ok) throw new Error('create http ' + res.status);
+      const data = await res.json();
+      if (!data.job_id) throw new Error('no job id');
+      onSuccess(data.job_id);
+    } catch (err) {
+      setBusy(false);
+      showError('We couldn\'t place your order.');
+    }
   }
 }
 
@@ -801,6 +843,25 @@ function onSuccess(jobId) {
   const msg = 'Hi! I just placed order ' + jobId + ' on printosky.com.';
   $('ov2-waLink').href = 'https://wa.me/' + WA_NUMBER + '?text=' + encodeURIComponent(msg);
   $('ov2-success').classList.add('show');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function onStaffSuccess(jobId, total) {
+  setBusy(false);
+  hide($('ov2-step1'));
+  hide($('ov2-step2'));
+  const successDiv = $('ov2-success');
+  const priceStr = total ? '₹' + Math.round(total) : '₹—';
+  successDiv.innerHTML =
+    '<div class="ov2-check">✅</div>' +
+    '<h2>Added to queue</h2>' +
+    '<div class="ov2-job">Job <b>' + jobId + '</b> · ' + priceStr + '</div>' +
+    '<div class="ov2-job" style="color:#888;font-size:13px">Mark paid & print from the jobs page</div>' +
+    '<div style="display:flex;gap:10px;justify-content:center;margin-top:18px">' +
+      '<button class="ov2-btn ov2-btn-primary" onclick="location.reload()">+ New job</button>' +
+      '<button class="ov2-btn ov2-btn-ghost" onclick="window.close()">Close</button>' +
+    '</div>';
+  successDiv.classList.add('show');
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -855,9 +916,48 @@ function wire() {
   $('ov2-address').addEventListener('input', validateStep2);
   $('ov2-submit').addEventListener('click', submitOrder);
 
-  // Detect a logged-in account (async, non-blocking); re-validate Step 2 once
-  // the identity fields have been prefilled/hidden.
-  initAccount().then(() => validateStep2()).catch(() => {});
+  // ── Staff mode: hide customer fields, lock store, relabel UI ──
+  if (STAFF) {
+    // Map store_id to pickup_store name
+    const sid = (localStorage.getItem('storeId') || '').toUpperCase();
+    const storeMap = { OSP: 'thriprayar', PRINTK: 'nattika' };
+    if (storeMap[sid]) runtime.pickup_store = storeMap[sid];
+
+    // Hide customer-only fields
+    hide($('ov2-field-wa'));       // WhatsApp number
+    hide($('ov2-identity'));       // Logged-in account banner
+    hide($('ov2-addrField'));      // Delivery address
+    // Hide delivery/pickup toggles, store picker, and payment select
+    document.querySelectorAll('[data-delivery]').forEach(function(el) {
+      if (el.parentElement) hide(el.parentElement.parentElement);  // .ov2-field
+    });
+    document.querySelectorAll('[data-store]').forEach(function(el) {
+      if (el.parentElement) hide(el.parentElement.parentElement);  // .ov2-field
+    });
+    var payField = $('ov2-payment');
+    if (payField && payField.parentElement) hide(payField.parentElement);
+
+    // Make name optional (remove required asterisk)
+    var nameLabel = $('ov2-field-name');
+    if (nameLabel) {
+      var req = nameLabel.querySelector('.ov2-req');
+      if (req) req.remove();
+    }
+    $('ov2-name').placeholder = 'Customer name (optional)';
+
+    // Relabel UI for staff context
+    var topSub = document.querySelector('.ov2-topbar-sub');
+    if (topSub) topSub.textContent = 'Staff · New Job';
+    $('ov2-step2pill').textContent = '2 · Review & Add';
+    $('ov2-submit').querySelector('span').textContent = 'Add to queue';
+
+    // Skip customer account detection — staff don't use Supabase auth
+    validateStep2();
+  } else {
+    // Detect a logged-in account (async, non-blocking); re-validate Step 2 once
+    // the identity fields have been prefilled/hidden.
+    initAccount().then(() => validateStep2()).catch(() => {});
+  }
 }
 
 if (document.readyState === 'loading') {
