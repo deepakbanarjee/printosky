@@ -147,9 +147,26 @@ Do NOT big-bang. Move one self-contained tab at a time, verify, then strip.
     with each page supplying a `sbAuthFail()` hook (admin → `logout()`;
     mis → `sessionStorage.clear(); location.reload()`). Behaviour-preserving; verified
     in Chromium that both pages resolve `sbFetch`/`showToast`/`sbAuthFail` cleanly.
-- **NEXT — move Transcripts tab first** (most self-contained). Its admin-pw modal
-  markup + `_convPw`/`_adminPwPrompt` cluster travels to mis.html with the first ops
-  tab that needs it. Then Conversations → Book Orders (+courier/dispatch/Divya) →
+- **2026-08-08 — Transcripts tab moved** (`62860d7`). First real tab migration.
+  - mis.html gained a top-level tab shell (`.mis-tab`: Reporting | Transcripts) via
+    `switchMisTab()`; existing reporting is `#mis-pane-reporting`, transcripts is
+    `#mis-pane-transcripts`. Added pdf.js + a global `.ctrl-btn` to mis.
+  - `getStoreId()` → `admin-shared.js` (admin's store-diag badge still needs it);
+    `changeStore`/`requireStoreId` are transcript-only and moved with the tab.
+  - admin.html stripped of the tab button, pane, `tr-edit-modal`, all `tr*` JS, and
+    the `switchTab` transcripts branch.
+  - NOTE: Transcripts does **not** use the admin-pw cluster (that stays in admin for
+    Conversations) — so the modal/`_adminPwPrompt` move is deferred to the first ops
+    tab that actually needs it (Conversations / Book Orders).
+  - Verified in Chromium (both pages: no errors, tab switching works, transcripts
+    renders). Caught + fixed one bug during verification: the moved inner
+    `#transcripts-tab` div kept its own `display:none`, so the pane rendered blank
+    until the wrapper `<main>` took over visibility.
+  - Pre-existing latent bugs carried over verbatim (fix in follow-up): `trScrollToPage`
+    and `trEditBalance` are referenced but never defined (both harmless/cosmetic).
+- **NEXT — move Conversations** (chat inspector). This is the first ops tab that uses
+  the admin-pw cluster, so `_convPw`/`_adminPwPrompt` + the `admin-pw-modal` markup
+  go to `admin-shared.js` / mis with it. Then Book Orders (+courier/dispatch/Divya) →
   Academic/Project Orders/Referrals → strip admin to Jobs-only → fix nav/redirects.
 - **DEFERRED (separate workstream):** admin **New Job → order-v2 fidelity**. The
   `nj*` walk-in wizard posts a thin payload with no `print_spec`, so walk-in jobs
