@@ -2319,6 +2319,7 @@
   </div>
 </div>
 
+<script src="admin-shared.js"></script>
 <script>
 // ── Config ─────────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co";
@@ -2562,18 +2563,9 @@ window.addEventListener("DOMContentLoaded", async () => {
 });
 
 // ── Supabase fetch ─────────────────────────────────────────────────────────
-async function sbFetch(table, params = "") {
-  const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${jwt}`,
-    }
-  });
-  if (r.status === 401) { logout(); return null; }
-  if (!r.ok) throw new Error(`${table}: ${r.status}`);
-  return r.json();
-}
+// sbFetch() lives in admin-shared.js (shared with mis.html). On a 401 it calls
+// the page's sbAuthFail() hook — here that logs the staff session out.
+function sbAuthFail() { logout(); }
 
 // ── Demo data (shown when Supabase has no records yet) ───────────────────────
 const DEMO_JOBS = [
@@ -2885,33 +2877,7 @@ function set(id,val)  { const el=document.getElementById(id); if(el) el.textCont
 function today()      { return new Date().toISOString().slice(0,10); }
 function now()        { return new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}); }
 
-// Lightweight non-blocking toast. Types: "ok" (green), "error" (red), else neutral.
-// The DTP timer handlers (and others) call this; there is no toast markup in the
-// page, so the container is created lazily on first use.
-function showToast(msg, type = "ok") {
-  let host = document.getElementById("toast-host");
-  if (!host) {
-    host = document.createElement("div");
-    host.id = "toast-host";
-    host.style.cssText = "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);"
-      + "z-index:10000;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none";
-    document.body.appendChild(host);
-  }
-  const colour = type === "error" ? "var(--red, #ff5252)"
-               : type === "ok"    ? "var(--green, #00e676)"
-               : "var(--muted, #888)";
-  const t = document.createElement("div");
-  t.textContent = msg;
-  t.style.cssText = "background:#1a1a1a;color:" + colour + ";border:1px solid " + colour + ";"
-    + "border-radius:8px;padding:8px 14px;font-family:var(--mono,monospace);font-size:.8rem;"
-    + "box-shadow:0 4px 16px rgba(0,0,0,.4);opacity:0;transition:opacity .18s;max-width:80vw";
-  host.appendChild(t);
-  requestAnimationFrame(() => { t.style.opacity = "1"; });
-  setTimeout(() => {
-    t.style.opacity = "0";
-    setTimeout(() => t.remove(), 220);
-  }, 2600);
-}
+// showToast() lives in admin-shared.js (shared with mis.html).
 
 function colourBadge(j) {
   if (!j.colour_page_map) return "";

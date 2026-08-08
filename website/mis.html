@@ -379,6 +379,7 @@
   </main>
 </div>
 
+<script src="admin-shared.js"></script>
 <script>
 // ── Config ───────────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mlhuwlnwwwxdnqafelko.supabase.co";
@@ -421,15 +422,9 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 // ── Supabase fetch ───────────────────────────────────────────────────────────
-async function sbFetch(table, params = "") {
-  const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
-    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${jwt}` }
-  });
-  if (r.status === 401) { sessionStorage.clear(); location.reload(); return null; }
-  if (!r.ok) throw new Error(`${table}: ${r.status}`);
-  return r.json();
-}
+// sbFetch() lives in admin-shared.js (shared with admin.html). On a 401 it
+// calls the page's sbAuthFail() hook — here that clears the session and reloads.
+function sbAuthFail() { sessionStorage.clear(); location.reload(); }
 
 // ── IST date helpers ─────────────────────────────────────────────────────────
 function todayIST()      { return new Date(Date.now() + 5.5*60*60*1000).toISOString().slice(0,10); }
