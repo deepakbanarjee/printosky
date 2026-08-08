@@ -21,12 +21,14 @@ from api.index import (  # noqa: E402
     _json_response,
     _send_cors_headers,
     _auth_admin_pw,
-    _acad_auth_staff,
     _hash_pin,
     _fmt_phone,
     _sha256,
     ADMIN_PASSWORD_HASH,
 )
+# NOTE: _acad_auth_staff is defined LOWER in api/index.py than the point where
+# this module is imported, so importing it at module load triggers a circular
+# ImportError that crashes the whole API. Import it lazily where it's used.
 from api.handlers_pb import _send_pb_whatsapp  # noqa: E402
 
 def _handle_admin_reset_pin(h, body: bytes) -> None:
@@ -758,6 +760,7 @@ def _handle_admin_mark_paid(h, body) -> None:
     except Exception:
         _json_response(h, 400, {"error": "Invalid JSON"})
         return
+    from api.index import _acad_auth_staff  # lazy — avoids circular import at load
     if not _acad_auth_staff(h):
         _json_response(h, 403, {"error": "Unauthorized"})
         return
