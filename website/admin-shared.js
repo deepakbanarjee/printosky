@@ -59,3 +59,10 @@ function showToast(msg, type = "ok") {
     setTimeout(() => t.remove(), 220);
   }, 2600);
 }
+
+// ── Store / office identity (shared) ────────────────────────────────────────
+// This machine's store code (e.g. OSP store PC, PRIOFF office), saved in
+// localStorage. Read by admin.html (store-diag badge) and mis.html (transcripts).
+function getStoreId() {
+  return (localStorage.getItem("storeId") || "").trim();
+}
