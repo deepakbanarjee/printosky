@@ -1229,27 +1229,6 @@
       <div class="stat"><div class="stat-label">Revenue Today</div><div class="stat-value green" id="s-rev">—</div><div class="stat-sub" id="s-rev-sub">—</div></div>
     </div>
 
-    <!-- Per-staff summary (today) -->
-    <div class="panel">
-      <div class="panel-hdr">
-        <div class="panel-title">By Staff — Today</div>
-        <span class="panel-badge" id="staff-sum-badge">—</span>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>Staff</th>
-            <th style="text-align:right">Jobs</th>
-            <th style="text-align:right">Pages</th>
-            <th style="text-align:right">Revenue</th>
-          </tr></thead>
-          <tbody id="staff-sum-tbody">
-            <tr><td colspan="4" class="empty"><span class="spinner"></span> Loading…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
     <!-- Jobs panel -->
     <div class="panel">
       <div class="panel-hdr">
@@ -1893,7 +1872,6 @@ async function loadAll() {
     allJobs = isDemo ? DEMO_JOBS : jobs;
     initStoreFilter();
     renderStats(isDemo ? DEMO_SUMMARY : (summary[0] || {}));
-    renderStaffSummary();
     renderTable();
     setSyncState(isDemo ? "demo" : "ok");
   } catch (e) {
@@ -2055,53 +2033,6 @@ async function printJob(jobId, filepath, printerKey, copies, colourMode) {
 }
 
 // ── Printer Breakdown ─────────────────────────────────────────────────────────
-// ── Per-staff summary (today, this store) ────────────────────────────────────
-// Aggregates the store-scoped jobs by printed_by (the staff who printed the
-// job). Konica's own attribution table is dead (0/4507), so pages come from the
-// job's own page_count and revenue from amount_collected.
-let _staffNames = null;
-async function renderStaffSummary() {
-  const tb = document.getElementById("staff-sum-tbody");
-  if (!tb) return;
-  if (!_staffNames) {
-    try {
-      const rows = await sbFetch("staff", "select=id,name");
-      _staffNames = {};
-      (rows || []).forEach(r => { _staffNames[String(r.id)] = r.name || String(r.id); });
-    } catch (e) { _staffNames = {}; }
-  }
-  const todayStr = today();
-  const jobs = allJobs.filter(j =>
-    (j.received_at || "").startsWith(todayStr) &&
-    (storeFilter === "all" || (j.assigned_store_id || "OSP") === storeFilter) &&
-    j.printed_by);
-  const stats = {};
-  jobs.forEach(j => {
-    const id = String(j.printed_by);
-    if (!stats[id]) stats[id] = { jobs: 0, pages: 0, revenue: 0 };
-    stats[id].jobs++;
-    stats[id].pages   += (j.page_count || 0);
-    stats[id].revenue += (j.amount_collected || 0);
-  });
-  const ids = Object.keys(stats).sort((x, y) => stats[y].revenue - stats[x].revenue);
-  const badge = document.getElementById("staff-sum-badge");
-  if (badge) badge.textContent = `${ids.length} staff · ${jobs.length} job${jobs.length !== 1 ? "s" : ""}`;
-  if (!ids.length) {
-    tb.innerHTML = `<tr><td colspan="4" class="empty">No staff activity yet today</td></tr>`;
-    return;
-  }
-  tb.innerHTML = ids.map(id => {
-    const s = stats[id];
-    const name = (_staffNames && _staffNames[id]) || id;
-    return `<tr>
-      <td><strong>${esc(name)}</strong></td>
-      <td style="text-align:right" class="accent">${s.jobs}</td>
-      <td style="text-align:right">${s.pages.toLocaleString()}</td>
-      <td style="text-align:right" class="green">${s.revenue ? "Rs." + s.revenue.toLocaleString() : "—"}</td>
-    </tr>`;
-  }).join("");
-}
-
 function renderPrinterBreakdown() {
   const todayStr = today();
   // Per-store console: scope the breakdown to this machine's store, same as the queue.
