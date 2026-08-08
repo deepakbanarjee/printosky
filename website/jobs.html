@@ -1234,7 +1234,7 @@
       <div class="panel-hdr">
         <div class="panel-title">Job Log</div>
         <span class="panel-badge" id="job-count">Loading…</span>
-        <button class="nj-btn-new-job" style="margin-left:auto" onclick="openNewJobModal()" title="Add walk-in or manual job (N)">+ New Job</button>
+        <button class="nj-btn-new-job" style="margin-left:auto" onclick="window.open('order-v2.html?staff=1','_blank')" title="Add walk-in or manual job (N)">+ New Job</button>
         <button class="filter-btn" onclick="openPhotocopyModal()">+ Photocopy</button>
       </div>
       <div class="filter-bar">
@@ -1854,6 +1854,7 @@ const DEMO_SUMMARY = { total_jobs:4, completed:2, pending:2, revenue:140, cash:6
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allJobs = [];
+let dailySummaries = [];
 let activeFilter = "all";
 let storeFilter = "all";        // "all" | "OSP" | "PRINTK" — which location's jobs to show
 let storeFilterInited = false;  // default set once from this PC's store, then user-controlled
@@ -1865,17 +1866,41 @@ async function loadAll() {
   try {
     const [jobs, summary] = await Promise.all([
       sbFetch("jobs", "order=received_at.desc&limit=200"),
-      sbFetch("daily_summary", `date=eq.${today()}&order=synced_at.desc&limit=1`),
+      sbFetch("daily_summary", `date=eq.${today()}`),
     ]);
 
     isDemo = jobs.length === 0;
     allJobs = isDemo ? DEMO_JOBS : jobs;
+    dailySummaries = isDemo ? [DEMO_SUMMARY] : summary;
     initStoreFilter();
-    renderStats(isDemo ? DEMO_SUMMARY : (summary[0] || {}));
+    updateStats();
     renderTable();
     setSyncState(isDemo ? "demo" : "ok");
   } catch (e) {
     setSyncState("err", e.message);
+  }
+}
+
+function updateStats() {
+  if (isDemo) {
+    renderStats(DEMO_SUMMARY);
+    return;
+  }
+  
+  if (storeFilter === "all") {
+    const agg = { total_jobs: 0, completed: 0, pending: 0, revenue: 0, cash: 0, upi: 0 };
+    dailySummaries.forEach(s => {
+      agg.total_jobs += s.total_jobs ?? 0;
+      agg.completed += s.completed ?? 0;
+      agg.pending += s.pending ?? 0;
+      agg.revenue += s.revenue ?? 0;
+      agg.cash += s.cash ?? 0;
+      agg.upi += s.upi ?? 0;
+    });
+    renderStats(agg);
+  } else {
+    const s = dailySummaries.find(x => x.store_id === storeFilter);
+    renderStats(s || { total_jobs: 0, completed: 0, pending: 0, revenue: 0, cash: 0, upi: 0 });
   }
 }
 
@@ -1913,6 +1938,7 @@ function setStoreFilter(v) {
   storeFilter = v;
   renderTable();
   updateStoreDiag();
+  updateStats();
 }
 
 // Default the store filter once, to THIS PC's store (the 🏪 Store setting):
@@ -2086,9 +2112,14 @@ async function loadPrinterJobs() {
     dateParam = `&job_date=gte.${weekAgo}T00:00:00`;
   }
 
+  let storeParam = "";
+  if (storeFilter !== "all") {
+    storeParam = `&store_id=eq.${storeFilter}`;
+  }
+
   const [konicaRows, epsonRows] = await Promise.all([
-    sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}`).catch(() => []),
-    sbFetch("epson_jobs",  `source=eq.weblog&order=job_date.desc&limit=200${dateParam}`).catch(() => []),
+    sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}${storeParam}`).catch(() => []),
+    sbFetch("epson_jobs",  `source=eq.weblog&order=job_date.desc&limit=200${dateParam}${storeParam}`).catch(() => []),
   ]);
 
   // Konica table
