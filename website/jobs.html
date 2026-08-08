@@ -1250,6 +1250,44 @@
       </div>
     </div>
 
+    <!-- Jobs panel -->
+    <div class="panel">
+      <div class="panel-hdr">
+        <div class="panel-title">Job Log</div>
+        <span class="panel-badge" id="job-count">Loading…</span>
+        <button class="nj-btn-new-job" style="margin-left:auto" onclick="openNewJobModal()" title="Add walk-in or manual job (N)">+ New Job</button>
+        <button class="filter-btn" onclick="openPhotocopyModal()">+ Photocopy</button>
+      </div>
+      <div class="filter-bar">
+        <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
+        <button class="filter-btn" onclick="setFilter('Completed', this)">Completed</button>
+        <button class="filter-btn" onclick="setFilter('Received', this)">Pending</button>
+        <button class="filter-btn" onclick="setFilter('today', this)">Today</button>
+        <input class="search-input" id="search" placeholder="Search job ID / file…" oninput="renderTable()">
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Job ID</th>
+              <th>Received</th>
+              <th>Phone</th>
+              <th>File</th>
+              <th>Source</th>
+              <th>Status</th>
+              <th>Service</th>
+              <th>Amount</th>
+              <th>Payment</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="jobs-tbody">
+            <tr><td colspan="10" class="empty"><span class="spinner"></span> Loading jobs…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- ── Job Print Panel (expands below table on row click) ── -->
   </div><!-- /#jobs-view -->
 
@@ -1856,6 +1894,7 @@ async function loadAll() {
     initStoreFilter();
     renderStats(isDemo ? DEMO_SUMMARY : (summary[0] || {}));
     renderStaffSummary();
+    renderTable();
     setSyncState(isDemo ? "demo" : "ok");
   } catch (e) {
     setSyncState("err", e.message);
