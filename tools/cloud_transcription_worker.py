@@ -267,12 +267,20 @@ def sync_completed_jobs():
         res = sb.table("manuscript_transcripts").select("*").eq("status", "completed").eq("uploaded_by_store", MY_STORE_ID).execute()
         jobs = res.data or []
         
+        from datetime import datetime
+        today_str = datetime.now().strftime("%d%m%y")
+        local_sync_dir = os.path.join(r"C:\DTP", today_str)
+        
         for job in jobs:
             filename = job["filename"]
             base_name = os.path.splitext(filename)[0]
-            local_txt_path = os.path.join(WATCH_DIR, f"{base_name}_transcript.txt")
-            local_docx_path = os.path.join(WATCH_DIR, f"{base_name}_transcript.docx")
-            local_pdf_path = os.path.join(WATCH_DIR, filename)
+            local_txt_path = os.path.join(local_sync_dir, f"{base_name}_transcript.txt")
+            local_docx_path = os.path.join(local_sync_dir, f"{base_name}_transcript.docx")
+            local_pdf_path = os.path.join(local_sync_dir, filename)
+            
+            # Ensure folder is created before writing/downloading
+            if not os.path.exists(local_sync_dir):
+                os.makedirs(local_sync_dir, exist_ok=True)
             
             # 1. Download/Write the completed transcript locally
             if not os.path.exists(local_txt_path):

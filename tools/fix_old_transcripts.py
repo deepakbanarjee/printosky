@@ -65,6 +65,21 @@ def run_fix():
         new_name = sanitize_filename(old_name)
         
         if old_name == new_name:
+            pdf_path = os.path.join(WATCH_DIR, new_name)
+            if os.path.exists(pdf_path):
+                log.info(f"Checking/Uploading storage file for: '{new_name}'")
+                try:
+                    with open(pdf_path, "rb") as f_obj:
+                        sb.storage.from_("manuscripts").upload(
+                            path=new_name,
+                            file=f_obj,
+                            file_options={"x-upsert": "true", "content-type": "application/pdf"}
+                        )
+                    log.info("Storage upload successful/verified.")
+                except Exception as e:
+                    # Ignore duplicate/already exists errors silently, log others
+                    if "Duplicate" not in str(e) and "already exists" not in str(e):
+                        log.error(f"Storage upload error for '{new_name}': {e}")
             continue
             
         log.info(f"--- Fixing record: '{old_name}' -> '{new_name}' ---")

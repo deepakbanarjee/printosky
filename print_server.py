@@ -1973,7 +1973,7 @@ class PrintHandler(BaseHTTPRequestHandler):
         path = parsed.path
         qs = parse_qs(parsed.query)
 
-        if path in ("/transcripts", "/transcripts/"):
+        if path in ("/transcripts", "/transcripts/", "/dtp", "/dtp/"):
             self.path = "/"
             self._proxy_to_transcribe("GET")
             return

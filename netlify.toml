@@ -22,8 +22,13 @@
   status = 200
 
 [[redirects]]
+  from   = "/dtp"
+  to     = "/dtp.html"
+  status = 200
+
+[[redirects]]
   from   = "/transcripts"
-  to     = "/transcripts.html"
+  to     = "/dtp.html"
   status = 200
 
 [[redirects]]

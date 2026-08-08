@@ -9,7 +9,7 @@
 
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Printosky Transcripts</title>
+<title>Printosky DTP</title>
 <meta name="robots" content="noindex, nofollow">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -202,8 +202,8 @@
 <div id="app">
   <header>
     <div>
-      <div class="hdr-logo"><img src="assets/printosky-wordmark-reverse.svg" alt="Printosky" style="height:18px;width:auto;display:inline-block;vertical-align:middle"> Transcripts</div>
-      <div class="hdr-sub">Malayalam manuscript OCR</div>
+      <div class="hdr-logo"><img src="assets/printosky-wordmark-reverse.svg" alt="Printosky" style="height:18px;width:auto;display:inline-block;vertical-align:middle"> DTP</div>
+      <div class="hdr-sub">DTP & Malayalam manuscript OCR</div>
     </div>
     <div class="hdr-right">
       <span class="sync-label" id="tr-auth-state">…</span>
@@ -221,7 +221,7 @@
         <div class="stat-value accent" id="tr-total-docs">—</div>
       </div>
       <div class="stat">
-        <div class="stat-label">Transcribed Pages</div>
+        <div class="stat-label">DTP / Transcribed Pages</div>
         <div class="stat-value green" id="tr-transcribed-pages">—</div>
       </div>
       <div class="stat">
@@ -240,7 +240,7 @@
 
     <!-- Upload and Actions Row -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-      <div style="font-size:.85rem;color:var(--muted)">Malayalam manuscript transcription powered by Gemini Flash-Lite</div>
+      <div style="font-size:.85rem;color:var(--muted)">DTP & Malayalam manuscript transcription powered by Gemini Flash-Lite</div>
       <div style="display:flex; gap:8px; align-items:center;">
         <button class="ctrl-btn" id="tr-store-btn" onclick="changeStore()" title="Which store / office THIS machine uploads transcripts as. Store PCs set this automatically; offices set it once here.">🏪 Store: —</button>
         <input type="file" id="tr-file-upload" accept=".pdf" style="display:none;" onchange="trHandleFileUpload(event)">
@@ -264,7 +264,7 @@
           </tr>
         </thead>
         <tbody id="tr-table-body">
-          <tr><td colspan="7" style="text-align:center; color:#888;">Loading manuscripts...</td></tr>
+          <tr><td colspan="7" style="text-align:center; color:#888;">Loading files...</td></tr>
         </tbody>
       </table>
     </div>
@@ -467,7 +467,7 @@ async function loadTranscripts() {
     tbody.innerHTML = "";
     
     if (trFilesList.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#888;">No manuscripts uploaded yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#888;">No files uploaded yet.</td></tr>`;
     } else {
       trFilesList.forEach(file => {
         const tr = document.createElement("tr");
@@ -539,7 +539,7 @@ async function loadTranscripts() {
     }
   } catch (e) {
     console.error("loadTranscripts error:", e);
-    document.getElementById("tr-table-body").innerHTML = `<tr><td colspan="7" style="text-align:center; color:#ef4444;">Failed to load transcripts from Supabase.</td></tr>`;
+    document.getElementById("tr-table-body").innerHTML = `<tr><td colspan="7" style="text-align:center; color:#ef4444;">Failed to load DTP files from Supabase.</td></tr>`;
   }
 }
 

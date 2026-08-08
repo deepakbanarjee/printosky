@@ -55,6 +55,55 @@ app = Flask(__name__)
 # ---------------------------------------------------------------------------
 WATCH_DIR = r"D:\Divya teacher\Preeksha sahayi"
 TEMP_DIR = r"d:\PY\printosky\_tmp_watcher"
+
+def find_transcript_file(filename):
+    r"""
+    Search for a transcript text file by filename.
+    Checks in:
+    1. Legacy WATCH_DIR
+    2. C:\DTP and its subdirectories
+    """
+    base_name = os.path.splitext(os.path.basename(filename))[0]
+    target_name = f"{base_name}_transcript.txt"
+    
+    # 1. Try legacy WATCH_DIR
+    legacy_path = os.path.join(WATCH_DIR, target_name)
+    if os.path.exists(legacy_path):
+        return legacy_path
+        
+    # 2. Try C:\DTP subfolders
+    dtp_base = r"C:\DTP"
+    if os.path.exists(dtp_base):
+        for root, dirs, files in os.walk(dtp_base):
+            if target_name in files:
+                return os.path.join(root, target_name)
+                
+    return None
+
+def find_pdf_file(filename):
+    r"""
+    Search for the original PDF file.
+    Checks in:
+    1. Legacy WATCH_DIR
+    2. C:\DTP and its subdirectories
+    """
+    base_name = os.path.basename(filename)
+    
+    # 1. Try legacy WATCH_DIR
+    legacy_path = os.path.join(WATCH_DIR, base_name)
+    if os.path.exists(legacy_path):
+        return legacy_path
+        
+    # 2. Try C:\DTP subfolders (space and case-insensitive check to match legacy behavior)
+    dtp_base = r"C:\DTP"
+    if os.path.exists(dtp_base):
+        for root, dirs, files in os.walk(dtp_base):
+            for f in files:
+                if f.lower() == base_name.lower() or f.replace(" ", "") == base_name.replace(" ", ""):
+                    return os.path.join(root, f)
+                    
+    return None
+
 GLOSSARY = u'''
 Use this vocabulary glossary of common terms in this manuscript to verify spelling and resolve hard-to-read handwriting:
 - "ഹൈസ്കൂൾ" (High School) - often written in flowy cursive.
@@ -494,10 +543,9 @@ def view_transcript():
     if not filename:
         return jsonify({"error": "Missing filename"}), 400
         
-    base_name = os.path.splitext(filename)[0]
-    transcript_path = os.path.join(WATCH_DIR, f"{base_name}_transcript.txt")
+    transcript_path = find_transcript_file(filename)
     
-    if os.path.exists(transcript_path):
+    if transcript_path and os.path.exists(transcript_path):
         try:
             with open(transcript_path, "r", encoding="utf-8") as f:
                 text = f.read()
@@ -515,14 +563,8 @@ def get_pdf():
     # Clean the filename to prevent directory traversal
     filename = os.path.basename(filename)
     
-    # Find matching file in WATCH_DIR (space and case-insensitive)
-    target_path = None
-    if os.path.exists(WATCH_DIR):
-        for f in os.listdir(WATCH_DIR):
-            if f.lower() == filename.lower() or f.replace(" ", "") == filename.replace(" ", ""):
-                target_path = os.path.join(WATCH_DIR, f)
-                break
-                
+    target_path = find_pdf_file(filename)
+                 
     if target_path and os.path.exists(target_path):
         return send_file(target_path, mimetype="application/pdf")
     return "File not found", 404
@@ -536,13 +578,7 @@ def get_page_image():
         
     filename = os.path.basename(filename)
     
-    # Find matching file in WATCH_DIR (space and case-insensitive)
-    target_path = None
-    if os.path.exists(WATCH_DIR):
-        for f in os.listdir(WATCH_DIR):
-            if f.lower() == filename.lower() or f.replace(" ", "") == filename.replace(" ", ""):
-                target_path = os.path.join(WATCH_DIR, f)
-                break
+    target_path = find_pdf_file(filename)
                 
     if not target_path or not os.path.exists(target_path):
         return "File not found", 404
@@ -600,9 +636,9 @@ def export_docx():
         
     filename = os.path.basename(filename)
     base_name = os.path.splitext(filename)[0]
-    transcript_path = os.path.join(WATCH_DIR, f"{base_name}_transcript.txt")
+    transcript_path = find_transcript_file(filename)
     
-    if not os.path.exists(transcript_path):
+    if not transcript_path or not os.path.exists(transcript_path):
         return "Transcript not found", 404
         
     try:
@@ -788,9 +824,8 @@ def delete_pdf():
         return jsonify({"error": "Missing filename"}), 400
         
     filename = os.path.basename(filename)
-    pdf_path = os.path.join(WATCH_DIR, filename)
-    base_name = os.path.splitext(filename)[0]
-    transcript_path = os.path.join(WATCH_DIR, f"{base_name}_transcript.txt")
+    pdf_path = find_pdf_file(filename) or os.path.join(WATCH_DIR, filename)
+    transcript_path = find_transcript_file(filename) or os.path.join(WATCH_DIR, f"{base_name}_transcript.txt")
     
     try:
         deleted = False
