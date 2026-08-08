@@ -2607,6 +2607,7 @@ from api.handlers_order import (
     _handle_order_upload_sign,
     _handle_order_quote,
     _handle_order_create,
+    _handle_order_staff_create,
     _handle_order_reorder,
     _handle_order_convert_docx,
 )
@@ -3128,6 +3129,9 @@ class handler(BaseHTTPRequestHandler):
             return
         if self.path == "/order/create":
             _handle_order_create(self, body)
+            return
+        if self.path == "/order/staff-create":
+            _handle_order_staff_create(self, body)
             return
         if self.path == "/order/reorder":
             _handle_order_reorder(self, body)

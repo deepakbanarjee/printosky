@@ -292,6 +292,93 @@ def _handle_order_create(h, body: bytes) -> None:
     _json_response(h, 200, {"job_id": job_id, "total": total})
 
 
+def _handle_order_staff_create(h, body: bytes) -> None:
+    """POST /order/staff-create — a staff member creates a walk-in print job
+    with the full order-v2 print_spec, but WITHOUT a customer phone or a
+    customer WhatsApp message.
+
+    Same rich pipeline as /order/create (upload -> print_spec -> Pending job the
+    store puller auto-prints once Paid), minus the customer-facing bits:
+      * auth is a staff PIN (X-Staff-Pin) or admin password, not a phone,
+      * no confirmation WhatsApp is sent,
+      * the fulfilling store comes from the request (the machine's store_id).
+    Staff take payment + print from the jobs console (mark-paid).
+
+    Body: {file_url, file_name, print_spec, store_id, customer_name?, phone?,
+           operator_note?}.
+    """
+    from api.index import _acad_auth_staff  # lazy — avoid load-time circular import
+    if not _acad_auth_staff(h):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    spec = data.get("print_spec") or {}
+    size = spec.get("paper_size", "A4")
+    colour = spec.get("colour_mode", "bw")
+    if size not in _VALID_SIZE or colour not in _VALID_COLOUR:
+        _json_response(h, 400, {"error": "invalid print spec"})
+        return
+    file_url = str(data.get("file_url") or "")
+    file_name = str(data.get("file_name") or "walk-in")
+    if not file_url:
+        _json_response(h, 400, {"error": "file_url required"})
+        return
+
+    # Derive billable items exactly like _handle_order_create.
+    inc = len(spec.get("pages_included") or [])
+    col_n = len(spec.get("colour_pages") or []) if colour == "mixed" else (inc if colour == "col" else 0)
+    bw_n = inc - col_n
+    sides = "ds" if spec.get("sides") == "duplex" else "ss"
+    layout_map = {1: "1-up", 2: "2-up", 4: "4-up", 6: "4-up", 9: "4-up"}
+    layout = layout_map.get(int(spec.get("nup", 1)), "1-up")
+    copies = int(spec.get("copies", 1))
+    items = []
+    if bw_n > 0 or col_n == 0:
+        items.append({"pages": bw_n, "paper_type": f"{size}_BW", "sides": sides, "layout": layout, "copies": copies})
+    if col_n > 0:
+        items.append({"pages": col_n, "paper_type": f"{size}_col", "sides": sides, "layout": layout, "copies": copies})
+    finishing = spec.get("binding", "none")
+    if finishing not in _VALID_FINISHING:
+        finishing = "none"
+    orientation = spec.get("orientation", "auto")
+    if orientation not in _VALID_ORIENTATION:
+        orientation = "auto"
+
+    try:
+        total = _quote_total(items, finishing, size)
+    except Exception:
+        total = 0.0
+
+    store_id = _resolve_store_id(data.get("store_id"))
+    cust_name = str(data.get("customer_name", "")).strip()
+    phone = _norm_phone(data.get("phone") or "")   # optional for walk-ins
+    note = str(data.get("operator_note", "")).strip()
+    note = (note + " · WALK-IN · " + _STORE_LABEL.get(store_id, store_id)).strip(" ·")
+    page_count = len(spec.get("pages_included") or []) or int(spec.get("total_pages", 0))
+
+    sender = phone or "walk-in"
+    suffix = phone[-4:] if phone else _uuid.uuid4().hex[:4]
+    job_id = f"OSP-{datetime.now().strftime('%Y%m%d')}-{suffix}-{_uuid.uuid4().hex[:4]}"
+    try:
+        _insert_job(job_id=job_id, sender=sender, filename=file_name, file_url=file_url)
+        _persist_settings(
+            job_id=job_id, amount_quoted=total, copies=copies, finishing=finishing,
+            size=size, colour=colour, page_count=page_count,
+            operator_note=note, orientation=orientation,
+            customer_name=cust_name, assigned_store_id=store_id, print_spec=spec,
+        )
+    except Exception as exc:
+        logger.error("staff-create db error %s: %r", type(exc).__name__, str(exc))
+        _json_response(h, 500, {"error": "could not create job"})
+        return
+    _json_response(h, 200, {"job_id": job_id, "total": total})
+
+
 def _handle_order_reorder(h, body: bytes) -> None:
     """POST /order/reorder — clone a past job into a new Pending order.
 
