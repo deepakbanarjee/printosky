@@ -197,11 +197,13 @@ Do NOT big-bang. Move one self-contained tab at a time, verify, then strip.
     into standalone pages (chat ✓, transcripts ✓). A later cleanup can retire admin's
     now-duplicated Jobs code once jobs.html is proven on the real store PC.
 - **FOLLOW-UPS surfaced by the Jobs extraction:**
-  - **Payments need the admin password.** `markPaid`/`confirmPayment` send
-    `X-Admin-Password` via `_convPw()`/`_adminPwPrompt()`. Since the admin password
-    isn't shared with staff, staff currently can't mark-paid/collect without it.
-    Decide: switch payment auth to the store/staff token (backend change) so counter
-    staff can take payment without the admin pw. (Own workstream.)
+  - ~~**Payments need the admin password.**~~ ✅ DONE (`c47fa3f`). `/admin/mark-paid`
+    now authorizes via `_acad_auth_staff(h)` (valid X-Staff-Pin OR X-Admin-Password),
+    the same staff-or-admin pattern the `/referrals/*` endpoints use; jobs.html
+    `markPaid` sends the staff PIN (no admin-pw prompt). `confirmPayment`/Collect
+    already used the store token + `_acad_auth_staff` redeem, so it was fine. Owner's
+    admin-pw path still works → admin.html unaffected. NOTE: the backend half deploys
+    with the Vercel API (`main`).
   - **Remaining per-store scoping:** the stats strip (Today's Jobs/Revenue) and the
     Printer Job Log come from pre-aggregated `daily_summary` / `konica_jobs`/
     `epson_jobs` tables that aren't store-scoped — they still show all-store totals.
