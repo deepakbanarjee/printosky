@@ -1854,7 +1854,7 @@ const DEMO_SUMMARY = { total_jobs:4, completed:2, pending:2, revenue:140, cash:6
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allJobs = [];
-let dailySummaries = [];
+let todaysJobs = [];            // today's jobs (all stores), source for the stat cards
 let activeFilter = "all";
 let storeFilter = "all";        // "all" | "OSP" | "PRINTK" — which location's jobs to show
 let storeFilterInited = false;  // default set once from this PC's store, then user-controlled
@@ -1864,14 +1864,14 @@ let isDemo = false;
 async function loadAll() {
   setSyncState("loading");
   try {
-    const [jobs, summary] = await Promise.all([
+    const [jobs, todayJobs] = await Promise.all([
       sbFetch("jobs", "order=received_at.desc&limit=200"),
-      sbFetch("daily_summary", `date=eq.${today()}`),
+      sbFetch("jobs", todayJobsParams(today())),   // today's jobs → stat cards
     ]);
 
     isDemo = jobs.length === 0;
     allJobs = isDemo ? DEMO_JOBS : jobs;
-    dailySummaries = isDemo ? [DEMO_SUMMARY] : summary;
+    todaysJobs = isDemo ? [] : (todayJobs || []);
     initStoreFilter();
     updateStats();
     renderTable();
@@ -1882,26 +1882,9 @@ async function loadAll() {
 }
 
 function updateStats() {
-  if (isDemo) {
-    renderStats(DEMO_SUMMARY);
-    return;
-  }
-  
-  if (storeFilter === "all") {
-    const agg = { total_jobs: 0, completed: 0, pending: 0, revenue: 0, cash: 0, upi: 0 };
-    dailySummaries.forEach(s => {
-      agg.total_jobs += s.total_jobs ?? 0;
-      agg.completed += s.completed ?? 0;
-      agg.pending += s.pending ?? 0;
-      agg.revenue += s.revenue ?? 0;
-      agg.cash += s.cash ?? 0;
-      agg.upi += s.upi ?? 0;
-    });
-    renderStats(agg);
-  } else {
-    const s = dailySummaries.find(x => x.store_id === storeFilter);
-    renderStats(s || { total_jobs: 0, completed: 0, pending: 0, revenue: 0, cash: 0, upi: 0 });
-  }
+  // Aggregate today's jobs (the source of truth) rather than the store-PC's
+  // daily_summary rows, which miss cloud-created orders and mis-split cash/upi.
+  renderStats(isDemo ? DEMO_SUMMARY : summarizeJobs(todaysJobs, storeFilter));
 }
 
 // ── Sync indicator ──────────────────────────────────────────────────────────
