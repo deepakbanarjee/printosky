@@ -100,8 +100,22 @@ function todayJobsParams(todayStr) {
 }
 
 // ── Store / office identity (shared) ────────────────────────────────────────
-// This machine's store code (e.g. OSP store PC, PRIOFF office), saved in
-// localStorage. Read by admin.html (store-diag badge) and mis.html (transcripts).
+// This machine's store code (e.g. OSP store PC, PRIOFF office). Read by
+// admin.html / jobs.html (store-diag badge + default location filter) and
+// mis.html (transcripts).
+//
+// Any PC whose print server is on the Oxygen shop LAN (192.168.55.*) is an
+// Oxygen store PC, so it resolves to OSP regardless of what /status last wrote
+// to localStorage — this keeps the multi-PC shop's consoles all scoped to the
+// one store. Off-LAN (localhost / store.printosky.com) falls back to the stored
+// store_id, which /status supplies (and which the backend also forces to OSP on
+// the LAN). Prefix mirrors store_config.OXYGEN_LAN_PREFIX.
+const OXYGEN_LAN_PREFIX = "192.168.55.";
+
 function getStoreId() {
+  try {
+    const host = new URL(localStorage.getItem("storePcUrl") || "").hostname;
+    if (host.startsWith(OXYGEN_LAN_PREFIX)) return "OSP";
+  } catch (e) { /* unset/invalid storePcUrl — fall through */ }
   return (localStorage.getItem("storeId") || "").trim();
 }

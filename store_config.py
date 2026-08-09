@@ -24,12 +24,24 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass, field
+import socket
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
+
+# The Oxygen shop runs several PCs, and every machine on the shop LAN
+# (192.168.55.0/24) is an Oxygen store PC. So when this process is running on
+# that subnet its store_id is OSP, whatever the local store_config.json says —
+# this guarantees all shop PCs attribute their jobs, revenue and heartbeat to
+# the one store (OSP) instead of drifting to a stale/blank id. Only store_id is
+# forced; printer IPs, paths etc. still come from config. The subnet prefix is
+# overridable via OXYGEN_LAN_PREFIX (set it empty to disable the rule, e.g. a
+# future re-IP or a test box).
+OXYGEN_LAN_PREFIX = os.environ.get("OXYGEN_LAN_PREFIX", "192.168.55.")
+OXYGEN_LAN_STORE_ID = "OSP"
 
 # Legacy Oxygen defaults — used as fallback if no config is found.
 # Keep these in sync with what is currently hardcoded so behaviour is
@@ -75,6 +87,49 @@ class StoreConfig:
         """True iff this config was synthesized from legacy defaults rather
         than read from a real file. Useful for logging during cutover."""
         return self.source_path is None
+
+
+def _local_ipv4s() -> set[str]:
+    """Best-effort set of this machine's own IPv4 addresses (LAN included).
+
+    Combines the hostname's resolved addresses with the source IP the OS would
+    pick to reach the shop subnet — the reliable way to learn our LAN IP on a
+    multi-homed Windows box. The UDP 'connect' sends no packets; it only selects
+    a source interface.
+    """
+    ips: set[str] = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ips.add(info[4][0])
+    except OSError:
+        pass
+    if OXYGEN_LAN_PREFIX:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect((OXYGEN_LAN_PREFIX + "1", 9))
+                ips.add(s.getsockname()[0])
+            finally:
+                s.close()
+        except OSError:
+            pass
+    return ips
+
+
+def _on_oxygen_lan() -> bool:
+    """True iff this machine holds an IP on the Oxygen shop LAN."""
+    if not OXYGEN_LAN_PREFIX:
+        return False
+    return any(ip.startswith(OXYGEN_LAN_PREFIX) for ip in _local_ipv4s())
+
+
+def _apply_lan_override(cfg: StoreConfig) -> StoreConfig:
+    """Force store_id=OSP when running on the Oxygen shop LAN (see module doc)."""
+    if cfg.store_id != OXYGEN_LAN_STORE_ID and _on_oxygen_lan():
+        log.info("store_config: on Oxygen LAN (%s*) — forcing store_id %s -> %s",
+                 OXYGEN_LAN_PREFIX, cfg.store_id, OXYGEN_LAN_STORE_ID)
+        return replace(cfg, store_id=OXYGEN_LAN_STORE_ID)
+    return cfg
 
 
 def _candidate_paths() -> list[Path]:
@@ -139,7 +194,7 @@ def get_store_config() -> StoreConfig:
             log.warning("store_config: failed to read %s (%s); skipping", path, exc)
             continue
         merged = _merge_with_defaults(raw)
-        cfg = _build(merged, source=str(path))
+        cfg = _apply_lan_override(_build(merged, source=str(path)))
         log.info("store_config: loaded store_id=%s from %s", cfg.store_id, path)
         return cfg
 
@@ -148,7 +203,7 @@ def get_store_config() -> StoreConfig:
         "defaults (store_id=%s)",
         _LEGACY_OXYGEN_DEFAULTS["store_id"],
     )
-    return _build(_LEGACY_OXYGEN_DEFAULTS, source=None)
+    return _apply_lan_override(_build(_LEGACY_OXYGEN_DEFAULTS, source=None))
 
 
 def reload_store_config() -> StoreConfig:
