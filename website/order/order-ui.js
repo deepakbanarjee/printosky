@@ -772,6 +772,10 @@ async function submitOrder() {
           customer_name: $('ov2-name').value.trim(),
           phone: $('ov2-whatsapp') && !$('ov2-field-wa').classList.contains('ov2-hidden')
             ? $('ov2-whatsapp').value.trim() : '',
+          // Page-inclusion + colour detail (N of M pages, SKIPPED, COLOUR pages).
+          // Pure buildOperatorNote — NOT withExtraInstructions, which would inject
+          // the customer 'Payment: cash' line from the hidden payment select.
+          operator_note: buildOperatorNote(state),
         }),
       });
       if (res.status === 403) {
