@@ -354,7 +354,13 @@ def _handle_order_staff_create(h, body: bytes) -> None:
     except Exception:
         total = 0.0
 
-    store_id = _resolve_store_id(data.get("store_id"))
+    # store_id here is the machine's ACTUAL store code (OSP / PRINTK), sent by
+    # jobs.html staff mode — NOT a customer pickup-location name. Use it directly.
+    # (_resolve_store_id maps location names like "nattika" and defaults unknown
+    # inputs to OSP, which would wrongly assign every PRINTK walk-in to OSP.)
+    store_id = str(data.get("store_id") or "").strip().upper()
+    if store_id not in _STORE_LABEL:
+        store_id = _DEFAULT_STORE_ID
     cust_name = str(data.get("customer_name", "")).strip()
     phone = _norm_phone(data.get("phone") or "")   # optional for walk-ins
     note = str(data.get("operator_note", "")).strip()
