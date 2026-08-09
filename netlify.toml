@@ -51,6 +51,19 @@
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
 
+# App JS must revalidate in lockstep with the HTML that calls it. Without this,
+# a browser keeps a stale admin-shared.js (or order/*.js) while loading fresh
+# HTML that references new helpers → "X is not defined" version-skew errors.
+[[headers]]
+  for = "/admin-shared.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/order/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
 [[headers]]
   for = "/admin"
   [headers.values]
