@@ -48,6 +48,80 @@ class TestDailyLog:
         assert "700" in out and "500" in out  # cash / upi split
 
 
+class TestSummarizeJobs:
+    """summarize_jobs aggregates the cloud `jobs` table (source of truth) into
+    daily_summary-shaped rows. Regression cover for the zero-revenue bug: real
+    payment_mode values are cash/Cash/CASH, and cloud-origin jobs never touch the
+    store PC's local SQLite that the old daily_summary rows were built from.
+    """
+
+    def test_empty_rows_gives_no_dates(self):
+        assert sd.summarize_jobs([]) == {}
+        assert sd.summarize_jobs(None) == {}
+
+    def test_case_insensitive_payment_mode(self):
+        rows = [
+            {"received_at": "2026-08-08 05:00:00", "status": "Printed",
+             "payment_mode": "cash", "amount_collected": 6},
+            {"received_at": "2026-08-08 06:00:00", "status": "Printed",
+             "payment_mode": "CASH", "amount_collected": 4},
+            {"received_at": "2026-08-08 07:00:00", "status": "Paid",
+             "payment_mode": "Upi", "amount_collected": 10},
+        ]
+        day = sd.summarize_jobs(rows, "OSP")["2026-08-08"]
+        assert day["total_jobs"] == 3
+        assert day["revenue"] == 20
+        assert day["cash"] == 10   # 6 + 4, both cash despite differing case
+        assert day["upi"] == 10
+        assert day["store_id"] == "OSP"
+
+    def test_buckets_by_received_date(self):
+        rows = [
+            {"received_at": "2026-08-07 23:59:59", "amount_collected": 5,
+             "payment_mode": "cash", "status": "Printed"},
+            {"received_at": "2026-08-08 00:00:01", "amount_collected": 7,
+             "payment_mode": "cash", "status": "Printed"},
+        ]
+        by_date = sd.summarize_jobs(rows)
+        assert set(by_date) == {"2026-08-07", "2026-08-08"}
+        assert by_date["2026-08-07"]["revenue"] == 5
+        assert by_date["2026-08-08"]["revenue"] == 7
+
+    def test_t_separated_timestamp_still_buckets(self):
+        rows = [{"received_at": "2026-08-08T10:00:00", "amount_collected": 9,
+                 "payment_mode": "upi", "status": "Paid"}]
+        assert sd.summarize_jobs(rows)["2026-08-08"]["upi"] == 9
+
+    def test_status_and_null_money_handling(self):
+        rows = [
+            {"received_at": "2026-08-08 01:00:00", "status": "Completed",
+             "payment_mode": "cash", "amount_collected": 8},
+            {"received_at": "2026-08-08 02:00:00", "status": "Pending",
+             "payment_mode": None, "amount_collected": None},
+            {"received_at": "2026-08-08 03:00:00", "status": "Cancelled",
+             "payment_mode": None, "amount_collected": None},
+        ]
+        day = sd.summarize_jobs(rows)["2026-08-08"]
+        assert day["total_jobs"] == 3
+        assert day["completed"] == 1
+        assert day["pending"] == 1          # Pending counts; Cancelled does not
+        assert day["revenue"] == 8          # None amount treated as 0
+        assert day["cash"] == 8
+
+    def test_bad_received_at_skipped(self):
+        rows = [{"received_at": "", "amount_collected": 5, "payment_mode": "cash"},
+                {"received_at": None, "amount_collected": 5, "payment_mode": "cash"}]
+        assert sd.summarize_jobs(rows) == {}
+
+    def test_feeds_daily_log_with_nonzero_revenue(self):
+        # End-to-end with the formatter that the owner actually receives.
+        rows = [{"received_at": "2026-08-08 05:00:00", "status": "Printed",
+                 "payment_mode": "cash", "amount_collected": 90}]
+        day = sd.summarize_jobs(rows, "OSP")["2026-08-08"]
+        out = sd.format_daily_log(day)
+        assert "₹90" in out
+
+
 class TestOpeningMessage:
     def test_opening_has_date_and_online(self):
         out = sd.compose_opening_message(date(2026, 6, 8))

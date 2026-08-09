@@ -77,6 +77,60 @@ def _as_date(d) -> date:
     return datetime.strptime(str(d)[:10], "%Y-%m-%d").date()
 
 
+# ── Summary aggregation from raw job rows ─────────────────────────────────────
+# daily_summary is written by the store PC from its LOCAL SQLite, so it misses
+# every job created directly in the cloud (the order API) and it split cash/upi
+# with a case-sensitive payment_mode match — real data has cash/Cash/CASH — so
+# the owner's day/week/month revenue logs read ~₹0. Aggregating the cloud `jobs`
+# table (the source of truth) here fixes both, for jobs of any origin.
+
+# Statuses that count as an open ("pending") job in the day log — everything
+# that isn't Completed or Cancelled. Matched case-insensitively.
+_PENDING_STATUSES = frozenset({
+    "received", "in progress", "pending", "paid", "queued", "ready", "printed",
+})
+
+
+def summarize_jobs(rows: Iterable[Mapping], store_id=None) -> dict:
+    """Aggregate raw `jobs` rows into per-date, `daily_summary`-shaped dicts.
+
+    Each row is a mapping carrying at least ``received_at`` (a
+    'YYYY-MM-DD[ /T]HH:MM:SS' string), ``status``, ``payment_mode`` and
+    ``amount_collected``; any other keys are ignored. Rows are bucketed by
+    DATE(received_at) and payment_mode is matched case-insensitively.
+
+    Returns ``{date_str: summary_dict}`` where each summary has the same shape
+    the day/week/month formatters expect: total_jobs, completed, pending,
+    revenue, cash, upi (+ store_id, date).
+    """
+    by_date: dict = {}
+    for r in rows or []:
+        ra = str(r.get("received_at") or "")[:10]
+        if len(ra) != 10:
+            continue
+        agg = by_date.get(ra)
+        if agg is None:
+            agg = by_date[ra] = {
+                "store_id": store_id, "date": ra,
+                "total_jobs": 0, "completed": 0, "pending": 0,
+                "revenue": 0.0, "cash": 0.0, "upi": 0.0,
+            }
+        agg["total_jobs"] += 1
+        status = str(r.get("status") or "").strip().lower()
+        if status == "completed":
+            agg["completed"] += 1
+        elif status in _PENDING_STATUSES:
+            agg["pending"] += 1
+        amt = _num(r.get("amount_collected"))
+        agg["revenue"] += amt
+        mode = str(r.get("payment_mode") or "").strip().lower()
+        if mode == "cash":
+            agg["cash"] += amt
+        elif mode == "upi":
+            agg["upi"] += amt
+    return by_date
+
+
 # ── Log sections ──────────────────────────────────────────────────────────────
 def format_daily_log(summary: Mapping) -> str:
     d = _as_date(summary.get("date"))

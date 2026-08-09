@@ -60,9 +60,70 @@ function showToast(msg, type = "ok") {
   }, 2600);
 }
 
+// ── Daily stat aggregation (shared) ─────────────────────────────────────────
+// The stat cards (jobs / done / pending / revenue / cash·upi) used to read the
+// `daily_summary` table, which the store PC writes from its LOCAL SQLite — so
+// it missed every job created directly in the cloud (the order API) and split
+// cash/upi with a case-sensitive payment_mode match, showing ₹0. Aggregate the
+// `jobs` table (the source of truth) instead. Mirrors the backend
+// store_digest.summarize_jobs so the console and the owner's digest agree.
+const SB_PENDING_STATUSES = new Set(
+  ["received", "in progress", "pending", "paid", "queued", "ready", "printed"]);
+
+function summarizeJobs(jobs, store = "all") {
+  const agg = { total_jobs: 0, completed: 0, pending: 0, revenue: 0, cash: 0, upi: 0 };
+  (jobs || []).forEach(j => {
+    if (store !== "all" && j.store_id !== store) return;
+    agg.total_jobs++;
+    const st = String(j.status || "").trim().toLowerCase();
+    if (st === "completed") agg.completed++;
+    else if (SB_PENDING_STATUSES.has(st)) agg.pending++;
+    const amt = Number(j.amount_collected) || 0;
+    agg.revenue += amt;
+    const pm = String(j.payment_mode || "").trim().toLowerCase();
+    if (pm === "cash") agg.cash += amt;
+    else if (pm === "upi") agg.upi += amt;
+  });
+  return agg;
+}
+
+// PostgREST params to fetch today's jobs (all stores) for stat aggregation.
+// Date-only bounds compare lexicographically against the 'YYYY-MM-DD HH:MM:SS'
+// received_at text and correctly cover both space- and 'T'-separated stamps.
+// tomorrow is derived in UTC from the date string so it never collapses to
+// today. Caller aggregates per-store client-side via summarizeJobs.
+function todayJobsParams(todayStr) {
+  const tomorrow = new Date(new Date(todayStr + "T00:00:00Z").getTime() + 864e5)
+    .toISOString().slice(0, 10);
+  return `received_at=gte.${todayStr}&received_at=lt.${tomorrow}`
+    + `&select=store_id,received_at,status,payment_mode,amount_collected&limit=5000`;
+}
+
 // ── Store / office identity (shared) ────────────────────────────────────────
-// This machine's store code (e.g. OSP store PC, PRIOFF office), saved in
-// localStorage. Read by admin.html (store-diag badge) and mis.html (transcripts).
+// This machine's store code (e.g. OSP store PC, PRIOFF office). Read by
+// admin.html / jobs.html (store-diag badge + default location filter) and
+// mis.html (transcripts).
+//
+// Any PC whose print server is on a shop LAN is that shop's store PC, so it
+// resolves to that store regardless of what /status last wrote to localStorage
+// — this keeps each multi-PC shop's consoles all scoped to the one store.
+// Off-LAN (localhost / store.printosky.com) falls back to the stored store_id,
+// which /status supplies (and which the backend also forces on the LAN). Map
+// mirrors store_config._DEFAULT_LAN_STORE_MAP.
+//   192.168.55.* -> OSP (Thriprayar) · 192.168.1.* -> PRINTK (Nattika)
+// Exempt ids (PRIOFF, the Nattika dev box that shares Printosky's 192.168.1.*
+// subnet) keep their own id — /status reports it and the subnet rule is skipped.
+const LAN_STORE_MAP = { "192.168.55.": "OSP", "192.168.1.": "PRINTK" };
+const LAN_STORE_EXEMPT = ["PRIOFF"];
+
 function getStoreId() {
-  return (localStorage.getItem("storeId") || "").trim();
+  const stored = (localStorage.getItem("storeId") || "").trim();
+  if (LAN_STORE_EXEMPT.includes(stored)) return stored;   // dev box stays itself
+  try {
+    const host = new URL(localStorage.getItem("storePcUrl") || "").hostname;
+    for (const prefix in LAN_STORE_MAP) {
+      if (host.startsWith(prefix)) return LAN_STORE_MAP[prefix];
+    }
+  } catch (e) { /* unset/invalid storePcUrl — fall through */ }
+  return stored;
 }

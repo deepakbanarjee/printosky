@@ -2470,6 +2470,7 @@ const DEMO_SUMMARY = { total_jobs:4, completed:2, pending:2, revenue:140, cash:6
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allJobs = [];
+let todaysJobs = [];            // today's jobs (all stores), source for the stat cards
 let activeFilter = "all";
 let storeFilter = "all";        // "all" | "OSP" | "PRINTK" — which location's jobs to show
 let storeFilterInited = false;  // default set once from this PC's store, then user-controlled
@@ -2479,15 +2480,16 @@ let isDemo = false;
 async function loadAll() {
   setSyncState("loading");
   try {
-    const [jobs, summary] = await Promise.all([
+    const [jobs, todayJobs] = await Promise.all([
       sbFetch("jobs", "order=received_at.desc&limit=200"),
-      sbFetch("daily_summary", `date=eq.${today()}&order=synced_at.desc&limit=1`),
+      sbFetch("jobs", todayJobsParams(today())),   // today's jobs → stat cards
     ]);
 
     isDemo = jobs.length === 0;
     allJobs = isDemo ? DEMO_JOBS : jobs;
+    todaysJobs = isDemo ? [] : (todayJobs || []);
     initStoreFilter();
-    renderStats(isDemo ? DEMO_SUMMARY : (summary[0] || {}));
+    renderStats(isDemo ? DEMO_SUMMARY : summarizeJobs(todaysJobs, storeFilter));
     renderTable();
     renderPrinterBreakdown();
     loadPrinterJobs();
@@ -2529,6 +2531,7 @@ function setFilter(f, btn) {
 
 function setStoreFilter(v) {
   storeFilter = v;
+  if (!isDemo) renderStats(summarizeJobs(todaysJobs, storeFilter));
   renderTable();
   updateStoreDiag();
 }
@@ -2570,7 +2573,11 @@ function renderTable() {
   const todayStr = today();
 
   let rows = allJobs.filter(j => {
-    if (storeFilter !== "all" && (j.assigned_store_id || "OSP") !== storeFilter) return false;
+    // Scope by the job's own store_id (always set on synced jobs). The old
+    // `assigned_store_id || "OSP"` dumped every unassigned job into OSP, so
+    // Nattika (PRINTK/PRIOFF) jobs leaked into the Oxygen console. A blank
+    // store_id (demo/legacy) is not hidden.
+    if (storeFilter !== "all" && j.store_id && j.store_id !== storeFilter) return false;
     if (activeFilter === "Completed" && j.status !== "Completed") return false;
     if (activeFilter === "Received"  && !["Received","In Progress","Printed","Queued","Draft"].includes(j.status)) return false;
     if (activeFilter === "today"     && !j.received_at?.startsWith(todayStr)) return false;

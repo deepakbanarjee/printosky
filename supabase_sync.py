@@ -281,8 +281,10 @@ def collect_daily_summary(db_path):
                 COUNT(CASE WHEN status='Completed' THEN 1 END) completed,
                 COUNT(CASE WHEN status IN ('Received','In Progress','Printed') THEN 1 END) pending,
                 COALESCE(SUM(amount_collected), 0) revenue,
-                COALESCE(SUM(CASE WHEN payment_mode='Cash' THEN amount_collected END), 0) cash,
-                COALESCE(SUM(CASE WHEN payment_mode='UPI'  THEN amount_collected END), 0) upi
+                -- payment_mode is stored inconsistently (cash/Cash/CASH), so
+                -- match case-insensitively or cash/upi read 0 while revenue > 0.
+                COALESCE(SUM(CASE WHEN UPPER(payment_mode)='CASH' THEN amount_collected END), 0) cash,
+                COALESCE(SUM(CASE WHEN UPPER(payment_mode)='UPI'  THEN amount_collected END), 0) upi
             FROM jobs WHERE DATE(received_at)=?
         """, (today,))
         row = dict(c.fetchone() or {})
