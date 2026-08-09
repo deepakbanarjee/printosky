@@ -629,7 +629,9 @@ function isHidden(id) {
 function validateStep2() {
   // A logged-in account hides the name and/or WhatsApp field (the backend
   // supplies that identity from the Bearer token) — a hidden field is satisfied.
-  const nameOk = isHidden('ov2-field-name') || $('ov2-name').value.trim().length > 0;
+  // In staff/walk-in mode the customer name is genuinely optional (the field is
+  // shown but only relabelled, not hidden), so don't let an empty name block submit.
+  const nameOk = STAFF || isHidden('ov2-field-name') || $('ov2-name').value.trim().length > 0;
   const phoneOk = isHidden('ov2-field-wa') || plausiblePhone($('ov2-whatsapp').value);
   const addrOk = runtime.delivery === 0 || $('ov2-address').value.trim().length > 0;
   const ok = nameOk && phoneOk && addrOk;
