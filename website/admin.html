@@ -2573,7 +2573,11 @@ function renderTable() {
   const todayStr = today();
 
   let rows = allJobs.filter(j => {
-    if (storeFilter !== "all" && (j.assigned_store_id || "OSP") !== storeFilter) return false;
+    // Scope by the job's own store_id (always set on synced jobs). The old
+    // `assigned_store_id || "OSP"` dumped every unassigned job into OSP, so
+    // Nattika (PRINTK/PRIOFF) jobs leaked into the Oxygen console. A blank
+    // store_id (demo/legacy) is not hidden.
+    if (storeFilter !== "all" && j.store_id && j.store_id !== storeFilter) return false;
     if (activeFilter === "Completed" && j.status !== "Completed") return false;
     if (activeFilter === "Received"  && !["Received","In Progress","Printed","Queued","Draft"].includes(j.status)) return false;
     if (activeFilter === "today"     && !j.received_at?.startsWith(todayStr)) return false;
