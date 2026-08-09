@@ -104,18 +104,26 @@ function todayJobsParams(todayStr) {
 // admin.html / jobs.html (store-diag badge + default location filter) and
 // mis.html (transcripts).
 //
-// Any PC whose print server is on the Oxygen shop LAN (192.168.55.*) is an
-// Oxygen store PC, so it resolves to OSP regardless of what /status last wrote
-// to localStorage — this keeps the multi-PC shop's consoles all scoped to the
-// one store. Off-LAN (localhost / store.printosky.com) falls back to the stored
-// store_id, which /status supplies (and which the backend also forces to OSP on
-// the LAN). Prefix mirrors store_config.OXYGEN_LAN_PREFIX.
-const OXYGEN_LAN_PREFIX = "192.168.55.";
+// Any PC whose print server is on a shop LAN is that shop's store PC, so it
+// resolves to that store regardless of what /status last wrote to localStorage
+// — this keeps each multi-PC shop's consoles all scoped to the one store.
+// Off-LAN (localhost / store.printosky.com) falls back to the stored store_id,
+// which /status supplies (and which the backend also forces on the LAN). Map
+// mirrors store_config._DEFAULT_LAN_STORE_MAP.
+//   192.168.55.* -> OSP (Thriprayar) · 192.168.1.* -> PRINTK (Nattika)
+// Exempt ids (PRIOFF, the Nattika dev box that shares Printosky's 192.168.1.*
+// subnet) keep their own id — /status reports it and the subnet rule is skipped.
+const LAN_STORE_MAP = { "192.168.55.": "OSP", "192.168.1.": "PRINTK" };
+const LAN_STORE_EXEMPT = ["PRIOFF"];
 
 function getStoreId() {
+  const stored = (localStorage.getItem("storeId") || "").trim();
+  if (LAN_STORE_EXEMPT.includes(stored)) return stored;   // dev box stays itself
   try {
     const host = new URL(localStorage.getItem("storePcUrl") || "").hostname;
-    if (host.startsWith(OXYGEN_LAN_PREFIX)) return "OSP";
+    for (const prefix in LAN_STORE_MAP) {
+      if (host.startsWith(prefix)) return LAN_STORE_MAP[prefix];
+    }
   } catch (e) { /* unset/invalid storePcUrl — fall through */ }
-  return (localStorage.getItem("storeId") || "").trim();
+  return stored;
 }

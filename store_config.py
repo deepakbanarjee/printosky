@@ -32,16 +32,51 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# The Oxygen shop runs several PCs, and every machine on the shop LAN
-# (192.168.55.0/24) is an Oxygen store PC. So when this process is running on
-# that subnet its store_id is OSP, whatever the local store_config.json says —
-# this guarantees all shop PCs attribute their jobs, revenue and heartbeat to
-# the one store (OSP) instead of drifting to a stale/blank id. Only store_id is
-# forced; printer IPs, paths etc. still come from config. The subnet prefix is
-# overridable via OXYGEN_LAN_PREFIX (set it empty to disable the rule, e.g. a
-# future re-IP or a test box).
-OXYGEN_LAN_PREFIX = os.environ.get("OXYGEN_LAN_PREFIX", "192.168.55.")
-OXYGEN_LAN_STORE_ID = "OSP"
+# Each shop runs several PCs, and every machine on a shop's LAN is that shop's
+# store PC. So when this process runs on a known shop subnet its store_id is
+# fixed accordingly, whatever the local store_config.json says — this guarantees
+# all of a shop's PCs attribute their jobs, revenue and heartbeat to the one
+# store instead of drifting to a stale/blank id. Only store_id is forced;
+# printer IPs, paths etc. still come from config.
+#
+#   192.168.55.0/24 -> OSP     (Oxygen Students Paradise, Thriprayar)
+#   192.168.1.0/24  -> PRINTK  (Printosky, Nattika)
+#
+# Override via env LAN_STORE_MAP as "prefix=STORE,prefix=STORE"; set it empty to
+# disable the rule (e.g. a re-IP or a test box). First matching subnet wins.
+_DEFAULT_LAN_STORE_MAP: dict[str, str] = {
+    "192.168.55.": "OSP",
+    "192.168.1.":  "PRINTK",
+}
+
+# Exempt store ids are pinned to their own machine and never swept into a shop's
+# production store by the LAN rule. PRIOFF — the Nattika dev / back-office box —
+# shares the Printosky store's 192.168.1.0/24 subnet, so without this it would
+# be mis-forced to PRINTK. The exemption is by *declared* store_id: the dev box
+# must set store_id=PRIOFF in its store_config.json (a machine with no config
+# falls back to the OSP legacy default and, on a shop LAN, is treated as that
+# shop). Override via env LAN_STORE_EXEMPT ("PRIOFF,OTHER").
+_DEFAULT_LAN_EXEMPT_STORE_IDS: frozenset[str] = frozenset({"PRIOFF"})
+
+
+def _lan_store_map() -> dict[str, str]:
+    raw = os.environ.get("LAN_STORE_MAP")
+    if raw is None:
+        return dict(_DEFAULT_LAN_STORE_MAP)
+    out: dict[str, str] = {}
+    for pair in raw.split(","):
+        prefix, sep, store_id = pair.partition("=")
+        prefix, store_id = prefix.strip(), store_id.strip()
+        if sep and prefix and store_id:
+            out[prefix] = store_id
+    return out
+
+
+def _lan_exempt_store_ids() -> set[str]:
+    raw = os.environ.get("LAN_STORE_EXEMPT")
+    if raw is None:
+        return set(_DEFAULT_LAN_EXEMPT_STORE_IDS)
+    return {s.strip() for s in raw.split(",") if s.strip()}
 
 # Legacy Oxygen defaults — used as fallback if no config is found.
 # Keep these in sync with what is currently hardcoded so behaviour is
@@ -89,11 +124,11 @@ class StoreConfig:
         return self.source_path is None
 
 
-def _local_ipv4s() -> set[str]:
+def _local_ipv4s(probe_hosts: tuple[str, ...] = ()) -> set[str]:
     """Best-effort set of this machine's own IPv4 addresses (LAN included).
 
     Combines the hostname's resolved addresses with the source IP the OS would
-    pick to reach the shop subnet — the reliable way to learn our LAN IP on a
+    pick to reach each shop subnet — the reliable way to learn our LAN IP on a
     multi-homed Windows box. The UDP 'connect' sends no packets; it only selects
     a source interface.
     """
@@ -103,11 +138,11 @@ def _local_ipv4s() -> set[str]:
             ips.add(info[4][0])
     except OSError:
         pass
-    if OXYGEN_LAN_PREFIX:
+    for host in probe_hosts:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
-                s.connect((OXYGEN_LAN_PREFIX + "1", 9))
+                s.connect((host, 9))
                 ips.add(s.getsockname()[0])
             finally:
                 s.close()
@@ -116,19 +151,33 @@ def _local_ipv4s() -> set[str]:
     return ips
 
 
-def _on_oxygen_lan() -> bool:
-    """True iff this machine holds an IP on the Oxygen shop LAN."""
-    if not OXYGEN_LAN_PREFIX:
-        return False
-    return any(ip.startswith(OXYGEN_LAN_PREFIX) for ip in _local_ipv4s())
+def _resolve_lan_store() -> str | None:
+    """store_id for the shop LAN this machine sits on, or None if off all of
+    them. First matching subnet (in map order) wins."""
+    store_map = _lan_store_map()
+    if not store_map:
+        return None
+    ips = _local_ipv4s(tuple(prefix + "1" for prefix in store_map))
+    for prefix, store_id in store_map.items():
+        if any(ip.startswith(prefix) for ip in ips):
+            return store_id
+    return None
 
 
 def _apply_lan_override(cfg: StoreConfig) -> StoreConfig:
-    """Force store_id=OSP when running on the Oxygen shop LAN (see module doc)."""
-    if cfg.store_id != OXYGEN_LAN_STORE_ID and _on_oxygen_lan():
-        log.info("store_config: on Oxygen LAN (%s*) — forcing store_id %s -> %s",
-                 OXYGEN_LAN_PREFIX, cfg.store_id, OXYGEN_LAN_STORE_ID)
-        return replace(cfg, store_id=OXYGEN_LAN_STORE_ID)
+    """Force store_id to the shop whose LAN we're on (see module doc).
+
+    A machine that explicitly declares an exempt store_id (e.g. PRIOFF, the
+    Nattika dev box on the Printosky subnet) keeps its own id — the LAN rule
+    never sweeps it into the shop's production store.
+    """
+    if cfg.store_id in _lan_exempt_store_ids():
+        return cfg
+    lan_store = _resolve_lan_store()
+    if lan_store and cfg.store_id != lan_store:
+        log.info("store_config: on shop LAN — forcing store_id %s -> %s",
+                 cfg.store_id, lan_store)
+        return replace(cfg, store_id=lan_store)
     return cfg
 
 
