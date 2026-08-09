@@ -2273,20 +2273,42 @@ def _sd_week_start(d):
     return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
 
 
+def _sd_summary_from_jobs(c, store_id, start_str, end_str):
+    """Per-date summaries for [start_str, end_str] computed from the cloud `jobs`
+    table — the source of truth — rather than the `daily_summary` rows the store
+    PC writes from its LOCAL SQLite.
+
+    The store-PC-written rows read ~₹0 because they miss every job created
+    directly in the cloud (the order API) and split cash/upi with a
+    case-sensitive payment_mode match. Aggregating jobs here fixes the owner's
+    revenue logs for jobs of any origin. Returns {date_str: summary_row}.
+
+    Range bound uses `< next-day-midnight` (not `<= end 23:59:59`) so both
+    space- and 'T'-separated received_at timestamps land in the right day.
+    """
+    from datetime import timedelta
+    import store_digest as sd
+
+    end_excl = (datetime.strptime(end_str, "%Y-%m-%d").date()
+                + timedelta(days=1)).strftime("%Y-%m-%d")
+    rows = (c.table("jobs")
+             .select("received_at,status,payment_mode,amount_collected")
+             .eq("store_id", store_id)
+             .gte("received_at", f"{start_str} 00:00:00")
+             .lt("received_at", f"{end_excl} 00:00:00")
+             .execute().data) or []
+    return sd.summarize_jobs(rows, store_id)
+
+
 def _sd_summary_row(c, store_id, date_str):
-    r = (c.table("daily_summary").select("*")
-          .eq("store_id", store_id).eq("date", date_str).limit(1).execute())
-    if r.data:
-        return r.data[0]
-    return {"date": date_str, "total_jobs": 0, "completed": 0,
-            "pending": 0, "revenue": 0, "cash": 0, "upi": 0}
+    got = _sd_summary_from_jobs(c, store_id, date_str, date_str).get(date_str)
+    return got or {"store_id": store_id, "date": date_str, "total_jobs": 0,
+                   "completed": 0, "pending": 0, "revenue": 0, "cash": 0, "upi": 0}
 
 
 def _sd_summary_range(c, store_id, start_str, end_str):
-    r = (c.table("daily_summary").select("*")
-          .eq("store_id", store_id)
-          .gte("date", start_str).lte("date", end_str).execute())
-    return r.data or []
+    by_date = _sd_summary_from_jobs(c, store_id, start_str, end_str)
+    return [by_date[d] for d in sorted(by_date)]
 
 
 def _handle_cron_store_pc_check(h) -> None:
