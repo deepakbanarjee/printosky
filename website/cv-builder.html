@@ -9,6 +9,8 @@
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Operator-only during private testing — keep out of search until public launch. -->
+  <meta name="robots" content="noindex, nofollow">
   <title>Elite AI CV Builder & ATS Optimizer — Printosky</title>
   <link rel="canonical" href="https://printosky.com/cv-builder.html">
   <meta name="description" content="Build an ATS-optimized professional resume. Parse CVs or LinkedIn PDFs, optimize keywords against job descriptions, and write entries with AI.">
@@ -1548,46 +1550,78 @@
     }
   }
 
-  function downloadPDFDirect() {
-    const element = document.getElementById('cvDocContainer').firstElementChild;
-    if (!element) {
-      alert("No document content found. Please fill out details first.");
+  async function downloadPDFDirect() {
+    const source = document.getElementById('cvDocContainer').firstElementChild;
+    if (!source || !source.classList || !String(source.className).includes('tmpl-')) {
+      alert("No document content found. Please fill in your details first.");
       return;
     }
-    
+
     const name = document.getElementById('cv-name').value.trim() || 'Resume';
     const btn = document.getElementById('btn-pdf-download');
     const originalContent = btn.innerHTML;
-    
     btn.innerHTML = '<span>⏳ Generating PDF...</span>';
     btn.disabled = true;
 
-    const opt = {
-      margin: 0,
-      filename: `resume_${name.replace(/\s+/g, '_')}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { 
-        scale: 2, 
-        useCORS: true, 
-        letterRendering: true,
-        backgroundColor: '#ffffff'
-      },
-      jsPDF: { 
-        unit: 'mm', 
-        format: 'a4', 
-        orientation: 'portrait' 
-      }
-    };
+    // Render a clone at a FIXED A4 width off-screen instead of capturing the
+    // live preview. The on-screen preview is capped at 620px and is hidden on
+    // tablet/mobile — capturing it produced narrow, misaligned, or blank PDFs.
+    // A dedicated 794px (A4 @96dpi) canvas makes the output deterministic on
+    // every device and screen size.
+    const A4_WIDTH_PX = 794;
+    const holder = document.createElement('div');
+    holder.style.cssText =
+      `position:fixed; left:-10000px; top:0; width:${A4_WIDTH_PX}px; background:#ffffff; z-index:-1;`;
+    // Preserve the chosen theme colour (set as a CSS var on the live container).
+    const theme = document.getElementById('cvDocContainer').style.getPropertyValue('--theme-color') || '#1e3a8a';
+    holder.style.setProperty('--theme-color', theme);
 
-    html2pdf().set(opt).from(element).save().then(() => {
+    const clone = source.cloneNode(true);
+    clone.style.width = A4_WIDTH_PX + 'px';
+    clone.style.maxWidth = 'none';
+    clone.style.margin = '0';
+    clone.style.boxShadow = 'none';
+    holder.appendChild(clone);
+    document.body.appendChild(holder);
+
+    try {
+      // Wait for web fonts and any embedded photo so the capture isn't taken
+      // against fallback fonts or a half-loaded image.
+      if (document.fonts && document.fonts.ready) {
+        try { await document.fonts.ready; } catch (_) {}
+      }
+      await Promise.all(Array.from(clone.querySelectorAll('img')).map(img =>
+        (img.complete && img.naturalWidth) ? Promise.resolve()
+          : new Promise(res => { img.onload = img.onerror = res; })
+      ));
+
+      const opt = {
+        margin: 0, // templates carry their own internal padding; keeps full-bleed sidebars to the edge
+        filename: `resume_${name.replace(/\s+/g, '_')}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          windowWidth: A4_WIDTH_PX,
+          scrollX: 0,
+          scrollY: 0
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        // Honour CSS page-break rules and never split an entry card across pages.
+        pagebreak: { mode: ['css', 'legacy'], avoid: '.c-entry' }
+      };
+
+      await html2pdf().set(opt).from(clone).save();
+    } catch (err) {
+      console.error('PDF generation failed:', err);
+      alert("PDF download failed: " + (err && err.message ? err.message : err) +
+            "\n\nTip: you can also use your browser's Print → Save as PDF.");
+    } finally {
+      holder.remove();
       btn.innerHTML = originalContent;
       btn.disabled = false;
-    }).catch(err => {
-      console.error(err);
-      alert("PDF download failed: " + err.message);
-      btn.innerHTML = originalContent;
-      btn.disabled = false;
-    });
+    }
   }
 
   // Backup Data Utilities
