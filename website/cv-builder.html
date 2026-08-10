@@ -16,9 +16,6 @@
   <meta name="description" content="Build an ATS-optimized professional resume. Parse CVs or LinkedIn PDFs, optimize keywords against job descriptions, and write entries with AI.">
   <link rel="stylesheet" href="styles.css">
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Syne:wght@700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700;1,300&family=Playfair+Display:ital,wght@0,600;0,700;1,400&display=swap" rel="stylesheet">
-  <!-- html2pdf.js Library for Direct Client-side PDF Generation -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  
   <style>
     /* ── BASE & WORKSPACE (DARK THEME FOR BUILDER) ── */
     :root {
@@ -733,15 +730,26 @@
       .tool-hero-content { max-width: 100%; }
     }
 
-    /* ── PRINT STYLESHEET ── */
+    /* ── PRINT STYLESHEET ──
+       Native print → "Save as PDF" prints ONLY the CV document: selectable text,
+       correct fonts, real A4 pagination. Everything else on the page is hidden. */
+    @page { size: A4; margin: 0; }  /* templates carry their own padding; full-bleed sidebars reach the edge */
     @media print {
-      body { background: #fff !important; color: #000 !important; }
+      html, body { background: #fff !important; color: #000 !important; margin: 0 !important; padding: 0 !important; }
       nav, footer, .tool-hero, .template-selector, .step-sidebar, .cv-form-side, .preview-header, .preview-actions, .floating-preview-toggle, .modal-overlay {
         display: none !important;
       }
       .builder-container { display: block !important; }
-      .cv-preview-side { display: block !important; position: static !important; width: 100% !important; height: auto !important; padding: 0 !important; background: transparent !important; }
-      .cv-doc { box-shadow: none !important; border: none !important; max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+      /* Force the preview visible even on tablet/mobile, where it's normally display:none. */
+      .cv-preview-side { display: block !important; position: static !important; width: 100% !important; height: auto !important; max-height: none !important; padding: 0 !important; margin: 0 !important; background: #fff !important; overflow: visible !important; }
+      /* min-height on the sheet would push a short resume onto a blank 2nd page — drop it for print. */
+      .cv-doc { box-shadow: none !important; border: none !important; border-radius: 0 !important; max-width: none !important; width: 100% !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; }
+      #cvDocContainer > .tmpl-classic, #cvDocContainer > .tmpl-modern, #cvDocContainer > .tmpl-minimal,
+      #cvDocContainer > .tmpl-creative, #cvDocContainer > .tmpl-executive, #cvDocContainer > .tmpl-tech,
+      #cvDocContainer > .tmpl-visual, #cvDocContainer > .tmpl-corporate, #cvDocContainer > .tmpl-serif,
+      #cvDocContainer > .tmpl-compact, #cvDocContainer > .tmpl-academic { min-height: 0 !important; }
+      /* Ask the browser to keep template background colours/gradients in the PDF. */
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     }
   </style>
 </head>
@@ -1052,8 +1060,8 @@
     </div>
 
     <div class="preview-actions" style="margin-top: 24px; display:flex; gap:12px; width:100%; max-width:620px;">
-      <button class="btn-import-trigger" id="btn-pdf-download" onclick="downloadPDFDirect()" style="flex: 1; background:linear-gradient(135deg, #10b981 0%, #059669 100%); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
-        <span>📥 Download PDF Document</span>
+      <button class="btn-import-trigger" id="btn-pdf-download" onclick="downloadPDFDirect()" title="Opens your browser's print dialog — choose &quot;Save as PDF&quot; as the destination" style="flex: 1; background:linear-gradient(135deg, #10b981 0%, #059669 100%); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
+        <span>🖨️ Download PDF (Save as PDF)</span>
       </button>
       <button class="btn-import-trigger" onclick="sendToWhatsApp()" style="background:#25D366; box-shadow: 0 4px 15px rgba(37, 211, 102, 0.3);">
         <span>💬 Send to Printosky</span>
@@ -1577,71 +1585,36 @@
       return;
     }
 
+    // Use the browser's native print → "Save as PDF" instead of html2canvas.
+    // html2canvas rasterised the resume into a single JPEG: text was NOT
+    // selectable (bad for ATS), and off-screen capture drifted/clipped content.
+    // Native print gives crisp, selectable, ATS-parseable text, correct fonts,
+    // and proper A4 pagination via the @media print stylesheet — with no CDN
+    // dependency (works even on networks that block cdnjs).
     const name = document.getElementById('cv-name').value.trim() || 'Resume';
-    const btn = document.getElementById('btn-pdf-download');
-    const originalContent = btn.innerHTML;
-    btn.innerHTML = '<span>⏳ Generating PDF...</span>';
-    btn.disabled = true;
 
-    // Render a clone at a FIXED A4 width off-screen instead of capturing the
-    // live preview. The on-screen preview is capped at 620px and is hidden on
-    // tablet/mobile — capturing it produced narrow, misaligned, or blank PDFs.
-    // A dedicated 794px (A4 @96dpi) canvas makes the output deterministic on
-    // every device and screen size.
-    const A4_WIDTH_PX = 794;
-    const holder = document.createElement('div');
-    holder.style.cssText =
-      `position:fixed; left:-10000px; top:0; width:${A4_WIDTH_PX}px; background:#ffffff; z-index:-1;`;
-    // Preserve the chosen theme colour (set as a CSS var on the live container).
-    const theme = document.getElementById('cvDocContainer').style.getPropertyValue('--theme-color') || '#1e3a8a';
-    holder.style.setProperty('--theme-color', theme);
+    // Make sure the preview reflects the latest edits before printing.
+    updatePreview();
 
-    const clone = source.cloneNode(true);
-    clone.style.width = A4_WIDTH_PX + 'px';
-    clone.style.maxWidth = 'none';
-    clone.style.margin = '0';
-    clone.style.boxShadow = 'none';
-    holder.appendChild(clone);
-    document.body.appendChild(holder);
-
-    try {
-      // Wait for web fonts and any embedded photo so the capture isn't taken
-      // against fallback fonts or a half-loaded image.
-      if (document.fonts && document.fonts.ready) {
-        try { await document.fonts.ready; } catch (_) {}
-      }
-      await Promise.all(Array.from(clone.querySelectorAll('img')).map(img =>
-        (img.complete && img.naturalWidth) ? Promise.resolve()
-          : new Promise(res => { img.onload = img.onerror = res; })
-      ));
-
-      const opt = {
-        margin: 0, // templates carry their own internal padding; keeps full-bleed sidebars to the edge
-        filename: `resume_${name.replace(/\s+/g, '_')}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: '#ffffff',
-          windowWidth: A4_WIDTH_PX,
-          scrollX: 0,
-          scrollY: 0
-        },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        // Honour CSS page-break rules and never split an entry card across pages.
-        pagebreak: { mode: ['css', 'legacy'], avoid: '.c-entry' }
-      };
-
-      await html2pdf().set(opt).from(clone).save();
-    } catch (err) {
-      console.error('PDF generation failed:', err);
-      alert("PDF download failed: " + (err && err.message ? err.message : err) +
-            "\n\nTip: you can also use your browser's Print → Save as PDF.");
-    } finally {
-      holder.remove();
-      btn.innerHTML = originalContent;
-      btn.disabled = false;
+    // Wait for web fonts + the profile photo so print isn't taken against
+    // fallback fonts or a half-loaded image.
+    if (document.fonts && document.fonts.ready) {
+      try { await document.fonts.ready; } catch (_) {}
     }
+    await Promise.all(Array.from(document.querySelectorAll('#cvDocContainer img')).map(img =>
+      (img.complete && img.naturalWidth) ? Promise.resolve()
+        : new Promise(res => { img.onload = img.onerror = res; })
+    ));
+
+    // Browsers use document.title as the default "Save as PDF" filename.
+    const originalTitle = document.title;
+    document.title = `resume_${name.replace(/\s+/g, '_')}`;
+    const restore = () => { document.title = originalTitle; window.removeEventListener('afterprint', restore); };
+    window.addEventListener('afterprint', restore);
+    // Fallback restore in case afterprint doesn't fire (older Safari).
+    setTimeout(restore, 60000);
+
+    window.print();
   }
 
   // Backup Data Utilities
