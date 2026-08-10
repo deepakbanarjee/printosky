@@ -703,10 +703,98 @@
     .tmpl-academic .c-entry-sub { display: flex; justify-content: space-between; font-style: italic; font-size: 12px; color: #555; margin-bottom: 4px; gap: 12px; }
     .tmpl-academic .c-desc { font-family: 'Outfit', sans-serif; font-size: 12px; color: #333; line-height: 1.6; }
 
+    /* Template: Banner Two-Column (full-width colored header + narrow aside + main) */
+    .tmpl-banner { font-family: 'Outfit', sans-serif; color: #1e293b; background: #fff; }
+    .tmpl-banner .c-banner { background: var(--theme-color, #1e3a8a); color: #fff; padding: 30px 40px; display: flex; align-items: center; gap: 22px; }
+    .tmpl-banner .c-photo { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; border: 3px solid rgba(255,255,255,0.55); flex-shrink: 0; }
+    .tmpl-banner .c-name { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.1; }
+    .tmpl-banner .c-role { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; opacity: 0.85; margin-top: 5px; }
+    .tmpl-banner .c-contact { font-size: 11px; opacity: 0.92; display: flex; flex-wrap: wrap; gap: 5px 16px; margin-top: 10px; }
+    .tmpl-banner .c-columns { display: grid; grid-template-columns: 33% 1fr; align-items: stretch; }
+    .tmpl-banner .c-aside { background: #f8fafc; border-right: 1px solid #e8edf3; padding: 26px 22px; }
+    .tmpl-banner .c-main { padding: 26px 28px; }
+    .tmpl-banner .c-sec-head { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: var(--theme-color, #1e3a8a); margin: 20px 0 10px; padding-bottom: 4px; border-bottom: 2px solid rgba(30,58,138,0.15); }
+    .tmpl-banner .c-aside .c-sec-head:first-child, .tmpl-banner .c-main .c-sec-head:first-child { margin-top: 0; }
+    .tmpl-banner .c-entry { margin-bottom: 13px; }
+    .tmpl-banner .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 12.5px; color: #0f172a; gap: 10px; }
+    .tmpl-banner .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px; gap: 10px; }
+    .tmpl-banner .c-desc { font-size: 11px; color: #334155; line-height: 1.5; }
+    .tmpl-banner .c-item { font-size: 11px; color: #334155; margin-bottom: 6px; line-height: 1.4; word-break: break-word; }
+    .tmpl-banner .c-chip { display: inline-block; font-size: 10.5px; background: #eef2f7; color: #334155; padding: 3px 9px; border-radius: 20px; margin: 0 5px 5px 0; }
+
+    /* Template: Timeline (modern vertical timeline with connected dots) */
+    .tmpl-timeline { font-family: 'Outfit', sans-serif; padding: 40px 44px; color: #1e293b; background: #fff; }
+    .tmpl-timeline .c-header { margin-bottom: 22px; display: flex; align-items: center; gap: 18px; }
+    .tmpl-timeline .c-photo { width: 76px; height: 76px; border-radius: 50%; object-fit: cover; border: 3px solid var(--theme-color, #0ea5e9); flex-shrink: 0; }
+    .tmpl-timeline .c-name { font-size: 27px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; }
+    .tmpl-timeline .c-role { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; color: var(--theme-color, #0ea5e9); margin-top: 3px; }
+    .tmpl-timeline .c-contact { font-size: 11px; color: #64748b; display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 8px; }
+    .tmpl-timeline .c-sec-head { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: #0f172a; margin: 22px 0 14px; padding-bottom: 5px; border-bottom: 2px solid #eef2f7; }
+    .tmpl-timeline .c-track { position: relative; padding-left: 22px; }
+    .tmpl-timeline .c-track::before { content: ''; position: absolute; left: 4px; top: 5px; bottom: 5px; width: 2px; background: #e2e8f0; }
+    .tmpl-timeline .c-entry { position: relative; margin-bottom: 14px; }
+    .tmpl-timeline .c-entry::before { content: ''; position: absolute; left: -22px; top: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--theme-color, #0ea5e9); border: 2px solid #fff; }
+    .tmpl-timeline .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 12.5px; color: #0f172a; gap: 10px; }
+    .tmpl-timeline .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px; gap: 10px; }
+    .tmpl-timeline .c-desc { font-size: 11px; color: #334155; line-height: 1.5; }
+    .tmpl-timeline .c-chip { display: inline-block; font-size: 10.5px; background: #f1f5f9; color: #334155; padding: 3px 9px; border-radius: 4px; margin: 0 5px 5px 0; }
+
+    /* Template: Infographic (colored sidebar with skill bars + language dots) */
+    .tmpl-infographic { font-family: 'Outfit', sans-serif; display: grid; grid-template-columns: 220px 1fr; align-items: stretch; color: #1e293b; background: #fff; min-height: 900px; }
+    .tmpl-infographic .c-aside { background: var(--theme-color, #0f766e); color: #fff; padding: 32px 20px; }
+    .tmpl-infographic .c-photo { width: 108px; height: 108px; border-radius: 50%; object-fit: cover; border: 3px solid rgba(255,255,255,0.5); display: block; margin: 0 auto 16px; }
+    .tmpl-infographic .c-aside .c-name { font-size: 20px; font-weight: 800; text-align: center; line-height: 1.2; }
+    .tmpl-infographic .c-aside .c-role { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; text-align: center; opacity: 0.85; margin-top: 5px; }
+    .tmpl-infographic .c-aside .c-sec-head { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; margin: 22px 0 10px; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.25); }
+    .tmpl-infographic .c-contact-item { font-size: 11px; margin-bottom: 7px; opacity: 0.95; word-break: break-word; }
+    .tmpl-infographic .c-skill { margin-bottom: 9px; }
+    .tmpl-infographic .c-skill-name { font-size: 11px; margin-bottom: 4px; }
+    .tmpl-infographic .c-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.25); overflow: hidden; }
+    .tmpl-infographic .c-bar > span { display: block; height: 100%; border-radius: 3px; background: #fff; }
+    .tmpl-infographic .c-lang { display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 7px; }
+    .tmpl-infographic .c-dots { display: flex; gap: 4px; }
+    .tmpl-infographic .c-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.3); }
+    .tmpl-infographic .c-dot.on { background: #fff; }
+    .tmpl-infographic .c-main { padding: 34px 30px; }
+    .tmpl-infographic .c-main .c-sec-head { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: var(--theme-color, #0f766e); margin: 22px 0 12px; padding-bottom: 5px; border-bottom: 2px solid rgba(15,118,110,0.15); }
+    .tmpl-infographic .c-main .c-sec-head:first-child { margin-top: 0; }
+    .tmpl-infographic .c-entry { margin-bottom: 13px; }
+    .tmpl-infographic .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 12.5px; color: #0f172a; gap: 10px; }
+    .tmpl-infographic .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px; gap: 10px; }
+    .tmpl-infographic .c-desc { font-size: 11px; color: #334155; line-height: 1.5; }
+
+    /* Template: Ivy League (traditional single-column serif, ATS-friendly) */
+    .tmpl-ivy { font-family: 'Georgia', serif; padding: 46px 52px; color: #1a1a1a; background: #fff; line-height: 1.5; }
+    .tmpl-ivy .c-header { text-align: center; margin-bottom: 18px; }
+    .tmpl-ivy .c-name { font-size: 26px; font-weight: 700; letter-spacing: 0.5px; color: #111; }
+    .tmpl-ivy .c-role { font-size: 12.5px; color: #444; margin-top: 3px; }
+    .tmpl-ivy .c-contact { font-size: 11px; color: #333; margin-top: 8px; }
+    .tmpl-ivy .c-sec-head { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #111; border-bottom: 1px solid #111; padding-bottom: 3px; margin: 20px 0 10px; }
+    .tmpl-ivy .c-entry { margin-bottom: 12px; }
+    .tmpl-ivy .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 12.5px; color: #111; gap: 12px; }
+    .tmpl-ivy .c-entry-sub { display: flex; justify-content: space-between; font-style: italic; font-size: 11.5px; color: #444; margin-bottom: 3px; gap: 12px; }
+    .tmpl-ivy .c-desc { font-size: 11.5px; color: #222; line-height: 1.5; }
+
+    /* Template: Editorial (left-label margin layout, serif headings) */
+    .tmpl-editorial { font-family: 'Outfit', sans-serif; padding: 42px 46px; color: #1e293b; background: #fff; }
+    .tmpl-editorial .c-header { margin-bottom: 4px; }
+    .tmpl-editorial .c-name { font-family: 'Playfair Display', serif; font-size: 30px; font-weight: 700; color: #0f172a; }
+    .tmpl-editorial .c-role { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; color: var(--theme-color, #b91c1c); margin-top: 4px; }
+    .tmpl-editorial .c-contact { font-size: 11px; color: #64748b; display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 8px; padding-bottom: 14px; border-bottom: 2px solid #0f172a; }
+    .tmpl-editorial .c-block { display: grid; grid-template-columns: 130px 1fr; gap: 16px; padding: 14px 0; border-bottom: 1px solid #eef2f7; }
+    .tmpl-editorial .c-block:last-child { border-bottom: none; }
+    .tmpl-editorial .c-sec-head { font-family: 'Playfair Display', serif; font-size: 14px; font-weight: 700; color: var(--theme-color, #b91c1c); line-height: 1.25; }
+    .tmpl-editorial .c-entry { margin-bottom: 11px; }
+    .tmpl-editorial .c-entry:last-child { margin-bottom: 0; }
+    .tmpl-editorial .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 12.5px; color: #0f172a; gap: 10px; }
+    .tmpl-editorial .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px; gap: 10px; }
+    .tmpl-editorial .c-desc { font-size: 11px; color: #334155; line-height: 1.55; }
+
     /* PDF Alignment fixes */
     .c-entry { page-break-inside: avoid; }
     .tmpl-classic, .tmpl-modern, .tmpl-minimal, .tmpl-creative, .tmpl-executive, .tmpl-tech, .tmpl-visual,
-    .tmpl-corporate, .tmpl-serif, .tmpl-compact, .tmpl-academic { box-sizing: border-box; }
+    .tmpl-corporate, .tmpl-serif, .tmpl-compact, .tmpl-academic,
+    .tmpl-banner, .tmpl-timeline, .tmpl-infographic, .tmpl-ivy, .tmpl-editorial { box-sizing: border-box; }
 
     /* ── RESPONSIVE DESIGN (DESKTOP / MOBILE SPLIT) ── */
     @media (max-width: 1024px) {
@@ -933,6 +1021,11 @@
           <option value="serif">🕊️ Elegant Serif (Centered)</option>
           <option value="compact">🗜️ Compact One-Page (Dense Two-Column)</option>
           <option value="academic">🎓 Academic CV (Long-form)</option>
+          <option value="banner">🎫 Banner Two-Column (Colored Header)</option>
+          <option value="timeline">🕒 Timeline (Connected Milestones)</option>
+          <option value="infographic">📊 Infographic (Skill Bars & Ratings)</option>
+          <option value="ivy">🏛️ Ivy League (Traditional / ATS)</option>
+          <option value="editorial">📰 Editorial (Left-Label Layout)</option>
         </select>
       </div>
 
@@ -1730,6 +1823,16 @@
         innerHTML = buildCompact(d);
       } else if (d.template === 'academic') {
         innerHTML = buildAcademic(d);
+      } else if (d.template === 'banner') {
+        innerHTML = buildBanner(d);
+      } else if (d.template === 'timeline') {
+        innerHTML = buildTimeline(d);
+      } else if (d.template === 'infographic') {
+        innerHTML = buildInfographic(d);
+      } else if (d.template === 'ivy') {
+        innerHTML = buildIvy(d);
+      } else if (d.template === 'editorial') {
+        innerHTML = buildEditorial(d);
       } else {
         innerHTML = buildVisual(d);
       }
@@ -2331,6 +2434,278 @@
         <p class="c-desc" style="font-weight:500;">${skills.join('  ·  ')}</p></div>` : ''}
 
       ${d.languages ? `<div ${spacingStyle}><div class="c-sec-head">Languages</div><p class="c-desc">${d.languages}</p></div>` : ''}
+    </div>`;
+  }
+
+  function buildBanner(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const languages = d.languages.split(',').map(s => s.trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+
+    return `<div class="tmpl-banner" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-banner">
+        ${photoHtml}
+        <div>
+          <div class="c-name">${d.name || 'Your Full Name'}</div>
+          ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+          <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).map(c => `<span>${c}</span>`).join('')}</div>
+        </div>
+      </div>
+      <div class="c-columns">
+        <div class="c-aside">
+          ${skills.length ? `<div class="c-sec-head">Skills</div>
+            <div>${skills.map(s => `<span class="c-chip">${s}</span>`).join('')}</div>` : ''}
+
+          ${d.education.length ? `<div class="c-sec-head">Education</div>
+            ${d.education.map(e => `
+              <div class="c-entry">
+                <div class="c-entry-header"><span>${e.degree}</span></div>
+                <div class="c-entry-sub"><span>${e.institution}</span></div>
+                <div class="c-desc">${[e.year, e.grade].filter(Boolean).join(' · ')}</div>
+              </div>`).join('')}` : ''}
+
+          ${languages.length ? `<div class="c-sec-head">Languages</div>
+            ${languages.map(l => `<div class="c-item">${l}</div>`).join('')}` : ''}
+
+          ${achievements.length ? `<div class="c-sec-head">Achievements</div>
+            ${achievements.map(a => `<div class="c-item">• ${a}</div>`).join('')}` : ''}
+        </div>
+        <div class="c-main" style="padding: ${d.sizing.margins}px;">
+          ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Profile</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+          ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Experience</div>
+            ${d.experience.map(e => `
+              <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+                <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+                <div class="c-entry-sub"><span>${e.company}</span></div>
+                ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+              </div>`).join('')}</div>` : ''}
+
+          ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+            ${d.projects.map(p => `
+              <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+                <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+                <p class="c-desc">${p.desc}</p>
+              </div>`).join('')}</div>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function buildTimeline(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+
+    return `<div class="tmpl-timeline" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight}; padding: ${d.sizing.margins}px;">
+      <div class="c-header">
+        ${photoHtml}
+        <div>
+          <div class="c-name">${d.name || 'Your Full Name'}</div>
+          ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+          <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).map(c => `<span>${c}</span>`).join('')}</div>
+        </div>
+      </div>
+
+      ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Profile</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+      ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Experience</div>
+        <div class="c-track">
+          ${d.experience.map(e => `
+            <div class="c-entry">
+              <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+              <div class="c-entry-sub"><span>${e.company}</span></div>
+              ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+            </div>`).join('')}
+        </div></div>` : ''}
+
+      ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+        <div class="c-track">
+          ${d.education.map(e => `
+            <div class="c-entry">
+              <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+              <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+            </div>`).join('')}
+        </div></div>` : ''}
+
+      ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+        <div class="c-track">
+          ${d.projects.map(p => `
+            <div class="c-entry">
+              <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+              <p class="c-desc">${p.desc}</p>
+            </div>`).join('')}
+        </div></div>` : ''}
+
+      ${skills.length ? `<div ${spacingStyle}><div class="c-sec-head">Skills</div>
+        <div>${skills.map(s => `<span class="c-chip">${s}</span>`).join('')}</div></div>` : ''}
+
+      ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Achievements</div>
+        <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+
+      ${d.languages ? `<div ${spacingStyle}><div class="c-sec-head">Languages</div><p class="c-desc">${d.languages}</p></div>` : ''}
+    </div>`;
+  }
+
+  function buildInfographic(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const languages = d.languages.split(',').map(s => s.trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+    // Decorative proficiency indicators — cycle a fixed set so bars/dots look
+    // designed rather than implying a precise self-assessed level.
+    const barLevels = [92, 85, 88, 80, 90, 83, 95, 78];
+    const dotLevels = [5, 4, 4, 3];
+
+    return `<div class="tmpl-infographic" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-aside">
+        ${photoHtml}
+        <div class="c-name">${d.name || 'Your Name'}</div>
+        ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+
+        <div class="c-sec-head">Contact</div>
+        ${d.phone ? `<div class="c-contact-item">📞 ${d.phone}</div>` : ''}
+        ${d.email ? `<div class="c-contact-item">✉ ${d.email}</div>` : ''}
+        ${d.location ? `<div class="c-contact-item">📍 ${d.location}</div>` : ''}
+        ${d.linkedin ? `<div class="c-contact-item">🔗 ${d.linkedin.replace(/^https?:\/\/(www\.)?/, '')}</div>` : ''}
+
+        ${skills.length ? `<div class="c-sec-head">Skills</div>
+          ${skills.map((s, i) => `
+            <div class="c-skill">
+              <div class="c-skill-name">${s}</div>
+              <div class="c-bar"><span style="width:${barLevels[i % barLevels.length]}%;"></span></div>
+            </div>`).join('')}` : ''}
+
+        ${languages.length ? `<div class="c-sec-head">Languages</div>
+          ${languages.map((l, i) => {
+            const on = dotLevels[i % dotLevels.length];
+            const dots = [1,2,3,4,5].map(n => `<span class="c-dot${n <= on ? ' on' : ''}"></span>`).join('');
+            return `<div class="c-lang"><span>${l}</span><span class="c-dots">${dots}</span></div>`;
+          }).join('')}` : ''}
+      </div>
+      <div class="c-main" style="padding: ${d.sizing.margins}px;">
+        ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Profile</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+        ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Experience</div>
+          ${d.experience.map(e => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+              <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+              <div class="c-entry-sub"><span>${e.company}</span></div>
+              ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+            </div>`).join('')}</div>` : ''}
+
+        ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+          ${d.education.map(e => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/2}px;">
+              <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+              <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+            </div>`).join('')}</div>` : ''}
+
+        ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+          ${d.projects.map(p => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+              <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+              <p class="c-desc">${p.desc}</p>
+            </div>`).join('')}</div>` : ''}
+
+        ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Achievements & Certifications</div>
+          <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function buildIvy(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+
+    return `<div class="tmpl-ivy" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight}; padding: ${d.sizing.margins}px;">
+      <div class="c-header">
+        <div class="c-name">${d.name || 'Your Full Name'}</div>
+        ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+        <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).join('  |  ')}</div>
+      </div>
+
+      ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Summary</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+      ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+        ${d.education.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${e.institution}</span><span>${e.year}</span></div>
+            <div class="c-entry-sub"><span>${e.degree}</span><span>${e.grade || ''}</span></div>
+          </div>`).join('')}</div>` : ''}
+
+      ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Experience</div>
+        ${d.experience.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${e.company}</span><span>${e.duration}</span></div>
+            <div class="c-entry-sub"><span>${e.role}</span></div>
+            ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+          </div>`).join('')}</div>` : ''}
+
+      ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+        ${d.projects.map(p => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+            <p class="c-desc">${p.desc}</p>
+          </div>`).join('')}</div>` : ''}
+
+      ${skills.length ? `<div ${spacingStyle}><div class="c-sec-head">Skills</div>
+        <p class="c-desc">${skills.join(', ')}</p></div>` : ''}
+
+      ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Awards & Certifications</div>
+        <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+
+      ${d.languages ? `<div ${spacingStyle}><div class="c-sec-head">Languages</div><p class="c-desc">${d.languages}</p></div>` : ''}
+    </div>`;
+  }
+
+  function buildEditorial(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+
+    const block = (title, inner) => inner ? `<div class="c-block"><div class="c-sec-head">${title}</div><div>${inner}</div></div>` : '';
+
+    const expInner = d.experience.length ? d.experience.map(e => `
+      <div class="c-entry">
+        <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+        <div class="c-entry-sub"><span>${e.company}</span></div>
+        ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+      </div>`).join('') : '';
+
+    const eduInner = d.education.length ? d.education.map(e => `
+      <div class="c-entry">
+        <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+        <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+      </div>`).join('') : '';
+
+    const projInner = d.projects.length ? d.projects.map(p => `
+      <div class="c-entry">
+        <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+        <p class="c-desc">${p.desc}</p>
+      </div>`).join('') : '';
+
+    const skillsInner = skills.length ? `<p class="c-desc" style="font-weight:500;">${skills.join('  ·  ')}</p>` : '';
+    const achInner = achievements.length ? `<p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p>` : '';
+    const langInner = d.languages ? `<p class="c-desc">${d.languages}</p>` : '';
+
+    return `<div class="tmpl-editorial" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight}; padding: ${d.sizing.margins}px;">
+      <div class="c-header">
+        <div class="c-name">${d.name || 'Your Full Name'}</div>
+        ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+        <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).map(c => `<span>${c}</span>`).join('')}</div>
+      </div>
+      ${block('Profile', d.summary ? `<p class="c-desc">${d.summary}</p>` : '')}
+      ${block('Experience', expInner)}
+      ${block('Education', eduInner)}
+      ${block('Projects', projInner)}
+      ${block('Skills', skillsInner)}
+      ${block('Awards', achInner)}
+      ${block('Languages', langInner)}
     </div>`;
   }
 
