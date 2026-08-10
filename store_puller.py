@@ -193,10 +193,14 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
                 "sides": "simplex"
             }
 
-        # Mixed-colour jobs are split into ordered B&W/colour sub-jobs; they MUST
-        # all print on ONE device (the Epson, which does both) or the sections
-        # land in two trays and lose their order. Non-mixed jobs route normally.
-        is_mixed = str(print_spec.get("colour_mode", "")).strip().lower() == "mixed"
+        # Mixed-colour jobs are split into ordered B&W/colour sub-jobs. Each
+        # sub-job routes to its NATURAL device — B&W -> Konica, colour -> Epson —
+        # so B&W stays on the cheaper Konica (a no-Konica store redirects
+        # konica->epson, so this is safe there too). print_planner keeps each
+        # printer's sections in document order; the operator interleaves the two
+        # trays, and the Konica's offset setting separates the B&W batches.
+        # (Previously mixed was forced entirely to the Epson to keep everything in
+        # one tray/order; Oxygen prefers the split.)
 
         dest_dir = os.path.dirname(os.path.abspath(dest_path))
         actions, temp_dir = print_planner.plan_print_job(job_id, dest_path, print_spec, dest_dir)
@@ -214,7 +218,7 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
             sub_orient = action["orientation"]
 
             send_colour = "colour" if sub_colour == "colour" else ("bw" if sub_colour == "bw" else colour_mode_for(colour))
-            printer_key = "epson" if is_mixed else printer_key_for(sub_colour)
+            printer_key = printer_key_for(sub_colour)
 
             # Mark the job "Printed" only on the FINAL sub-job. The loop breaks on
             # any failure, so this last (status-updating) call is reached only when
