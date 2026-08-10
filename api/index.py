@@ -1818,8 +1818,8 @@ def _handle_staff_set_pin(h, body: bytes) -> None:
     if not staff_id or not current or not new_pin:
         _json_response(h, 400, {"error": "staff_id, current_pin, new_pin required"})
         return
-    if not new_pin.isdigit() or len(new_pin) != 4:
-        _json_response(h, 400, {"error": "new_pin must be 4 digits"})
+    if not new_pin.isdigit() or len(new_pin) != 6:
+        _json_response(h, 400, {"error": "new_pin must be 6 digits"})
         return
 
     from db_cloud import _client

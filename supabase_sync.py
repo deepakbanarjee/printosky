@@ -268,6 +268,33 @@ def collect_staff_sessions(db_path):
         return []
 
 
+def collect_staff(db_path):
+    """Pull staff credentials from local SQLite (the source of truth, written by
+    staff_setup.py) so Supabase stays in sync.
+
+    Why this exists: staff log in against the store PC's local `staff` table
+    (print_server.py /staff-login), but the Vercel API authenticates the same PIN
+    against the Supabase `staff` table (_acad_auth_staff). Without this collector
+    the two tables drift — a locally-reset PIN logs in fine yet fails every cloud
+    call (mark-paid, etc.) with a 403. Pushing local→cloud each cycle keeps them
+    aligned while login stays offline-capable.
+
+    The cloud `staff` table has no store_id column (staff ids are global), so we
+    push only id/name/pin_hash/pin_salt/active and upsert on id.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT id, name, pin_hash, pin_salt, active FROM staff")
+        rows = [dict(row) for row in c.fetchall()]
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.warning(f"collect_staff: {e}")
+        return []
+
+
 def collect_daily_summary(db_path):
     """Push today's summary stats."""
     try:
@@ -354,6 +381,7 @@ def sync_once(db_path):
     konica_jobs   = collect_konica_jobs(db_path)
     epson_jobs    = collect_epson_jobs(db_path)
     staff_sess    = collect_staff_sessions(db_path)
+    staff         = collect_staff(db_path)
 
     ok_jobs       = upsert("jobs",             jobs,        on_conflict="job_id")                       if jobs        else True
     ok_printers   = upsert("printer_counters", printers,    on_conflict="store_id,printer,polled_at")   if printers    else True
@@ -363,13 +391,15 @@ def sync_once(db_path):
     ok_konica     = upsert("konica_jobs",      konica_jobs, on_conflict="store_id,job_number")          if konica_jobs else True
     ok_epson      = upsert("epson_jobs",       epson_jobs,  on_conflict="store_id,job_number")          if epson_jobs  else True
     ok_sessions   = upsert("staff_sessions",   staff_sess,  on_conflict="id")                           if staff_sess  else True
+    ok_staff      = upsert("staff",            staff,       on_conflict="id")                           if staff       else True
 
-    if ok_jobs and ok_printers and ok_summary and ok_supplies and ok_changes and ok_konica and ok_epson and ok_sessions:
+    if (ok_jobs and ok_printers and ok_summary and ok_supplies and ok_changes
+            and ok_konica and ok_epson and ok_sessions and ok_staff):
         _record_sync_success()
         logger.info(f"Supabase sync OK — {len(jobs)} jobs, {len(printers)} printers, "
                     f"{len(supplies)} supplies, {len(sup_changes)} supply_changes, "
                     f"{len(konica_jobs)} konica_jobs, {len(epson_jobs)} epson_jobs, "
-                    f"{len(staff_sess)} staff_sessions")
+                    f"{len(staff_sess)} staff_sessions, {len(staff)} staff")
     else:
         _record_sync_failure("one or more table upserts failed")
         logger.error("Supabase sync had errors — admin data is now STALE until the "
