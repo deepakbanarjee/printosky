@@ -1,16 +1,38 @@
 """Resume-builder AI coach and parser HTTP handlers.
 
 Backs the /resume/coach and /resume/parse endpoints.
+
+Security notes:
+  * These endpoints are public (CORS *) and unauthenticated, calling Claude on
+    the shop's ANTHROPIC_API_KEY. To keep them from being drained as a free
+    general-purpose LLM proxy, every request body and every user-supplied field
+    is length-capped BEFORE it reaches the prompt (see _CAPS / _clip), and the
+    whole body is size-checked first. Prompts are fixed-purpose (resume help
+    only); we never forward a raw client-supplied prompt.
+  * On failure we log the real exception but return a generic message — raw
+    exception strings must not leak to the browser.
 """
 import json
 import logging
 import os
 import base64
-import io
 
 logger = logging.getLogger("api.webhook")
 
-import docx_engine
+# Max raw request body sizes (bytes). /coach carries only text fields; /parse
+# carries a base64-encoded document, so it needs a much larger envelope.
+_MAX_COACH_BODY = 120_000
+_MAX_PARSE_BODY = 10_000_000  # ~7.5 MB decoded file
+
+# Per-field character caps. Short = single-line identity fields; the rest bound
+# the free-text that actually drives token spend.
+_CAPS = {
+    "short": 200,      # name, role, company, location
+    "summary": 4_000,  # current_summary, a single experience desc
+    "jd": 8_000,       # job description
+    "resume": 20_000,  # flattened resume text / serialized resume_data
+}
+
 
 def _get_claude_client():
     key = os.environ.get("ANTHROPIC_API_KEY")
@@ -24,14 +46,48 @@ def _get_claude_client():
         logger.error("handlers_resume: anthropic init failed: %s", exc)
         return None
 
+
+def _clip(value, kind="short") -> str:
+    """Coerce to a stripped string capped to the limit for `kind`."""
+    return str(value or "").strip()[: _CAPS.get(kind, _CAPS["short"])]
+
+
+def _extract_text(response) -> str:
+    """Concatenate the text blocks of a Claude message, robustly.
+
+    Real SDK text blocks carry type == "text"; tool_use / other blocks are
+    skipped. Blocks with no `type` (e.g. test doubles) are treated as text so
+    the endpoint degrades gracefully rather than IndexError-ing on content[0].
+    """
+    parts = []
+    for block in getattr(response, "content", None) or []:
+        if getattr(block, "type", "text") == "text" and hasattr(block, "text"):
+            parts.append(block.text)
+    return "".join(parts).strip()
+
+
+def _strip_json_fence(text: str) -> str:
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
+
+
 def _handle_resume_coach(h, body: bytes) -> None:
     """POST /resume/coach — AI-assisted resume builder assistant."""
     from api.index import _json_response
     try:
+        if body and len(body) > _MAX_COACH_BODY:
+            _json_response(h, 413, {"error": "Request too large"})
+            return
+
         data = json.loads(body)
         action = data.get("action", "")
-        payload = data.get("data", {})
-        
+        payload = data.get("data", {}) or {}
+
         client = _get_claude_client()
         if not client:
             _json_response(h, 503, {"error": "AI service is currently unavailable. Please verify API key setup."})
@@ -41,12 +97,12 @@ def _handle_resume_coach(h, body: bytes) -> None:
         prompt = ""
 
         if action == "improve_summary":
-            name = payload.get("name", "")
-            role = payload.get("role", "")
-            location = payload.get("location", "")
-            current = payload.get("current_summary", "")
-            jd = payload.get("job_description", "")
-            
+            name = _clip(payload.get("name"))
+            role = _clip(payload.get("role"))
+            location = _clip(payload.get("location"))
+            current = _clip(payload.get("current_summary"), "summary")
+            jd = _clip(payload.get("job_description"), "jd")
+
             prompt = f"Write a professional CV summary for a candidate named '{name}' with the role/title '{role}'"
             if location:
                 prompt += f" based in '{location}'"
@@ -57,11 +113,11 @@ def _handle_resume_coach(h, body: bytes) -> None:
             prompt += "\nFormat guidelines: Keep it highly professional, outcome-focused, 3-4 lines maximum. Return ONLY the plain text summary, no quotes, no markdown, no conversational preface/epilogue."
 
         elif action == "improve_experience":
-            role = payload.get("role", "")
-            company = payload.get("company", "")
-            current = payload.get("desc", "")
-            jd = payload.get("job_description", "")
-            
+            role = _clip(payload.get("role"))
+            company = _clip(payload.get("company"))
+            current = _clip(payload.get("desc"), "summary")
+            jd = _clip(payload.get("job_description"), "jd")
+
             prompt = f"Improve the work experience description for the role '{role}' at company '{company}'"
             if current:
                 prompt += f". Current description/bullets: '{current}'"
@@ -70,18 +126,18 @@ def _handle_resume_coach(h, body: bytes) -> None:
             prompt += "\nFormat guidelines: Rewrite as 2-3 high-impact, professional bullet points using the STAR method (quantifiable metrics, strong action verbs, e.g., 'Led...', 'Optimized...'). Use a plain list starting with '- ' for each line. No markdown formatting like bolding, no preface/epilogue."
 
         elif action == "suggest_skills":
-            role = payload.get("role", "")
-            jd = payload.get("job_description", "")
-            
+            role = _clip(payload.get("role"))
+            jd = _clip(payload.get("job_description"), "jd")
+
             prompt = f"Suggest 12-15 relevant professional skills for a candidate with the role/background: '{role}'"
             if jd:
                 prompt += f" tailored to this job description:\n{jd}\n"
             prompt += "\nFormat guidelines: Return ONLY a comma-separated list of skills (e.g. 'Project Management, SQL, Excel, Team Leadership'). No explanations, no introductory text, no markdown."
 
         elif action == "optimize_ats":
-            resume_text = payload.get("resume_text", "")
-            jd = payload.get("job_description", "")
-            
+            resume_text = _clip(payload.get("resume_text"), "resume")
+            jd = _clip(payload.get("job_description"), "jd")
+
             prompt = f"""You are an expert ATS (Applicant Tracking System) recruiter and resume scanner. Compare the following resume content with the target job description and provide a structured JSON response.
 
 JOB DESCRIPTION:
@@ -101,15 +157,17 @@ Format guidelines: Return ONLY a JSON object conforming strictly to the schema b
 
         elif action == "tailor_full_resume":
             resume_data = payload.get("resume_data", {})
-            jd = payload.get("job_description", "")
-            
+            # Serialize then cap: bounds token spend even if the client sends a huge object.
+            resume_data_json = json.dumps(resume_data, indent=2)[: _CAPS["resume"]]
+            jd = _clip(payload.get("job_description"), "jd")
+
             prompt = f"""You are an elite executive resume writer. Tailor the following candidate resume to align perfectly with the target job description while maintaining realistic and professional descriptions.
-            
+
 JOB DESCRIPTION:
 {jd}
 
 CANDIDATE RESUME DATA:
-{json.dumps(resume_data, indent=2)}
+{resume_data_json}
 
 Task:
 1. Revise the summary statement to align with the keywords and responsibilities in the job description.
@@ -136,32 +194,38 @@ Format guidelines: Return ONLY a JSON object conforming strictly to the schema b
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}]
         )
-        result_text = response.content[0].text.strip()
-        
+        result_text = _extract_text(response)
+
         # Clean up JSON if Claude wrapped it in backticks despite instructions
         if action in ("optimize_ats", "tailor_full_resume"):
-            if result_text.startswith("```json"):
-                result_text = result_text[7:]
-            if result_text.endswith("```"):
-                result_text = result_text[:-3]
-            result_text = result_text.strip()
+            result_text = _strip_json_fence(result_text)
             try:
                 result_json = json.loads(result_text)
                 _json_response(h, 200, result_json)
             except Exception as e:
                 logger.error("Failed to parse JSON response from Claude: %s", e)
-                _json_response(h, 500, {"error": "Failed to parse AI optimization recommendations."})
+                _json_response(h, 502, {"error": "Failed to parse AI optimization recommendations."})
         else:
             _json_response(h, 200, {"result": result_text})
 
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "Invalid JSON"})
     except Exception as exc:
         logger.error("resume coach error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
+        _json_response(h, 500, {"error": "Internal error"})
+
 
 def _handle_resume_parse(h, body: bytes) -> None:
     """POST /resume/parse — Parse CV PDF/DOCX or LinkedIn PDF export into structured schema."""
     from api.index import _json_response
+    # Lazy import (matches handlers_pb): keeps python-docx / pdfplumber / PyMuPDF
+    # out of the import graph of every unrelated endpoint's cold start.
+    import docx_engine
     try:
+        if body and len(body) > _MAX_PARSE_BODY:
+            _json_response(h, 413, {"error": "File too large. Please upload a resume under ~7 MB."})
+            return
+
         data = json.loads(body)
         content_b64 = data.get("content_b64", "")
         filename = data.get("filename", "resume.pdf")
@@ -170,7 +234,12 @@ def _handle_resume_parse(h, body: bytes) -> None:
             _json_response(h, 400, {"error": "No file content provided"})
             return
 
-        file_bytes = base64.b64decode(content_b64)
+        try:
+            file_bytes = base64.b64decode(content_b64)
+        except Exception:
+            _json_response(h, 400, {"error": "File content is not valid base64"})
+            return
+
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
         if ext == "pdf":
@@ -182,7 +251,7 @@ def _handle_resume_parse(h, body: bytes) -> None:
                 text = "\n\n".join(page.get_text() for page in doc)
             except Exception as e:
                 logger.warning("fitz extraction failed: %s", e)
-            
+
             # Pass 2: Fallback to pdfplumber if fitz returned nothing
             if not text.strip():
                 try:
@@ -207,6 +276,9 @@ def _handle_resume_parse(h, body: bytes) -> None:
             return
 
         model = os.environ.get("ANTHROPIC_MODEL_SONNET", "claude-sonnet-4-6")
+        # Cap extracted text before it hits the prompt — a huge PDF shouldn't
+        # translate into an unbounded token bill.
+        text = text[:20_000]
         prompt = f"""You are an expert Applicant Tracking System (ATS) parser. Analyze the extracted resume text below and structure it into a JSON object matching the schema.
 
 EXTRACTED TEXT:
@@ -249,21 +321,18 @@ SCHEMA:
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}]
         )
-        
-        result_text = response.content[0].text.strip()
-        if result_text.startswith("```json"):
-            result_text = result_text[7:]
-        if result_text.endswith("```"):
-            result_text = result_text[:-3]
-        result_text = result_text.strip()
+
+        result_text = _strip_json_fence(_extract_text(response))
 
         try:
             parsed_resume = json.loads(result_text)
             _json_response(h, 200, parsed_resume)
         except Exception as e:
             logger.error("Failed to parse Claude output as JSON: %s. Raw output: %s", e, result_text)
-            _json_response(h, 500, {"error": "Failed to parse document text into structured resume format."})
+            _json_response(h, 502, {"error": "Failed to parse document text into structured resume format."})
 
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "Invalid JSON"})
     except Exception as exc:
         logger.error("resume parse error: %s", exc)
-        _json_response(h, 500, {"error": str(exc)})
+        _json_response(h, 500, {"error": "Internal error"})

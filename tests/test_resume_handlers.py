@@ -95,14 +95,36 @@ def test_resume_coach_optimize_ats(monkeypatch):
     assert captured["data"]["score"] == 92
     assert "SQL" in captured["data"]["matching_keywords"]
 
-def test_resume_parse_pdf(monkeypatch):
+def test_resume_coach_rejects_oversized_body(monkeypatch):
+    """Oversized bodies are rejected before any (billable) Claude call."""
     import api.handlers_resume as hr
     import api.index
     captured = {}
     monkeypatch.setattr(api.index, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
-    
-    # Mock text extraction to return something
-    monkeypatch.setattr(hr.docx_engine, "extract_text_from_pdf", lambda b: "Sample Resume Text")
+
+    client_called = {"v": False}
+    def _boom():
+        client_called["v"] = True
+        return _fake_client("should not be reached")
+    monkeypatch.setattr(hr, "_get_claude_client", _boom)
+
+    huge = b'{"action":"improve_summary","data":{"current_summary":"' + b"x" * 200_000 + b'"}}'
+    hr._handle_resume_coach(_fake_h(), huge)
+
+    assert captured["status"] == 413
+    assert client_called["v"] is False  # never spent a token
+
+
+def test_resume_parse_pdf(monkeypatch):
+    import api.handlers_resume as hr
+    import api.index
+    import docx_engine
+    captured = {}
+    monkeypatch.setattr(api.index, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+
+    # Mock text extraction to return something. handlers_resume lazy-imports
+    # docx_engine inside the handler, so patch the canonical module here.
+    monkeypatch.setattr(docx_engine, "extract_text_from_pdf", lambda b: "Sample Resume Text")
     
     parsed_json = {
       "name": "Test Candidate",

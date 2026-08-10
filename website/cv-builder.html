@@ -1142,7 +1142,6 @@
 
   // ── CARD MANAGER (DYNAMIC LISTS) ──
   function addExperienceCard(data = {}) {
-    eduCount++; // Reuse increment logic or declare unique
     const index = ++expCount;
     const container = document.getElementById('exp-entries-container');
     const card = document.createElement('div');
@@ -1157,22 +1156,22 @@
       <div class="form-row-2">
         <div class="form-group">
           <label>Job Title / Role</label>
-          <input type="text" class="exp-role" value="${data.role || ''}" placeholder="e.g. Sales Executive" oninput="updatePreview()">
+          <input type="text" class="exp-role" value="${esc(data.role)}" placeholder="e.g. Sales Executive" oninput="updatePreview()">
         </div>
         <div class="form-group">
           <label>Company Name</label>
-          <input type="text" class="exp-company" value="${data.company || ''}" placeholder="e.g. Tech Solutions Inc." oninput="updatePreview()">
+          <input type="text" class="exp-company" value="${esc(data.company)}" placeholder="e.g. Tech Solutions Inc." oninput="updatePreview()">
         </div>
       </div>
       <div class="form-row-2">
         <div class="form-group">
           <label>Duration / Period</label>
-          <input type="text" class="exp-duration" value="${data.duration || ''}" placeholder="e.g. June 2022 - Present" oninput="updatePreview()">
+          <input type="text" class="exp-duration" value="${esc(data.duration)}" placeholder="e.g. June 2022 - Present" oninput="updatePreview()">
         </div>
       </div>
       <div class="form-group">
         <label>Key Responsibilities & Achievements <span class="opt">(use - bullets for newlines)</span></label>
-        <textarea class="exp-desc" rows="3" placeholder="- Led a team of 4 representatives...&#10;- Increased sales volume by 20% in Q3..." oninput="updatePreview()">${data.desc || ''}</textarea>
+        <textarea class="exp-desc" rows="3" placeholder="- Led a team of 4 representatives...&#10;- Increased sales volume by 20% in Q3..." oninput="updatePreview()">${esc(data.desc)}</textarea>
         <button class="ai-assist-btn" onclick="aiImproveExperience(${index})" id="btn-exp-${index}">
           <div class="ai-spinner"></div>
           <span>✨ AI: Improve bullet points</span>
@@ -1198,21 +1197,21 @@
       <div class="form-row-2">
         <div class="form-group">
           <label>Degree / Qualification</label>
-          <input type="text" class="edu-degree" value="${data.degree || ''}" placeholder="e.g. Bachelor of Commerce" oninput="updatePreview()">
+          <input type="text" class="edu-degree" value="${esc(data.degree)}" placeholder="e.g. Bachelor of Commerce" oninput="updatePreview()">
         </div>
         <div class="form-group">
           <label>Institution / Board</label>
-          <input type="text" class="edu-institution" value="${data.institution || ''}" placeholder="e.g. Calicut University" oninput="updatePreview()">
+          <input type="text" class="edu-institution" value="${esc(data.institution)}" placeholder="e.g. Calicut University" oninput="updatePreview()">
         </div>
       </div>
       <div class="form-row-2">
         <div class="form-group">
           <label>Graduation Year / Period</label>
-          <input type="text" class="edu-year" value="${data.year || ''}" placeholder="e.g. 2021 - 2024" oninput="updatePreview()">
+          <input type="text" class="edu-year" value="${esc(data.year)}" placeholder="e.g. 2021 - 2024" oninput="updatePreview()">
         </div>
         <div class="form-group">
           <label>Grade / Score <span class="opt">(optional)</span></label>
-          <input type="text" class="edu-grade" value="${data.grade || ''}" placeholder="e.g. 8.5 CGPA or 82%" oninput="updatePreview()">
+          <input type="text" class="edu-grade" value="${esc(data.grade)}" placeholder="e.g. 8.5 CGPA or 82%" oninput="updatePreview()">
         </div>
       </div>
     `;
@@ -1235,16 +1234,16 @@
       <div class="form-row-2">
         <div class="form-group">
           <label>Project Title</label>
-          <input type="text" class="proj-title" value="${data.title || ''}" placeholder="e.g. E-Commerce Web Application" oninput="updatePreview()">
+          <input type="text" class="proj-title" value="${esc(data.title)}" placeholder="e.g. E-Commerce Web Application" oninput="updatePreview()">
         </div>
         <div class="form-group">
           <label>Duration / Period</label>
-          <input type="text" class="proj-duration" value="${data.duration || ''}" placeholder="e.g. Winter 2024" oninput="updatePreview()">
+          <input type="text" class="proj-duration" value="${esc(data.duration)}" placeholder="e.g. Winter 2024" oninput="updatePreview()">
         </div>
       </div>
       <div class="form-group">
         <label>Description / Technical Stack</label>
-        <textarea class="proj-desc" rows="3" placeholder="Developed using Node.js, Express and SQLite. Configured automated SMS receipts..." oninput="updatePreview()">${data.desc || ''}</textarea>
+        <textarea class="proj-desc" rows="3" placeholder="Developed using Node.js, Express and SQLite. Configured automated SMS receipts..." oninput="updatePreview()">${esc(data.desc)}</textarea>
       </div>
     `;
     container.appendChild(card);
@@ -1561,13 +1560,53 @@
     input.click();
   }
 
+  // ── HTML ESCAPING (XSS-safe rendering) ──
+  // All preview templates build HTML by string interpolation into innerHTML.
+  // Any user-supplied value (typed, restored from localStorage, imported from a
+  // JSON backup, or parsed by AI from an uploaded PDF/DOCX) must be escaped
+  // before it lands in markup, or a stray < / " / </textarea> breaks the layout
+  // (and, with a crafted import/upload, injects script). We escape ONCE here, at
+  // the render boundary, so raw values are still saved/sent to the API intact.
+  function esc(v) {
+    if (v === undefined || v === null) return '';
+    return String(v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // Return a render-safe copy of the form data: every string field escaped,
+  // entry arrays deep-escaped. Non-text fields (template, themeColor, sizing)
+  // are carried through unchanged; photo is a data: URL but is escaped too so a
+  // crafted import can't break out of the src="" attribute.
+  function escapeData(raw) {
+    const escEntry = obj => {
+      const out = {};
+      for (const k in obj) out[k] = esc(obj[k]);
+      return out;
+    };
+    return {
+      ...raw,
+      name: esc(raw.name), role: esc(raw.role), email: esc(raw.email),
+      phone: esc(raw.phone), location: esc(raw.location), linkedin: esc(raw.linkedin),
+      summary: esc(raw.summary), skills: esc(raw.skills),
+      achievements: esc(raw.achievements), languages: esc(raw.languages),
+      photo: esc(raw.photo),
+      experience: (raw.experience || []).map(escEntry),
+      education: (raw.education || []).map(escEntry),
+      projects: (raw.projects || []).map(escEntry)
+    };
+  }
+
   // ── PREVIEW COMPOSITIONS ──
   function updatePreview() {
     try {
-      const d = collectFormData();
-      saveToLocalStorage(d);
+      const raw = collectFormData();
+      saveToLocalStorage(raw);
 
-      if (!d.name && !d.phone && !d.email) {
+      if (!raw.name && !raw.phone && !raw.email) {
         document.getElementById('cvDocContainer').innerHTML = `
           <div style="padding: 60px; text-align: center; color: #64748b; font-family:'Outfit', sans-serif;">
             <div style="font-size: 50px; margin-bottom: 16px;">📄</div>
@@ -1577,11 +1616,12 @@
         return;
       }
 
+      const d = escapeData(raw);
       let innerHTML = '';
-      
+
       // Inject Theme Variable dynamically
-      document.getElementById('cvDocContainer').style.setProperty('--theme-color', d.themeColor);
-      
+      document.getElementById('cvDocContainer').style.setProperty('--theme-color', raw.themeColor);
+
       if (d.template === 'classic') {
         innerHTML = buildClassic(d);
       } else if (d.template === 'modern') {
@@ -1600,13 +1640,14 @@
 
       document.getElementById('cvDocContainer').innerHTML = innerHTML;
     } catch (err) {
-      console.error(err);
+      // Log the details for debugging, but never dump a raw stack trace into the
+      // customer-facing preview.
+      console.error('CV preview render error:', err);
       document.getElementById('cvDocContainer').innerHTML = `
-        <div style="padding: 24px; text-align: left; color: #dc2626; font-family: monospace; font-size: 12px; background: #fee2e2; border: 1.5px solid #fca5a5; border-radius: 4px; line-height: 1.5; margin: 10px;">
-          <strong style="font-size: 14px;">⚠️ JavaScript Render Error</strong><br>
-          <span style="font-weight: 700;">Error Message:</span> ${err.message}<br><br>
-          <strong style="display: block; margin-bottom: 4px;">Stack Trace:</strong>
-          <pre style="white-space: pre-wrap; font-size: 10px; margin: 0; background: rgba(0,0,0,0.03); padding: 8px; border-radius: 4px; overflow-x: auto;">${err.stack}</pre>
+        <div style="padding: 40px; text-align: center; color: #64748b; font-family:'Outfit', sans-serif;">
+          <div style="font-size: 40px; margin-bottom: 12px;">⚠️</div>
+          <div style="font-weight:700; font-size:15px; color:#1e293b;">Couldn't refresh the preview</div>
+          <p style="font-size:12px; margin-top:6px; color:#94a3b8;">Something in the last change tripped up the renderer. Adjust your most recent edit, or use "Reset" to start fresh — your saved data is intact.</p>
         </div>`;
     }
   }
