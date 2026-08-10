@@ -77,6 +77,17 @@
   .ov2-filechip.show { display: flex; }
   .ov2-filechip b { color: #064e3b; }
   .ov2-filechip .ov2-change { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--blue); cursor: pointer; text-decoration: underline; }
+  #ov2-batchbar { margin-top: 8px; }
+  .ov2-addfile { width: 100%; border: 1px dashed var(--blue); background: #f4f7ff; color: var(--blue);
+    font-weight: 600; font-size: 13px; padding: 9px; border-radius: 8px; cursor: pointer; }
+  .ov2-addfile:hover { background: #eaf0ff; }
+  .ov2-batch { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .ov2-batch.show { display: flex; }
+  .ov2-batch-title { font-size: 12px; font-weight: 700; color: #374151; }
+  .ov2-batch-chip { display: flex; align-items: center; gap: 8px; background: #ecfdf5; border: 1px solid #a7f3d0;
+    border-radius: 6px; padding: 6px 10px; font-size: 12px; color: #064e3b; }
+  .ov2-batch-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ov2-batch-x { margin-left: auto; border: none; background: none; color: #6b7280; cursor: pointer; font-size: 13px; }
   .ov2-amber {
     margin: 8px 20px 0; display: none; font-size: 12px; line-height: 1.5;
     background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; border-radius: 8px; padding: 8px 12px;
@@ -286,6 +297,11 @@
         <span>✓ <b id="ov2-filename">file.pdf</b></span>
         <span id="ov2-pagecount">— pages</span>
         <span class="ov2-change" id="ov2-change">change</span>
+      </div>
+      <!-- Staff multi-file batch (revealed in ?staff=1 mode once a file loads) -->
+      <div id="ov2-batchbar" class="ov2-hidden">
+        <button type="button" id="ov2-addfile" class="ov2-addfile">➕ Add another file (its own settings)</button>
+        <div class="ov2-batch" id="ov2-batch"></div>
       </div>
       <div class="ov2-amber" id="ov2-amber">Estimated page count — real page previews aren't available for this format. Upload a PDF for an exact preview &amp; price.</div>
       <div class="ov2-manual" id="ov2-manual">
