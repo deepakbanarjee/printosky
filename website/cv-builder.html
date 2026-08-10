@@ -1148,6 +1148,26 @@
   // Persistence Key
   const LOCAL_STORAGE_KEY = 'printosky_resume_builder_data';
 
+  // ── ADMIN GATE ──
+  // The AI endpoints (/resume/coach, /resume/parse) are operator-only during
+  // private testing and require the Printosky admin password. Prompt once per
+  // browser session, cache it, and send it as X-Admin-Password on every AI call.
+  const ADMIN_PW_KEY = 'printosky_admin_pw';
+  let adminPassword = sessionStorage.getItem(ADMIN_PW_KEY) || '';
+
+  function ensureAdminPassword() {
+    if (!adminPassword) {
+      adminPassword = (prompt('Enter the Printosky admin password to use the AI features:') || '').trim();
+      if (adminPassword) sessionStorage.setItem(ADMIN_PW_KEY, adminPassword);
+    }
+    return adminPassword;
+  }
+
+  function clearAdminPassword() {
+    adminPassword = '';
+    sessionStorage.removeItem(ADMIN_PW_KEY);
+  }
+
   // Builder States
   let currentTemplate = 'classic';
   let themeColor = '#1e3a8a';
@@ -2471,13 +2491,19 @@
 
   // ── AI HANDLERS VIA SERVERLESS ENDPOINTS ──
   async function callResumeAPI(action, payloadData) {
+    const pw = ensureAdminPassword();
+    if (!pw) throw new Error('Admin password required to use AI features.');
     const res = await fetch(API + '/resume/coach', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Password': pw },
       body: JSON.stringify({ action: action, data: payloadData })
     });
+    if (res.status === 403) {
+      clearAdminPassword();
+      throw new Error('Admin password rejected. Please re-enter it and try again.');
+    }
     if (!res.ok) {
-      const errorData = await res.json();
+      const errorData = await res.json().catch(() => ({}));
       throw new Error(errorData.error || 'Server request failed');
     }
     return await res.json();
@@ -2664,20 +2690,27 @@
     loaderText.innerText = "Extracting text from file...";
 
     try {
+      const pw = ensureAdminPassword();
+      if (!pw) { loader.classList.remove('active'); alert('Admin password required to use AI features.'); return; }
+
       const base64Content = await fileToBase64(file);
       loaderText.innerText = "Claude is structuring content...";
 
       const res = await fetch(API + '/resume/parse', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Password': pw },
         body: JSON.stringify({
           content_b64: base64Content,
           filename: file.name
         })
       });
 
+      if (res.status === 403) {
+        clearAdminPassword();
+        throw new Error('Admin password rejected. Please re-enter it and try again.');
+      }
       if (!res.ok) {
-        const errorData = await res.json();
+        const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.error || 'Document extraction failed');
       }
 

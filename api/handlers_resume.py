@@ -47,6 +47,24 @@ def _get_claude_client():
         return None
 
 
+def _require_admin(h) -> bool:
+    """Gate: the resume AI endpoints are operator-only during private testing.
+
+    Requires the admin password (same one Operator Mode uses) via the
+    X-Admin-Password header. Responds 503/403 and returns False when it's
+    missing/invalid, so callers can `if not _require_admin(h): return`.
+    """
+    from api.index import _json_response, _auth_admin_pw, ADMIN_PASSWORD_HASH
+    if not ADMIN_PASSWORD_HASH:
+        _json_response(h, 503, {"error": "Admin auth not configured"})
+        return False
+    pw = h.headers.get("X-Admin-Password", "").strip()
+    if not _auth_admin_pw(pw):
+        _json_response(h, 403, {"error": "Unauthorized — admin password required"})
+        return False
+    return True
+
+
 def _clip(value, kind="short") -> str:
     """Coerce to a stripped string capped to the limit for `kind`."""
     return str(value or "").strip()[: _CAPS.get(kind, _CAPS["short"])]
@@ -82,6 +100,9 @@ def _handle_resume_coach(h, body: bytes) -> None:
     try:
         if body and len(body) > _MAX_COACH_BODY:
             _json_response(h, 413, {"error": "Request too large"})
+            return
+
+        if not _require_admin(h):
             return
 
         data = json.loads(body)
@@ -224,6 +245,9 @@ def _handle_resume_parse(h, body: bytes) -> None:
     try:
         if body and len(body) > _MAX_PARSE_BODY:
             _json_response(h, 413, {"error": "File too large. Please upload a resume under ~7 MB."})
+            return
+
+        if not _require_admin(h):
             return
 
         data = json.loads(body)
