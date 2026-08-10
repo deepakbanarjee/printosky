@@ -648,9 +648,66 @@
     .tmpl-visual .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px; }
     .tmpl-visual .c-desc { font-size: 11px; color: #334155; line-height: 1.5; }
 
+    /* Template: Corporate Two-Tone (colored accent bar, single column, ATS-safe) */
+    .tmpl-corporate { font-family: 'Outfit', sans-serif; color: #1e293b; background: #fff; }
+    .tmpl-corporate .c-header { background: var(--theme-color, #1e3a8a); color: #fff; padding: 28px 36px; display: flex; align-items: center; gap: 20px; }
+    .tmpl-corporate .c-photo { width: 78px; height: 78px; border-radius: 6px; object-fit: cover; border: 2px solid rgba(255,255,255,0.6); }
+    .tmpl-corporate .c-name { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.15; }
+    .tmpl-corporate .c-role { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; opacity: 0.85; margin-top: 4px; }
+    .tmpl-corporate .c-contact { font-size: 11px; opacity: 0.9; display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+    .tmpl-corporate .c-body { padding: 28px 36px; }
+    .tmpl-corporate .c-sec-head { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: var(--theme-color, #1e3a8a); border-left: 4px solid var(--theme-color, #1e3a8a); padding-left: 10px; margin: 22px 0 12px; }
+    .tmpl-corporate .c-sec-head:first-of-type { margin-top: 0; }
+    .tmpl-corporate .c-entry { margin-bottom: 14px; }
+    .tmpl-corporate .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 13px; color: #0f172a; gap: 12px; }
+    .tmpl-corporate .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; font-weight: 500; margin-bottom: 4px; gap: 12px; }
+    .tmpl-corporate .c-desc { font-size: 11.5px; color: #334155; line-height: 1.5; }
+
+    /* Template: Elegant Serif (refined centered serif, understated rules) */
+    .tmpl-serif { font-family: 'Playfair Display', serif; padding: 46px 48px; color: #2b2b2b; background: #fff; }
+    .tmpl-serif .c-header { text-align: center; display: flex; flex-direction: column; align-items: center; margin-bottom: 22px; }
+    .tmpl-serif .c-photo { width: 82px; height: 82px; border-radius: 50%; object-fit: cover; border: 1px solid #d4c9b8; margin-bottom: 14px; }
+    .tmpl-serif .c-name { font-size: 30px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: #1a1a1a; }
+    .tmpl-serif .c-role { font-family: 'Outfit', sans-serif; font-size: 12px; font-weight: 500; letter-spacing: 3px; text-transform: uppercase; color: var(--theme-color, #8a6d3b); margin-top: 8px; }
+    .tmpl-serif .c-contact { font-family: 'Outfit', sans-serif; font-size: 11px; color: #555; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5ddce; display: inline-flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+    .tmpl-serif .c-sec-head { font-size: 15px; font-weight: 700; letter-spacing: 1px; text-align: center; color: #1a1a1a; margin: 24px 0 12px; position: relative; }
+    .tmpl-serif .c-sec-head::after { content: ''; display: block; width: 40px; height: 1.5px; background: var(--theme-color, #8a6d3b); margin: 6px auto 0; }
+    .tmpl-serif .c-entry { margin-bottom: 14px; }
+    .tmpl-serif .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 13px; color: #1a1a1a; gap: 12px; }
+    .tmpl-serif .c-entry-sub { display: flex; justify-content: space-between; font-family: 'Outfit', sans-serif; font-style: italic; font-size: 11px; color: #777; margin-bottom: 4px; gap: 12px; }
+    .tmpl-serif .c-desc { font-family: 'Outfit', sans-serif; font-size: 11.5px; color: #444; line-height: 1.6; text-align: justify; }
+
+    /* Template: Compact One-Page (dense two-column body to fit more on one A4) */
+    .tmpl-compact { font-family: 'Outfit', sans-serif; padding: 30px 34px; color: #1e293b; background: #fff; font-size: 11px; }
+    .tmpl-compact .c-header { border-bottom: 2px solid var(--theme-color, #1e3a8a); padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+    .tmpl-compact .c-photo { width: 62px; height: 62px; border-radius: 50%; object-fit: cover; border: 2px solid var(--theme-color, #1e3a8a); }
+    .tmpl-compact .c-name { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; color: #0f172a; }
+    .tmpl-compact .c-role { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; color: var(--theme-color, #1e3a8a); margin-top: 2px; }
+    .tmpl-compact .c-contact { font-size: 10px; color: #64748b; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+    .tmpl-compact .c-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; align-items: start; }
+    .tmpl-compact .c-sec-head { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: var(--theme-color, #1e3a8a); border-bottom: 1px solid #e2e8f0; padding-bottom: 3px; margin: 14px 0 8px; }
+    .tmpl-compact .c-sec-head:first-of-type { margin-top: 0; }
+    .tmpl-compact .c-entry { margin-bottom: 9px; }
+    .tmpl-compact .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 11px; color: #0f172a; gap: 8px; }
+    .tmpl-compact .c-entry-sub { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; margin-bottom: 3px; gap: 8px; }
+    .tmpl-compact .c-desc { font-size: 10px; color: #334155; line-height: 1.45; }
+
+    /* Template: Academic CV (long-form, publication/coursework oriented) */
+    .tmpl-academic { font-family: 'Georgia', serif; padding: 46px 50px; color: #222; background: #fff; line-height: 1.55; }
+    .tmpl-academic .c-header { margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid #cbd5e1; }
+    .tmpl-academic .c-name { font-size: 27px; font-weight: 700; color: #111; letter-spacing: 0.5px; }
+    .tmpl-academic .c-role { font-size: 13px; font-style: italic; color: var(--theme-color, #334155); margin-top: 4px; }
+    .tmpl-academic .c-contact { font-family: 'Outfit', sans-serif; font-size: 11px; color: #555; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 14px; }
+    .tmpl-academic .c-sec-head { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: var(--theme-color, #334155); border-bottom: 1px solid #94a3b8; padding-bottom: 3px; margin: 24px 0 12px; }
+    .tmpl-academic .c-entry { margin-bottom: 14px; }
+    .tmpl-academic .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 13px; color: #111; gap: 12px; }
+    .tmpl-academic .c-entry-sub { display: flex; justify-content: space-between; font-style: italic; font-size: 12px; color: #555; margin-bottom: 4px; gap: 12px; }
+    .tmpl-academic .c-desc { font-family: 'Outfit', sans-serif; font-size: 12px; color: #333; line-height: 1.6; }
+
     /* PDF Alignment fixes */
     .c-entry { page-break-inside: avoid; }
-    .tmpl-classic, .tmpl-modern, .tmpl-minimal, .tmpl-creative, .tmpl-executive, .tmpl-tech, .tmpl-visual { box-sizing: border-box; }
+    .tmpl-classic, .tmpl-modern, .tmpl-minimal, .tmpl-creative, .tmpl-executive, .tmpl-tech, .tmpl-visual,
+    .tmpl-corporate, .tmpl-serif, .tmpl-compact, .tmpl-academic { box-sizing: border-box; }
 
     /* ── RESPONSIVE DESIGN (DESKTOP / MOBILE SPLIT) ── */
     @media (max-width: 1024px) {
@@ -862,6 +919,10 @@
           <option value="executive">👔 Formal Corporate (Executive serif)</option>
           <option value="tech">💻 Developer Portfolio (Tech Monospace)</option>
           <option value="visual">📸 Visual Resume (Sidebar with Photo)</option>
+          <option value="corporate">🏢 Corporate Two-Tone (Accent Bar)</option>
+          <option value="serif">🕊️ Elegant Serif (Centered)</option>
+          <option value="compact">🗜️ Compact One-Page (Dense Two-Column)</option>
+          <option value="academic">🎓 Academic CV (Long-form)</option>
         </select>
       </div>
 
@@ -1634,6 +1695,14 @@
         innerHTML = buildExecutive(d);
       } else if (d.template === 'tech') {
         innerHTML = buildTech(d);
+      } else if (d.template === 'corporate') {
+        innerHTML = buildCorporate(d);
+      } else if (d.template === 'serif') {
+        innerHTML = buildSerif(d);
+      } else if (d.template === 'compact') {
+        innerHTML = buildCompact(d);
+      } else if (d.template === 'academic') {
+        innerHTML = buildAcademic(d);
       } else {
         innerHTML = buildVisual(d);
       }
@@ -2029,6 +2098,212 @@
         ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Key Achievements</div>
           <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
       </div>
+    </div>`;
+  }
+
+  // Shared helper: turn a multi-line desc into • bullets (values are already
+  // escaped by escapeData before they reach any build function).
+  function fmtBullets(text) {
+    return text.split('\n').map(l => l.trim()).filter(Boolean)
+      .map(line => line.startsWith('-') ? line : '• ' + line).join('<br>');
+  }
+
+  function buildCorporate(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+
+    return `<div class="tmpl-corporate" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-header">
+        ${photoHtml}
+        <div>
+          <div class="c-name">${d.name || 'Your Full Name'}</div>
+          ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+          <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).join('  •  ')}</div>
+        </div>
+      </div>
+      <div class="c-body" style="padding: ${d.sizing.margins}px;">
+        ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Professional Summary</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+        ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Work Experience</div>
+          ${d.experience.map(e => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+              <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+              <div class="c-entry-sub"><span>${e.company}</span></div>
+              ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+            </div>`).join('')}</div>` : ''}
+
+        ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+          ${d.education.map(e => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/2}px;">
+              <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+              <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+            </div>`).join('')}</div>` : ''}
+
+        ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+          ${d.projects.map(p => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+              <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+              <p class="c-desc">${p.desc}</p>
+            </div>`).join('')}</div>` : ''}
+
+        ${skills.length ? `<div ${spacingStyle}><div class="c-sec-head">Core Skills</div>
+          <p class="c-desc" style="font-weight:500;">${skills.join('  ·  ')}</p></div>` : ''}
+
+        ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Achievements & Certifications</div>
+          <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+
+        ${d.languages ? `<div ${spacingStyle}><div class="c-sec-head">Languages</div><p class="c-desc">${d.languages}</p></div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function buildSerif(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+
+    return `<div class="tmpl-serif" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-header">
+        ${photoHtml}
+        <div class="c-name">${d.name || 'Your Full Name'}</div>
+        ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+        <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).map(c => `<span>${c}</span>`).join('')}</div>
+      </div>
+
+      ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Profile</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+      ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Experience</div>
+        ${d.experience.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+            <div class="c-entry-sub"><span>${e.company}</span></div>
+            ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+          </div>`).join('')}</div>` : ''}
+
+      ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+        ${d.education.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/2}px;">
+            <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+            <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+          </div>`).join('')}</div>` : ''}
+
+      ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+        ${d.projects.map(p => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+            <p class="c-desc">${p.desc}</p>
+          </div>`).join('')}</div>` : ''}
+
+      ${skills.length ? `<div ${spacingStyle}><div class="c-sec-head">Skills</div>
+        <p class="c-desc" style="text-align:center; font-weight:500;">${skills.join('  ·  ')}</p></div>` : ''}
+
+      ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Achievements</div>
+        <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+
+      ${d.languages ? `<div ${spacingStyle}><div class="c-sec-head">Languages</div><p class="c-desc" style="text-align:center;">${d.languages}</p></div>` : ''}
+    </div>`;
+  }
+
+  function buildCompact(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+
+    const expBlock = d.experience.length ? `<div class="c-sec-head">Experience</div>
+      ${d.experience.map(e => `
+        <div class="c-entry">
+          <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+          <div class="c-entry-sub"><span>${e.company}</span></div>
+          ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+        </div>`).join('')}` : '';
+
+    const projBlock = d.projects.length ? `<div class="c-sec-head">Projects</div>
+      ${d.projects.map(p => `
+        <div class="c-entry">
+          <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+          <p class="c-desc">${p.desc}</p>
+        </div>`).join('')}` : '';
+
+    const eduBlock = d.education.length ? `<div class="c-sec-head">Education</div>
+      ${d.education.map(e => `
+        <div class="c-entry">
+          <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+          <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+        </div>`).join('')}` : '';
+
+    const skillsBlock = skills.length ? `<div class="c-sec-head">Skills</div>
+      <p class="c-desc" style="font-weight:500;">${skills.join(', ')}</p>` : '';
+
+    const achBlock = achievements.length ? `<div class="c-sec-head">Achievements</div>
+      <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p>` : '';
+
+    const langBlock = d.languages ? `<div class="c-sec-head">Languages</div><p class="c-desc">${d.languages}</p>` : '';
+
+    return `<div class="tmpl-compact" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-header">
+        <div>
+          <div class="c-name">${d.name || 'Your Full Name'}</div>
+          ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+          <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).join('  •  ')}</div>
+        </div>
+        ${photoHtml}
+      </div>
+
+      ${d.summary ? `<div style="margin-bottom:10px;"><div class="c-sec-head">Summary</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+      <div class="c-columns">
+        <div>${expBlock}${projBlock}</div>
+        <div>${eduBlock}${skillsBlock}${achBlock}${langBlock}</div>
+      </div>
+    </div>`;
+  }
+
+  function buildAcademic(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+
+    return `<div class="tmpl-academic" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-header">
+        <div class="c-name">${d.name || 'Your Full Name'}</div>
+        ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+        <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).join('  ·  ')}</div>
+      </div>
+
+      ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Research / Professional Statement</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+      ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+        ${d.education.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+            <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+          </div>`).join('')}</div>` : ''}
+
+      ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Appointments & Experience</div>
+        ${d.experience.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+            <div class="c-entry-sub"><span>${e.company}</span></div>
+            ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+          </div>`).join('')}</div>` : ''}
+
+      ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Research Projects</div>
+        ${d.projects.map(p => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+            <p class="c-desc">${p.desc}</p>
+          </div>`).join('')}</div>` : ''}
+
+      ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Awards, Publications & Certifications</div>
+        <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+
+      ${skills.length ? `<div ${spacingStyle}><div class="c-sec-head">Skills & Competencies</div>
+        <p class="c-desc" style="font-weight:500;">${skills.join('  ·  ')}</p></div>` : ''}
+
+      ${d.languages ? `<div ${spacingStyle}><div class="c-sec-head">Languages</div><p class="c-desc">${d.languages}</p></div>` : ''}
     </div>`;
   }
 
