@@ -15,10 +15,19 @@ import sqlite3
 import sys
 from datetime import datetime
 
-if sys.platform == "win32":
-    DB_PATH = r"C:\Printosky\Data\jobs.db"
-else:
-    DB_PATH = os.path.join(os.path.expanduser("~"), "Printosky", "Data", "jobs.db")
+# Resolve the DB the same way print_server.py does — via store_config — so a
+# PIN reset always lands in the database the print server actually reads. On a
+# dev/test box whose store_config.json points db_path at a sandboxed jobs.db,
+# the old hardcoded path wrote to the wrong DB, so a reset "succeeded" yet login
+# kept failing. Fall back to the legacy OSP path if store_config is unavailable.
+try:
+    from store_config import get_store_config
+    DB_PATH = get_store_config().db_path
+except Exception:
+    if sys.platform == "win32":
+        DB_PATH = r"C:\Printosky\Data\jobs.db"
+    else:
+        DB_PATH = os.path.join(os.path.expanduser("~"), "Printosky", "Data", "jobs.db")
 
 DEFAULT_STAFF = [
     ("priya",   "Priya",   "1001"),
@@ -160,6 +169,7 @@ def cmd_activate(sid: str):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+    print(f"Using DB: {DB_PATH}")
     if not args:
         cmd_seed()
     elif args[0] == "list":
