@@ -2633,6 +2633,10 @@ from api.handlers_order import (
     _handle_order_reorder,
     _handle_order_convert_docx,
 )
+from api.handlers_resume import (
+    _handle_resume_coach,
+    _handle_resume_parse,
+)
 
 # ── Vercel request handler ────────────────────────────────────────────────────
 
@@ -3136,6 +3140,14 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/project-builder/process":
             _handle_pb_process(self, body)
+            return
+
+        if self.path == "/resume/coach":
+            _handle_resume_coach(self, body)
+            return
+
+        if self.path == "/resume/parse":
+            _handle_resume_parse(self, body)
             return
 
         _pb_resend = re.match(r"^/project-builder/orders/([^/?]+)/resend$", self.path.split("?")[0])

@@ -23,6 +23,8 @@
     { "src": "/academic/orders/(.*)",                 "dest": "/api/index.py" },
     { "src": "/academic/razorpay-webhook",            "dest": "/api/index.py" },
     { "src": "/project-builder/templates",            "dest": "/api/index.py" },
+    { "src": "/resume/coach",                         "dest": "/api/index.py" },
+    { "src": "/resume/parse",                         "dest": "/api/index.py" },
     { "src": "/project-builder/templates/(.*)",       "dest": "/api/index.py" },
     { "src": "/project-builder/analyse",              "dest": "/api/index.py" },
     { "src": "/project-builder/format-preview",       "dest": "/api/index.py" },
