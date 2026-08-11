@@ -163,7 +163,9 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
     # one output tray and keep document order.
     bw_call = captured_calls[1]
     assert bw_call["job_id"] == "OSP-E2E-TEST"
-    assert bw_call["printer_key"] == "epson"
+    # Mixed jobs now split across printers: the B&W section routes to the Konica
+    # (this store has one), while the colour section above goes to the Epson.
+    assert bw_call["printer_key"] == "konica"
     assert bw_call["colour_mode"] == "bw"
     assert bw_call["copies"] == 3
     assert bw_call["sides"] == "ds"
