@@ -158,13 +158,13 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
     assert len(doc_col) == 2  # exactly 2 pages
     doc_col.close()
 
-    # Check B&W sub-job. Mixed jobs force EVERY sub-job to the Epson (even the
-    # B&W section, despite a Konica being present) so the two sections stay in
-    # one output tray and keep document order.
+    # Check B&W sub-job. Mixed jobs now route each section to its NATURAL device
+    # (a51e0fe): the B&W section goes to the Konica (cheaper) while the colour
+    # section goes to the Epson. print_planner keeps each section's pages
+    # contiguous and in order; on a store with no Konica the print server
+    # redirects konica->epson, so this stays safe there too.
     bw_call = captured_calls[1]
     assert bw_call["job_id"] == "OSP-E2E-TEST"
-    # Mixed jobs now split across printers: the B&W section routes to the Konica
-    # (this store has one), while the colour section above goes to the Epson.
     assert bw_call["printer_key"] == "konica"
     assert bw_call["colour_mode"] == "bw"
     assert bw_call["copies"] == 3

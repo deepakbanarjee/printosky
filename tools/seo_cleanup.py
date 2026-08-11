@@ -17,11 +17,12 @@ WEB = Path(__file__).resolve().parent.parent / "website"
 BASE = "https://printosky.com"
 
 # Public, indexable pages currently missing a canonical tag.
-CANONICAL = ["academic", "books", "cv-builder", "project-builder"]
+CANONICAL = ["academic", "books", "project-builder"]
 
 # Internal / thin / dev pages that must NOT be indexed.
 NOINDEX = [
     "superadmin", "operator-mode", "chat",      # internal admin consoles
+    "cv-builder",                               # operator-only during private testing, not public yet
     "payment-done", "pb-retrieve", "notes",     # thank-you / utility / dead redirect
     "project-builder-v2", "project-builder-v3", "project-builder-v4",  # dev iterations
 ]
@@ -79,7 +80,7 @@ SITEMAP = [
     ("/about.html",           "2026-06-14", "yearly",  "0.7"),
     ("/contact.html",         "2026-06-14", "yearly",  "0.7"),
     ("/academic.html",        "2026-06-16", "monthly", "0.6"),
-    ("/cv-builder.html",      "2026-06-16", "monthly", "0.6"),
+    # cv-builder.html omitted from sitemap: operator-only during private testing.
     ("/project-builder.html", "2026-06-16", "monthly", "0.6"),
     ("/account.html",         "2026-06-16", "monthly", "0.5"),
 ]

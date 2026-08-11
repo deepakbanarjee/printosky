@@ -9,14 +9,13 @@
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Operator-only during private testing — keep out of search until public launch. -->
+  <meta name="robots" content="noindex, nofollow">
   <title>Elite AI CV Builder & ATS Optimizer — Printosky</title>
   <link rel="canonical" href="https://printosky.com/cv-builder.html">
   <meta name="description" content="Build an ATS-optimized professional resume. Parse CVs or LinkedIn PDFs, optimize keywords against job descriptions, and write entries with AI.">
   <link rel="stylesheet" href="styles.css">
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Syne:wght@700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700;1,300&family=Playfair+Display:ital,wght@0,600;0,700;1,400&display=swap" rel="stylesheet">
-  <!-- html2pdf.js Library for Direct Client-side PDF Generation -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  
   <style>
     /* ── BASE & WORKSPACE (DARK THEME FOR BUILDER) ── */
     :root {
@@ -648,9 +647,154 @@
     .tmpl-visual .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px; }
     .tmpl-visual .c-desc { font-size: 11px; color: #334155; line-height: 1.5; }
 
+    /* Template: Corporate Two-Tone (colored accent bar, single column, ATS-safe) */
+    .tmpl-corporate { font-family: 'Outfit', sans-serif; color: #1e293b; background: #fff; }
+    .tmpl-corporate .c-header { background: var(--theme-color, #1e3a8a); color: #fff; padding: 28px 36px; display: flex; align-items: center; gap: 20px; }
+    .tmpl-corporate .c-photo { width: 78px; height: 78px; border-radius: 6px; object-fit: cover; border: 2px solid rgba(255,255,255,0.6); }
+    .tmpl-corporate .c-name { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.15; }
+    .tmpl-corporate .c-role { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; opacity: 0.85; margin-top: 4px; }
+    .tmpl-corporate .c-contact { font-size: 11px; opacity: 0.9; display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+    .tmpl-corporate .c-body { padding: 28px 36px; }
+    .tmpl-corporate .c-sec-head { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: var(--theme-color, #1e3a8a); border-left: 4px solid var(--theme-color, #1e3a8a); padding-left: 10px; margin: 22px 0 12px; }
+    .tmpl-corporate .c-sec-head:first-of-type { margin-top: 0; }
+    .tmpl-corporate .c-entry { margin-bottom: 14px; }
+    .tmpl-corporate .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 13px; color: #0f172a; gap: 12px; }
+    .tmpl-corporate .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; font-weight: 500; margin-bottom: 4px; gap: 12px; }
+    .tmpl-corporate .c-desc { font-size: 11.5px; color: #334155; line-height: 1.5; }
+
+    /* Template: Elegant Serif (refined centered serif, understated rules) */
+    .tmpl-serif { font-family: 'Playfair Display', serif; padding: 46px 48px; color: #2b2b2b; background: #fff; }
+    .tmpl-serif .c-header { text-align: center; display: flex; flex-direction: column; align-items: center; margin-bottom: 22px; }
+    .tmpl-serif .c-photo { width: 82px; height: 82px; border-radius: 50%; object-fit: cover; border: 1px solid #d4c9b8; margin-bottom: 14px; }
+    .tmpl-serif .c-name { font-size: 30px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: #1a1a1a; }
+    .tmpl-serif .c-role { font-family: 'Outfit', sans-serif; font-size: 12px; font-weight: 500; letter-spacing: 3px; text-transform: uppercase; color: var(--theme-color, #8a6d3b); margin-top: 8px; }
+    .tmpl-serif .c-contact { font-family: 'Outfit', sans-serif; font-size: 11px; color: #555; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5ddce; display: inline-flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+    .tmpl-serif .c-sec-head { font-size: 15px; font-weight: 700; letter-spacing: 1px; text-align: center; color: #1a1a1a; margin: 24px 0 12px; position: relative; }
+    .tmpl-serif .c-sec-head::after { content: ''; display: block; width: 40px; height: 1.5px; background: var(--theme-color, #8a6d3b); margin: 6px auto 0; }
+    .tmpl-serif .c-entry { margin-bottom: 14px; }
+    .tmpl-serif .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 13px; color: #1a1a1a; gap: 12px; }
+    .tmpl-serif .c-entry-sub { display: flex; justify-content: space-between; font-family: 'Outfit', sans-serif; font-style: italic; font-size: 11px; color: #777; margin-bottom: 4px; gap: 12px; }
+    .tmpl-serif .c-desc { font-family: 'Outfit', sans-serif; font-size: 11.5px; color: #444; line-height: 1.6; text-align: justify; }
+
+    /* Template: Compact One-Page (dense two-column body to fit more on one A4) */
+    .tmpl-compact { font-family: 'Outfit', sans-serif; padding: 30px 34px; color: #1e293b; background: #fff; font-size: 11px; }
+    .tmpl-compact .c-header { border-bottom: 2px solid var(--theme-color, #1e3a8a); padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+    .tmpl-compact .c-photo { width: 62px; height: 62px; border-radius: 50%; object-fit: cover; border: 2px solid var(--theme-color, #1e3a8a); }
+    .tmpl-compact .c-name { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; color: #0f172a; }
+    .tmpl-compact .c-role { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; color: var(--theme-color, #1e3a8a); margin-top: 2px; }
+    .tmpl-compact .c-contact { font-size: 10px; color: #64748b; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+    .tmpl-compact .c-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; align-items: start; }
+    .tmpl-compact .c-sec-head { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: var(--theme-color, #1e3a8a); border-bottom: 1px solid #e2e8f0; padding-bottom: 3px; margin: 14px 0 8px; }
+    .tmpl-compact .c-sec-head:first-of-type { margin-top: 0; }
+    .tmpl-compact .c-entry { margin-bottom: 9px; }
+    .tmpl-compact .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 11px; color: #0f172a; gap: 8px; }
+    .tmpl-compact .c-entry-sub { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; margin-bottom: 3px; gap: 8px; }
+    .tmpl-compact .c-desc { font-size: 10px; color: #334155; line-height: 1.45; }
+
+    /* Template: Academic CV (long-form, publication/coursework oriented) */
+    .tmpl-academic { font-family: 'Georgia', serif; padding: 46px 50px; color: #222; background: #fff; line-height: 1.55; }
+    .tmpl-academic .c-header { margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid #cbd5e1; }
+    .tmpl-academic .c-name { font-size: 27px; font-weight: 700; color: #111; letter-spacing: 0.5px; }
+    .tmpl-academic .c-role { font-size: 13px; font-style: italic; color: var(--theme-color, #334155); margin-top: 4px; }
+    .tmpl-academic .c-contact { font-family: 'Outfit', sans-serif; font-size: 11px; color: #555; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 14px; }
+    .tmpl-academic .c-sec-head { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: var(--theme-color, #334155); border-bottom: 1px solid #94a3b8; padding-bottom: 3px; margin: 24px 0 12px; }
+    .tmpl-academic .c-entry { margin-bottom: 14px; }
+    .tmpl-academic .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 13px; color: #111; gap: 12px; }
+    .tmpl-academic .c-entry-sub { display: flex; justify-content: space-between; font-style: italic; font-size: 12px; color: #555; margin-bottom: 4px; gap: 12px; }
+    .tmpl-academic .c-desc { font-family: 'Outfit', sans-serif; font-size: 12px; color: #333; line-height: 1.6; }
+
+    /* Template: Banner Two-Column (full-width colored header + narrow aside + main) */
+    .tmpl-banner { font-family: 'Outfit', sans-serif; color: #1e293b; background: #fff; }
+    .tmpl-banner .c-banner { background: var(--theme-color, #1e3a8a); color: #fff; padding: 30px 40px; display: flex; align-items: center; gap: 22px; }
+    .tmpl-banner .c-photo { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; border: 3px solid rgba(255,255,255,0.55); flex-shrink: 0; }
+    .tmpl-banner .c-name { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.1; }
+    .tmpl-banner .c-role { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; opacity: 0.85; margin-top: 5px; }
+    .tmpl-banner .c-contact { font-size: 11px; opacity: 0.92; display: flex; flex-wrap: wrap; gap: 5px 16px; margin-top: 10px; }
+    .tmpl-banner .c-columns { display: grid; grid-template-columns: 33% 1fr; align-items: stretch; }
+    .tmpl-banner .c-aside { background: #f8fafc; border-right: 1px solid #e8edf3; padding: 26px 22px; }
+    .tmpl-banner .c-main { padding: 26px 28px; }
+    .tmpl-banner .c-sec-head { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: var(--theme-color, #1e3a8a); margin: 20px 0 10px; padding-bottom: 4px; border-bottom: 2px solid rgba(30,58,138,0.15); }
+    .tmpl-banner .c-aside .c-sec-head:first-child, .tmpl-banner .c-main .c-sec-head:first-child { margin-top: 0; }
+    .tmpl-banner .c-entry { margin-bottom: 13px; }
+    .tmpl-banner .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 12.5px; color: #0f172a; gap: 10px; }
+    .tmpl-banner .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px; gap: 10px; }
+    .tmpl-banner .c-desc { font-size: 11px; color: #334155; line-height: 1.5; }
+    .tmpl-banner .c-item { font-size: 11px; color: #334155; margin-bottom: 6px; line-height: 1.4; word-break: break-word; }
+    .tmpl-banner .c-chip { display: inline-block; font-size: 10.5px; background: #eef2f7; color: #334155; padding: 3px 9px; border-radius: 20px; margin: 0 5px 5px 0; }
+
+    /* Template: Timeline (modern vertical timeline with connected dots) */
+    .tmpl-timeline { font-family: 'Outfit', sans-serif; padding: 40px 44px; color: #1e293b; background: #fff; }
+    .tmpl-timeline .c-header { margin-bottom: 22px; display: flex; align-items: center; gap: 18px; }
+    .tmpl-timeline .c-photo { width: 76px; height: 76px; border-radius: 50%; object-fit: cover; border: 3px solid var(--theme-color, #0ea5e9); flex-shrink: 0; }
+    .tmpl-timeline .c-name { font-size: 27px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; }
+    .tmpl-timeline .c-role { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; color: var(--theme-color, #0ea5e9); margin-top: 3px; }
+    .tmpl-timeline .c-contact { font-size: 11px; color: #64748b; display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 8px; }
+    .tmpl-timeline .c-sec-head { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: #0f172a; margin: 22px 0 14px; padding-bottom: 5px; border-bottom: 2px solid #eef2f7; }
+    .tmpl-timeline .c-track { position: relative; padding-left: 22px; }
+    .tmpl-timeline .c-track::before { content: ''; position: absolute; left: 4px; top: 5px; bottom: 5px; width: 2px; background: #e2e8f0; }
+    .tmpl-timeline .c-entry { position: relative; margin-bottom: 14px; }
+    .tmpl-timeline .c-entry::before { content: ''; position: absolute; left: -22px; top: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--theme-color, #0ea5e9); border: 2px solid #fff; }
+    .tmpl-timeline .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 12.5px; color: #0f172a; gap: 10px; }
+    .tmpl-timeline .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px; gap: 10px; }
+    .tmpl-timeline .c-desc { font-size: 11px; color: #334155; line-height: 1.5; }
+    .tmpl-timeline .c-chip { display: inline-block; font-size: 10.5px; background: #f1f5f9; color: #334155; padding: 3px 9px; border-radius: 4px; margin: 0 5px 5px 0; }
+
+    /* Template: Infographic (colored sidebar with skill bars + language dots) */
+    .tmpl-infographic { font-family: 'Outfit', sans-serif; display: grid; grid-template-columns: 220px 1fr; align-items: stretch; color: #1e293b; background: #fff; min-height: 900px; }
+    .tmpl-infographic .c-aside { background: var(--theme-color, #0f766e); color: #fff; padding: 32px 20px; }
+    .tmpl-infographic .c-photo { width: 108px; height: 108px; border-radius: 50%; object-fit: cover; border: 3px solid rgba(255,255,255,0.5); display: block; margin: 0 auto 16px; }
+    .tmpl-infographic .c-aside .c-name { font-size: 20px; font-weight: 800; text-align: center; line-height: 1.2; }
+    .tmpl-infographic .c-aside .c-role { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; text-align: center; opacity: 0.85; margin-top: 5px; }
+    .tmpl-infographic .c-aside .c-sec-head { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; margin: 22px 0 10px; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.25); }
+    .tmpl-infographic .c-contact-item { font-size: 11px; margin-bottom: 7px; opacity: 0.95; word-break: break-word; }
+    .tmpl-infographic .c-skill { margin-bottom: 9px; }
+    .tmpl-infographic .c-skill-name { font-size: 11px; margin-bottom: 4px; }
+    .tmpl-infographic .c-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.25); overflow: hidden; }
+    .tmpl-infographic .c-bar > span { display: block; height: 100%; border-radius: 3px; background: #fff; }
+    .tmpl-infographic .c-lang { display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 7px; }
+    .tmpl-infographic .c-dots { display: flex; gap: 4px; }
+    .tmpl-infographic .c-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.3); }
+    .tmpl-infographic .c-dot.on { background: #fff; }
+    .tmpl-infographic .c-main { padding: 34px 30px; }
+    .tmpl-infographic .c-main .c-sec-head { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: var(--theme-color, #0f766e); margin: 22px 0 12px; padding-bottom: 5px; border-bottom: 2px solid rgba(15,118,110,0.15); }
+    .tmpl-infographic .c-main .c-sec-head:first-child { margin-top: 0; }
+    .tmpl-infographic .c-entry { margin-bottom: 13px; }
+    .tmpl-infographic .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 12.5px; color: #0f172a; gap: 10px; }
+    .tmpl-infographic .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px; gap: 10px; }
+    .tmpl-infographic .c-desc { font-size: 11px; color: #334155; line-height: 1.5; }
+
+    /* Template: Ivy League (traditional single-column serif, ATS-friendly) */
+    .tmpl-ivy { font-family: 'Georgia', serif; padding: 46px 52px; color: #1a1a1a; background: #fff; line-height: 1.5; }
+    .tmpl-ivy .c-header { text-align: center; margin-bottom: 18px; }
+    .tmpl-ivy .c-name { font-size: 26px; font-weight: 700; letter-spacing: 0.5px; color: #111; }
+    .tmpl-ivy .c-role { font-size: 12.5px; color: #444; margin-top: 3px; }
+    .tmpl-ivy .c-contact { font-size: 11px; color: #333; margin-top: 8px; }
+    .tmpl-ivy .c-sec-head { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #111; border-bottom: 1px solid #111; padding-bottom: 3px; margin: 20px 0 10px; }
+    .tmpl-ivy .c-entry { margin-bottom: 12px; }
+    .tmpl-ivy .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 12.5px; color: #111; gap: 12px; }
+    .tmpl-ivy .c-entry-sub { display: flex; justify-content: space-between; font-style: italic; font-size: 11.5px; color: #444; margin-bottom: 3px; gap: 12px; }
+    .tmpl-ivy .c-desc { font-size: 11.5px; color: #222; line-height: 1.5; }
+
+    /* Template: Editorial (left-label margin layout, serif headings) */
+    .tmpl-editorial { font-family: 'Outfit', sans-serif; padding: 42px 46px; color: #1e293b; background: #fff; }
+    .tmpl-editorial .c-header { margin-bottom: 4px; }
+    .tmpl-editorial .c-name { font-family: 'Playfair Display', serif; font-size: 30px; font-weight: 700; color: #0f172a; }
+    .tmpl-editorial .c-role { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; color: var(--theme-color, #b91c1c); margin-top: 4px; }
+    .tmpl-editorial .c-contact { font-size: 11px; color: #64748b; display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 8px; padding-bottom: 14px; border-bottom: 2px solid #0f172a; }
+    .tmpl-editorial .c-block { display: grid; grid-template-columns: 130px 1fr; gap: 16px; padding: 14px 0; border-bottom: 1px solid #eef2f7; }
+    .tmpl-editorial .c-block:last-child { border-bottom: none; }
+    .tmpl-editorial .c-sec-head { font-family: 'Playfair Display', serif; font-size: 14px; font-weight: 700; color: var(--theme-color, #b91c1c); line-height: 1.25; }
+    .tmpl-editorial .c-entry { margin-bottom: 11px; }
+    .tmpl-editorial .c-entry:last-child { margin-bottom: 0; }
+    .tmpl-editorial .c-entry-header { display: flex; justify-content: space-between; font-weight: 700; font-size: 12.5px; color: #0f172a; gap: 10px; }
+    .tmpl-editorial .c-entry-sub { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px; gap: 10px; }
+    .tmpl-editorial .c-desc { font-size: 11px; color: #334155; line-height: 1.55; }
+
     /* PDF Alignment fixes */
     .c-entry { page-break-inside: avoid; }
-    .tmpl-classic, .tmpl-modern, .tmpl-minimal, .tmpl-creative, .tmpl-executive, .tmpl-tech, .tmpl-visual { box-sizing: border-box; }
+    .tmpl-classic, .tmpl-modern, .tmpl-minimal, .tmpl-creative, .tmpl-executive, .tmpl-tech, .tmpl-visual,
+    .tmpl-corporate, .tmpl-serif, .tmpl-compact, .tmpl-academic,
+    .tmpl-banner, .tmpl-timeline, .tmpl-infographic, .tmpl-ivy, .tmpl-editorial { box-sizing: border-box; }
 
     /* ── RESPONSIVE DESIGN (DESKTOP / MOBILE SPLIT) ── */
     @media (max-width: 1024px) {
@@ -674,15 +818,26 @@
       .tool-hero-content { max-width: 100%; }
     }
 
-    /* ── PRINT STYLESHEET ── */
+    /* ── PRINT STYLESHEET ──
+       Native print → "Save as PDF" prints ONLY the CV document: selectable text,
+       correct fonts, real A4 pagination. Everything else on the page is hidden. */
+    @page { size: A4; margin: 0; }  /* templates carry their own padding; full-bleed sidebars reach the edge */
     @media print {
-      body { background: #fff !important; color: #000 !important; }
+      html, body { background: #fff !important; color: #000 !important; margin: 0 !important; padding: 0 !important; }
       nav, footer, .tool-hero, .template-selector, .step-sidebar, .cv-form-side, .preview-header, .preview-actions, .floating-preview-toggle, .modal-overlay {
         display: none !important;
       }
       .builder-container { display: block !important; }
-      .cv-preview-side { display: block !important; position: static !important; width: 100% !important; height: auto !important; padding: 0 !important; background: transparent !important; }
-      .cv-doc { box-shadow: none !important; border: none !important; max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+      /* Force the preview visible even on tablet/mobile, where it's normally display:none. */
+      .cv-preview-side { display: block !important; position: static !important; width: 100% !important; height: auto !important; max-height: none !important; padding: 0 !important; margin: 0 !important; background: #fff !important; overflow: visible !important; }
+      /* min-height on the sheet would push a short resume onto a blank 2nd page — drop it for print. */
+      .cv-doc { box-shadow: none !important; border: none !important; border-radius: 0 !important; max-width: none !important; width: 100% !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; }
+      #cvDocContainer > .tmpl-classic, #cvDocContainer > .tmpl-modern, #cvDocContainer > .tmpl-minimal,
+      #cvDocContainer > .tmpl-creative, #cvDocContainer > .tmpl-executive, #cvDocContainer > .tmpl-tech,
+      #cvDocContainer > .tmpl-visual, #cvDocContainer > .tmpl-corporate, #cvDocContainer > .tmpl-serif,
+      #cvDocContainer > .tmpl-compact, #cvDocContainer > .tmpl-academic { min-height: 0 !important; }
+      /* Ask the browser to keep template background colours/gradients in the PDF. */
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     }
   </style>
 </head>
@@ -862,6 +1017,15 @@
           <option value="executive">👔 Formal Corporate (Executive serif)</option>
           <option value="tech">💻 Developer Portfolio (Tech Monospace)</option>
           <option value="visual">📸 Visual Resume (Sidebar with Photo)</option>
+          <option value="corporate">🏢 Corporate Two-Tone (Accent Bar)</option>
+          <option value="serif">🕊️ Elegant Serif (Centered)</option>
+          <option value="compact">🗜️ Compact One-Page (Dense Two-Column)</option>
+          <option value="academic">🎓 Academic CV (Long-form)</option>
+          <option value="banner">🎫 Banner Two-Column (Colored Header)</option>
+          <option value="timeline">🕒 Timeline (Connected Milestones)</option>
+          <option value="infographic">📊 Infographic (Skill Bars & Ratings)</option>
+          <option value="ivy">🏛️ Ivy League (Traditional / ATS)</option>
+          <option value="editorial">📰 Editorial (Left-Label Layout)</option>
         </select>
       </div>
 
@@ -989,8 +1153,8 @@
     </div>
 
     <div class="preview-actions" style="margin-top: 24px; display:flex; gap:12px; width:100%; max-width:620px;">
-      <button class="btn-import-trigger" id="btn-pdf-download" onclick="downloadPDFDirect()" style="flex: 1; background:linear-gradient(135deg, #10b981 0%, #059669 100%); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
-        <span>📥 Download PDF Document</span>
+      <button class="btn-import-trigger" id="btn-pdf-download" onclick="downloadPDFDirect()" title="Opens your browser's print dialog — choose &quot;Save as PDF&quot; as the destination" style="flex: 1; background:linear-gradient(135deg, #10b981 0%, #059669 100%); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
+        <span>🖨️ Download PDF (Save as PDF)</span>
       </button>
       <button class="btn-import-trigger" onclick="sendToWhatsApp()" style="background:#25D366; box-shadow: 0 4px 15px rgba(37, 211, 102, 0.3);">
         <span>💬 Send to Printosky</span>
@@ -1085,6 +1249,26 @@
   // Persistence Key
   const LOCAL_STORAGE_KEY = 'printosky_resume_builder_data';
 
+  // ── ADMIN GATE ──
+  // The AI endpoints (/resume/coach, /resume/parse) are operator-only during
+  // private testing and require the Printosky admin password. Prompt once per
+  // browser session, cache it, and send it as X-Admin-Password on every AI call.
+  const ADMIN_PW_KEY = 'printosky_admin_pw';
+  let adminPassword = sessionStorage.getItem(ADMIN_PW_KEY) || '';
+
+  function ensureAdminPassword() {
+    if (!adminPassword) {
+      adminPassword = (prompt('Enter the Printosky admin password to use the AI features:') || '').trim();
+      if (adminPassword) sessionStorage.setItem(ADMIN_PW_KEY, adminPassword);
+    }
+    return adminPassword;
+  }
+
+  function clearAdminPassword() {
+    adminPassword = '';
+    sessionStorage.removeItem(ADMIN_PW_KEY);
+  }
+
   // Builder States
   let currentTemplate = 'classic';
   let themeColor = '#1e3a8a';
@@ -1142,7 +1326,6 @@
 
   // ── CARD MANAGER (DYNAMIC LISTS) ──
   function addExperienceCard(data = {}) {
-    eduCount++; // Reuse increment logic or declare unique
     const index = ++expCount;
     const container = document.getElementById('exp-entries-container');
     const card = document.createElement('div');
@@ -1157,22 +1340,22 @@
       <div class="form-row-2">
         <div class="form-group">
           <label>Job Title / Role</label>
-          <input type="text" class="exp-role" value="${data.role || ''}" placeholder="e.g. Sales Executive" oninput="updatePreview()">
+          <input type="text" class="exp-role" value="${esc(data.role)}" placeholder="e.g. Sales Executive" oninput="updatePreview()">
         </div>
         <div class="form-group">
           <label>Company Name</label>
-          <input type="text" class="exp-company" value="${data.company || ''}" placeholder="e.g. Tech Solutions Inc." oninput="updatePreview()">
+          <input type="text" class="exp-company" value="${esc(data.company)}" placeholder="e.g. Tech Solutions Inc." oninput="updatePreview()">
         </div>
       </div>
       <div class="form-row-2">
         <div class="form-group">
           <label>Duration / Period</label>
-          <input type="text" class="exp-duration" value="${data.duration || ''}" placeholder="e.g. June 2022 - Present" oninput="updatePreview()">
+          <input type="text" class="exp-duration" value="${esc(data.duration)}" placeholder="e.g. June 2022 - Present" oninput="updatePreview()">
         </div>
       </div>
       <div class="form-group">
         <label>Key Responsibilities & Achievements <span class="opt">(use - bullets for newlines)</span></label>
-        <textarea class="exp-desc" rows="3" placeholder="- Led a team of 4 representatives...&#10;- Increased sales volume by 20% in Q3..." oninput="updatePreview()">${data.desc || ''}</textarea>
+        <textarea class="exp-desc" rows="3" placeholder="- Led a team of 4 representatives...&#10;- Increased sales volume by 20% in Q3..." oninput="updatePreview()">${esc(data.desc)}</textarea>
         <button class="ai-assist-btn" onclick="aiImproveExperience(${index})" id="btn-exp-${index}">
           <div class="ai-spinner"></div>
           <span>✨ AI: Improve bullet points</span>
@@ -1198,21 +1381,21 @@
       <div class="form-row-2">
         <div class="form-group">
           <label>Degree / Qualification</label>
-          <input type="text" class="edu-degree" value="${data.degree || ''}" placeholder="e.g. Bachelor of Commerce" oninput="updatePreview()">
+          <input type="text" class="edu-degree" value="${esc(data.degree)}" placeholder="e.g. Bachelor of Commerce" oninput="updatePreview()">
         </div>
         <div class="form-group">
           <label>Institution / Board</label>
-          <input type="text" class="edu-institution" value="${data.institution || ''}" placeholder="e.g. Calicut University" oninput="updatePreview()">
+          <input type="text" class="edu-institution" value="${esc(data.institution)}" placeholder="e.g. Calicut University" oninput="updatePreview()">
         </div>
       </div>
       <div class="form-row-2">
         <div class="form-group">
           <label>Graduation Year / Period</label>
-          <input type="text" class="edu-year" value="${data.year || ''}" placeholder="e.g. 2021 - 2024" oninput="updatePreview()">
+          <input type="text" class="edu-year" value="${esc(data.year)}" placeholder="e.g. 2021 - 2024" oninput="updatePreview()">
         </div>
         <div class="form-group">
           <label>Grade / Score <span class="opt">(optional)</span></label>
-          <input type="text" class="edu-grade" value="${data.grade || ''}" placeholder="e.g. 8.5 CGPA or 82%" oninput="updatePreview()">
+          <input type="text" class="edu-grade" value="${esc(data.grade)}" placeholder="e.g. 8.5 CGPA or 82%" oninput="updatePreview()">
         </div>
       </div>
     `;
@@ -1235,16 +1418,16 @@
       <div class="form-row-2">
         <div class="form-group">
           <label>Project Title</label>
-          <input type="text" class="proj-title" value="${data.title || ''}" placeholder="e.g. E-Commerce Web Application" oninput="updatePreview()">
+          <input type="text" class="proj-title" value="${esc(data.title)}" placeholder="e.g. E-Commerce Web Application" oninput="updatePreview()">
         </div>
         <div class="form-group">
           <label>Duration / Period</label>
-          <input type="text" class="proj-duration" value="${data.duration || ''}" placeholder="e.g. Winter 2024" oninput="updatePreview()">
+          <input type="text" class="proj-duration" value="${esc(data.duration)}" placeholder="e.g. Winter 2024" oninput="updatePreview()">
         </div>
       </div>
       <div class="form-group">
         <label>Description / Technical Stack</label>
-        <textarea class="proj-desc" rows="3" placeholder="Developed using Node.js, Express and SQLite. Configured automated SMS receipts..." oninput="updatePreview()">${data.desc || ''}</textarea>
+        <textarea class="proj-desc" rows="3" placeholder="Developed using Node.js, Express and SQLite. Configured automated SMS receipts..." oninput="updatePreview()">${esc(data.desc)}</textarea>
       </div>
     `;
     container.appendChild(card);
@@ -1488,46 +1671,43 @@
     }
   }
 
-  function downloadPDFDirect() {
-    const element = document.getElementById('cvDocContainer').firstElementChild;
-    if (!element) {
-      alert("No document content found. Please fill out details first.");
+  async function downloadPDFDirect() {
+    const source = document.getElementById('cvDocContainer').firstElementChild;
+    if (!source || !source.classList || !String(source.className).includes('tmpl-')) {
+      alert("No document content found. Please fill in your details first.");
       return;
     }
-    
+
+    // Use the browser's native print → "Save as PDF" instead of html2canvas.
+    // html2canvas rasterised the resume into a single JPEG: text was NOT
+    // selectable (bad for ATS), and off-screen capture drifted/clipped content.
+    // Native print gives crisp, selectable, ATS-parseable text, correct fonts,
+    // and proper A4 pagination via the @media print stylesheet — with no CDN
+    // dependency (works even on networks that block cdnjs).
     const name = document.getElementById('cv-name').value.trim() || 'Resume';
-    const btn = document.getElementById('btn-pdf-download');
-    const originalContent = btn.innerHTML;
-    
-    btn.innerHTML = '<span>⏳ Generating PDF...</span>';
-    btn.disabled = true;
 
-    const opt = {
-      margin: 0,
-      filename: `resume_${name.replace(/\s+/g, '_')}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { 
-        scale: 2, 
-        useCORS: true, 
-        letterRendering: true,
-        backgroundColor: '#ffffff'
-      },
-      jsPDF: { 
-        unit: 'mm', 
-        format: 'a4', 
-        orientation: 'portrait' 
-      }
-    };
+    // Make sure the preview reflects the latest edits before printing.
+    updatePreview();
 
-    html2pdf().set(opt).from(element).save().then(() => {
-      btn.innerHTML = originalContent;
-      btn.disabled = false;
-    }).catch(err => {
-      console.error(err);
-      alert("PDF download failed: " + err.message);
-      btn.innerHTML = originalContent;
-      btn.disabled = false;
-    });
+    // Wait for web fonts + the profile photo so print isn't taken against
+    // fallback fonts or a half-loaded image.
+    if (document.fonts && document.fonts.ready) {
+      try { await document.fonts.ready; } catch (_) {}
+    }
+    await Promise.all(Array.from(document.querySelectorAll('#cvDocContainer img')).map(img =>
+      (img.complete && img.naturalWidth) ? Promise.resolve()
+        : new Promise(res => { img.onload = img.onerror = res; })
+    ));
+
+    // Browsers use document.title as the default "Save as PDF" filename.
+    const originalTitle = document.title;
+    document.title = `resume_${name.replace(/\s+/g, '_')}`;
+    const restore = () => { document.title = originalTitle; window.removeEventListener('afterprint', restore); };
+    window.addEventListener('afterprint', restore);
+    // Fallback restore in case afterprint doesn't fire (older Safari).
+    setTimeout(restore, 60000);
+
+    window.print();
   }
 
   // Backup Data Utilities
@@ -1561,13 +1741,53 @@
     input.click();
   }
 
+  // ── HTML ESCAPING (XSS-safe rendering) ──
+  // All preview templates build HTML by string interpolation into innerHTML.
+  // Any user-supplied value (typed, restored from localStorage, imported from a
+  // JSON backup, or parsed by AI from an uploaded PDF/DOCX) must be escaped
+  // before it lands in markup, or a stray < / " / </textarea> breaks the layout
+  // (and, with a crafted import/upload, injects script). We escape ONCE here, at
+  // the render boundary, so raw values are still saved/sent to the API intact.
+  function esc(v) {
+    if (v === undefined || v === null) return '';
+    return String(v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // Return a render-safe copy of the form data: every string field escaped,
+  // entry arrays deep-escaped. Non-text fields (template, themeColor, sizing)
+  // are carried through unchanged; photo is a data: URL but is escaped too so a
+  // crafted import can't break out of the src="" attribute.
+  function escapeData(raw) {
+    const escEntry = obj => {
+      const out = {};
+      for (const k in obj) out[k] = esc(obj[k]);
+      return out;
+    };
+    return {
+      ...raw,
+      name: esc(raw.name), role: esc(raw.role), email: esc(raw.email),
+      phone: esc(raw.phone), location: esc(raw.location), linkedin: esc(raw.linkedin),
+      summary: esc(raw.summary), skills: esc(raw.skills),
+      achievements: esc(raw.achievements), languages: esc(raw.languages),
+      photo: esc(raw.photo),
+      experience: (raw.experience || []).map(escEntry),
+      education: (raw.education || []).map(escEntry),
+      projects: (raw.projects || []).map(escEntry)
+    };
+  }
+
   // ── PREVIEW COMPOSITIONS ──
   function updatePreview() {
     try {
-      const d = collectFormData();
-      saveToLocalStorage(d);
+      const raw = collectFormData();
+      saveToLocalStorage(raw);
 
-      if (!d.name && !d.phone && !d.email) {
+      if (!raw.name && !raw.phone && !raw.email) {
         document.getElementById('cvDocContainer').innerHTML = `
           <div style="padding: 60px; text-align: center; color: #64748b; font-family:'Outfit', sans-serif;">
             <div style="font-size: 50px; margin-bottom: 16px;">📄</div>
@@ -1577,11 +1797,12 @@
         return;
       }
 
+      const d = escapeData(raw);
       let innerHTML = '';
-      
+
       // Inject Theme Variable dynamically
-      document.getElementById('cvDocContainer').style.setProperty('--theme-color', d.themeColor);
-      
+      document.getElementById('cvDocContainer').style.setProperty('--theme-color', raw.themeColor);
+
       if (d.template === 'classic') {
         innerHTML = buildClassic(d);
       } else if (d.template === 'modern') {
@@ -1594,19 +1815,38 @@
         innerHTML = buildExecutive(d);
       } else if (d.template === 'tech') {
         innerHTML = buildTech(d);
+      } else if (d.template === 'corporate') {
+        innerHTML = buildCorporate(d);
+      } else if (d.template === 'serif') {
+        innerHTML = buildSerif(d);
+      } else if (d.template === 'compact') {
+        innerHTML = buildCompact(d);
+      } else if (d.template === 'academic') {
+        innerHTML = buildAcademic(d);
+      } else if (d.template === 'banner') {
+        innerHTML = buildBanner(d);
+      } else if (d.template === 'timeline') {
+        innerHTML = buildTimeline(d);
+      } else if (d.template === 'infographic') {
+        innerHTML = buildInfographic(d);
+      } else if (d.template === 'ivy') {
+        innerHTML = buildIvy(d);
+      } else if (d.template === 'editorial') {
+        innerHTML = buildEditorial(d);
       } else {
         innerHTML = buildVisual(d);
       }
 
       document.getElementById('cvDocContainer').innerHTML = innerHTML;
     } catch (err) {
-      console.error(err);
+      // Log the details for debugging, but never dump a raw stack trace into the
+      // customer-facing preview.
+      console.error('CV preview render error:', err);
       document.getElementById('cvDocContainer').innerHTML = `
-        <div style="padding: 24px; text-align: left; color: #dc2626; font-family: monospace; font-size: 12px; background: #fee2e2; border: 1.5px solid #fca5a5; border-radius: 4px; line-height: 1.5; margin: 10px;">
-          <strong style="font-size: 14px;">⚠️ JavaScript Render Error</strong><br>
-          <span style="font-weight: 700;">Error Message:</span> ${err.message}<br><br>
-          <strong style="display: block; margin-bottom: 4px;">Stack Trace:</strong>
-          <pre style="white-space: pre-wrap; font-size: 10px; margin: 0; background: rgba(0,0,0,0.03); padding: 8px; border-radius: 4px; overflow-x: auto;">${err.stack}</pre>
+        <div style="padding: 40px; text-align: center; color: #64748b; font-family:'Outfit', sans-serif;">
+          <div style="font-size: 40px; margin-bottom: 12px;">⚠️</div>
+          <div style="font-weight:700; font-size:15px; color:#1e293b;">Couldn't refresh the preview</div>
+          <p style="font-size:12px; margin-top:6px; color:#94a3b8;">Something in the last change tripped up the renderer. Adjust your most recent edit, or use "Reset" to start fresh — your saved data is intact.</p>
         </div>`;
     }
   }
@@ -1991,6 +2231,484 @@
     </div>`;
   }
 
+  // Shared helper: turn a multi-line desc into • bullets (values are already
+  // escaped by escapeData before they reach any build function).
+  function fmtBullets(text) {
+    return text.split('\n').map(l => l.trim()).filter(Boolean)
+      .map(line => line.startsWith('-') ? line : '• ' + line).join('<br>');
+  }
+
+  function buildCorporate(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+
+    return `<div class="tmpl-corporate" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-header">
+        ${photoHtml}
+        <div>
+          <div class="c-name">${d.name || 'Your Full Name'}</div>
+          ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+          <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).join('  •  ')}</div>
+        </div>
+      </div>
+      <div class="c-body" style="padding: ${d.sizing.margins}px;">
+        ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Professional Summary</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+        ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Work Experience</div>
+          ${d.experience.map(e => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+              <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+              <div class="c-entry-sub"><span>${e.company}</span></div>
+              ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+            </div>`).join('')}</div>` : ''}
+
+        ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+          ${d.education.map(e => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/2}px;">
+              <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+              <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+            </div>`).join('')}</div>` : ''}
+
+        ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+          ${d.projects.map(p => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+              <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+              <p class="c-desc">${p.desc}</p>
+            </div>`).join('')}</div>` : ''}
+
+        ${skills.length ? `<div ${spacingStyle}><div class="c-sec-head">Core Skills</div>
+          <p class="c-desc" style="font-weight:500;">${skills.join('  ·  ')}</p></div>` : ''}
+
+        ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Achievements & Certifications</div>
+          <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+
+        ${d.languages ? `<div ${spacingStyle}><div class="c-sec-head">Languages</div><p class="c-desc">${d.languages}</p></div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function buildSerif(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+
+    return `<div class="tmpl-serif" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-header">
+        ${photoHtml}
+        <div class="c-name">${d.name || 'Your Full Name'}</div>
+        ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+        <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).map(c => `<span>${c}</span>`).join('')}</div>
+      </div>
+
+      ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Profile</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+      ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Experience</div>
+        ${d.experience.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+            <div class="c-entry-sub"><span>${e.company}</span></div>
+            ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+          </div>`).join('')}</div>` : ''}
+
+      ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+        ${d.education.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/2}px;">
+            <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+            <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+          </div>`).join('')}</div>` : ''}
+
+      ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+        ${d.projects.map(p => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+            <p class="c-desc">${p.desc}</p>
+          </div>`).join('')}</div>` : ''}
+
+      ${skills.length ? `<div ${spacingStyle}><div class="c-sec-head">Skills</div>
+        <p class="c-desc" style="text-align:center; font-weight:500;">${skills.join('  ·  ')}</p></div>` : ''}
+
+      ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Achievements</div>
+        <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+
+      ${d.languages ? `<div ${spacingStyle}><div class="c-sec-head">Languages</div><p class="c-desc" style="text-align:center;">${d.languages}</p></div>` : ''}
+    </div>`;
+  }
+
+  function buildCompact(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+
+    const expBlock = d.experience.length ? `<div class="c-sec-head">Experience</div>
+      ${d.experience.map(e => `
+        <div class="c-entry">
+          <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+          <div class="c-entry-sub"><span>${e.company}</span></div>
+          ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+        </div>`).join('')}` : '';
+
+    const projBlock = d.projects.length ? `<div class="c-sec-head">Projects</div>
+      ${d.projects.map(p => `
+        <div class="c-entry">
+          <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+          <p class="c-desc">${p.desc}</p>
+        </div>`).join('')}` : '';
+
+    const eduBlock = d.education.length ? `<div class="c-sec-head">Education</div>
+      ${d.education.map(e => `
+        <div class="c-entry">
+          <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+          <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+        </div>`).join('')}` : '';
+
+    const skillsBlock = skills.length ? `<div class="c-sec-head">Skills</div>
+      <p class="c-desc" style="font-weight:500;">${skills.join(', ')}</p>` : '';
+
+    const achBlock = achievements.length ? `<div class="c-sec-head">Achievements</div>
+      <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p>` : '';
+
+    const langBlock = d.languages ? `<div class="c-sec-head">Languages</div><p class="c-desc">${d.languages}</p>` : '';
+
+    return `<div class="tmpl-compact" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-header">
+        <div>
+          <div class="c-name">${d.name || 'Your Full Name'}</div>
+          ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+          <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).join('  •  ')}</div>
+        </div>
+        ${photoHtml}
+      </div>
+
+      ${d.summary ? `<div style="margin-bottom:10px;"><div class="c-sec-head">Summary</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+      <div class="c-columns">
+        <div>${expBlock}${projBlock}</div>
+        <div>${eduBlock}${skillsBlock}${achBlock}${langBlock}</div>
+      </div>
+    </div>`;
+  }
+
+  function buildAcademic(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+
+    return `<div class="tmpl-academic" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-header">
+        <div class="c-name">${d.name || 'Your Full Name'}</div>
+        ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+        <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).join('  ·  ')}</div>
+      </div>
+
+      ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Research / Professional Statement</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+      ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+        ${d.education.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+            <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+          </div>`).join('')}</div>` : ''}
+
+      ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Appointments & Experience</div>
+        ${d.experience.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+            <div class="c-entry-sub"><span>${e.company}</span></div>
+            ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+          </div>`).join('')}</div>` : ''}
+
+      ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Research Projects</div>
+        ${d.projects.map(p => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+            <p class="c-desc">${p.desc}</p>
+          </div>`).join('')}</div>` : ''}
+
+      ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Awards, Publications & Certifications</div>
+        <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+
+      ${skills.length ? `<div ${spacingStyle}><div class="c-sec-head">Skills & Competencies</div>
+        <p class="c-desc" style="font-weight:500;">${skills.join('  ·  ')}</p></div>` : ''}
+
+      ${d.languages ? `<div ${spacingStyle}><div class="c-sec-head">Languages</div><p class="c-desc">${d.languages}</p></div>` : ''}
+    </div>`;
+  }
+
+  function buildBanner(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const languages = d.languages.split(',').map(s => s.trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+
+    return `<div class="tmpl-banner" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-banner">
+        ${photoHtml}
+        <div>
+          <div class="c-name">${d.name || 'Your Full Name'}</div>
+          ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+          <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).map(c => `<span>${c}</span>`).join('')}</div>
+        </div>
+      </div>
+      <div class="c-columns">
+        <div class="c-aside">
+          ${skills.length ? `<div class="c-sec-head">Skills</div>
+            <div>${skills.map(s => `<span class="c-chip">${s}</span>`).join('')}</div>` : ''}
+
+          ${d.education.length ? `<div class="c-sec-head">Education</div>
+            ${d.education.map(e => `
+              <div class="c-entry">
+                <div class="c-entry-header"><span>${e.degree}</span></div>
+                <div class="c-entry-sub"><span>${e.institution}</span></div>
+                <div class="c-desc">${[e.year, e.grade].filter(Boolean).join(' · ')}</div>
+              </div>`).join('')}` : ''}
+
+          ${languages.length ? `<div class="c-sec-head">Languages</div>
+            ${languages.map(l => `<div class="c-item">${l}</div>`).join('')}` : ''}
+
+          ${achievements.length ? `<div class="c-sec-head">Achievements</div>
+            ${achievements.map(a => `<div class="c-item">• ${a}</div>`).join('')}` : ''}
+        </div>
+        <div class="c-main" style="padding: ${d.sizing.margins}px;">
+          ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Profile</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+          ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Experience</div>
+            ${d.experience.map(e => `
+              <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+                <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+                <div class="c-entry-sub"><span>${e.company}</span></div>
+                ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+              </div>`).join('')}</div>` : ''}
+
+          ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+            ${d.projects.map(p => `
+              <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+                <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+                <p class="c-desc">${p.desc}</p>
+              </div>`).join('')}</div>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function buildTimeline(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+
+    return `<div class="tmpl-timeline" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight}; padding: ${d.sizing.margins}px;">
+      <div class="c-header">
+        ${photoHtml}
+        <div>
+          <div class="c-name">${d.name || 'Your Full Name'}</div>
+          ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+          <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).map(c => `<span>${c}</span>`).join('')}</div>
+        </div>
+      </div>
+
+      ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Profile</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+      ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Experience</div>
+        <div class="c-track">
+          ${d.experience.map(e => `
+            <div class="c-entry">
+              <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+              <div class="c-entry-sub"><span>${e.company}</span></div>
+              ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+            </div>`).join('')}
+        </div></div>` : ''}
+
+      ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+        <div class="c-track">
+          ${d.education.map(e => `
+            <div class="c-entry">
+              <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+              <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+            </div>`).join('')}
+        </div></div>` : ''}
+
+      ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+        <div class="c-track">
+          ${d.projects.map(p => `
+            <div class="c-entry">
+              <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+              <p class="c-desc">${p.desc}</p>
+            </div>`).join('')}
+        </div></div>` : ''}
+
+      ${skills.length ? `<div ${spacingStyle}><div class="c-sec-head">Skills</div>
+        <div>${skills.map(s => `<span class="c-chip">${s}</span>`).join('')}</div></div>` : ''}
+
+      ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Achievements</div>
+        <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+
+      ${d.languages ? `<div ${spacingStyle}><div class="c-sec-head">Languages</div><p class="c-desc">${d.languages}</p></div>` : ''}
+    </div>`;
+  }
+
+  function buildInfographic(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const languages = d.languages.split(',').map(s => s.trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+    const photoHtml = d.photo ? `<img src="${d.photo}" class="c-photo">` : '';
+    // Decorative proficiency indicators — cycle a fixed set so bars/dots look
+    // designed rather than implying a precise self-assessed level.
+    const barLevels = [92, 85, 88, 80, 90, 83, 95, 78];
+    const dotLevels = [5, 4, 4, 3];
+
+    return `<div class="tmpl-infographic" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight};">
+      <div class="c-aside">
+        ${photoHtml}
+        <div class="c-name">${d.name || 'Your Name'}</div>
+        ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+
+        <div class="c-sec-head">Contact</div>
+        ${d.phone ? `<div class="c-contact-item">📞 ${d.phone}</div>` : ''}
+        ${d.email ? `<div class="c-contact-item">✉ ${d.email}</div>` : ''}
+        ${d.location ? `<div class="c-contact-item">📍 ${d.location}</div>` : ''}
+        ${d.linkedin ? `<div class="c-contact-item">🔗 ${d.linkedin.replace(/^https?:\/\/(www\.)?/, '')}</div>` : ''}
+
+        ${skills.length ? `<div class="c-sec-head">Skills</div>
+          ${skills.map((s, i) => `
+            <div class="c-skill">
+              <div class="c-skill-name">${s}</div>
+              <div class="c-bar"><span style="width:${barLevels[i % barLevels.length]}%;"></span></div>
+            </div>`).join('')}` : ''}
+
+        ${languages.length ? `<div class="c-sec-head">Languages</div>
+          ${languages.map((l, i) => {
+            const on = dotLevels[i % dotLevels.length];
+            const dots = [1,2,3,4,5].map(n => `<span class="c-dot${n <= on ? ' on' : ''}"></span>`).join('');
+            return `<div class="c-lang"><span>${l}</span><span class="c-dots">${dots}</span></div>`;
+          }).join('')}` : ''}
+      </div>
+      <div class="c-main" style="padding: ${d.sizing.margins}px;">
+        ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Profile</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+        ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Experience</div>
+          ${d.experience.map(e => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+              <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+              <div class="c-entry-sub"><span>${e.company}</span></div>
+              ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+            </div>`).join('')}</div>` : ''}
+
+        ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+          ${d.education.map(e => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/2}px;">
+              <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+              <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+            </div>`).join('')}</div>` : ''}
+
+        ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+          ${d.projects.map(p => `
+            <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+              <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+              <p class="c-desc">${p.desc}</p>
+            </div>`).join('')}</div>` : ''}
+
+        ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Achievements & Certifications</div>
+          <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function buildIvy(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const spacingStyle = `style="margin-bottom: ${d.sizing.spacing}px;"`;
+
+    return `<div class="tmpl-ivy" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight}; padding: ${d.sizing.margins}px;">
+      <div class="c-header">
+        <div class="c-name">${d.name || 'Your Full Name'}</div>
+        ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+        <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).join('  |  ')}</div>
+      </div>
+
+      ${d.summary ? `<div ${spacingStyle}><div class="c-sec-head">Summary</div><p class="c-desc">${d.summary}</p></div>` : ''}
+
+      ${d.education.length ? `<div ${spacingStyle}><div class="c-sec-head">Education</div>
+        ${d.education.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${e.institution}</span><span>${e.year}</span></div>
+            <div class="c-entry-sub"><span>${e.degree}</span><span>${e.grade || ''}</span></div>
+          </div>`).join('')}</div>` : ''}
+
+      ${d.experience.length ? `<div ${spacingStyle}><div class="c-sec-head">Experience</div>
+        ${d.experience.map(e => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${e.company}</span><span>${e.duration}</span></div>
+            <div class="c-entry-sub"><span>${e.role}</span></div>
+            ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+          </div>`).join('')}</div>` : ''}
+
+      ${d.projects.length ? `<div ${spacingStyle}><div class="c-sec-head">Projects</div>
+        ${d.projects.map(p => `
+          <div class="c-entry" style="margin-bottom:${d.sizing.spacing/1.5}px;">
+            <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+            <p class="c-desc">${p.desc}</p>
+          </div>`).join('')}</div>` : ''}
+
+      ${skills.length ? `<div ${spacingStyle}><div class="c-sec-head">Skills</div>
+        <p class="c-desc">${skills.join(', ')}</p></div>` : ''}
+
+      ${achievements.length ? `<div ${spacingStyle}><div class="c-sec-head">Awards & Certifications</div>
+        <p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p></div>` : ''}
+
+      ${d.languages ? `<div ${spacingStyle}><div class="c-sec-head">Languages</div><p class="c-desc">${d.languages}</p></div>` : ''}
+    </div>`;
+  }
+
+  function buildEditorial(d) {
+    const skills = d.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const achievements = d.achievements.split('\n').map(s => s.replace(/^-\s*/, '').trim()).filter(Boolean);
+
+    const block = (title, inner) => inner ? `<div class="c-block"><div class="c-sec-head">${title}</div><div>${inner}</div></div>` : '';
+
+    const expInner = d.experience.length ? d.experience.map(e => `
+      <div class="c-entry">
+        <div class="c-entry-header"><span>${e.role}</span><span>${e.duration}</span></div>
+        <div class="c-entry-sub"><span>${e.company}</span></div>
+        ${e.desc ? `<p class="c-desc">${fmtBullets(e.desc)}</p>` : ''}
+      </div>`).join('') : '';
+
+    const eduInner = d.education.length ? d.education.map(e => `
+      <div class="c-entry">
+        <div class="c-entry-header"><span>${e.degree}</span><span>${e.year}</span></div>
+        <div class="c-entry-sub"><span>${e.institution}</span><span>${e.grade || ''}</span></div>
+      </div>`).join('') : '';
+
+    const projInner = d.projects.length ? d.projects.map(p => `
+      <div class="c-entry">
+        <div class="c-entry-header"><span>${p.title}</span><span>${p.duration}</span></div>
+        <p class="c-desc">${p.desc}</p>
+      </div>`).join('') : '';
+
+    const skillsInner = skills.length ? `<p class="c-desc" style="font-weight:500;">${skills.join('  ·  ')}</p>` : '';
+    const achInner = achievements.length ? `<p class="c-desc">${achievements.map(a => '• ' + a).join('<br>')}</p>` : '';
+    const langInner = d.languages ? `<p class="c-desc">${d.languages}</p>` : '';
+
+    return `<div class="tmpl-editorial" style="font-size: ${d.sizing.fontsize}px; line-height: ${d.sizing.lineheight}; padding: ${d.sizing.margins}px;">
+      <div class="c-header">
+        <div class="c-name">${d.name || 'Your Full Name'}</div>
+        ${d.role ? `<div class="c-role">${d.role}</div>` : ''}
+        <div class="c-contact">${[d.phone, d.email, d.location, d.linkedin].filter(Boolean).map(c => `<span>${c}</span>`).join('')}</div>
+      </div>
+      ${block('Profile', d.summary ? `<p class="c-desc">${d.summary}</p>` : '')}
+      ${block('Experience', expInner)}
+      ${block('Education', eduInner)}
+      ${block('Projects', projInner)}
+      ${block('Skills', skillsInner)}
+      ${block('Awards', achInner)}
+      ${block('Languages', langInner)}
+    </div>`;
+  }
+
   // ── LOCAL REAL-TIME ATS METHOD ──
   function triggerLocalATS() {
     const jd = document.getElementById('cv-jd-input').value.trim();
@@ -2121,13 +2839,19 @@
 
   // ── AI HANDLERS VIA SERVERLESS ENDPOINTS ──
   async function callResumeAPI(action, payloadData) {
+    const pw = ensureAdminPassword();
+    if (!pw) throw new Error('Admin password required to use AI features.');
     const res = await fetch(API + '/resume/coach', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Password': pw },
       body: JSON.stringify({ action: action, data: payloadData })
     });
+    if (res.status === 403) {
+      clearAdminPassword();
+      throw new Error('Admin password rejected. Please re-enter it and try again.');
+    }
     if (!res.ok) {
-      const errorData = await res.json();
+      const errorData = await res.json().catch(() => ({}));
       throw new Error(errorData.error || 'Server request failed');
     }
     return await res.json();
@@ -2314,20 +3038,27 @@
     loaderText.innerText = "Extracting text from file...";
 
     try {
+      const pw = ensureAdminPassword();
+      if (!pw) { loader.classList.remove('active'); alert('Admin password required to use AI features.'); return; }
+
       const base64Content = await fileToBase64(file);
       loaderText.innerText = "Claude is structuring content...";
 
       const res = await fetch(API + '/resume/parse', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Password': pw },
         body: JSON.stringify({
           content_b64: base64Content,
           filename: file.name
         })
       });
 
+      if (res.status === 403) {
+        clearAdminPassword();
+        throw new Error('Admin password rejected. Please re-enter it and try again.');
+      }
       if (!res.ok) {
-        const errorData = await res.json();
+        const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.error || 'Document extraction failed');
       }
 

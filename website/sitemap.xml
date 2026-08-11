@@ -72,12 +72,7 @@
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
-  <url>
-    <loc>https://printosky.com/cv-builder.html</loc>
-    <lastmod>2026-06-16</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-  </url>
+  <!-- cv-builder.html intentionally omitted: operator-only during private testing, not public yet. -->
   <url>
     <loc>https://printosky.com/project-builder.html</loc>
     <lastmod>2026-06-16</lastmod>

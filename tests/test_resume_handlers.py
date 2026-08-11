@@ -25,6 +25,7 @@ def test_resume_coach_improve_summary(monkeypatch):
     import api.index
     captured = {}
     monkeypatch.setattr(api.index, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(hr, "_require_admin", lambda h: True)  # auth covered by its own test
     
     mock_client = _fake_client("This is an improved professional summary text.")
     monkeypatch.setattr(hr, "_get_claude_client", lambda: mock_client)
@@ -49,6 +50,7 @@ def test_resume_coach_suggest_skills(monkeypatch):
     import api.index
     captured = {}
     monkeypatch.setattr(api.index, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(hr, "_require_admin", lambda h: True)  # auth covered by its own test
     
     mock_client = _fake_client("Tally ERP, GST, Tax Filing, Excel, Communication")
     monkeypatch.setattr(hr, "_get_claude_client", lambda: mock_client)
@@ -70,6 +72,7 @@ def test_resume_coach_optimize_ats(monkeypatch):
     import api.index
     captured = {}
     monkeypatch.setattr(api.index, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(hr, "_require_admin", lambda h: True)  # auth covered by its own test
     
     response_json = {
         "score": 92,
@@ -95,14 +98,79 @@ def test_resume_coach_optimize_ats(monkeypatch):
     assert captured["data"]["score"] == 92
     assert "SQL" in captured["data"]["matching_keywords"]
 
-def test_resume_parse_pdf(monkeypatch):
+def test_resume_coach_rejects_oversized_body(monkeypatch):
+    """Oversized bodies are rejected before any (billable) Claude call."""
     import api.handlers_resume as hr
     import api.index
     captured = {}
     monkeypatch.setattr(api.index, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
-    
-    # Mock text extraction to return something
-    monkeypatch.setattr(hr.docx_engine, "extract_text_from_pdf", lambda b: "Sample Resume Text")
+    monkeypatch.setattr(hr, "_require_admin", lambda h: True)  # auth covered by its own test
+
+    client_called = {"v": False}
+    def _boom():
+        client_called["v"] = True
+        return _fake_client("should not be reached")
+    monkeypatch.setattr(hr, "_get_claude_client", _boom)
+
+    huge = b'{"action":"improve_summary","data":{"current_summary":"' + b"x" * 200_000 + b'"}}'
+    hr._handle_resume_coach(_fake_h(), huge)
+
+    assert captured["status"] == 413
+    assert client_called["v"] is False  # never spent a token
+
+
+def test_resume_coach_rejects_wrong_admin_password(monkeypatch):
+    """A wrong admin password 403s before any (billable) Claude call."""
+    import api.handlers_resume as hr
+    import api.index
+    captured = {}
+    monkeypatch.setattr(api.index, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(api.index, "ADMIN_PASSWORD_HASH", api.index._sha256("correct-horse"))
+
+    called = {"v": False}
+    def _boom():
+        called["v"] = True
+        return _fake_client("nope")
+    monkeypatch.setattr(hr, "_get_claude_client", _boom)
+
+    h = MagicMock()
+    h.headers = {"X-Admin-Password": "wrong-pw"}
+    payload = {"action": "improve_summary", "data": {"name": "A"}}
+    hr._handle_resume_coach(h, json.dumps(payload).encode())
+
+    assert captured["status"] == 403
+    assert called["v"] is False  # never reached the client
+
+
+def test_resume_coach_accepts_valid_admin_password(monkeypatch):
+    """The correct admin password lets the request through to the coach."""
+    import api.handlers_resume as hr
+    import api.index
+    captured = {}
+    monkeypatch.setattr(api.index, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(api.index, "ADMIN_PASSWORD_HASH", api.index._sha256("s3cret"))
+    monkeypatch.setattr(hr, "_get_claude_client", lambda: _fake_client("ok summary"))
+
+    h = MagicMock()
+    h.headers = {"X-Admin-Password": "s3cret"}
+    payload = {"action": "improve_summary", "data": {"name": "A"}}
+    hr._handle_resume_coach(h, json.dumps(payload).encode())
+
+    assert captured["status"] == 200
+    assert captured["data"]["result"] == "ok summary"
+
+
+def test_resume_parse_pdf(monkeypatch):
+    import api.handlers_resume as hr
+    import api.index
+    import docx_engine
+    captured = {}
+    monkeypatch.setattr(api.index, "_json_response", lambda h, s, d: captured.update(status=s, data=d))
+    monkeypatch.setattr(hr, "_require_admin", lambda h: True)  # auth covered by its own test
+
+    # Mock text extraction to return something. handlers_resume lazy-imports
+    # docx_engine inside the handler, so patch the canonical module here.
+    monkeypatch.setattr(docx_engine, "extract_text_from_pdf", lambda b: "Sample Resume Text")
     
     parsed_json = {
       "name": "Test Candidate",
