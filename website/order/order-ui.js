@@ -1080,6 +1080,67 @@ function onStaffSuccess(jobId, total) {
 }
 
 // ── Wiring ────────────────────────────────────────────────────────────────────
+// Staff sign-in gate. order-v2 staff mode carries no login of its own — it reads
+// the PIN from sessionStorage. When launched standalone (or on a machine off the
+// store LAN, e.g. the office box) that PIN is missing, so we verify it against
+// the cloud (/staff/login → Supabase active staff) with no store-PC dependency.
+// Resolves immediately when a PIN is already present (e.g. opened from jobs.html).
+function ensureStaffAuth() {
+  if (sessionStorage.getItem('staff_pin')) return Promise.resolve();
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.setAttribute('role', 'dialog');
+    ov.style.cssText =
+      'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;' +
+      'justify-content:center;background:rgba(17,24,39,.72);backdrop-filter:blur(2px)';
+    ov.innerHTML =
+      '<div style="background:#fff;border-radius:16px;padding:28px 26px;width:min(360px,92vw);' +
+      'box-shadow:0 20px 60px rgba(0,0,0,.35);font-family:inherit;text-align:center">' +
+      '<div style="font-size:18px;font-weight:700;color:#111827">Staff sign-in</div>' +
+      '<div style="font-size:13px;color:#6b7280;margin:6px 0 16px">Enter your staff PIN to create jobs.</div>' +
+      '<input id="ov2-staffpin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" ' +
+      'placeholder="PIN" style="width:100%;box-sizing:border-box;padding:12px 14px;font-size:20px;' +
+      'letter-spacing:.3em;text-align:center;border:1.5px solid #d1d5db;border-radius:10px;outline:none" />' +
+      '<div id="ov2-staffpin-err" style="min-height:18px;color:#dc2626;font-size:12.5px;margin:8px 0"></div>' +
+      '<button id="ov2-staffpin-btn" type="button" style="width:100%;padding:12px;font-size:15px;' +
+      'font-weight:600;color:#fff;background:#2563eb;border:none;border-radius:10px;cursor:pointer">' +
+      'Sign in</button></div>';
+    document.body.appendChild(ov);
+    const input = ov.querySelector('#ov2-staffpin');
+    const btn = ov.querySelector('#ov2-staffpin-btn');
+    const err = ov.querySelector('#ov2-staffpin-err');
+    input.focus();
+    async function submit() {
+      const pin = input.value.trim();
+      if (!/^\d{4,8}$/.test(pin)) { err.textContent = 'Enter your 4–8 digit PIN'; return; }
+      btn.disabled = true; err.textContent = '';
+      try {
+        const r = await fetch(API + '/staff/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) {
+          sessionStorage.setItem('staff_pin', pin);
+          sessionStorage.setItem('staff_id', d.staff_id || '');
+          sessionStorage.setItem('staff_name', d.name || '');
+          ov.remove();
+          resolve();
+        } else {
+          err.textContent = d.error || 'Incorrect PIN';
+          btn.disabled = false; input.select();
+        }
+      } catch (e) {
+        err.textContent = 'Network error — try again';
+        btn.disabled = false;
+      }
+    }
+    btn.addEventListener('click', submit);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  });
+}
+
 function wire() {
   const fileInput = $('ov2-file');
   fileInput.addEventListener('change', (e) => {
@@ -1138,6 +1199,9 @@ function wire() {
 
   // ── Staff mode: hide customer fields, lock store, relabel UI ──
   if (STAFF) {
+    // Gate the page behind a staff PIN when none is inherited from a prior login.
+    // Verified in the cloud, so it works off the store LAN (e.g. the office box).
+    ensureStaffAuth();
     // Map store_id to pickup_store name
     const sid = (localStorage.getItem('storeId') || '').toUpperCase();
     const storeMap = { OSP: 'thriprayar', PRINTK: 'nattika' };

@@ -1844,6 +1844,48 @@ def _handle_staff_set_pin(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "Server error"})
 
 
+def _handle_staff_login(h, body: bytes) -> None:
+    """POST /staff/login — verify a staff PIN against active staff in Supabase,
+    independent of any store PC.
+
+    The store-PC login (print_server ``/staff-login``) only works on the store
+    LAN. This cloud endpoint lets staff authenticate from any network (e.g. the
+    office / PRIOFF box) so cloud tools — order-v2 staff mode, the Jobs console —
+    work off-LAN. Returns ``{ok, staff_id, name}`` on match. It deliberately does
+    NOT create a ``staff_sessions`` row; that activity tracking stays the store
+    PC's job for on-LAN logins.
+    """
+    try:
+        payload = json.loads(body or b"{}")
+        pin = (payload.get("pin") or "").strip()
+    except Exception:
+        _json_response(h, 400, {"error": "Invalid JSON"})
+        return
+    if not pin.isdigit() or not (4 <= len(pin) <= 8):
+        _json_response(h, 400, {"ok": False, "error": "pin must be 4-8 digits"})
+        return
+    try:
+        from db_cloud import _client
+        result = (
+            _client()
+            .table("staff")
+            .select("id,name,pin_hash,pin_salt")
+            .eq("active", True)
+            .execute()
+        )
+        for r in (result.data or []):
+            if _verify_pin(pin, r["pin_hash"], r.get("pin_salt")):
+                logger.info(f"Staff {r['id']} cloud PIN login")
+                _json_response(h, 200, {
+                    "ok": True, "staff_id": r["id"], "name": r.get("name") or r["id"],
+                })
+                return
+        _json_response(h, 401, {"ok": False, "error": "Incorrect PIN"})
+    except Exception as e:
+        logger.error(f"staff/login error: {e}")
+        _json_response(h, 500, {"ok": False, "error": "Server error"})
+
+
 def _handle_staff_resume(h, body: bytes) -> None:
     """POST /staff/resume — resume bot for a customer held by staff.
 
@@ -2929,6 +2971,10 @@ class handler(BaseHTTPRequestHandler):
 
         if self.path == "/staff/set-pin":
             _handle_staff_set_pin(self, body)
+            return
+
+        if self.path == "/staff/login":
+            _handle_staff_login(self, body)
             return
 
         if self.path == "/admin/reset-pin":

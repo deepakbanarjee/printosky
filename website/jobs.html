@@ -1666,43 +1666,63 @@ async function tryPinLogin() {
   const pin = document.getElementById("pin-input").value;
   if (pin.length !== 6) return;
   const pcId = getPcId();
-  try {
-    const r = await fetch(`${STORE_PC_URL}/staff-login`, {
-      method: "POST",
-      headers: storeHeaders(),
-      body: JSON.stringify({ pin, pc_id: pcId }),
-    });
-    const data = await r.json();
-    if (data.ok) {
-      sessionStorage.setItem("p_auth", "1");
-      sessionStorage.setItem("staff_id", data.staff_id);
-      sessionStorage.setItem("staff_name", data.name);
-      sessionStorage.setItem("session_id", data.session_id);
-      sessionStorage.setItem("staff_pin", pin);
-      // Fetch Supabase JWT so sbFetch works with RLS-protected tables
-      try {
-        const jr = await fetch("/.netlify/functions/auth", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "staff", password: localStorage.getItem("storeToken") || "" }),
-        });
-        const jd = await jr.json();
-        if (jd.supabase_jwt) sessionStorage.setItem("supabase_jwt", jd.supabase_jwt);
-      } catch { /* JWT optional — falls back to anon key */ }
-      showDashboard();
-    } else {
-      document.getElementById("login-err").textContent = "Incorrect PIN";
-      document.getElementById("login-err").style.display = "block";
-      document.getElementById("pin-input").value = "";
-      for (let i = 0; i < 6; i++) document.getElementById("pd" + i).classList.remove("filled");
-    }
-  } catch {
-    // Store PC offline — fall back to admin override only
-    document.getElementById("login-err").textContent = "Print server offline — use Admin Override";
-    document.getElementById("login-err").style.display = "block";
-    document.getElementById("pin-input").value = "";
-    onPinInput();
+  // 1) Store-PC login first (on-LAN — also opens a staff_sessions activity row).
+  if (STORE_PC_URL) {
+    try {
+      const r = await fetch(`${STORE_PC_URL}/staff-login`, {
+        method: "POST",
+        headers: storeHeaders(),
+        body: JSON.stringify({ pin, pc_id: pcId }),
+      });
+      const data = await r.json();
+      if (data.ok) { await onStaffAuthed(pin, data); return; }
+      pinBadLogin("Incorrect PIN");   // reachable + wrong PIN → stop, don't retry cloud
+      return;
+    } catch { /* store PC offline → fall through to the cloud fallback below */ }
   }
+  // 2) Cloud fallback (off-LAN, e.g. the office box): verify the PIN against
+  //    Supabase via the API. No staff_sessions row is created — activity
+  //    tracking stays the store PC's job — but the PIN is stored so staff tools
+  //    (order-v2 New Job, mark-paid) authenticate.
+  try {
+    const r = await fetch(`${ACAD_API}/staff/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) { await onStaffAuthed(pin, data); return; }
+    pinBadLogin(data.error || "Incorrect PIN");
+  } catch {
+    pinBadLogin("Can't reach the server — check your connection");
+  }
+}
+
+// Shared post-auth: persist the staff session, grab a Supabase JWT, open the app.
+async function onStaffAuthed(pin, data) {
+  sessionStorage.setItem("p_auth", "1");
+  sessionStorage.setItem("staff_id", data.staff_id || "");
+  sessionStorage.setItem("staff_name", data.name || "");
+  if (data.session_id) sessionStorage.setItem("session_id", data.session_id);
+  sessionStorage.setItem("staff_pin", pin);
+  // Fetch Supabase JWT so sbFetch works with RLS-protected tables (optional).
+  try {
+    const jr = await fetch("/.netlify/functions/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "staff", password: localStorage.getItem("storeToken") || "" }),
+    });
+    const jd = await jr.json();
+    if (jd.supabase_jwt) sessionStorage.setItem("supabase_jwt", jd.supabase_jwt);
+  } catch { /* JWT optional — falls back to anon key */ }
+  showDashboard();
+}
+
+function pinBadLogin(msg) {
+  document.getElementById("login-err").textContent = msg;
+  document.getElementById("login-err").style.display = "block";
+  document.getElementById("pin-input").value = "";
+  for (let i = 0; i < 6; i++) document.getElementById("pd" + i).classList.remove("filled");
 }
 
 // ── Admin override (master password) ──────────────────────────────────────
