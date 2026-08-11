@@ -1667,6 +1667,11 @@ async function tryPinLogin() {
   if (pin.length !== 6) return;
   const pcId = getPcId();
   // 1) Store-PC login first (on-LAN — also opens a staff_sessions activity row).
+  //    Success ends here. On ANY failure — store PC offline, OR it rejects the
+  //    PIN because its local staff DB has drifted from the cloud copy — fall
+  //    through to the cloud path below, which is the authoritative check. (We no
+  //    longer dead-end on a local rejection: the same PIN that works off-LAN
+  //    must not fail on the store PC just because its SQLite lagged a sync.)
   if (STORE_PC_URL) {
     try {
       const r = await fetch(`${STORE_PC_URL}/staff-login`, {
@@ -1674,16 +1679,15 @@ async function tryPinLogin() {
         headers: storeHeaders(),
         body: JSON.stringify({ pin, pc_id: pcId }),
       });
-      const data = await r.json();
+      const data = await r.json().catch(() => ({}));
       if (data.ok) { await onStaffAuthed(pin, data); return; }
-      pinBadLogin("Incorrect PIN");   // reachable + wrong PIN → stop, don't retry cloud
-      return;
     } catch { /* store PC offline → fall through to the cloud fallback below */ }
   }
-  // 2) Cloud fallback (off-LAN, e.g. the office box): verify the PIN against
-  //    Supabase via the API. No staff_sessions row is created — activity
-  //    tracking stays the store PC's job — but the PIN is stored so staff tools
-  //    (order-v2 New Job, mark-paid) authenticate.
+  // 2) Cloud (Supabase, authoritative): verify the PIN via the API. Works
+  //    off-LAN and when the store PC's local DB drifted. No staff_sessions row
+  //    is created here — activity tracking stays the store PC's on-LAN job — but
+  //    the PIN is stored and a Supabase JWT is minted so the console reads live
+  //    data and staff tools (order-v2 New Job, mark-paid) authenticate.
   try {
     const r = await fetch(`${ACAD_API}/staff/login`, {
       method: "POST",
