@@ -129,9 +129,12 @@ async function handleFile(file) {
   renderThumbs();
   show($('ov2-previewBlock'));
   show($('ov2-controlsBlock'));
-  setNup(1);
+  if (STAFF) show($('ov2-batchbar'));   // multi-file batch controls
+  if (carryOpts) applyCarry();   // 2nd+ file in a staff batch keeps prior options
+  else setNup(1);
   updateSummary();
   requestQuote();
+  updateSubmitLabel();
 }
 
 function guessContentType(ext) {
@@ -705,8 +708,213 @@ async function buildUploadBytes() {
   return await newDoc.save();
 }
 
+// ── Multi-file batch (staff mode) ─────────────────────────────────────────────
+// Staff can queue several files, each with its OWN print options, and create one
+// job per file in a single submit. The existing single-file editor edits the
+// "current" file; addAnotherFile() snapshots it into `batch` (carrying the print
+// options forward as defaults) and loads the next file. Submit loops batch + the
+// current file, uploading + creating each independently.
+let batch = [];          // [{ bytes, contentType, spec }]
+let pendingFiles = [];   // Files still to load from a multi-select
+let carryOpts = null;    // print options carried to the next file
+
+function snapshotSpec() {
+  return {
+    fileName: state.fileName, fileExt: state.fileExt, totalPages: state.totalPages,
+    included: Object.assign({}, state.included), colourPages: Object.assign({}, state.colourPages),
+    colourMode: state.colourMode, nup: state.nup, copies: state.copies, paperSize: state.paperSize,
+    sides: state.sides, orientation: state.orientation, direction: state.direction,
+    binding: state.binding, amountEstimated: state.amountEstimated, priceExact: state.priceExact,
+  };
+}
+
+function currentRecord() {
+  return { bytes: runtime.originalBytes, contentType: runtime.contentType, spec: snapshotSpec() };
+}
+
+async function buildUploadBytesFrom(spec, bytes) {
+  const indices = [];
+  for (let i = 1; i <= spec.totalPages; i++) if (spec.included[i]) indices.push(i - 1);
+  const allIncluded = indices.length === spec.totalPages;
+  if (spec.fileExt !== 'pdf' || allIncluded) return new Uint8Array(bytes);
+  const srcDoc = await PDFLib.PDFDocument.load(bytes);
+  const newDoc = await PDFLib.PDFDocument.create();
+  const copied = await newDoc.copyPages(srcDoc, indices);
+  copied.forEach((p) => newDoc.addPage(p));
+  return await newDoc.save();
+}
+
+// Upload one file to storage and create one staff job. Throws on failure
+// (message '403' for an auth failure so the caller can show the login hint).
+async function uploadAndCreateStaff(rec, cust) {
+  const bytes = await buildUploadBytesFrom(rec.spec, rec.bytes);
+  const signRes = await fetch(API + '/order/upload-sign', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: rec.spec.fileName }),
+  });
+  if (!signRes.ok) throw new Error('sign http ' + signRes.status);
+  const signed = await signRes.json();
+  if (!signed.signed_url || !signed.storage_path) throw new Error('missing signed url');
+  const put = await fetch(signed.signed_url, {
+    method: 'PUT', headers: { 'Content-Type': rec.contentType }, body: bytes,
+  });
+  if (!put.ok) throw new Error('put http ' + put.status);
+  const res = await fetch(API + '/order/staff-create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' },
+    body: JSON.stringify({
+      file_url: SUPABASE_PUBLIC + signed.storage_path,
+      file_name: rec.spec.fileName,
+      print_spec: buildPrintSpec(rec.spec),
+      store_id: localStorage.getItem('storeId') || '',
+      customer_name: cust.name,
+      phone: cust.phone,
+      operator_note: buildOperatorNote(rec.spec),
+    }),
+  });
+  if (res.status === 403) throw new Error('403');
+  if (!res.ok) throw new Error('staff-create http ' + res.status);
+  const data = await res.json();
+  if (!data.job_id) throw new Error('no job id');
+  return { job_id: data.job_id, total: data.total || 0 };
+}
+
+// Apply carried-forward print options to the freshly-loaded file.
+function applyCarry() {
+  if (!carryOpts) return;
+  state.copies = carryOpts.copies;
+  $('ov2-copiesVal').textContent = state.copies;
+  state.paperSize = carryOpts.paperSize;
+  if ($('ov2-paper')) $('ov2-paper').value = state.paperSize;
+  setColourMode(carryOpts.colourMode);
+  setSides(carryOpts.sides);
+  setOrientation(carryOpts.orientation);
+  setDirection(carryOpts.direction);
+  setBinding(carryOpts.binding);
+  setNup(carryOpts.nup);   // also re-renders the sheet + quote
+}
+
+// Clear the editor so the "current" slot is empty until the next file loads —
+// prevents the just-added file also counting as the current one at submit.
+function clearEditor() {
+  resetForNewFile();
+  runtime.originalBytes = null;
+  hide($('ov2-previewBlock'));
+  hide($('ov2-controlsBlock'));
+  $('ov2-filechip').classList.remove('show');
+  updateSubmitLabel();
+}
+
+function addAnotherFile() {
+  if (!runtime.originalBytes) return;
+  batch.push(currentRecord());
+  carryOpts = {
+    colourMode: state.colourMode, nup: state.nup, copies: state.copies, paperSize: state.paperSize,
+    sides: state.sides, orientation: state.orientation, direction: state.direction, binding: state.binding,
+  };
+  renderBatchStrip();
+  clearEditor();
+  if (pendingFiles.length) handleFile(pendingFiles.shift());
+  else $('ov2-file').click();   // let the operator pick the next file
+}
+
+function removeBatchFile(idx) {
+  batch.splice(idx, 1);
+  renderBatchStrip();
+}
+
+function renderBatchStrip() {
+  const strip = $('ov2-batch');
+  if (!strip) return;
+  strip.innerHTML = '';
+  if (!batch.length) { strip.classList.remove('show'); updateSubmitLabel(); return; }
+  strip.classList.add('show');
+  const title = document.createElement('div');
+  title.className = 'ov2-batch-title';
+  title.textContent = 'In this batch (' + batch.length + ')';
+  strip.appendChild(title);
+  batch.forEach((r, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'ov2-batch-chip';
+    const nm = document.createElement('span');
+    nm.textContent = r.spec.fileName;
+    chip.appendChild(nm);
+    const x = document.createElement('button');
+    x.className = 'ov2-batch-x'; x.textContent = '✕'; x.title = 'Remove';
+    x.addEventListener('click', () => removeBatchFile(i));
+    chip.appendChild(x);
+    strip.appendChild(chip);
+  });
+  updateSubmitLabel();
+}
+
+function updateSubmitLabel() {
+  if (!STAFF) return;
+  const span = $('ov2-submit') && $('ov2-submit').querySelector('span');
+  if (!span) return;
+  const n = batch.length + (runtime.originalBytes ? 1 : 0);
+  span.textContent = n > 1 ? ('Create ' + n + ' jobs') : 'Add to queue';
+}
+
+async function submitStaffBatch() {
+  const cust = {
+    name: $('ov2-name').value.trim(),
+    phone: ($('ov2-whatsapp') && !$('ov2-field-wa').classList.contains('ov2-hidden'))
+      ? $('ov2-whatsapp').value.trim() : '',
+  };
+  const files = batch.concat(runtime.originalBytes ? [currentRecord()] : []);
+  if (!files.length) return;
+  const created = [];
+  try {
+    for (let i = 0; i < files.length; i++) {
+      setBusy(true, 'Adding job ' + (i + 1) + ' of ' + files.length + '…');
+      created.push(await uploadAndCreateStaff(files[i], cust));
+    }
+  } catch (err) {
+    setBusy(false);
+    if (String(err.message) === '403') {
+      showError('Open this from the jobs page (log in with your PIN first).');
+      return;
+    }
+    showError('Added ' + created.length + ' of ' + files.length
+      + ' jobs — the rest failed. The created ones are already in the queue; reload to retry the remaining.');
+    return;
+  }
+  onStaffBatchSuccess(created);
+}
+
+function onStaffBatchSuccess(created) {
+  setBusy(false);
+  hide($('ov2-step1'));
+  hide($('ov2-step2'));
+  const total = created.reduce((s, r) => s + (r.total || 0), 0);
+  const successDiv = $('ov2-success');
+  successDiv.innerHTML = '';
+  const check = document.createElement('div'); check.className = 'ov2-check'; check.textContent = '✅';
+  const h = document.createElement('h2');
+  h.textContent = created.length + (created.length > 1 ? ' jobs added' : ' job added');
+  successDiv.appendChild(check); successDiv.appendChild(h);
+  created.forEach((r) => {
+    const d = document.createElement('div'); d.className = 'ov2-job'; d.style.fontSize = '13px';
+    d.textContent = 'Job ' + r.job_id;
+    successDiv.appendChild(d);
+  });
+  const sub = document.createElement('div'); sub.className = 'ov2-job';
+  sub.style.color = '#888'; sub.style.fontSize = '13px';
+  sub.textContent = '₹' + Math.round(total) + ' total · mark paid & print from the jobs page';
+  successDiv.appendChild(sub);
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:10px;justify-content:center;margin-top:18px';
+  actions.innerHTML = '<button class="ov2-btn ov2-btn-primary" onclick="location.reload()">+ New batch</button>'
+    + '<button class="ov2-btn ov2-btn-ghost" onclick="window.close()">Close</button>';
+  successDiv.appendChild(actions);
+  successDiv.classList.add('show');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 async function submitOrder() {
   if (!validateStep2()) return;
+  if (STAFF) { submitStaffBatch(); return; }
   clearError();
   setBusy(true, 'Preparing your file…');
 
@@ -872,13 +1080,78 @@ function onStaffSuccess(jobId, total) {
 }
 
 // ── Wiring ────────────────────────────────────────────────────────────────────
+// Staff sign-in gate. order-v2 staff mode carries no login of its own — it reads
+// the PIN from sessionStorage. When launched standalone (or on a machine off the
+// store LAN, e.g. the office box) that PIN is missing, so we verify it against
+// the cloud (/staff/login → Supabase active staff) with no store-PC dependency.
+// Resolves immediately when a PIN is already present (e.g. opened from jobs.html).
+function ensureStaffAuth() {
+  if (sessionStorage.getItem('staff_pin')) return Promise.resolve();
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.setAttribute('role', 'dialog');
+    ov.style.cssText =
+      'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;' +
+      'justify-content:center;background:rgba(17,24,39,.72);backdrop-filter:blur(2px)';
+    ov.innerHTML =
+      '<div style="background:#fff;border-radius:16px;padding:28px 26px;width:min(360px,92vw);' +
+      'box-shadow:0 20px 60px rgba(0,0,0,.35);font-family:inherit;text-align:center">' +
+      '<div style="font-size:18px;font-weight:700;color:#111827">Staff sign-in</div>' +
+      '<div style="font-size:13px;color:#6b7280;margin:6px 0 16px">Enter your staff PIN to create jobs.</div>' +
+      '<input id="ov2-staffpin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" ' +
+      'placeholder="PIN" style="width:100%;box-sizing:border-box;padding:12px 14px;font-size:20px;' +
+      'letter-spacing:.3em;text-align:center;border:1.5px solid #d1d5db;border-radius:10px;outline:none" />' +
+      '<div id="ov2-staffpin-err" style="min-height:18px;color:#dc2626;font-size:12.5px;margin:8px 0"></div>' +
+      '<button id="ov2-staffpin-btn" type="button" style="width:100%;padding:12px;font-size:15px;' +
+      'font-weight:600;color:#fff;background:#2563eb;border:none;border-radius:10px;cursor:pointer">' +
+      'Sign in</button></div>';
+    document.body.appendChild(ov);
+    const input = ov.querySelector('#ov2-staffpin');
+    const btn = ov.querySelector('#ov2-staffpin-btn');
+    const err = ov.querySelector('#ov2-staffpin-err');
+    input.focus();
+    async function submit() {
+      const pin = input.value.trim();
+      if (!/^\d{4,8}$/.test(pin)) { err.textContent = 'Enter your 4–8 digit PIN'; return; }
+      btn.disabled = true; err.textContent = '';
+      try {
+        const r = await fetch(API + '/staff/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) {
+          sessionStorage.setItem('staff_pin', pin);
+          sessionStorage.setItem('staff_id', d.staff_id || '');
+          sessionStorage.setItem('staff_name', d.name || '');
+          ov.remove();
+          resolve();
+        } else {
+          err.textContent = d.error || 'Incorrect PIN';
+          btn.disabled = false; input.select();
+        }
+      } catch (e) {
+        err.textContent = 'Network error — try again';
+        btn.disabled = false;
+      }
+    }
+    btn.addEventListener('click', submit);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  });
+}
+
 function wire() {
   const fileInput = $('ov2-file');
   fileInput.addEventListener('change', (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (f) handleFile(f);
+    const fl = e.target.files;
+    if (!fl || !fl.length) return;
+    if (STAFF && fl.length > 1) pendingFiles = Array.from(fl).slice(1);  // batch the rest
+    handleFile(fl[0]);
   });
   $('ov2-change').addEventListener('click', (e) => { e.preventDefault(); fileInput.click(); });
+  const addBtn = $('ov2-addfile');
+  if (addBtn) addBtn.addEventListener('click', (e) => { e.preventDefault(); addAnotherFile(); });
 
   // Drag & drop onto the label
   const drop = $('ov2-drop');
@@ -887,8 +1160,10 @@ function wire() {
   ['dragleave', 'drop'].forEach((evt) =>
     drop.addEventListener(evt, (e) => { e.preventDefault(); drop.classList.remove('dragover'); }));
   drop.addEventListener('drop', (e) => {
-    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f) { fileInput.files = e.dataTransfer.files; handleFile(f); }
+    const fl = e.dataTransfer && e.dataTransfer.files;
+    if (!fl || !fl.length) return;
+    if (STAFF && fl.length > 1) pendingFiles = Array.from(fl).slice(1);
+    handleFile(fl[0]);
   });
 
   $('ov2-selAll').addEventListener('click', () => selectAll(true));
@@ -924,6 +1199,9 @@ function wire() {
 
   // ── Staff mode: hide customer fields, lock store, relabel UI ──
   if (STAFF) {
+    // Gate the page behind a staff PIN when none is inherited from a prior login.
+    // Verified in the cloud, so it works off the store LAN (e.g. the office box).
+    ensureStaffAuth();
     // Map store_id to pickup_store name
     const sid = (localStorage.getItem('storeId') || '').toUpperCase();
     const storeMap = { OSP: 'thriprayar', PRINTK: 'nattika' };
@@ -956,6 +1234,10 @@ function wire() {
     if (topSub) topSub.textContent = 'Staff · New Job';
     $('ov2-step2pill').textContent = '2 · Review & Add';
     $('ov2-submit').querySelector('span').textContent = 'Add to queue';
+
+    // Multi-file batch: allow selecting several files, one job per file.
+    $('ov2-file').multiple = true;
+    updateSubmitLabel();
 
     // Skip customer account detection — staff don't use Supabase auth
     validateStep2();
