@@ -1870,7 +1870,7 @@ def _handle_staff_login(h, body: bytes) -> None:
             _client()
             .table("staff")
             .select("id,name,pin_hash,pin_salt")
-            .eq("active", True)
+            .eq("active", 1)
             .execute()
         )
         for r in (result.data or []):
@@ -1992,7 +1992,7 @@ def _acad_auth_staff(h) -> bool:
             _client()
             .table("staff")
             .select("id,pin_hash,pin_salt")
-            .eq("active", True)
+            .eq("active", 1)
             .execute()
         )
         return any(
