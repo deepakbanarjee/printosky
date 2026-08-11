@@ -1844,6 +1844,38 @@ def _handle_staff_set_pin(h, body: bytes) -> None:
         _json_response(h, 500, {"error": "Server error"})
 
 
+def _mint_supabase_jwt():
+    """Sign into Supabase Auth (password grant) and return an ``access_token``
+    JWT for RLS-protected reads, or ``None``. Best-effort; never raises.
+
+    Mirrors ``netlify/functions/auth.js``: a single shared Supabase Auth user
+    (``SUPABASE_AUTH_EMAIL`` / ``SUPABASE_AUTH_PASSWORD``) issues an
+    ``authenticated``-role JWT so cloud staff tools (the Jobs console) can read
+    RLS-protected tables off-LAN with only a PIN — no store-PC token hop. When
+    the auth env vars are unset, returns ``None`` and the frontend falls back to
+    the netlify auth function.
+    """
+    try:
+        url    = os.environ.get("SUPABASE_URL")
+        apikey = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY")
+        email  = os.environ.get("SUPABASE_AUTH_EMAIL")
+        pw     = os.environ.get("SUPABASE_AUTH_PASSWORD")
+        if not (url and apikey and email and pw):
+            return None
+        req = urllib.request.Request(
+            f"{url}/auth/v1/token?grant_type=password",
+            data=json.dumps({"email": email, "password": pw}).encode(),
+            headers={"Content-Type": "application/json", "apikey": apikey},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read() or b"{}")
+        return data.get("access_token")
+    except Exception as e:
+        logger.warning(f"supabase jwt mint failed: {e}")
+        return None
+
+
 def _handle_staff_login(h, body: bytes) -> None:
     """POST /staff/login — verify a staff PIN against active staff in Supabase,
     independent of any store PC.
@@ -1878,6 +1910,9 @@ def _handle_staff_login(h, body: bytes) -> None:
                 logger.info(f"Staff {r['id']} cloud PIN login")
                 _json_response(h, 200, {
                     "ok": True, "staff_id": r["id"], "name": r.get("name") or r["id"],
+                    # Authenticated-role JWT so the Jobs console reads live data
+                    # off-LAN with only the PIN (None if auth env unset).
+                    "supabase_jwt": _mint_supabase_jwt(),
                 })
                 return
         _json_response(h, 401, {"ok": False, "error": "Incorrect PIN"})
