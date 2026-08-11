@@ -1993,11 +1993,15 @@ function renderTable() {
   const todayStr = today();
 
   let rows = allJobs.filter(j => {
-    // Scope by the job's own store_id (always set on synced jobs). The old
-    // `assigned_store_id || "OSP"` dumped every unassigned job into OSP, so
-    // Nattika (PRINTK/PRIOFF) jobs leaked into the Oxygen console. A blank
-    // store_id (demo/legacy) is not hidden.
-    if (storeFilter !== "all" && j.store_id && j.store_id !== storeFilter) return false;
+    // Scope by the FULFILLING store — the store responsible for printing the job,
+    // which is what each store's console should show and what the store PC's
+    // puller routes on. Cloud staff jobs carry an OSP-prefixed store_id but are
+    // assigned to the chosen store, so filtering by store_id wrongly hid them
+    // from the fulfilling store. Fall back to store_id when unassigned (legacy),
+    // NOT to a hardcoded "OSP" (which used to dump every unassigned job into
+    // Oxygen). A blank owner is not hidden.
+    const owner = j.assigned_store_id || j.store_id;
+    if (storeFilter !== "all" && owner && owner !== storeFilter) return false;
     if (activeFilter === "Completed" && j.status !== "Completed") return false;
     if (activeFilter === "Received"  && !["Received","In Progress","Printed","Queued","Draft"].includes(j.status)) return false;
     if (activeFilter === "today"     && !j.received_at?.startsWith(todayStr)) return false;
@@ -2081,9 +2085,11 @@ async function printJob(jobId, filepath, printerKey, copies, colourMode) {
 function renderPrinterBreakdown() {
   const todayStr = today();
   // Per-store console: scope the breakdown to this machine's store, same as the queue.
-  const todayJobs = allJobs.filter(j =>
-    (j.received_at || "").startsWith(todayStr) &&
-    (storeFilter === "all" || !j.store_id || j.store_id === storeFilter));
+  const todayJobs = allJobs.filter(j => {
+    const owner = j.assigned_store_id || j.store_id;  // fulfilling store
+    return (j.received_at || "").startsWith(todayStr) &&
+      (storeFilter === "all" || !owner || owner === storeFilter);
+  });
 
   ["konica", "epson"].forEach(p => {
     const isEpson = p === "epson";

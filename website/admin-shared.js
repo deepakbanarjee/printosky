@@ -73,7 +73,9 @@ const SB_PENDING_STATUSES = new Set(
 function summarizeJobs(jobs, store = "all") {
   const agg = { total_jobs: 0, completed: 0, pending: 0, revenue: 0, cash: 0, upi: 0 };
   (jobs || []).forEach(j => {
-    if (store !== "all" && j.store_id !== store) return;
+    // Scope by the fulfilling store (assigned_store_id), fall back to store_id.
+    const owner = j.assigned_store_id || j.store_id;
+    if (store !== "all" && owner !== store) return;
     agg.total_jobs++;
     const st = String(j.status || "").trim().toLowerCase();
     if (st === "completed") agg.completed++;
@@ -96,7 +98,7 @@ function todayJobsParams(todayStr) {
   const tomorrow = new Date(new Date(todayStr + "T00:00:00Z").getTime() + 864e5)
     .toISOString().slice(0, 10);
   return `received_at=gte.${todayStr}&received_at=lt.${tomorrow}`
-    + `&select=store_id,received_at,status,payment_mode,amount_collected&limit=5000`;
+    + `&select=store_id,assigned_store_id,received_at,status,payment_mode,amount_collected&limit=5000`;
 }
 
 // ── Store / office identity (shared) ────────────────────────────────────────
