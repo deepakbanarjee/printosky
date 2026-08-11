@@ -1705,16 +1705,24 @@ async function onStaffAuthed(pin, data) {
   sessionStorage.setItem("staff_name", data.name || "");
   if (data.session_id) sessionStorage.setItem("session_id", data.session_id);
   sessionStorage.setItem("staff_pin", pin);
-  // Fetch Supabase JWT so sbFetch works with RLS-protected tables (optional).
-  try {
-    const jr = await fetch("/.netlify/functions/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "staff", password: localStorage.getItem("storeToken") || "" }),
-    });
-    const jd = await jr.json();
-    if (jd.supabase_jwt) sessionStorage.setItem("supabase_jwt", jd.supabase_jwt);
-  } catch { /* JWT optional — falls back to anon key */ }
+  // Supabase JWT so sbFetch works with RLS-protected tables (else demo mode).
+  // Prefer a JWT minted by the login response itself (cloud /staff/login mints
+  // one from just the PIN — works off-LAN with no store token). Only when the
+  // login didn't supply one (older store-PC path) fall back to the netlify auth
+  // function, which needs the store token in localStorage.
+  if (data.supabase_jwt) {
+    sessionStorage.setItem("supabase_jwt", data.supabase_jwt);
+  } else {
+    try {
+      const jr = await fetch("/.netlify/functions/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "staff", password: localStorage.getItem("storeToken") || "" }),
+      });
+      const jd = await jr.json();
+      if (jd.supabase_jwt) sessionStorage.setItem("supabase_jwt", jd.supabase_jwt);
+    } catch { /* JWT optional — falls back to anon key */ }
+  }
   showDashboard();
 }
 
