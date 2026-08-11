@@ -656,6 +656,13 @@ function setStore(s) {
   $('ov2-st-nattika').classList.toggle('active', s === 'nattika');
 }
 
+// Staff mode: the fulfilling store is whatever the operator picked in the
+// (visible) location picker, mapped to a real store id — never the box's own
+// machine id. A roaming box can serve either store, so the store must be an
+// explicit choice, not derived from the machine.
+const PICKUP_TO_STORE = { thriprayar: 'OSP', nattika: 'PRINTK' };
+function staffStoreId() { return PICKUP_TO_STORE[runtime.pickup_store] || 'OSP'; }
+
 // ── Submit flow ───────────────────────────────────────────────────────────────
 function showError(html) {
   const box = $('ov2-error');
@@ -766,7 +773,7 @@ async function uploadAndCreateStaff(rec, cust) {
       file_url: SUPABASE_PUBLIC + signed.storage_path,
       file_name: rec.spec.fileName,
       print_spec: buildPrintSpec(rec.spec),
-      store_id: localStorage.getItem('storeId') || '',
+      store_id: staffStoreId(),
       customer_name: cust.name,
       phone: cust.phone,
       operator_note: buildOperatorNote(rec.spec),
@@ -976,7 +983,7 @@ async function submitOrder() {
           file_url: fileUrl,
           file_name: state.fileName,
           print_spec: buildPrintSpec(state),
-          store_id: localStorage.getItem('storeId') || '',
+          store_id: staffStoreId(),
           customer_name: $('ov2-name').value.trim(),
           phone: $('ov2-whatsapp') && !$('ov2-field-wa').classList.contains('ov2-hidden')
             ? $('ov2-whatsapp').value.trim() : '',
@@ -1202,20 +1209,27 @@ function wire() {
     // Gate the page behind a staff PIN when none is inherited from a prior login.
     // Verified in the cloud, so it works off the store LAN (e.g. the office box).
     ensureStaffAuth();
-    // Map store_id to pickup_store name
+    // Fulfilling store: staff choose it explicitly via the location picker,
+    // which stays VISIBLE in staff mode (a roaming box can serve either store
+    // and must never tag jobs with its own machine id). Default the picker to
+    // this box's store when it IS a real store PC (OSP/PRINTK); otherwise leave
+    // Thriprayar as the default and let the operator switch per job.
     const sid = (localStorage.getItem('storeId') || '').toUpperCase();
     const storeMap = { OSP: 'thriprayar', PRINTK: 'nattika' };
-    if (storeMap[sid]) runtime.pickup_store = storeMap[sid];
+    setStore(storeMap[sid] || 'thriprayar');
+    const storeField = $('ov2-field-store');
+    if (storeField) {
+      const lbl = storeField.querySelector('label');
+      if (lbl) lbl.textContent = 'Fulfilling store';
+    }
 
     // Hide customer-only fields
     hide($('ov2-field-wa'));       // WhatsApp number
     hide($('ov2-identity'));       // Logged-in account banner
     hide($('ov2-addrField'));      // Delivery address
-    // Hide delivery/pickup toggles, store picker, and payment select
+    // Hide delivery/pickup toggles and payment select — but KEEP the store
+    // picker visible so staff pick which store fulfils the job.
     document.querySelectorAll('[data-delivery]').forEach(function(el) {
-      if (el.parentElement) hide(el.parentElement.parentElement);  // .ov2-field
-    });
-    document.querySelectorAll('[data-store]').forEach(function(el) {
       if (el.parentElement) hide(el.parentElement.parentElement);  // .ov2-field
     });
     var payField = $('ov2-payment');
