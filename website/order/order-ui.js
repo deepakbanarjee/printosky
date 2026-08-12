@@ -663,6 +663,14 @@ function setStore(s) {
 const PICKUP_TO_STORE = { thriprayar: 'OSP', nattika: 'PRINTK' };
 function staffStoreId() { return PICKUP_TO_STORE[runtime.pickup_store] || 'OSP'; }
 
+// Staff payment choice at creation: 'cash' | 'upi' | 'hold'. cash/upi mark the
+// job Paid so it prints immediately; hold leaves it Pending for the console.
+function staffPaymentMode() {
+  const el = $('ov2-payment');
+  const v = el ? (el.value || '').toLowerCase() : 'hold';
+  return (v === 'cash' || v === 'upi') ? v : 'hold';
+}
+
 // ── Submit flow ───────────────────────────────────────────────────────────────
 function showError(html) {
   const box = $('ov2-error');
@@ -774,6 +782,7 @@ async function uploadAndCreateStaff(rec, cust) {
       file_name: rec.spec.fileName,
       print_spec: buildPrintSpec(rec.spec),
       store_id: staffStoreId(),
+      payment_mode: staffPaymentMode(),
       customer_name: cust.name,
       phone: cust.phone,
       operator_note: buildOperatorNote(rec.spec),
@@ -783,7 +792,7 @@ async function uploadAndCreateStaff(rec, cust) {
   if (!res.ok) throw new Error('staff-create http ' + res.status);
   const data = await res.json();
   if (!data.job_id) throw new Error('no job id');
-  return { job_id: data.job_id, total: data.total || 0 };
+  return { job_id: data.job_id, total: data.total || 0, paid: !!data.paid, mode: data.payment_mode || 'hold' };
 }
 
 // Apply carried-forward print options to the freshly-loaded file.
@@ -908,7 +917,11 @@ function onStaffBatchSuccess(created) {
   });
   const sub = document.createElement('div'); sub.className = 'ov2-job';
   sub.style.color = '#888'; sub.style.fontSize = '13px';
-  sub.textContent = '₹' + Math.round(total) + ' total · mark paid & print from the jobs page';
+  const anyPaid = created.some((r) => r.paid);
+  const mode = (created.find((r) => r.paid) || {}).mode || '';
+  sub.textContent = anyPaid
+    ? '₹' + Math.round(total) + ' total · Paid (' + String(mode).toUpperCase() + ') · printing now'
+    : '₹' + Math.round(total) + ' total · mark paid & print from the jobs page';
   successDiv.appendChild(sub);
   const actions = document.createElement('div');
   actions.style.cssText = 'display:flex;gap:10px;justify-content:center;margin-top:18px';
@@ -984,6 +997,7 @@ async function submitOrder() {
           file_name: state.fileName,
           print_spec: buildPrintSpec(state),
           store_id: staffStoreId(),
+          payment_mode: staffPaymentMode(),
           customer_name: $('ov2-name').value.trim(),
           phone: $('ov2-whatsapp') && !$('ov2-field-wa').classList.contains('ov2-hidden')
             ? $('ov2-whatsapp').value.trim() : '',
@@ -1001,7 +1015,7 @@ async function submitOrder() {
       if (!res.ok) throw new Error('staff-create http ' + res.status);
       const data = await res.json();
       if (!data.job_id) throw new Error('no job id');
-      onStaffSuccess(data.job_id, data.total);
+      onStaffSuccess(data.job_id, data.total, !!data.paid, data.payment_mode || 'hold');
     } catch (err) {
       setBusy(false);
       showError('Couldn\'t add the job to the queue.');
@@ -1067,17 +1081,20 @@ function onSuccess(jobId) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function onStaffSuccess(jobId, total) {
+function onStaffSuccess(jobId, total, paid, mode) {
   setBusy(false);
   hide($('ov2-step1'));
   hide($('ov2-step2'));
   const successDiv = $('ov2-success');
   const priceStr = total ? '₹' + Math.round(total) : '₹—';
+  const statusStr = paid
+    ? 'Paid (' + String(mode || '').toUpperCase() + ') · printing now'
+    : 'On hold — mark paid & print from the jobs page';
   successDiv.innerHTML =
     '<div class="ov2-check">✅</div>' +
-    '<h2>Added to queue</h2>' +
+    '<h2>' + (paid ? 'Sent to print' : 'Added to queue') + '</h2>' +
     '<div class="ov2-job">Job <b>' + jobId + '</b> · ' + priceStr + '</div>' +
-    '<div class="ov2-job" style="color:#888;font-size:13px">Mark paid & print from the jobs page</div>' +
+    '<div class="ov2-job" style="color:#888;font-size:13px">' + statusStr + '</div>' +
     '<div style="display:flex;gap:10px;justify-content:center;margin-top:18px">' +
       '<button class="ov2-btn ov2-btn-primary" onclick="location.reload()">+ New job</button>' +
       '<button class="ov2-btn ov2-btn-ghost" onclick="window.close()">Close</button>' +
@@ -1232,8 +1249,20 @@ function wire() {
     document.querySelectorAll('[data-delivery]').forEach(function(el) {
       if (el.parentElement) hide(el.parentElement.parentElement);  // .ov2-field
     });
+    // Payment: staff choose at creation. Cash/UPI record the payment and print
+    // now; Hold (default) leaves the job Pending to pay + print later from the
+    // console. Repurpose the payment select (kept visible) with these options.
     var payField = $('ov2-payment');
-    if (payField && payField.parentElement) hide(payField.parentElement);
+    if (payField) {
+      payField.innerHTML =
+        '<option value="hold">Hold — take payment later</option>' +
+        '<option value="cash">Cash — paid, print now</option>' +
+        '<option value="upi">UPI — paid, print now</option>';
+      payField.value = 'hold';
+      var payLabel = payField.parentElement
+        ? payField.parentElement.querySelector('label') : null;
+      if (payLabel) payLabel.textContent = 'Payment';
+    }
 
     // Make name optional (remove required asterisk)
     var nameLabel = $('ov2-field-name');
