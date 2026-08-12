@@ -232,6 +232,27 @@ class TestCalculateItemCost:
         r = rc.calculate_item_cost(5, "A4_col", "ss", "1-up", 1)
         assert "Colour" in r["breakdown_line"]
 
+    def test_colour_billed_per_page_duplex_equals_simplex(self):
+        # Owner rule: colour is charged per page — duplex must not change the
+        # price, and there is no doubled DS rate.
+        ss = rc.calculate_item_cost(10, "A4_col", "ss", "1-up", 1)
+        ds = rc.calculate_item_cost(10, "A4_col", "ds", "1-up", 1)
+        assert ss["print_cost"] == 100.0
+        assert ds["print_cost"] == 100.0   # was 120.0 before the per-page fix
+        assert ds["sheets"] == 10          # billed by page, not halved
+
+    def test_colour_odd_duplex_not_rounded_up(self):
+        # 3 colour pages DS → 3 pages × Rs.10 = Rs.30 (no even round-up, no doubling)
+        r = rc.calculate_item_cost(3, "A4_col", "ds", "1-up", 1)
+        assert r["print_cost"] == 30.0
+
+    def test_bw_duplex_discount_preserved(self):
+        # B&W keeps the per-sheet model: DS still ~halves vs SS.
+        ss = rc.calculate_item_cost(10, "A4_BW", "ss", "1-up", 1)
+        ds = rc.calculate_item_cost(10, "A4_BW", "ds", "1-up", 1)
+        assert ss["print_cost"] == 30.0
+        assert ds["print_cost"] < ss["print_cost"]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # calculate_finishing_cost
