@@ -32,6 +32,11 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
     sides = "ss"
     if spec.get("sides") in ("duplex", "ds", "duplexlong"):
         sides = "ds"
+    # Print-time duplex binding edge, sent to the printer on each action. Kept
+    # separate from `sides` (which drives the internal sheet-pairing logic, and
+    # must stay "ss"/"ds"). Defaults to long-edge; landscape N-up flips it to
+    # short-edge below so the back side registers with the front.
+    out_sides = sides
 
     paper_size = spec.get("paper_size")
     orientation = spec.get("orientation", "auto")
@@ -136,6 +141,14 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
             # portrait). Let the printer honour the imposed page as-is.
             orientation = None
 
+            # Landscape N-up duplex must bind on the SHORT (top) edge: the pages
+            # sit side-by-side on a landscape sheet, so the back only registers
+            # with the front when the sheet flips top-to-bottom. Long-edge
+            # binding mis-aligns it (confirmed on the Konica). Portrait N-up and
+            # 2-up vertical keep long-edge.
+            if sides == "ds" and nup_orient.lower() == "landscape":
+                out_sides = "duplexshort"
+
             # Read sliced file bytes
             with open(current_pdf, "rb") as f:
                 pdf_bytes = f.read()
@@ -207,7 +220,7 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                     "pdf_path": current_pdf,
                     "colour_mode": sections[0][0],
                     "copies": copies,
-                    "sides": sides,
+                    "sides": out_sides,
                     "paper_size": paper_size,
                     "orientation": orientation
                 }], temp_dir
@@ -225,7 +238,7 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                     "pdf_path": sub_pdf_path,
                     "colour_mode": mode,
                     "copies": copies,
-                    "sides": sides,
+                    "sides": out_sides,
                     "paper_size": paper_size,
                     "orientation": orientation
                 })
@@ -238,7 +251,7 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                 "pdf_path": current_pdf,
                 "colour_mode": final_colour,
                 "copies": copies,
-                "sides": sides,
+                "sides": out_sides,
                 "paper_size": paper_size,
                 "orientation": orientation
             }], temp_dir

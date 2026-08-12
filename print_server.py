@@ -623,6 +623,9 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
     s = (sides or "").strip().lower()
     if s in ("ds", "duplex", "double", "duplexlong"):
         settings_parts.append("duplexlong")
+    elif s in ("duplexshort", "dss", "shortedge", "short"):
+        # Short/top-edge bind — landscape N-up needs this so the back registers.
+        settings_parts.append("duplexshort")
     elif s in ("ss", "simplex", "single"):
         settings_parts.append("simplex")
 
@@ -1694,7 +1697,8 @@ def handle_get_vendors(qs: dict) -> dict:
 
 # ── A2: Print a specific print_item (reads all settings from DB) ──────────────
 
-def handle_print_item(job_id: str, item_number: int, staff_id: str = None) -> dict:
+def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
+                      printer_override: str = None) -> dict:
     """
     POST /print  { job_id, item_number, staff_id }
     Reads print_items row from DB → builds exact SumatraPDF command → fires print.
@@ -1762,8 +1766,14 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None) -> di
     if not sumatra:
         return {"ok": False, "error": "SumatraPDF not found on this PC"}
 
-    # Read item settings from DB (trust DB, NOT frontend)
-    printer_key = item["printer"] or ("epson" if item["colour"] == "col" else "konica")
+    # Read item settings from DB (trust DB, NOT frontend). Exception: staff may
+    # override the destination printer at print time — e.g. "Konica busy → send
+    # this B&W job to the Epson". Only known printer keys are honoured.
+    if (printer_override or "").strip().lower() in ("epson", "konica"):
+        printer_key = printer_override.strip().lower()
+        logging.info("print %s item %s: staff override -> %s", job_id, item_number, printer_key)
+    else:
+        printer_key = item["printer"] or ("epson" if item["colour"] == "col" else "konica")
     # No-Konica stores (e.g. Nattika): a B&W item defaults to 'konica', which does
     # not exist here — redirect to the Epson (same helper the auto-print path uses).
     printer_key = _effective_printer_key(printer_key, job_id)
@@ -2287,10 +2297,13 @@ class PrintHandler(BaseHTTPRequestHandler):
             self._json(400, {"error": "job_id is required"})
             return
 
+        # Optional per-print printer override (staff: "Konica busy → Epson").
+        printer_override = (body.get("printer") or "").strip().lower() or None
+
         # New-style: item_number provided — read everything from print_items DB
         item_number = body.get("item_number")
         if item_number is not None:
-            result = handle_print_item(job_id, int(item_number), staff_id)
+            result = handle_print_item(job_id, int(item_number), staff_id, printer_override)
             self._json(200 if result.get("ok") else 400, result)
             return
 
