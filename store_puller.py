@@ -36,6 +36,11 @@ logger = logging.getLogger("store_puller")
 
 POLL_SECONDS = int(os.environ.get("STORE_PULLER_POLL_SECONDS", "60"))
 
+# Housekeeping: a printed download is deleted immediately; anything left behind
+# (a job whose auto-print failed and was kept for manual printing) is purged
+# after this many days so the disk cannot silently fill. Set 0 to disable.
+KEEP_DAYS = int(os.environ.get("STORE_PULLER_KEEP_DAYS", "7"))
+
 # Only these statuses mean "assigned to us and ready to print". A job that
 # has not yet been paid, or is already delivered, must not be pulled.
 PULLABLE_STATUSES = ("Paid",)
@@ -131,6 +136,30 @@ def download_url(url: str, dest_path: str) -> int:
     with open(dest_path, "wb") as fh:
         fh.write(resp.content)
     return len(resp.content)
+
+
+def purge_old_files(dest_dir: str, max_age_days: int) -> int:
+    """Delete files in ``dest_dir`` older than ``max_age_days``. Returns the
+    count removed. Best-effort — never raises. A ``max_age_days`` of 0 disables
+    purging. Only top-level files are touched (the planner's temp_* dirs clean
+    up themselves), so a job kept for manual printing survives its grace period.
+    """
+    if max_age_days <= 0 or not os.path.isdir(dest_dir):
+        return 0
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    for name in os.listdir(dest_dir):
+        path = os.path.join(dest_dir, name)
+        try:
+            if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                os.remove(path)
+                removed += 1
+        except OSError:
+            pass
+    if removed:
+        logger.info("store_puller: purged %d file(s) older than %dd from %s",
+                    removed, max_age_days, dest_dir)
+    return removed
 
 
 # ── auto-print (best-effort) ──────────────────────────────────────────────────
@@ -354,17 +383,27 @@ def main(argv: list[str] | None = None) -> int:
     on_pulled = None
     if autoprint:
         def on_pulled(row, dest):
-            auto_print(
+            printed = auto_print(
                 row.get("job_id"), dest, row.get("colour"), row.get("copies"),
                 paper_size=row.get("size"), orientation=row.get("orientation"),
                 print_spec=row.get("print_spec"),
             )
+            # Printed successfully → the download is no longer needed; delete it
+            # so Jobs/Assigned cannot fill the disk (root cause of the WinError
+            # 112 that aborted a mid-run job). A failed print keeps the file for
+            # manual printing; purge_old_files sweeps it up after KEEP_DAYS.
+            if printed:
+                try:
+                    os.remove(dest)
+                except OSError:
+                    pass
 
     logger.info(
         "store_puller: store=%s dest=%s poll=%ss mode=%s autoprint=%s",
         store_id, dest_dir, POLL_SECONDS, "once" if once else "loop", autoprint,
     )
     while True:
+        purge_old_files(dest_dir, KEEP_DAYS)
         pull_once(client, store_id, dest_dir, conn, on_pulled=on_pulled)
         if once:
             return 0

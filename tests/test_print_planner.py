@@ -62,7 +62,11 @@ def test_nup_imposition(temp_pdf, tmp_path):
     actions, temp_dir = print_planner.plan_print_job("J_NUP", temp_pdf, spec, str(tmp_path))
     assert len(actions) == 1
     assert temp_dir is not None
-    assert actions[0]["orientation"] == "landscape"  # 2-up forces Landscape
+    # The imposed PDF already carries the final (landscape) geometry for 2-up, so
+    # the action must NOT also carry an orientation flag — passing one made
+    # SumatraPDF re-rotate the sheet (landscape 2-up printed portrait). None here
+    # means "print the imposed page as-is".
+    assert actions[0]["orientation"] is None
     
     # 10 pages in 2-up -> 5 sheets
     doc = fitz.open(actions[0]["pdf_path"])
