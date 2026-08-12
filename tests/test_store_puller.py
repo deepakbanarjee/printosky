@@ -214,11 +214,35 @@ class TestPullOnce:
         def boom(row, dest):
             raise RuntimeError("printer offline")
 
-        # A raising hook must not stop the job counting as pulled.
+        # A raising hook must not crash pull_once — but the job must NOT be
+        # recorded as pulled, so it retries next cycle instead of stranding.
         pulled = pull_once(_FakeClient(self._rows()), "NTK", str(tmp_path), conn,
                            downloader=lambda u, d: 1, on_pulled=boom)
-        assert set(pulled) == {"J1", "J2"}
+        assert pulled == []
+        assert load_pulled_ids(conn) == set()
+
+    def test_failed_print_retries_next_cycle(self, tmp_path):
+        conn = _mem_conn()
+        # First cycle: print fails -> not recorded.
+        pulled1 = pull_once(_FakeClient(self._rows()), "NTK", str(tmp_path), conn,
+                            downloader=lambda u, d: 1, on_pulled=lambda r, d: False)
+        assert pulled1 == []
+        assert load_pulled_ids(conn) == set()
+        # Second cycle: print succeeds -> recorded, not re-pulled after.
+        pulled2 = pull_once(_FakeClient(self._rows()), "NTK", str(tmp_path), conn,
+                            downloader=lambda u, d: 1, on_pulled=lambda r, d: True)
+        assert set(pulled2) == {"J1", "J2"}
         assert load_pulled_ids(conn) == {"J1", "J2"}
+
+    def test_reconcile_resets_stranded_paid_jobs(self, tmp_path):
+        from store_puller import reconcile_stranded, record_pulled
+        conn = _mem_conn()
+        # J1 was pulled-but-not-printed under old code; cloud still says Paid.
+        record_pulled(conn, "J1", "x")
+        record_pulled(conn, "J9", "y")   # not in the cloud's Paid set → keep
+        n = reconcile_stranded(_FakeClient(self._rows()), "NTK", conn)
+        assert n == 1
+        assert load_pulled_ids(conn) == {"J9"}   # J1 cleared for retry
 
 
 # ---------- auto-print helpers -------------------------------------------------
