@@ -306,14 +306,21 @@ def calculate_item_cost(pages: int, paper_type: str, sides: str,
     Returns:
         { sheets, rate, print_cost, breakdown_line }
     """
-    sheets = calc_sheets(pages, sides, layout)
-    rate   = get_print_rate(paper_type, sides, sheets, is_student)
+    is_colour = "col" in paper_type.lower()
+    # Colour is billed strictly per page (owner rule): duplex never changes a
+    # colour job's price and there is no doubled DS rate. Force single-sided
+    # billing so the billed quantity = pages (after any N-up) at the base
+    # per-page rate. B&W keeps the per-sheet model (duplex still ~halves it).
+    bill_sides = "ss" if is_colour else sides
+    sheets = calc_sheets(pages, bill_sides, layout)
+    rate   = get_print_rate(paper_type, bill_sides, sheets, is_student)
     cost   = round(sheets * copies * rate, 2)
 
     sides_label  = "SS" if sides == "ss" else "DS"
-    colour_label = "Colour" if "col" in paper_type.lower() else "B&W"
+    colour_label = "Colour" if is_colour else "B&W"
+    unit         = "pages" if is_colour else "sheets"
     breakdown    = (f"{colour_label} {layout} {sides_label} - "
-                    f"{sheets} sheets x {copies}x @ Rs.{rate} = Rs.{cost:.2f}")
+                    f"{sheets} {unit} x {copies}x @ Rs.{rate} = Rs.{cost:.2f}")
 
     return {"sheets": sheets, "rate": rate, "print_cost": cost,
             "breakdown_line": breakdown}
