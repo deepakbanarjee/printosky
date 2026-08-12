@@ -382,7 +382,27 @@ def _handle_order_staff_create(h, body: bytes) -> None:
         logger.error("staff-create db error %s: %r", type(exc).__name__, str(exc))
         _json_response(h, 500, {"error": "could not create job"})
         return
-    _json_response(h, 200, {"job_id": job_id, "total": total})
+
+    # Payment, chosen by staff at creation:
+    #   cash / upi -> record the payment and flip the job to Paid, so the store
+    #                 puller pulls + auto-prints it immediately (quoted amount).
+    #   hold (default) -> leave it Pending; staff take payment + print later from
+    #                 the jobs console (Mark Paid).
+    payment_mode = str(data.get("payment_mode") or "hold").strip().lower()
+    paid = False
+    if payment_mode in ("cash", "upi"):
+        try:
+            from db_cloud import mark_job_paid_manual
+            mark_job_paid_manual(job_id, total, payment_mode)
+            paid = True
+        except Exception as exc:
+            # Job is still created (Pending) — surface that it wasn't marked paid
+            # so the operator can Mark Paid from the console instead of assuming.
+            logger.error("staff-create mark-paid failed for %s: %s", job_id, exc)
+    _json_response(h, 200, {
+        "job_id": job_id, "total": total,
+        "paid": paid, "payment_mode": payment_mode if paid else "hold",
+    })
 
 
 def _handle_order_reorder(h, body: bytes) -> None:

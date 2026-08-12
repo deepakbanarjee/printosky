@@ -150,7 +150,10 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
     assert col_call["copies"] == 3
     assert col_call["sides"] == "ds"
     assert col_call["paper_size"] == "A4"
-    assert col_call["orientation"] == "landscape"  # 2-up landscape
+    # Imposed N-up jobs carry no orientation flag — the imposition already bakes
+    # the final (landscape) geometry into the page, and passing an orientation to
+    # the printer would re-rotate it (landscape 2-up printed portrait).
+    assert col_call["orientation"] is None
     # Not the final sub-job → must NOT mark the job Printed yet (HIGH-1).
     assert col_call["update_status"] is False
 
@@ -170,7 +173,7 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
     assert bw_call["copies"] == 3
     assert bw_call["sides"] == "ds"
     assert bw_call["paper_size"] == "A4"
-    assert bw_call["orientation"] == "landscape"  # 2-up landscape
+    assert bw_call["orientation"] is None  # imposed N-up carries no orientation flag
     # Final sub-job → marks the job Printed exactly once (HIGH-1).
     assert bw_call["update_status"] is True
     
