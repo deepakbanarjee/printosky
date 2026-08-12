@@ -367,9 +367,25 @@ def _load_runtime():
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     once = "--once" in argv
+    # Log to the console AND a rotating file, so the auto-print history survives
+    # after the "Printosky Job Puller" window is closed. This is the process that
+    # runs the imposition + auto_print, so its Print command lines land here (not
+    # in print_server.log). 2 MB x 5 backups. Best-effort on the file handler.
+    _handlers = [logging.StreamHandler()]
+    try:
+        import logging.handlers
+        _log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        os.makedirs(_log_dir, exist_ok=True)
+        _handlers.append(logging.handlers.RotatingFileHandler(
+            os.path.join(_log_dir, "store_puller.log"),
+            maxBytes=2_000_000, backupCount=5, encoding="utf-8",
+        ))
+    except Exception:
+        pass
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=_handlers,
     )
     try:
         store_id, dest_dir, conn, client = _load_runtime()
