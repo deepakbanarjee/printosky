@@ -25,6 +25,7 @@ Run:  python store_puller.py            # loop, poll every POLL_SECONDS
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
 import re
 import sqlite3
@@ -410,7 +411,6 @@ def main(argv: list[str] | None = None) -> int:
     # in print_server.log). 2 MB x 5 backups. Best-effort on the file handler.
     _handlers = [logging.StreamHandler()]
     try:
-        import logging.handlers
         _log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
         os.makedirs(_log_dir, exist_ok=True)
         _handlers.append(logging.handlers.RotatingFileHandler(
