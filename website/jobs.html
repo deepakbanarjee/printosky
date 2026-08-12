@@ -2919,6 +2919,12 @@ function itemHTML(it, idx) {
             ${printed ? "" : ""}>
       ${printed ? "✓ Printed on " + (isEpson ? "Epson" : "Konica") : "Print on " + (isEpson ? "Epson →" : "Konica →")}
     </button>
+    ${isEpson ? "" : `<button class="pi-print-btn" id="piprintalt-${idx}"
+            style="margin-top:4px;border-color:var(--muted);color:var(--muted)"
+            title="Konica busy or jammed? Send this B&amp;W item to the Epson instead."
+            onclick="printItem('${jid}', ${idx + 1}, 'epson')">
+      → Epson (if Konica busy)
+    </button>`}
   </div>`;
 }
 
@@ -3042,7 +3048,7 @@ async function saveJobSpecs() {
 }
 
 // ── Print one item → POST /print ─────────────────────────────────────────────
-async function printItem(jobId, itemNumber) {
+async function printItem(jobId, itemNumber, printerOverride) {
   if (!STORE_PC_URL) { alert("Print server not configured — click PC Setup"); return; }
   const idx = itemNumber - 1;
   const btn = document.getElementById("piprint-" + idx);
@@ -3094,12 +3100,15 @@ async function printItem(jobId, itemNumber) {
   }
 
   // ── Step 2: send to printer ───────────────────────────────────────────────
-  if (btn) btn.textContent = "Sending to printer…";
+  if (btn) btn.textContent = printerOverride ? `Sending to ${printerOverride}…` : "Sending to printer…";
   try {
+    const printBody = { job_id: jobId, item_number: itemNumber,
+                        staff_id: sessionStorage.getItem("staff_id") };
+    // Staff override: force this item to a specific printer (Konica busy → Epson).
+    if (printerOverride) printBody.printer = printerOverride;
     const r    = await fetch(`${STORE_PC_URL}/print`, {
       method: "POST", headers: storeHeaders(),
-      body: JSON.stringify({ job_id: jobId, item_number: itemNumber,
-                             staff_id: sessionStorage.getItem("staff_id") }),
+      body: JSON.stringify(printBody),
     });
     const data = await r.json();
     if (data.ok) {
