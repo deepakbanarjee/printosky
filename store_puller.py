@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("store_puller")
 
-POLL_SECONDS = int(os.environ.get("STORE_PULLER_POLL_SECONDS", "60"))
+POLL_SECONDS = int(os.environ.get("STORE_PULLER_POLL_SECONDS", "15"))
 
 # Housekeeping: a printed download is deleted immediately; anything left behind
 # (a job whose auto-print failed and was kept for manual printing) is purged
@@ -290,6 +290,31 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
 
 # -- orchestration -------------------------------------------------------------
 
+def reconcile_stranded(client, store_id: str, conn: sqlite3.Connection) -> int:
+    """Startup recovery: forget any job the cloud still reports as Paid but that
+    is already in ``pulled_jobs``. Such a job was downloaded yet never printed
+    (a transient disk-full / printer-busy failure under the old code), so drop
+    its record and let the next poll pull + print it again. Returns the count
+    reset. Best-effort — never raises.
+    """
+    try:
+        rows = fetch_assigned_paid(client, store_id)
+    except Exception as exc:
+        logger.error("store_puller: reconcile fetch failed: %s", exc)
+        return 0
+    ensure_pulled_table(conn)
+    pulled_ids = load_pulled_ids(conn)
+    strand = [r["job_id"] for r in rows
+              if (r.get("job_id") or "") and r["job_id"] in pulled_ids]
+    for jid in strand:
+        conn.execute("DELETE FROM pulled_jobs WHERE job_id=?", (jid,))
+    if strand:
+        conn.commit()
+        logger.info("store_puller: reconcile — reset %d stranded Paid job(s) for retry: %s",
+                    len(strand), ", ".join(strand))
+    return len(strand)
+
+
 def pull_once(
     client,
     store_id: str,
@@ -305,8 +330,10 @@ def pull_once(
     next cycle because it is only recorded as pulled on success.
 
     ``on_pulled(row, dest_path)`` is an optional best-effort hook run after a
-    successful download (used for auto-print). It must not raise; if it does,
-    the job still counts as pulled.
+    successful download (used for auto-print). It returns True when the job
+    printed, False when it failed. A job is recorded as pulled only when there is
+    no hook (download-only) or the hook reports success — so a failed print
+    retries next cycle rather than stranding at Paid.
     """
     ensure_pulled_table(conn)
     try:
@@ -329,14 +356,24 @@ def pull_once(
         except Exception as exc:
             logger.error("store_puller: download failed for %s: %s", job_id, exc)
             continue
-        record_pulled(conn, job_id, dest)
-        pulled.append(job_id)
         logger.info("store_puller: pulled %s -> %s (%s bytes)", job_id, dest, n)
+        printed = None
         if on_pulled:
             try:
-                on_pulled(row, dest)
+                printed = on_pulled(row, dest)
             except Exception as exc:
                 logger.warning("store_puller: on_pulled hook failed for %s: %s", job_id, exc)
+                printed = False
+        # Record as done only when nothing remains to do: no autoprint hook
+        # (download-only mode), or the print actually succeeded. A FAILED print is
+        # left un-recorded so the next poll retries it — the job stays 'Paid' in
+        # the cloud — instead of stranding at Paid forever (which is what happened
+        # when a disk-full/printer-busy print failed after the download).
+        if on_pulled is None or printed:
+            record_pulled(conn, job_id, dest)
+            pulled.append(job_id)
+        else:
+            logger.warning("store_puller: %s did not print — leaving un-recorded to retry next poll", job_id)
     return pulled
 
 
@@ -413,11 +450,17 @@ def main(argv: list[str] | None = None) -> int:
                     os.remove(dest)
                 except OSError:
                     pass
+            # Report success back to pull_once so a failed print is NOT recorded
+            # as pulled and retries next cycle.
+            return printed
 
     logger.info(
         "store_puller: store=%s dest=%s poll=%ss mode=%s autoprint=%s",
         store_id, dest_dir, POLL_SECONDS, "once" if once else "loop", autoprint,
     )
+    # Recover any jobs stranded at Paid by an earlier failed print (pre-fix).
+    reconcile_stranded(client, store_id, conn)
+
     while True:
         purge_old_files(dest_dir, KEEP_DAYS)
         pull_once(client, store_id, dest_dir, conn, on_pulled=on_pulled)
