@@ -129,7 +129,12 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
             # stacked, page 1 on top (1 col x 2 rows, portrait).
             if nup == 2 and nup_dir == "vertical":
                 cols, rows, nup_orient = 1, 2, "Portrait"
-            orientation = nup_orient.lower() # force landscape/portrait
+            # The imposition below bakes the final orientation into the imposed
+            # PDF's page geometry (via nup_orient). Do NOT also pass an
+            # orientation flag to the printer — SumatraPDF would apply it a
+            # second time and flip the sheet (a landscape 2-up came out
+            # portrait). Let the printer honour the imposed page as-is.
+            orientation = None
 
             # Read sliced file bytes
             with open(current_pdf, "rb") as f:
