@@ -108,15 +108,28 @@ def perform_nup(
                 in_page = doc_in[in_pg_idx]
                 in_w, in_h = in_page.rect.width, in_page.rect.height
 
+                # Auto-detect if input page needs rotation to best fit slot orientation
+                # (e.g., portrait page in landscape slot)
+                slot_is_landscape = slot_width > slot_height
+                page_is_portrait = in_h > in_w
+                needs_rotation = (slot_is_landscape and page_is_portrait) or (not slot_is_landscape and not page_is_portrait)
+
+                if needs_rotation:
+                    rot = 90 if (is_duplex and is_back_page) else 270
+                    eff_w, eff_h = in_h, in_w
+                else:
+                    rot = 0
+                    eff_w, eff_h = in_w, in_h
+
                 # 4 & 5. Scaling & Centering Logic
                 target_w, target_h = slot_width, slot_height
                 if scale_behavior == "Original":
-                    target_w, target_h = in_w, in_h
+                    target_w, target_h = eff_w, eff_h
                 elif scale_behavior == "Custom":
                     target_w, target_h = custom_scale_width, custom_scale_height
                 elif scale_behavior == "Auto-Fit" and maintain_aspect:
-                    scale = min(slot_width / in_w, slot_height / in_h)
-                    target_w, target_h = in_w * scale, in_h * scale
+                    scale = min(slot_width / eff_w, slot_height / eff_h)
+                    target_w, target_h = eff_w * scale, eff_h * scale
 
                 final_x0, final_y0 = slot_x0, slot_y0
                 if is_centered:
@@ -124,7 +137,7 @@ def perform_nup(
                     final_y0 = slot_y0 + (slot_height - target_h) / 2
 
                 rect = fitz.Rect(final_x0, final_y0, final_x0 + target_w, final_y0 + target_h)
-                page_out.show_pdf_page(rect, doc_in, in_pg_idx)
+                page_out.show_pdf_page(rect, doc_in, in_pg_idx, rotate=rot)
 
             # 7. Crop Marks
             if draw_crop_marks:
