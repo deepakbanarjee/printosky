@@ -1309,6 +1309,7 @@
         <table>
           <thead><tr>
             <th>Date</th>
+            <th>Store</th>
             <th>Source</th>
             <th>Job / Attribution</th>
             <th>Pages</th>
@@ -1317,7 +1318,7 @@
             <th>Type</th>
           </tr></thead>
           <tbody id="epson-jobs-tbody">
-            <tr><td colspan="7" class="empty"><span class="spinner"></span></td></tr>
+            <tr><td colspan="8" class="empty"><span class="spinner"></span></td></tr>
           </tbody>
         </table>
       </div>
@@ -2738,13 +2739,14 @@ async function loadPrinterJobs() {
   const et = document.getElementById("epson-jobs-tbody");
   if (et) {
     if (!epsonRows || !epsonRows.length) {
-      et.innerHTML = `<tr><td colspan="7" class="empty">No Epson job records yet — delta attribution populates after each print cycle</td></tr>`;
+      et.innerHTML = `<tr><td colspan="8" class="empty">No Epson job records yet — delta attribution populates after each print cycle</td></tr>`;
     } else {
       et.innerHTML = epsonRows.map(r => `
         <tr>
           <td style="color:var(--muted)">${shortTime(r.job_date)}</td>
+          <td><span class="badge ${r.store_id === 'PRINTK' ? 'badge-completed' : r.store_id === 'OSP' ? 'badge-amber' : 'badge-ready'}" style="font-size:.65rem;padding:2px 5px">${esc(r.store_id || 'PRINTK')}</span></td>
           <td style="color:var(--muted);font-family:monospace;font-size:.65rem">${esc(r.source || "delta")}</td>
-          <td style="color:var(--muted);font-size:.7rem">${esc(r.attributed_job_id || r.job_number || "—")}</td>
+          <td style="color:var(--muted);font-size:.7rem" title="${esc(r.file_name || '')}">${esc(trim(r.file_name || r.attributed_job_id || r.job_number || "—", 24))}</td>
           <td class="amount">${r.pages_printed ?? r.delta_pages ?? "—"}</td>
           <td style="color:var(--muted)">${r.mono_pages ?? "—"}</td>
           <td style="color:var(--amber)">${r.color_pages ?? "—"}</td>

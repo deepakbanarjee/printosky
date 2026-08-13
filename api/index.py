@@ -1263,7 +1263,7 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
         base_name = f"{sender}_{ts}{ext or '.bin'}"
 
     dest_name = f"{sender}_{ts}_{base_name}"   # unique storage key
-    job_id    = f"OSP-{datetime.now().strftime('%Y%m%d')}-{sender[-4:]}-{ts[-4:]}-{os.urandom(3).hex()}"
+    job_id    = f"OSKY-{datetime.now().strftime('%Y%m%d')}-{sender[-4:]}-{ts[-4:]}-{os.urandom(3).hex()}"
 
     # ── Step 1: ONE Meta API call — receipt + size question combined ─────────
     # This stays within Vercel's 10s Hobby timeout. Splitting into two calls

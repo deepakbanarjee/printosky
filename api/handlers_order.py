@@ -272,7 +272,7 @@ def _handle_order_create(h, body: bytes) -> None:
     note = (note + " · " + _STORE_LABEL.get(assigned_store_id, assigned_store_id)).strip(" ·")
     page_count = len(spec.get("pages_included") or []) or int(spec.get("total_pages", 0))
 
-    job_id = f"OSP-{datetime.now().strftime('%Y%m%d')}-{phone[-4:]}-{_uuid.uuid4().hex[:4]}"
+    job_id = f"OSKY-{datetime.now().strftime('%Y%m%d')}-{phone[-4:]}-{_uuid.uuid4().hex[:4]}"
     try:
         _insert_job(job_id=job_id, sender=phone, filename=file_name, file_url=file_url)
         _persist_settings(
@@ -369,7 +369,7 @@ def _handle_order_staff_create(h, body: bytes) -> None:
 
     sender = phone or "walk-in"
     suffix = phone[-4:] if phone else _uuid.uuid4().hex[:4]
-    job_id = f"OSP-{datetime.now().strftime('%Y%m%d')}-{suffix}-{_uuid.uuid4().hex[:4]}"
+    job_id = f"OSKY-{datetime.now().strftime('%Y%m%d')}-{suffix}-{_uuid.uuid4().hex[:4]}"
     try:
         _insert_job(job_id=job_id, sender=sender, filename=file_name, file_url=file_url)
         _persist_settings(
@@ -448,7 +448,7 @@ def _handle_order_reorder(h, body: bytes) -> None:
     base_note = str(src.get("notes") or "").strip()
     note = ("Reorder of " + src_id + (" · " + base_note if base_note else "")).strip()
 
-    job_id = f"OSP-{datetime.now().strftime('%Y%m%d')}-{phone[-4:]}-{_uuid.uuid4().hex[:4]}"
+    job_id = f"OSKY-{datetime.now().strftime('%Y%m%d')}-{phone[-4:]}-{_uuid.uuid4().hex[:4]}"
     try:
         _insert_job(job_id=job_id, sender=phone,
                     filename=str(src.get("filename") or "order"), file_url=file_url)

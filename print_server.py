@@ -1113,15 +1113,15 @@ def handle_new_photocopy(body: dict) -> dict:
     today = datetime.now().strftime("%Y%m%d")
     conn  = _db()
     row   = conn.execute(
-        "SELECT job_id FROM jobs WHERE job_id LIKE ? ORDER BY job_id DESC LIMIT 1",
-        (f"OSP-{today}-%",)
+        "SELECT job_id FROM jobs WHERE (job_id LIKE ? OR job_id LIKE ?) ORDER BY job_id DESC LIMIT 1",
+        (f"OSKY-{today}-%", f"OSP-{today}-%")
     ).fetchone()
     if row:
         last_seq = int(row["job_id"].split("-")[-1])
         seq = last_seq + 1
     else:
         seq = 1
-    job_id = f"OSP-{today}-{seq:04d}"
+    job_id = f"OSKY-{today}-{seq:04d}"
     now    = _now()
 
     conn.execute("""
@@ -1224,11 +1224,11 @@ def handle_create_job(body: dict) -> dict:
     today_str = datetime.now().strftime("%Y%m%d")
     conn = _db()
     row = conn.execute(
-        "SELECT job_id FROM jobs WHERE job_id LIKE ? ORDER BY job_id DESC LIMIT 1",
-        (f"OSP-{today_str}-%",)
+        "SELECT job_id FROM jobs WHERE (job_id LIKE ? OR job_id LIKE ?) ORDER BY job_id DESC LIMIT 1",
+        (f"OSKY-{today_str}-%", f"OSP-{today_str}-%")
     ).fetchone()
     seq = (int(row["job_id"].split("-")[-1]) + 1) if row else 1
-    job_id  = f"OSP-{today_str}-{seq:04d}"
+    job_id  = f"OSKY-{today_str}-{seq:04d}"
     now_str = _now()
 
     status    = "Queued" if (paid or override_reason) else "Draft"

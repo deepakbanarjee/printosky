@@ -116,14 +116,14 @@ def _login(session: requests.Session) -> bool:
                 "INPUTT_USERNAME":  EPSON_USER,
                 "INPUTT_PASSWORD":  EPSON_PASS,
                 "access":           "https",
+                "FROMURL":          "INFO_JOBHISTORY"
             },
             timeout=HTTP_TIMEOUT,
             allow_redirects=True,
         )
-        # Successful login sets EPSON_COOKIE_SESSION; check for it
-        ok = r.status_code == 200 and "EPSON_COOKIE_SESSION" in session.cookies
+        ok = r.status_code == 200 and "Incorrect" not in r.text and "Authentication failed" not in r.text
         if not ok:
-            logger.debug(f"Epson login failed — no session cookie. len={len(r.text)}")
+            logger.debug(f"Epson login failed — status={r.status_code}, len={len(r.text)}")
         return ok
     except Exception as e:
         logger.debug(f"Epson login error: {e}")
