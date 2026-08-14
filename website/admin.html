@@ -1338,9 +1338,10 @@
         <button class="filter-btn" onclick="setFilter('Received', this)">Pending</button>
         <button class="filter-btn" onclick="setFilter('today', this)">Today</button>
         <select class="filter-btn" id="storeFilter" onchange="setStoreFilter(this.value)" style="cursor:pointer" title="Which location's jobs to show">
-          <option value="all">All locations</option>
-          <option value="OSP">Thriprayar</option>
-          <option value="PRINTK">Nattika</option>
+          <option value="all">All locations (3 stores)</option>
+          <option value="PRIOFF">Printosky Office (PRIOFF)</option>
+          <option value="PRINTK">Printosky Nattika (PRINTK)</option>
+          <option value="OSP">Oxygen Thriprayar (OSP)</option>
         </select>
         <span id="store-diag" style="font-family:var(--mono);font-size:11px;color:var(--muted);align-self:center" title="This machine's store_id (from its print_server /status) and where the admin read it from — this decides the default location filter."></span>
         <input class="search-input" id="search" placeholder="Search job ID / file…" oninput="renderTable()">
@@ -2534,6 +2535,8 @@ function setStoreFilter(v) {
   storeFilter = v;
   if (!isDemo) renderStats(summarizeJobs(todaysJobs, storeFilter));
   renderTable();
+  renderPrinterBreakdown();
+  loadPrinterJobs();
   updateStoreDiag();
 }
 
@@ -2545,7 +2548,7 @@ function initStoreFilter() {
   if (storeFilterInited) return;
   storeFilterInited = true;
   const machine = getStoreId();
-  storeFilter = (machine === "OSP" || machine === "PRINTK") ? machine : "all";
+  storeFilter = (machine === "OSP" || machine === "PRINTK" || machine === "PRIOFF") ? machine : "all";
   const sel = document.getElementById("storeFilter");
   if (sel) sel.value = storeFilter;
   updateStoreDiag();
@@ -2553,7 +2556,7 @@ function initStoreFilter() {
 
 // Diagnostic: surface THIS machine's resolved store_id and where it was read
 // from (storePcUrl /status), so a store PC showing the wrong jobs is obvious at
-// a glance. Green when it maps to a filterable store (OSP/PRINTK); amber when it
+// a glance. Green when it maps to a filterable store (OSP/PRINTK/PRIOFF); amber when it
 // does not (the filter then correctly falls back to "all").
 function updateStoreDiag() {
   const el = document.getElementById("store-diag");
@@ -2561,12 +2564,12 @@ function updateStoreDiag() {
   const machine = getStoreId();
   let host = "";
   try { host = new URL(localStorage.getItem("storePcUrl") || "").host; } catch (e) {}
-  const known = (machine === "OSP" || machine === "PRINTK");
+  const known = (machine === "OSP" || machine === "PRINTK" || machine === "PRIOFF");
   el.textContent = `🖥 ${machine || "(unknown)"} · src ${host || "(storePcUrl unset)"}`;
   el.style.color = known ? "var(--green)" : "var(--amber)";
   el.title = known
     ? `This PC reports store_id="${machine}" (from ${host}); jobs are default-filtered to it. Override with the dropdown.`
-    : `This PC's store_id=${machine || "(unknown)"} is not a filterable store (expected OSP or PRINTK), so the filter shows ALL jobs. If this IS a store PC, set store_config.json store_id and point storePcUrl (⚙ PC Setup) at this PC's own :3005.`;
+    : `This PC's store_id=${machine || "(unknown)"} is not a filterable store (expected OSP, PRINTK or PRIOFF), so the filter shows ALL jobs. If this IS a store PC, set store_config.json store_id and point storePcUrl (⚙ PC Setup) at this PC's own :3005.`;
 }
 
 function renderTable() {
@@ -2661,7 +2664,11 @@ async function printJob(jobId, filepath, printerKey, copies, colourMode) {
 // ── Printer Breakdown ─────────────────────────────────────────────────────────
 function renderPrinterBreakdown() {
   const todayStr = today();
-  const todayJobs = allJobs.filter(j => (j.received_at || "").startsWith(todayStr));
+  const todayJobs = allJobs.filter(j => {
+    if (!(j.received_at || "").startsWith(todayStr)) return false;
+    if (storeFilter !== "all" && j.store_id && j.store_id !== storeFilter) return false;
+    return true;
+  });
 
   ["konica", "epson"].forEach(p => {
     const isEpson = p === "epson";
@@ -2709,9 +2716,14 @@ async function loadPrinterJobs() {
     dateParam = `&job_date=gte.${weekAgo}T00:00:00`;
   }
 
+  let storeParam = "";
+  if (storeFilter !== "all") {
+    storeParam = `&store_id=eq.${storeFilter}`;
+  }
+
   const [konicaRows, epsonRows] = await Promise.all([
-    sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}`).catch(() => []),
-    sbFetch("epson_jobs",  `source=eq.weblog&order=job_date.desc&limit=200${dateParam}`).catch(() => []),
+    sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}${storeParam}`).catch(() => []),
+    sbFetch("epson_jobs",  `source=eq.weblog&order=job_date.desc&limit=200${dateParam}${storeParam}`).catch(() => []),
   ]);
 
   // Konica table
