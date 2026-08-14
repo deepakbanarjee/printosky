@@ -2139,10 +2139,10 @@ async function loadPrinterJobs() {
   const filter = (document.getElementById("pjl-filter") || {}).value || "today";
   let dateParam = "";
   if (filter === "today") {
-    dateParam = `&job_date=gte.${today()}T00:00:00`;
+    dateParam = `&job_date=gte.${today()}`;
   } else if (filter === "week") {
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-    dateParam = `&job_date=gte.${weekAgo}T00:00:00`;
+    dateParam = `&job_date=gte.${weekAgo}`;
   }
 
   let storeParam = "";
