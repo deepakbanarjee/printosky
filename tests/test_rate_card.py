@@ -34,23 +34,23 @@ class TestCalcSheets:
         assert rc.calc_sheets(1, "ss", "1-up") == 1
 
     def test_ds_1up_even_pages(self):
-        # 6 pages DS → ceil(6/2)=3 → next even=4
-        assert rc.calc_sheets(6, "ds", "1-up") == 4
+        # 6 pages DS → ceil(6/2)=3 sheets
+        assert rc.calc_sheets(6, "ds", "1-up") == 3
 
     def test_ds_1up_odd_pages(self):
-        # 5 pages DS → ceil(5/2)=3 → next even=4
-        assert rc.calc_sheets(5, "ds", "1-up") == 4
+        # 5 pages DS → ceil(5/2)=3 sheets
+        assert rc.calc_sheets(5, "ds", "1-up") == 3
 
     def test_ds_1up_34_pages(self):
-        # 34 pages DS → ceil(34/2)=17 → next even=18
-        assert rc.calc_sheets(34, "ds", "1-up") == 18
+        # 34 pages DS → ceil(34/2)=17 sheets
+        assert rc.calc_sheets(34, "ds", "1-up") == 17
 
     def test_ds_1up_1_page(self):
-        # 1 page DS → ceil(1/2)=1 → next even=2
-        assert rc.calc_sheets(1, "ds", "1-up") == 2
+        # 1 page DS → ceil(1/2)=1 sheet
+        assert rc.calc_sheets(1, "ds", "1-up") == 1
 
     def test_ds_1up_already_even(self):
-        # 4 pages DS → ceil(4/2)=2 → already even → 2
+        # 4 pages DS → ceil(4/2)=2 sheets
         assert rc.calc_sheets(4, "ds", "1-up") == 2
 
     def test_ss_2up(self):
@@ -62,8 +62,8 @@ class TestCalcSheets:
         assert rc.calc_sheets(40, "ss", "4-up") == 10
 
     def test_ds_2up(self):
-        # 50 pages 2-up DS → after layout: ceil(50/2)=25 pages → DS: ceil(25/2)=13 → next even=14
-        assert rc.calc_sheets(50, "ds", "2-up") == 14
+        # 50 pages 2-up DS → after layout: ceil(50/2)=25 pages → DS: ceil(25/2)=13 sheets
+        assert rc.calc_sheets(50, "ds", "2-up") == 13
 
     def test_unknown_layout_defaults_to_1up(self):
         # Unknown layout treated as 1-up
@@ -219,10 +219,10 @@ class TestCalculateItemCost:
         assert r["print_cost"] == 90.0
 
     def test_ds_rounding_in_cost(self):
-        # 34 pages DS → 18 sheets × Rs.3 = Rs.54
+        # 34 pages DS → 17 sheets × Rs.3 = Rs.51.00
         r = rc.calculate_item_cost(34, "A4_BW", "ds", "1-up", 1)
-        assert r["sheets"] == 18
-        assert r["print_cost"] == 54.0
+        assert r["sheets"] == 17
+        assert r["print_cost"] == 51.0
 
     def test_breakdown_line_present(self):
         r = rc.calculate_item_cost(10, "A4_BW", "ss", "1-up", 1)
@@ -349,15 +349,15 @@ class TestCalculateQuote:
         assert q["total"] == 30.0
 
     def test_quote_with_spiral(self):
-        # 34p DS A4 BW + spiral → 18 sheets × Rs.3 = Rs.54 + Rs.30 = Rs.84
+        # 34p DS A4 BW + spiral → 17 sheets × Rs.3 = Rs.51 + Rs.30 = Rs.81
         q = rc.calculate_quote(
             [{"pages": 34, "paper_type": "A4_BW", "sides": "ds", "layout": "1-up", "copies": 1}],
             finishing="spiral"
         )
-        assert q["total_sheets"] == 18
-        assert q["print_cost"] == 54.0
+        assert q["total_sheets"] == 17
+        assert q["print_cost"] == 51.0
         assert q["finishing_cost"] == 30
-        assert q["total"] == 84.0
+        assert q["total"] == 81.0
 
     def test_quote_colour_tiered(self):
         # 20p A4 col SS → 20 sheets ≤30 → Rs.10/sheet = Rs.200

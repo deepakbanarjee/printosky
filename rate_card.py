@@ -228,8 +228,6 @@ def calc_sheets(pages: int, sides: str = "ss", layout: str = "1-up") -> int:
     # Step 2: sides
     if sides == "ds":
         sheets = math.ceil(pages / 2)
-        if sheets % 2 != 0:
-            sheets += 1   # round to next even number (owner requirement)
     else:
         sheets = pages
 
@@ -610,12 +608,13 @@ if __name__ == "__main__":
 
     tests = [
         # (desc, pages, sides, layout, expected_sheets)
-        ("34p DS 1-up",   34, "ds", "1-up", 18),   # ceil(34/2)=17 → next even=18
-        ("5p  DS 1-up",    5, "ds", "1-up",  4),   # ceil(5/2)=3 → next even=4
-        ("6p  DS 1-up",    6, "ds", "1-up",  4),   # ceil(6/2)=3 → next even=4
+        ("34p DS 1-up",   34, "ds", "1-up", 17),   # ceil(34/2)=17 sheets
+        ("5p  DS 1-up",    5, "ds", "1-up",  3),   # ceil(5/2)=3 sheets
+        ("6p  DS 1-up",    6, "ds", "1-up",  3),   # ceil(6/2)=3 sheets
+        ("4p  DS 2-up",    4, "ds", "2-up",  1),   # ceil(4/2)=2p -> ceil(2/2)=1 sheet
         ("50p SS 2-up",   50, "ss", "2-up", 25),   # ceil(50/2)=25 sheets
         ("10p SS 1-up",   10, "ss", "1-up", 10),
-        ("1p  DS 1-up",    1, "ds", "1-up",  2),   # ceil(1/2)=1 → next even=2
+        ("1p  DS 1-up",    1, "ds", "1-up",  1),   # ceil(1/2)=1 sheet
     ]
 
     all_pass = True
