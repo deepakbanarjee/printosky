@@ -98,6 +98,15 @@ def init_epson_jobs_table(conn):
     logger.info("epson_jobs table ready")
 
 
+def get_epson_ip() -> str:
+    cfg_ip = get_store_config().printers.epson_ip
+    if not cfg_ip or cfg_ip == "192.168.1.204":
+        return "192.168.1.201"
+    return cfg_ip
+
+def get_epson_url(endpoint: str) -> str:
+    return f"https://{get_epson_ip()}/PRESENTATION/ADVANCED/{endpoint}"
+
 # ── Tier 1: Web log CSV (form login + SETUPTOKEN) ─────────────────────────────
 
 def _make_session() -> requests.Session:
@@ -108,32 +117,48 @@ def _make_session() -> requests.Session:
 
 def _login(session: requests.Session) -> bool:
     """POST credentials to ADVANCED/PASSWORD/SET to acquire a session cookie."""
-    try:
-        r = session.post(
-            LOGIN_URL,
-            data={
-                "SEL_SESSIONTYPE": "ADMIN",
-                "INPUTT_USERNAME":  EPSON_USER,
-                "INPUTT_PASSWORD":  EPSON_PASS,
-                "access":           "https",
-                "FROMURL":          "INFO_JOBHISTORY"
-            },
-            timeout=HTTP_TIMEOUT,
-            allow_redirects=True,
-        )
-        ok = r.status_code == 200 and "Incorrect" not in r.text and "Authentication failed" not in r.text
-        if not ok:
-            logger.debug(f"Epson login failed — status={r.status_code}, len={len(r.text)}")
-        return ok
-    except Exception as e:
-        logger.debug(f"Epson login error: {e}")
-        return False
+    passwords = [
+        os.environ.get("EPSON_PASS", ""),
+        "XCVJ000892",
+        "XCVJ000949",
+        "Oxygen@1234",
+        "Oxygen@2026",
+        "access"
+    ]
+    usernames = ["", "Oxygen", "admin"]
+    login_url = get_epson_url("PASSWORD/SET")
+
+    for pwd in passwords:
+        if not pwd:
+            continue
+        for user in usernames:
+            try:
+                r = session.post(
+                    login_url,
+                    data={
+                        "SEL_SESSIONTYPE": "ADMIN",
+                        "INPUTT_USERNAME": user,
+                        "INPUTT_PASSWORD": pwd,
+                        "access": "https",
+                        "FROMURL": "INFO_JOBHISTORY"
+                    },
+                    timeout=HTTP_TIMEOUT,
+                    allow_redirects=True,
+                )
+                ok = r.status_code == 200 and "Incorrect" not in r.text and "Authentication failed" not in r.text
+                if ok:
+                    logger.info(f"Epson login successful on {get_epson_ip()} using user='{user}'")
+                    return True
+            except Exception as e:
+                logger.debug(f"Epson login error: {e}")
+    logger.debug("Epson login failed on all credential combinations")
+    return False
 
 
 def _get_setup_token(session: requests.Session) -> str | None:
     """GET job history page and extract the per-session SETUPTOKEN."""
     try:
-        r = session.get(HISTORY_URL, timeout=HTTP_TIMEOUT)
+        r = session.get(get_epson_url("INFO_JOBHISTORY/TOP"), timeout=HTTP_TIMEOUT)
         r.raise_for_status()
         m = re.search(r'name="INPUTT_SETUPTOKEN"\s+value="([^"]+)"', r.text)
         return m.group(1) if m else None
@@ -146,7 +171,7 @@ def _download_csv(session: requests.Session, token: str) -> str | None:
     """POST to the CSV export endpoint with the session token."""
     try:
         r = session.post(
-            EXPORT_URL,
+            get_epson_url("INFO_JOBHISTORY/OUTPUT.CSV"),
             data={"INPUTT_SETUPTOKEN": token, "INPUTD_HISTORYTYPE": "ALL"},
             timeout=HTTP_TIMEOUT,
         )
@@ -157,22 +182,87 @@ def _download_csv(session: requests.Session, token: str) -> str | None:
         return None
 
 
+def _fetch_html_joblog(session: requests.Session) -> list[dict]:
+    """Scrape multi-page HTML job log directly from INFO_JOBHISTORY/TOP."""
+    jobs = []
+    seen = set()
+    now = datetime.now().isoformat(sep=" ", timespec="seconds")
+    
+    for page in range(1, 15):
+        try:
+            r = session.post(
+                get_epson_url("INFO_JOBHISTORY/TOP"),
+                data={"PAGE": str(page), "ROWNUM": "50", "INPUTD_HISTORYTYPE": "ALL"},
+                timeout=HTTP_TIMEOUT,
+            )
+            html = r.text
+            receipts = re.findall(r'id="(\d+)_RECEIPTNO"', html, re.I) or re.findall(r'value="(\d+)"\s+id="\d+_RECEIPTNO"', html, re.I)
+            if not receipts:
+                break
+            
+            for r_id in receipts:
+                if r_id in seen:
+                    continue
+                seen.add(r_id)
+                
+                def get_val(key):
+                    m = re.search(fr'value="([^"]*)"\s+id="{r_id}_{key}"', html, re.I) or re.search(fr'id="{r_id}_{key}"\s+value="([^"]*)"', html, re.I)
+                    return m.group(1) if m else ""
+                    
+                dt_str = get_val("DATETIME")
+                comp_str = get_val("COMPLETED")
+                jtype = get_val("TYPE")
+                res = get_val("RESULT")
+                pgs = get_val("PAGES")
+                frm = get_val("FROM")
+                fname = get_val("FILENAME")
+                
+                try:
+                    pages_printed = int(pgs.split("/")[0]) if "/" in pgs else int(pgs)
+                except (ValueError, IndexError):
+                    pages_printed = None
+                    
+                jobs.append({
+                    "source": "weblog",
+                    "job_number": str(r_id),
+                    "job_type": jtype or "Print",
+                    "user_name": frm or "Epson",
+                    "file_name": fname,
+                    "result": res or "OK",
+                    "pages_printed": pages_printed,
+                    "job_date": _epson_date(dt_str),
+                    "print_end_date": _epson_date(comp_str),
+                    "imported_at": now,
+                })
+        except Exception as e:
+            logger.debug(f"HTML scraper page {page} error: {e}")
+            break
+            
+    return jobs
+
+
 def _probe_job_log(session: requests.Session):
     """
-    Login, get token, download CSV.
-    Returns (EXPORT_URL, csv_text, 'csv') or (None, None, None) on failure.
+    Login, try CSV download first, fallback to multi-page HTML scraping.
+    Returns (url, payload, format) or (None, None, None) on failure.
     """
     if not _login(session):
         logger.debug("Epson Tier 1: login failed")
         return None, None, None
+        
     token = _get_setup_token(session)
-    if not token:
-        logger.debug("Epson Tier 1: SETUPTOKEN not found")
-        return None, None, None
-    csv_text = _download_csv(session, token)
-    if csv_text:
-        logger.info("Epson web log CSV downloaded successfully")
-        return EXPORT_URL, csv_text, "csv"
+    if token:
+        csv_text = _download_csv(session, token)
+        if csv_text:
+            logger.info("Epson web log CSV downloaded successfully")
+            return get_epson_url("INFO_JOBHISTORY/OUTPUT.CSV"), csv_text, "csv"
+            
+    # Fallback to direct HTML multi-page scraping
+    html_rows = _fetch_html_joblog(session)
+    if html_rows:
+        logger.info(f"Epson web log HTML scraped successfully ({len(html_rows)} rows)")
+        return get_epson_url("INFO_JOBHISTORY/TOP"), html_rows, "parsed_rows"
+        
     return None, None, None
 
 
@@ -392,14 +482,16 @@ def fetch_and_import(db_path):
     if _weblog_available:
         try:
             session = _make_session()
-            url, text, fmt = _probe_job_log(session)
-            if text:
+            url, data_obj, fmt = _probe_job_log(session)
+            if data_obj:
                 if fmt == "csv":
-                    rows = _parse_joblog_csv(text)
+                    rows = _parse_joblog_csv(data_obj)
                     if rows:
                         _import_weblog_rows(conn, rows)
                     else:
                         logger.info("Epson web log: CSV downloaded but no Print jobs found")
+                elif fmt == "parsed_rows":
+                    _import_weblog_rows(conn, data_obj)
                 _weblog_fail_count = 0
             else:
                 _weblog_fail_count += 1

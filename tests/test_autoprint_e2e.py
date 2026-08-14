@@ -108,7 +108,7 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
 
     # Auto-print hook configuration
     def on_pulled(row, dest):
-        auto_print(
+        return auto_print(
             row.get("job_id"), dest, row.get("colour"), row.get("copies"),
             paper_size=row.get("size"), orientation=row.get("orientation"),
             print_spec=row.get("print_spec"),
