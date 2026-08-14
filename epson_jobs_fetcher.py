@@ -1,7 +1,7 @@
 """
 EPSON JOB LOG FETCHER
 ======================
-Fetches per-job print details from the Epson WF-C21000 (192.168.55.202).
+Fetches per-job print details from the Epson EM-C8100.
 
 Two-tier approach:
   Tier 1 — Web log CSV: logs in via form POST, extracts SETUPTOKEN from

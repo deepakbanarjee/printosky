@@ -736,7 +736,7 @@ def _send_ink_alerts(printer: str, supplies: list, conn) -> None:
 
     if alerts:
         from whatsapp_notify import send_staff_alert
-        printer_name = "Epson WF-C21000" if printer == "epson" else "Konica Bizhub"
+        printer_name = "Epson EM-C8100" if printer == "epson" else "Konica Bizhub"
         msg = f"🖨️ *{printer_name} ink alert*\n\n" + "\n".join(alerts)
         send_staff_alert(msg)
         logger.warning(f"Ink alert sent for {printer}: {alerts}")

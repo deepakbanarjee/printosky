@@ -272,7 +272,7 @@ tr:hover td{background:#fafafa}
         </div>
       </div>
       <div style="flex:1;min-width:220px;background:#f0f7ff;border-radius:10px;padding:16px">
-        <div style="font-weight:700;margin-bottom:10px">🎨 Epson WF-C21000</div>
+        <div style="font-weight:700;margin-bottom:10px">🎨 Epson EM-C8100</div>
         <div style="font-size:12px;color:#888;margin-bottom:8px" id="epson-ts">Not yet polled</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div><div style="font-size:11px;color:#888">Total Pages</div><div style="font-size:22px;font-weight:700" id="epson-total">—</div></div>
