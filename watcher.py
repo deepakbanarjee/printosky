@@ -177,6 +177,18 @@ IGNORE_PATTERNS = {
     ".ds_store",    # Mac metadata
 }
 
+# DTP transcription outputs. Exporting a finished transcript from the DTP console
+# drops it into the hot folder, where this watcher logged it as a fresh print job
+# — one per export, so re-exporting a file produced duplicate Pending jobs (and
+# would fire a customer "file received, here's your quote" reply if the drop ever
+# carried a sender). A transcript is a deliverable, not print intake: staff add it
+# to print deliberately once the DTP work is signed off.
+TRANSCRIPT_SUFFIXES = (
+    "_transcript.docx",
+    "_transcript.txt",
+    "_transcript.pdf",
+)
+
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # SETUP
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -504,6 +516,17 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
     filename_lower = filepath.name.lower()
     if any(filename_lower.startswith(p) or filename_lower.endswith(p)
            for p in IGNORE_PATTERNS):
+        return
+
+    # DTP transcript exports are deliverables, not intake (see TRANSCRIPT_SUFFIXES).
+    # Logged at INFO, not debug: staff need to see that the file was noticed and
+    # deliberately skipped, so a missing job reads as "add it to print" rather
+    # than "the watcher lost my file".
+    if any(filename_lower.endswith(s) for s in TRANSCRIPT_SUFFIXES):
+        logging.info(
+            "Skipping DTP transcript (not auto-logged — add to print manually): %s",
+            filepath.name,
+        )
         return
 
     # Only track known file types
