@@ -75,6 +75,13 @@ def download_pdf_from_storage(filename):
         
     return sb.storage.from_("manuscripts").download(filename)
 MY_STORE_ID = cfg.store_id
+
+# Seconds between poll cycles. The transcription queue is low-volume (tens of
+# jobs), so a 10s loop bought no responsiveness and cost ~8.6k round trips a day
+# against the Supabase egress quota. 60s is still well inside the turnaround a
+# manuscript job needs. Override with TRANSCRIBE_POLL_SECONDS if a store wants
+# it tighter.
+POLL_SECONDS = int(os.environ.get("TRANSCRIBE_POLL_SECONDS", "60"))
 WATCH_DIR = r"D:\Divya teacher\Preeksha sahayi"
 TEMP_DIR = r"d:\PY\printosky\_tmp_watcher"
 
@@ -165,7 +172,7 @@ def process_transcription_job(job):
     model_name = "models/gemini-3.5-flash" if mode == "urgent" else "models/gemini-3.1-flash-lite"
     
     # Fetch current state from DB
-    current_job = sb.table("manuscript_transcripts").select("*").eq("id", job_id).execute().data[0]
+    current_job = sb.table("manuscript_transcripts").select("content,transcribed_pages").eq("id", job_id).execute().data[0]
     start_page = current_job.get("transcribed_pages", 0)
     current_content = current_job.get("content") or ""
     
@@ -261,32 +268,85 @@ def split_malayalam_english(text):
         segments.append((part, is_mal))
     return segments
 
+def _fetch_transcript_content(job_id):
+    """Fetch the ``content`` blob for a single job, on demand.
+
+    Split out of the sync probe so the transcript text — by far the largest
+    column in the table — leaves the database only when a file actually has to
+    be written. Returns "" when the row is gone or has no content yet.
+    """
+    res = (
+        sb.table("manuscript_transcripts")
+        .select("content")
+        .eq("id", job_id)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    return (rows[0].get("content") or "") if rows else ""
+
+
 def sync_completed_jobs():
-    # Sync files that were completed and belong to this store
+    # Sync files that were completed and belong to this store.
+    #
+    # Egress: this runs on every poll cycle, so it must stay cheap. It selects
+    # only the two columns needed to work out what is missing on disk — NOT
+    # ``content``, which holds the full OCR transcript. Pulling ``select("*")``
+    # here re-downloaded every completed transcript on every cycle (~8.7k
+    # requests/day), which is what blew the Supabase egress quota. The content is
+    # now fetched per-job, only when a local file is actually missing, so a
+    # steady state where everything is already synced costs one small query.
     try:
-        res = sb.table("manuscript_transcripts").select("*").eq("status", "completed").eq("uploaded_by_store", MY_STORE_ID).execute()
+        res = (
+            sb.table("manuscript_transcripts")
+            .select("id,filename")
+            .eq("status", "completed")
+            .eq("uploaded_by_store", MY_STORE_ID)
+            .execute()
+        )
         jobs = res.data or []
-        
+
         from datetime import datetime
         today_str = datetime.now().strftime("%d%m%y")
         local_sync_dir = os.path.join(r"C:\DTP", today_str)
-        
+
         for job in jobs:
             filename = job["filename"]
             base_name = os.path.splitext(filename)[0]
             local_txt_path = os.path.join(local_sync_dir, f"{base_name}_transcript.txt")
             local_docx_path = os.path.join(local_sync_dir, f"{base_name}_transcript.docx")
             local_pdf_path = os.path.join(local_sync_dir, filename)
-            
+
+            # Nothing missing for this job → skip without fetching the
+            # transcript at all. This is the common case once a day's files
+            # have synced, and it is what keeps the loop cheap.
+            if (os.path.exists(local_txt_path)
+                    and os.path.exists(local_docx_path)
+                    and os.path.exists(local_pdf_path)):
+                continue
+
+            # Something has to be written, so pull the transcript text once and
+            # reuse it for both the .txt and the .docx below.
+            content = None
+            if not (os.path.exists(local_txt_path) and os.path.exists(local_docx_path)):
+                try:
+                    content = _fetch_transcript_content(job["id"])
+                except Exception as e:
+                    log.error(f"Failed to fetch transcript content for {filename}: {e}")
+                    continue
+                if not content:
+                    log.warning(f"No transcript content yet for {filename}; skipping this cycle")
+                    continue
+
             # Ensure folder is created before writing/downloading
             if not os.path.exists(local_sync_dir):
                 os.makedirs(local_sync_dir, exist_ok=True)
-            
+
             # 1. Download/Write the completed transcript locally
             if not os.path.exists(local_txt_path):
                 log.info(f"Downloading finished transcript locally: {local_txt_path}")
                 with open(local_txt_path, "w", encoding="utf-8") as f:
-                    f.write(job["content"])
+                    f.write(content)
                     
             # 2. Generate and write the Word Docx locally
             if not os.path.exists(local_docx_path):
@@ -298,7 +358,7 @@ def sync_completed_jobs():
                     from docx.shared import Pt
                     
                     doc = docx.Document()
-                    lines = job["content"].split("\n")
+                    lines = content.split("\n")
                     first_page = True
                     p = None
                     
@@ -376,8 +436,11 @@ def main_loop():
     
     while True:
         try:
-            # 1. Check for pending jobs to execute
-            res = sb.table("manuscript_transcripts").select("*").eq("status", "pending").limit(1).execute()
+            # 1. Check for pending jobs to execute.
+            # Only the three fields process_transcription_job reads are selected;
+            # it re-fetches its own resume state, so pulling ``content`` here
+            # would ship a partial transcript on every cycle for nothing.
+            res = sb.table("manuscript_transcripts").select("id,filename,mode").eq("status", "pending").limit(1).execute()
             if res.data:
                 job = res.data[0]
                 # Claim the job to avoid race conditions
@@ -386,7 +449,7 @@ def main_loop():
                     process_transcription_job(job)
                     
             # 2. Check for transcribing jobs that might have crashed/interrupted
-            res = sb.table("manuscript_transcripts").select("*").eq("status", "transcribing").limit(1).execute()
+            res = sb.table("manuscript_transcripts").select("id,filename,mode").eq("status", "transcribing").limit(1).execute()
             if res.data:
                 job = res.data[0]
                 # If we are the worker that crashed, or we want to resume
@@ -399,8 +462,8 @@ def main_loop():
             
         except Exception as e:
             log.error(f"Error in main worker loop: {e}")
-            
-        time.sleep(10)
+
+        time.sleep(POLL_SECONDS)
 
 if __name__ == "__main__":
     if sb and client:
