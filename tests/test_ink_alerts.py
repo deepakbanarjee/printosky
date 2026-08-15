@@ -227,7 +227,8 @@ def test_epson_printer_name_in_alert(conn):
     _insert_current(conn, "epson", 3, 5.0)
     supplies = [{"supply_index": 3, "description": "Ink Cyan (C)", "pct": 5.0}]
     _send_ink_alerts("epson", supplies, conn)
-    assert "Epson WF-C21000" in _alerts_sent[0]
+    # EM-C8100 replaced the WF-C21000 on 2026-06-29 (store_config.py, ARCHITECTURE.md).
+    assert "Epson EM-C8100" in _alerts_sent[0]
 
 
 def test_konica_printer_name_in_alert(conn):
