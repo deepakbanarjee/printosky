@@ -23,9 +23,12 @@ def _ago(days: float) -> str:
     return ts.isoformat().replace("+00:00", "Z")
 
 
-def _classify(name, age_days, referenced=frozenset(), tiers=ALL_TIERS, override=None):
+def _classify(name, age_days, referenced=frozenset(), tiers=ALL_TIERS, override=None,
+              referenced_names=None):
+    """Helper. `referenced` accepts full URLs or keys — normalised like main()."""
+    keys = {cleanup.object_key(u) for u in referenced}
     return cleanup.classify(
-        name, _ago(age_days), 1234, set(referenced), BASE, tiers, override
+        name, _ago(age_days), 1234, keys, BASE, tiers, override, referenced_names
     )
 
 
@@ -36,6 +39,41 @@ def test_referenced_file_is_never_deleted():
     name = "project-builder/old.pdf"
     url = f"{BASE}/storage/v1/object/public/incoming-files/{name}"
     assert _classify(name, 999, referenced={url}) is None
+
+
+def test_referenced_url_with_trailing_question_mark_is_kept():
+    """Regression: the bug that deleted 49 files referenced by Pending jobs.
+
+    Job rows store file_url with a trailing '?'. Comparing that raw string
+    against a freshly-built public URL never matched, so live files were
+    classified as orphans and swept.
+    """
+    name = "918943232033_20260405_124609_Claude_Secret_Codes.pdf"
+    url = f"{BASE}/storage/v1/object/public/incoming-files/{name}?"
+    assert _classify(name, 130, referenced={url}) is None
+
+
+def test_referenced_url_percent_encoded_is_kept():
+    """A row storing %20 for a space must still match the raw object key."""
+    name = "918592925551_20260406_131428_JEE MAIN PHYSICS QUESTIONS _2025_.pdf"
+    encoded = name.replace(" ", "%20")
+    url = f"{BASE}/storage/v1/object/public/incoming-files/{encoded}?"
+    assert _classify(name, 130, referenced={url}) is None
+
+
+def test_filename_guard_keeps_file_when_url_unmatched():
+    """Second guard: a bare filename match vetoes the delete on its own."""
+    name = "918943232033_20260407_082551_Thesis.pdf"
+    assert _classify(name, 130, referenced=set(),
+                     referenced_names={name}) is None
+
+
+def test_object_key_normalisation():
+    base = f"{BASE}/storage/v1/object/public/incoming-files/"
+    assert cleanup.object_key(base + "a.pdf?") == "a.pdf"
+    assert cleanup.object_key(base + "a%20b.pdf") == "a b.pdf"
+    assert cleanup.object_key(base + "orders/x.pdf?token=abc") == "orders/x.pdf"
+    assert cleanup.object_key("") == ""
 
 
 def test_payment_evidence_is_protected():

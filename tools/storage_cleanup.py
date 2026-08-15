@@ -73,31 +73,66 @@ def _client():
     return create_client(url, key)
 
 
-def referenced_urls(sb) -> set[str]:
-    """Every file_url currently referenced by a job row.
+def object_key(url: str) -> str:
+    """Reduce a storage URL to the bucket-relative object key.
+
+    Job rows do not store a canonical URL. Observed variations include a
+    trailing '?' (the common case — roughly a third of rows), percent-encoded
+    spaces, and signed-URL query strings. Comparing raw URL strings therefore
+    reports a live file as unreferenced, which is exactly how the first run of
+    this script deleted 49 files that Pending jobs still pointed at.
+
+    Normalising to the key — strip the query string, then URL-decode — makes
+    both sides comparable regardless of which form the row happens to carry.
+    """
+    from urllib.parse import unquote
+
+    if not url:
+        return ""
+    key = url.split("?", 1)[0]
+    marker = f"/{BUCKET}/"
+    idx = key.find(marker)
+    if idx != -1:
+        key = key[idx + len(marker):]
+    return unquote(key).strip().lstrip("/")
+
+
+def referenced_keys(sb) -> tuple[set[str], set[str]]:
+    """Object keys, and bare filenames, referenced by any job row.
+
+    Returns (keys, basenames). The basename set is a deliberately blunt second
+    guard: if a job row references a file whose key we somehow fail to match,
+    the filename alone is still enough to veto the delete. It costs a few
+    genuinely-orphaned files that happen to share a name with a live job — an
+    acceptable trade against deleting a customer's file.
 
     Fetched in pages because PostgREST caps a single response, and a missed row
     here would mean deleting a live customer file.
     """
-    urls: set[str] = set()
-    page, size = 0, 1000
+    keys: set[str] = set()
+    names: set[str] = set()
+    page, size = 1000, 1000
+    offset = 0
     while True:
         res = (
             sb.table("jobs")
-            .select("file_url")
-            .not_.is_("file_url", "null")
-            .range(page * size, page * size + size - 1)
+            .select("file_url,filename")
+            .range(offset, offset + page - 1)
             .execute()
         )
         rows = res.data or []
         for r in rows:
-            u = (r.get("file_url") or "").strip()
-            if u:
-                urls.add(u)
-        if len(rows) < size:
+            key = object_key((r.get("file_url") or "").strip())
+            if key:
+                keys.add(key)
+                names.add(key.rsplit("/", 1)[-1])
+            fn = (r.get("filename") or "").strip()
+            if fn:
+                names.add(fn)
+        if len(rows) < page:
             break
-        page += 1
-    return urls
+        offset += page
+    return keys, names
 
 
 def list_objects(sb) -> list[dict]:
@@ -156,14 +191,26 @@ def _age_days(created: str | None) -> float:
 
 def classify(name: str, created: str | None, size: int,
              referenced: set[str], base_url: str,
-             tiers: list[str], min_age_override: int | None) -> str | None:
-    """Return the tier a file qualifies for, or None to keep it."""
+             tiers: list[str], min_age_override: int | None,
+             referenced_names: set[str] | None = None) -> str | None:
+    """Return the tier a file qualifies for, or None to keep it.
+
+    ``referenced`` holds normalised object keys (see object_key). ``base_url``
+    is accepted for signature compatibility but is no longer used to rebuild a
+    URL for comparison — that reconstruction was the source of the false
+    "unreferenced" verdicts.
+    """
     if any(name.startswith(p) for p in PROTECTED_PREFIXES):
         return None
 
-    public_url = f"{base_url}/storage/v1/object/public/{BUCKET}/{name}"
-    if public_url in referenced:
+    key = object_key(name)
+    if key in referenced:
         return None  # a job still points at this file
+
+    # Second, independent guard: match on filename alone. Catches any row whose
+    # URL form we failed to normalise.
+    if referenced_names and key.rsplit("/", 1)[-1] in referenced_names:
+        return None
 
     age = _age_days(created)
     for tier in tiers:
@@ -213,9 +260,22 @@ def main(argv: list[str] | None = None) -> int:
     base_url = os.environ["SUPABASE_URL"].rstrip("/")
 
     print(f"Scanning {BUCKET} …")
-    referenced = referenced_urls(sb)
+    referenced, referenced_names = referenced_keys(sb)
     objects = list_objects(sb)
-    print(f"  {len(objects)} objects, {len(referenced)} referenced by a job row\n")
+    print(f"  {len(objects)} objects, {len(referenced)} referenced by a job row")
+
+    # Sanity gate. If the reference set comes back empty (or absurdly small)
+    # while the bucket is full, something is wrong with the query or the URL
+    # normalisation — and proceeding would treat every live file as an orphan.
+    # Refuse rather than risk a repeat of the 49-file deletion.
+    if objects and len(referenced) < max(1, len(objects) // 20):
+        print(
+            f"\nrefusing to continue: only {len(referenced)} referenced keys for "
+            f"{len(objects)} objects — the reference lookup looks broken.",
+            file=sys.stderr,
+        )
+        return 3
+    print()
 
     doomed: list[tuple[str, str, int, float]] = []
     for obj in objects:
@@ -224,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         size = int(meta.get("size") or 0)
         created = obj.get("created_at")
         tier = classify(name, created, size, referenced, base_url,
-                        tiers, args.min_age_days)
+                        tiers, args.min_age_days, referenced_names)
         if tier:
             doomed.append((tier, name, size, _age_days(created)))
 
