@@ -57,7 +57,7 @@ HTTP_TIMEOUT         = 10           # seconds
 
 EPSON_BASE      = f"https://{EPSON_IP}"
 EPSON_USER      = os.environ.get("EPSON_USER", "Oxygen")
-EPSON_PASS      = os.environ.get("EPSON_PASS", "Oxygen@1234")
+EPSON_PASS      = os.environ.get("EPSON_PASS", "")
 EPSON_LOGIN_URL = f"{EPSON_BASE}/PRESENTATION/ADVANCED/PASSWORD/SET"
 EPSON_USAGE_URL = f"{EPSON_BASE}/PRESENTATION/ADVANCED/INFO_MENTINFO/TOP"
 

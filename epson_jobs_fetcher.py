@@ -49,7 +49,7 @@ logger = logging.getLogger("epson_fetcher")
 EPSON_IP           = get_store_config().printers.epson_ip
 EPSON_BASE         = f"https://{EPSON_IP}"
 EPSON_USER         = os.environ.get("EPSON_USER", "Oxygen")
-EPSON_PASS         = os.environ.get("EPSON_PASS", "Oxygen@1234")
+EPSON_PASS         = os.environ.get("EPSON_PASS", "")
 HTTP_TIMEOUT       = 15        # seconds
 FETCH_INTERVAL     = 300       # seconds (5 minutes — matches SNMP poll)
 _WEBLOG_FAIL_LIMIT = 3         # give up Tier 1 after this many consecutive failures
@@ -115,18 +115,49 @@ def _make_session() -> requests.Session:
     return session
 
 
+def _csv_env(name: str, default: str = "") -> list[str]:
+    """Read a comma-separated env var into a stripped, de-duped list.
+
+    Blank entries are kept only when they carry meaning (see _epson_usernames).
+    """
+    raw = os.environ.get(name, default)
+    return [item.strip() for item in raw.split(",")]
+
+
+def _epson_passwords() -> list[str]:
+    """Admin passwords to try, primary first. All from env — no secrets in source.
+
+      EPSON_PASS           — primary web-admin password
+      EPSON_PASS_FALLBACKS — comma-separated extra passwords to try after it
+    """
+    candidates = [os.environ.get("EPSON_PASS", "")] + _csv_env("EPSON_PASS_FALLBACKS")
+    seen, out = set(), []
+    for pwd in candidates:
+        if pwd and pwd not in seen:
+            seen.add(pwd)
+            out.append(pwd)
+    return out
+
+
+def _epson_usernames() -> list[str]:
+    """Usernames to pair with each password. Blank ('') is a valid value the
+    firmware accepts, so it is preserved. Override via EPSON_USERS (comma-sep).
+    """
+    raw = os.environ.get("EPSON_USERS")
+    if raw is None:
+        return ["", "Oxygen", "admin"]
+    return [u.strip() for u in raw.split(",")]
+
+
 def _login(session: requests.Session) -> bool:
     """POST credentials to ADVANCED/PASSWORD/SET to acquire a session cookie."""
-    passwords = [
-        os.environ.get("EPSON_PASS", ""),
-        "XCVJ000892",
-        "XCVJ000949",
-        "Oxygen@1234",
-        "Oxygen@2026",
-        "access"
-    ]
-    usernames = ["", "Oxygen", "admin"]
+    passwords = _epson_passwords()
+    usernames = _epson_usernames()
     login_url = get_epson_url("PASSWORD/SET")
+
+    if not passwords:
+        logger.warning("Epson login skipped — no EPSON_PASS / EPSON_PASS_FALLBACKS set")
+        return False
 
     for pwd in passwords:
         if not pwd:
