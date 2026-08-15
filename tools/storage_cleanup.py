@@ -101,19 +101,46 @@ def referenced_urls(sb) -> set[str]:
 
 
 def list_objects(sb) -> list[dict]:
-    """List every object in the bucket, paging through the storage API."""
+    """List every object in the bucket, recursing into folders.
+
+    The storage list API is NOT recursive: listing a path returns that level's
+    files plus *folder markers* — entries with a null ``id`` and no metadata.
+    Listing only the root therefore sees the bare intake uploads and none of the
+    foldered objects, so tiers keyed on a prefix (project-builder/, outbound/)
+    silently match nothing and the sweep under-reports.
+
+    Each level is paged, and returned names are rewritten to the full path from
+    the bucket root so classify() and the delete call both address the real key.
+    """
     out: list[dict] = []
-    offset, limit = 0, 100
-    while True:
-        batch = sb.storage.from_(BUCKET).list(
-            path="", options={"limit": limit, "offset": offset}
-        )
-        if not batch:
-            break
-        out.extend(batch)
-        if len(batch) < limit:
-            break
-        offset += limit
+    queue: list[str] = [""]
+    visited: set[str] = set()
+
+    while queue:
+        prefix = queue.pop()
+        if prefix in visited:
+            continue
+        visited.add(prefix)
+
+        offset, limit = 0, 100
+        while True:
+            batch = sb.storage.from_(BUCKET).list(
+                path=prefix, options={"limit": limit, "offset": offset}
+            ) or []
+            for entry in batch:
+                name = entry.get("name") or ""
+                if not name:
+                    continue
+                full = f"{prefix}/{name}" if prefix else name
+                # A folder marker carries no id/metadata — descend into it
+                # rather than treating it as a deletable object.
+                if entry.get("id") is None:
+                    queue.append(full)
+                else:
+                    out.append({**entry, "name": full})
+            if len(batch) < limit:
+                break
+            offset += limit
     return out
 
 

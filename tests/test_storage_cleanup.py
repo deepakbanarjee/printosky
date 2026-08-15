@@ -94,3 +94,80 @@ def test_missing_created_at_is_treated_as_new():
     assert cleanup.classify(
         "project-builder/x.docx", None, 10, set(), BASE, ALL_TIERS, None
     ) is None
+
+
+# ── listing ───────────────────────────────────────────────────────────────────
+
+class _FakeStorage:
+    """Mimics Supabase storage list(): non-recursive, folder markers have id=None."""
+
+    def __init__(self, tree):
+        self._tree = tree  # {prefix: [entry, ...]}
+
+    def from_(self, _bucket):
+        return self
+
+    def list(self, path="", options=None):
+        options = options or {}
+        offset = options.get("offset", 0)
+        limit = options.get("limit", 100)
+        return self._tree.get(path, [])[offset:offset + limit]
+
+
+def _file(name):
+    return {"name": name, "id": f"id-{name}", "metadata": {"size": 10},
+            "created_at": _ago(200)}
+
+
+def _folder(name):
+    return {"name": name, "id": None, "metadata": None, "created_at": None}
+
+
+def test_list_objects_recurses_into_folders():
+    """Regression: the root listing alone hides every foldered object.
+
+    The first run of this script reported 157 objects for a 433-object bucket
+    and matched zero project-builder/ or outbound/ files, because the storage
+    API never recurses on its own.
+    """
+    sb = type("SB", (), {})()
+    sb.storage = _FakeStorage({
+        "": [_file("root_intake.pdf"), _folder("outbound"), _folder("project-builder")],
+        "outbound": [_file("sent1.pdf"), _file("sent2.pdf")],
+        "project-builder": [_folder("uploads-v2")],
+        "project-builder/uploads-v2": [_file("deep.docx")],
+    })
+
+    names = sorted(o["name"] for o in cleanup.list_objects(sb))
+
+    assert names == [
+        "outbound/sent1.pdf",
+        "outbound/sent2.pdf",
+        "project-builder/uploads-v2/deep.docx",
+        "root_intake.pdf",
+    ], "nested objects must be returned with their full path from the bucket root"
+
+
+def test_list_objects_excludes_folder_markers():
+    """A folder marker is a directory, not a deletable object."""
+    sb = type("SB", (), {})()
+    sb.storage = _FakeStorage({
+        "": [_folder("outbound")],
+        "outbound": [_file("a.pdf")],
+    })
+
+    objects = cleanup.list_objects(sb)
+
+    assert len(objects) == 1
+    assert objects[0]["name"] == "outbound/a.pdf"
+
+
+def test_list_objects_pages_within_a_folder():
+    """Folders larger than one page must be fully drained."""
+    sb = type("SB", (), {})()
+    sb.storage = _FakeStorage({
+        "": [_folder("outbound")],
+        "outbound": [_file(f"f{i}.pdf") for i in range(250)],
+    })
+
+    assert len(cleanup.list_objects(sb)) == 250
