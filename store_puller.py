@@ -35,7 +35,11 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("store_puller")
 
-POLL_SECONDS = int(os.environ.get("STORE_PULLER_POLL_SECONDS", "15"))
+# A paid job is picked up within this many seconds. 15s meant ~5.8k requests/day
+# against the Supabase egress quota for a queue that is empty most of the time;
+# 45s still collects a job well before staff walk to the printer. Lower it via
+# STORE_PULLER_POLL_SECONDS if a store wants faster pickup.
+POLL_SECONDS = int(os.environ.get("STORE_PULLER_POLL_SECONDS", "45"))
 
 # Housekeeping: a printed download is deleted immediately; anything left behind
 # (a job whose auto-print failed and was kept for manual printing) is purged

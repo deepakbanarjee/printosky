@@ -24,7 +24,11 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-POLL_INTERVAL  = int(os.environ.get("ACAD_POLL_INTERVAL", "30"))  # seconds
+# Seconds between polls. Academic generation is a minutes-long job kicked off by
+# a human-approved status change, so a 30s loop bought no useful latency and cost
+# ~2.9k requests/day against the Supabase egress quota. 90s keeps pickup well
+# inside the customer-visible turnaround.
+POLL_INTERVAL  = int(os.environ.get("ACAD_POLL_INTERVAL", "90"))  # seconds
 STORAGE_BUCKET = "academic-outputs"
 
 _sb = None
@@ -141,6 +145,11 @@ def poll_once() -> None:
         result = (
             _client()
             .table("academic_orders")
+            # Deliberately select("*"): the row is handed whole to
+            # build_phase1_brief/build_phase2_brief, which live outside this repo,
+            # so narrowing the column list here risks dropping a field the brief
+            # builder needs. This query matches zero rows in the common case, so
+            # its egress cost is request count — addressed via POLL_INTERVAL.
             .select("*")
             .in_("status", ["chapters_generating", "final_generating"])
             .execute()
