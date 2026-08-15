@@ -66,7 +66,7 @@ def test_create_inserts_job_and_settings(monkeypatch):
     }
     ho._handle_order_create(_fake_h(), json.dumps(payload).encode())
     assert captured["status"] == 200
-    assert captured["data"]["job_id"].startswith("OSP-")
+    assert captured["data"]["job_id"].startswith("OSKY-")
     assert calls["insert"]["sender"] == "919495706405"
     assert calls["settings"]["colour"] == "mixed"
     assert calls["settings"]["amount_quoted"] == 91.5
@@ -214,7 +214,10 @@ def test_reorder_clones_owned_job(monkeypatch):
 
     assert captured["status"] == 200
     new_id = captured["data"]["job_id"]
-    assert new_id.startswith("OSP-") and new_id != "OSP-20260610-0031"   # a fresh job
+    # Reordering a legacy OSP- job mints a fresh OSKY- id — this is the
+    # backward-compatible path bf0ea5f promised: old ids stay addressable,
+    # new jobs always carry the new prefix.
+    assert new_id.startswith("OSKY-") and new_id != "OSP-20260610-0031"   # a fresh job
     assert calls["insert"]["sender"] == "919495706405"
     assert calls["insert"]["file_url"] == "https://x/orders/u/report.pdf"  # reuses stored file
     assert calls["settings"]["copies"] == 2 and calls["settings"]["colour"] == "mixed"
