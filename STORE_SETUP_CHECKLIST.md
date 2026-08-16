@@ -25,7 +25,16 @@ PC**. None of them are live until the workers are pulled and restarted. As of
 days, which matches the `store_puller.py` startup crash fixed in #67 on that
 exact date.
 
-- [ ] **Pull:** `PULL_UPDATE.bat` (or `git pull origin main` in `C:\PY\printosky`)
+- [ ] **Pull:** `PULL_UPDATE.bat`, or by hand in `C:\printosky_watcher`:
+      ```
+      git checkout <the branch you are deploying>
+      git pull
+      git log --oneline -1        REM confirm the commit you expect
+      ```
+      **Check the branch, not just the pull.** On 2026-08-16 the store PC sat on
+      `feat/emc8100-migration` (tracking `origin/main`) while fixes were being
+      pushed to a feature branch. `git pull` reported "Already up to date" after
+      fetching them, and three rounds of print tests ran against stale code.
 - [ ] **Restart:** `STOP_PRINTOSKY.bat` → `START_PRINTOSKY.bat`
       (`START_SILENT.bat` is what Windows Startup runs; it launches all six services)
 - [ ] **Confirm each worker is actually up** — `STATUS_PRINTOSKY.bat`, then check

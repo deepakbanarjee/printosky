@@ -4,7 +4,7 @@ Things only **you** can do (dashboard logins, DNS, hardware, GitHub/Vercel
 secrets). Everything in the code backlog is done; these are the external steps.
 
 > **Secrets:** where a step needs a secret, it's referenced by its `.env` key
-> name (e.g. `RAZORPAY_WEBHOOK_SECRET`) — copy the value from `C:\PY\printosky\.env`.
+> name (e.g. `RAZORPAY_WEBHOOK_SECRET`) — copy the value from `C:\printosky_watcher\.env`.
 > Never paste secret values into this file or any commit.
 
 Last updated: 2026-08-16

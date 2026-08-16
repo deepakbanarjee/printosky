@@ -54,7 +54,7 @@ ANTHROPIC_API_KEY, ADMIN_PBKDF2_*, etc.) in this order:
 2. `<repo>/.env` — existing repo config
 3. `C:\printosky\.env`
 4. `C:\printosky_watcher\.env`
-5. `C:\PY\printosky\.env`
+5. `C:\printosky_watcher\.env`  (OSP store PC; older docs say `C:\PY\printosky`)
 
 First match wins. If none found, the installer fails with clear
 instructions to obtain `hq-secrets.env` from HQ.
