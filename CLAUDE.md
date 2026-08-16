@@ -38,6 +38,8 @@ python staff_setup.py seed
 
 ## Pending Work
 See [SPRINT_BACKLOG.md](SPRINT_BACKLOG.md)
+Store-only tasks (needs physical access) → [STORE_SETUP_CHECKLIST.md](STORE_SETUP_CHECKLIST.md)
+Owner/dashboard tasks → [docs/OWNER_ACTIONS.md](docs/OWNER_ACTIONS.md)
 
 ## Security & Config
 See [docs/SECURITY.md](docs/SECURITY.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#environment-variables)

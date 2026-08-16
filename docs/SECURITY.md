@@ -41,7 +41,7 @@ _Last updated: 2026-04-29 — session 10_
 ### 🟠 High priority
 
 **SEC-OPEN-4: Epson web panel default password**
-- Epson at `192.168.55.202` reachable on store LAN with default `admin/admin`
+- Epson at `192.168.55.214` reachable on store LAN with default `admin/admin`
 - Fix: change via Epson web panel UI. 10 minutes.
 
 **SEC-OPEN-5: STORE_TOKEN in localStorage**

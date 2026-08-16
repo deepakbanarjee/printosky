@@ -1,7 +1,7 @@
 """
 PRINTOSKY PRINTER POLLER — Phase 3
 ====================================
-Polls Konica Bizhub Pro 1100 and Epson WF-C21000 for page counters.
+Polls Konica Bizhub Pro 1100 and Epson EM-C8100 for page counters.
 Stores readings in SQLite. Dashboard picks them up automatically.
 
 Konica: Uses /wcd/system_device.xml (HTTP, counters) + /wcd/system_consumable.xml (supplies) with SNMP fallback
@@ -82,7 +82,9 @@ OID_KONICA_COPY_COL  = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.1"
 OID_KONICA_TONER_PCT = "1.3.6.1.4.1.18334.1.1.1.5.7.2.3.1.1.1"   # toner remaining %
 OID_KONICA_TONER_STS = "1.3.6.1.4.1.18334.1.1.1.5.7.2.3.1.2.1"   # toner status code
 OID_EPSON_TOTAL      = "1.3.6.1.2.1.43.10.2.1.4.1.1"
-# Epson WF-C21000 vendor OIDs — confirmed via epson_snmp_discover.py 2026-03-15
+# Epson vendor OIDs — confirmed via epson_snmp_discover.py 2026-03-15 on the
+# WF-C21000. NOT re-verified against the EM-C8100 that replaced it 2026-06-29;
+# re-run epson_snmp_discover.py against the current unit if counters look wrong.
 # 6.1.1.4.1.X = print pages by media type; .4.1.2 = A4 (all sizes sum = total)
 # Colour/mono split not exposed directly; colour derived as total − A4_print
 OID_EPSON_PRINT_MONO = "1.3.6.1.4.1.1248.1.2.2.6.1.1.4.1.2"   # A4 prints ≈ B&W
@@ -467,10 +469,14 @@ def poll_konica_supplies_vendor_snmp():
 
 def poll_epson_snmp():
     """
-    Poll Epson WF-C21000 via SNMP.
-    - total_pages : standard prtMarkerLifeCount (confirmed 910,112)
-    - print_bw    : A4 print pages via vendor OID (897,489 — majority are B&W)
-    - print_colour: derived as total − print_bw (~12,623 colour/non-A4 pages)
+    Poll the Epson via SNMP.
+    - total_pages : standard prtMarkerLifeCount
+    - print_bw    : A4 print pages via vendor OID (majority are B&W)
+    - print_colour: derived as total − print_bw (colour/non-A4 pages)
+
+    Sample values above were taken on the WF-C21000 (910,112 / 897,489 /
+    ~12,623) and do not carry over to the EM-C8100 installed 2026-06-29 —
+    the new unit starts its own life count.
     """
     total      = snmp_get(EPSON_IP, OID_EPSON_TOTAL)
     print_mono = snmp_get(EPSON_IP, OID_EPSON_PRINT_MONO)
@@ -526,7 +532,9 @@ def save_reading(conn, printer, data):
 # ── Supply level polling (standard printer MIB 1.3.6.1.2.1.43.11) ─────────────
 
 # Hardcoded supply names per printer (index → label)
-# WF-C21000 confirmed layout (SNMP walk 2026-03-16, colorant indices 43.11.1.1.3):
+# Layout confirmed on the WF-C21000 (SNMP walk 2026-03-16, colorant indices
+# 43.11.1.1.3). The EM-C8100 replaced it 2026-06-29 and this mapping has not
+# been re-walked — if ink alerts name the wrong colour, re-walk and update here.
 #   colorant indices: 1,1,2,3,4 → supplies 1&2 both Black; 3=Cyan, 4=Magenta, 5=Yellow
 #   idx 1: Black 1 (K)   80%
 #   idx 2: Black 2 (K)    0%  — EMPTY, needs replacement
@@ -746,8 +754,8 @@ def _send_ink_alerts(printer: str, supplies: list, conn) -> None:
 
 def poll_epson_web():
     """
-    Scrape Epson WF-C21000 Usage Status page (INFO_MENTINFO/TOP) for accurate
-    colour/BW totals. SNMP cannot provide real colour counts on this model.
+    Scrape the Epson Usage Status page (INFO_MENTINFO/TOP) for accurate
+    colour/BW totals. SNMP cannot provide real colour counts on these models.
     Returns counter dict or None on failure.
     """
     try:

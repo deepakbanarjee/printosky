@@ -1,5 +1,23 @@
 # Printosky Sprint Backlog
-Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin conversations fix all shipped (S10-6/7/8)
+Last updated: 2026-08-16 — refreshed against `main` @ `57ad33b`. The June–August
+arc (order-v2, per-store jobs console, full-fidelity auto-print, DTP/OCR
+pipeline, Supabase egress work) is now reflected here; it had been missing since
+the 2026-06-02 entry.
+
+**Store-only tasks live in [STORE_SETUP_CHECKLIST.md](STORE_SETUP_CHECKLIST.md).**
+Owner/dashboard tasks live in [docs/OWNER_ACTIONS.md](docs/OWNER_ACTIONS.md).
+
+---
+
+## 🔥 OPEN NOW — top of the list
+
+| # | Task | Why it's urgent |
+|---|------|-----------------|
+| **N1** | **Store PC is running code from before 2026-08-12** | `watcher.log` stale since 08-12, no `cloud_worker.log`. Eight commits (#62–#69) that run on that PC are not live, including the `store_puller` startup-crash fix (#67). While `watcher.py` is down there are no SNMP readings, no ink alerts and no Epson attribution. → checklist §A |
+| **N2** | **Supabase quota — projects restricted from 2026-09-11** | 2.903/5 GB egress **4 days into** the 12 Aug–12 Sep cycle; storage 0.722/1 GB. The #68 interval cuts only take effect after N1; `tools/storage_cleanup.py --apply` still needs running. → checklist §B |
+| **N3** | **Print fidelity never verified on paper** | The whole August auto-print arc (N-up, duplex, mixed colour, per-page colour billing) has unit tests only. → checklist §D |
+| **N4** | **TASK-001 — Razorpay webhook still not repointed** | 0 Razorpay webhooks have ever been processed; no online payment is recorded anywhere. → OWNER_ACTIONS |
+| **N5** | **PR #51 stale** | `feat/store-scoped-jobs`, open since 08-05, likely superseded by the `jobs.html` work in #54–#60. Close or rebase. |
 
 ---
 
@@ -7,20 +25,13 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 
 | # | Task | Details |
 |---|------|---------|
-| SEC-1 | ~~**Remove staff PINs from SPRINT_BACKLOG.md**~~ ✅ | PIN values removed from file; staff can look up via `python staff_setup.py list` |
-| SEC-2 | ~~**Move Supabase credentials to env vars**~~ ✅ | Moved to `.env`; `supabase_sync.py` now uses `load_dotenv` + `os.environ` |
-| SEC-3 | ~~**Admin password hash exposed in Netlify JS**~~ ✅ | All password hashes moved to Netlify env vars; `netlify/functions/auth.js` verifies server-side. Covers admin (PBKDF2), superadmin, store, and MIS |
-| SEC-4 | ~~**Supabase anon key in admin.html**~~ ✅ | All `sbFetch` calls now use Supabase JWT from sessionStorage; `SCHEMA_v5_migration.sql` tightens RLS to `auth.role() = 'authenticated'`; `supabase_sync.py` uses `SUPABASE_SERVICE_KEY` |
-| SEC-5 | ~~**Sequential staff PINs**~~ ✅ | Reset all staff PINs to random non-sequential values on store PC (2026-04-09) |
-
----
-
-## 🔴 CRITICAL / BLOCKERS
-
-| # | Task | Details |
-|---|------|---------|
-| C1 | ~~**Run SCHEMA_v3 in Supabase**~~ ✅ | Done |
-| C2 | ~~**OXYGEN PC server URL**~~ ✅ | Fixed: `192.168.55.212:3005` |
+| SEC-1 | ~~**Remove staff PINs from SPRINT_BACKLOG.md**~~ ✅ | PIN values removed; look them up via `python staff_setup.py list` |
+| SEC-2 | ~~**Move Supabase credentials to env vars**~~ ✅ | `.env` + `load_dotenv` in `supabase_sync.py` |
+| SEC-3 | ~~**Admin password hash exposed in Netlify JS**~~ ✅ | Hashes moved to Netlify env vars; `netlify/functions/auth.js` verifies server-side |
+| SEC-4 | ~~**Supabase anon key in admin.html**~~ ✅ | `sbFetch` uses the Supabase JWT from sessionStorage; RLS tightened in `SCHEMA_v5_migration.sql` |
+| SEC-5 | ~~**Sequential staff PINs**~~ ✅ | Reset to random values 2026-04-09 |
+| SEC-6 | **Epson default password** ⏳ | `192.168.55.214` still `admin`/`admin`. Store-only → checklist §C1. Also drop the hardcoded credential-fallback list in `epson_jobs_fetcher.py` once `EPSON_PASS` is authoritative. |
+| SEC-7 | **STORE_TOKEN in localStorage** | Move to an httpOnly cookie + CSP (FEATURE_PIPELINE SEC5) |
 
 ---
 
@@ -28,11 +39,11 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 
 | # | Task | Details |
 |---|------|---------|
-| S7-1 | ~~**Quote endpoint: `colour=col` param**~~ ✅ | Fixed in print_server.py handle_quote(); `colour=col/colour/color` → `paper_type=A4_col`. Tests in test_quote_endpoint.py |
-| S7-2 | **Print panel: deploy & test** | New floating panel inserted under job row — deploy to Netlify + test on all PCs |
-| S7-3 | ~~**Print panel: item specs loaded from DB**~~ ✅ | Fixed: handle_update_job derived paper_type from colour when not sent by frontend; was always defaulting to A4_BW so colour quotes were billed at B&W rates. 6 tests in test_update_job.py. |
-| S7-4 | **Outsourced vendor workflow** | When finishing=project/record/lam_roll, show vendor selection; send job to vendor via WhatsApp |
-| S7-5 | **Thermal binding** listed in admin but rate not tested | Test `finishing=thermal` in quote endpoint |
+| S7-1 | ~~**Quote endpoint: `colour=col` param**~~ ✅ | Fixed in `handle_quote()`; tests in `test_quote_endpoint.py` |
+| S7-2 | ~~**Print panel: deploy & test**~~ ✅ | Superseded by the standalone `jobs.html` console (#54–#60), live on Netlify at `/jobs` |
+| S7-3 | ~~**Print panel: item specs loaded from DB**~~ ✅ | `handle_update_job` derives `paper_type` from colour; 6 tests in `test_update_job.py` |
+| S7-4 | **Outsourced vendor workflow** | finishing=project/record/lam_roll → vendor selection + WhatsApp dispatch. Not started. |
+| S7-5 | **Thermal binding rate untested** ⏳ | `finishing=thermal` shows in admin, rate never verified. Needs a live job → checklist §D |
 
 ---
 
@@ -40,11 +51,13 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 
 | # | Task | Details |
 |---|------|---------|
-| S8-1 | **Tell staff their PINs** | Run `python staff_setup.py list` to view current PINs — do not commit PIN values to this file |
-| S8-2 | **MIS dashboard — live test** | mis.html built but never live-tested. Verify staff sessions syncing to Supabase |
-| S8-3 | **Staff session Supabase sync** | `supabase_sync.py` syncs staff_sessions — verify after SCHEMA_v3 applied |
-| S8-4 | ~~**Konica job attribution**~~ 🗑️ | RETIRED 2026-05-12 — 0/4507 attribution rate; see `retired/2026-05-12-graveyard/konica_attribution.py` for code + revival path. |
-| S8-5 | **Idle logout timer** | session_timeout.py — verify it logs out idle staff correctly |
+| S8-1 | **Tell staff their PINs** ⏳ | `python staff_setup.py list` — store-only |
+| S8-2 | **MIS dashboard — live test** ⏳ | `mis.html` built, never live-tested |
+| S8-3 | **Staff session Supabase sync** ⏳ | Verify `supabase_sync.py` syncs `staff_sessions` |
+| S8-4 | ~~**Konica job attribution**~~ 🗑️ | RETIRED 2026-05-12 — 0/4507 attribution rate; `retired/2026-05-12-graveyard/konica_attribution.py` |
+| S8-5 | **Idle logout timer** ⏳ | Verify `session_timeout.py` |
+| S8-6 | ~~**Staff PIN mark-paid without admin password**~~ ✅ | `/admin/mark-paid` accepts `X-Staff-Pin` (`c47fa3f`) |
+| S8-7 | ~~**Cloud staff-PIN login (off-LAN)**~~ ✅ | `/staff/login` mints the Supabase JWT (#57); LAN-reject fallback (#58) |
 
 ---
 
@@ -52,12 +65,13 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 
 | # | Task | Details |
 |---|------|---------|
-| S9-1 | ~~**Konica supply levels**~~ ✅ | `parse_konica_xml_supplies()` + `poll_konica_xml_supplies()` in printer_poller.py. Parses TnrBlkRmng/DrmBlkRmng tags (and alternates); poll_once() tries XML first, falls back to SNMP. 14 tests in test_konica_supplies.py. |
-| S9-2 | ~~**Konica job export URL**~~ ✅ | Jobs loading correctly — confirmed 2026-04-20 |
-| S9-3 | ~~**Epson ink alerts**~~ ✅ | `_send_ink_alerts()` in printer_poller.py:434. Fires on threshold crossing (EMPTY at 0%, LOW at ≤10%). Called in poll_once() for both printers. |
-| S9-4 | **A3 printing** | Test A3 job end-to-end (bot → quote → print) |
-| S9-5 | ~~**Receipt printer**~~ 🗑️ | RETIRED 2026-05-12 — hardware never purchased, stub returned "not configured" on every call. See `retired/2026-05-12-graveyard/receipt_printer.py` for code + revival path. |
-| S9-6 | **Epson per-job mono/colour tracking** ⏳ | Re-scoped to **Epson EM-C8100** (OSP unit, IP `192.168.55.214`, installed 2026-06-29). Prior work: (a) ✅ delta dedup on Supabase; (b) ✅ `source='spec'` rows on Epson dispatch in print_server.py. Remaining: (c) ⏳ store-PC redeploy after new printer install; (d) ⏳ admin-UI spec ↔ weblog reconciliation. Note: binding store gets its own separate EM-C8100 (see S11-4). |
+| S9-1 | ~~**Konica supply levels**~~ ✅ | XML parse + SNMP fallback; 14 tests |
+| S9-2 | ~~**Konica job export URL**~~ ✅ | Confirmed 2026-04-20 |
+| S9-3 | ~~**Epson ink alerts**~~ ✅ | `_send_ink_alerts()`, fires on threshold crossing |
+| S9-4 | **A3 printing** ⏳ | Never tested end-to-end → checklist §D |
+| S9-5 | ~~**Receipt printer**~~ 🗑️ | RETIRED 2026-05-12 — hardware never purchased |
+| S9-6 | **Epson per-job mono/colour tracking** ⏳ | On the **EM-C8100** (`192.168.55.214`, installed 2026-06-29). Done: delta dedup, `source='spec'` rows on dispatch, multi-credential fallback + HTML scraper (`a6d28d2`), **queue-name matching fix (2026-08-16 — the delta query had matched the retired unit's name and silently attributed nothing)**. Remaining: (c) store-PC redeploy → checklist §A; (d) admin-UI spec ↔ weblog reconciliation. |
+| S9-7 | **Re-walk EM-C8100 SNMP OIDs** ⏳ | Vendor OIDs and the supply index→colour map in `printer_poller.py` were confirmed on the *retired* WF-C21000 and never re-verified. → checklist §C |
 
 ---
 
@@ -65,16 +79,13 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 
 | # | Task | Details |
 |---|------|---------|
-| S10-1 | ~~**Meta Cloud API migration**~~ ✅ | Live on 9495706405 via Vercel. App review submitted. Token rotated 2026-04-09. |
-| S10-2 | ~~**Bot conversation flow review**~~ ✅ | Full journey tested: file → 6 steps → payment → notification (2026-04-09) |
-| S10-3 | ~~**WhatsApp group/channel filter**~~ ✅ | Filters @g.us, @newsletter, @broadcast, isGroupMsg in index.js:165-170. Confirmed in code. |
-| S10-4 | ~~**Delivery flow**~~ ✅ | Verified working (2026-04-09) |
-| S10-5 | ~~**B2B bot**~~ 🗑️ | RETIRED 2026-05-12 — 0 b2b_clients rows in production, no owner. See `retired/2026-05-12-graveyard/{b2b_bot.py,b2b_manager.py,test_b2b*.py}` for code + revival path. Live Supabase tables `b2b_clients` + `b2b_payments` left in place. |
-| S10-6 | ~~**Xtraa book-order flow**~~ ✅ | Live 2026-06-02 (commit c0cbb74). WhatsApp flow: enquiry → catalog (ML ₹200 / HI ₹150 / EN ₹200 / set ₹549 + ₹75 courier) → qty per book → address → phone confirm → summary → branded UPI QR → payment screenshot → owner 1-tap confirm. Separate `book_orders` table (RLS service_role); `book_bot.py` + `book_catalog.py`; admin **Book Orders** tab + `/admin/book-orders` & `/confirm` endpoints. Owner-verified payment (no auto-confirm) to block screenshot fraud. 62 tests. **Open:** confirm real book titles (placeholders) + live WhatsApp smoke-test. |
-| S10-7 | ~~**New-customer welcome auto-reply**~~ ✅ | Live 2026-06-02 (commit ae95ba5). A brand-new contact (no prior `conversation_log` rows) whose first message isn't a file/book/help/command gets a welcome + menu (printouts / Xtraa books / staff). `db_cloud.is_new_contact()`; fires once, returning customers unaffected. 2 tests. |
-| S10-8 | ~~**Admin conversations 404 fix**~~ ✅ | Fixed 2026-06-02 (commit 6126b6a/1ccd3f1). `/admin/conversations` + `/admin/thread` were 404ing — `vercel.json` only registered `/admin/reset-pin` + `/admin/send`; replaced with `/admin/(.*)` wildcard + `/referrals/(.*)`. Conversations panel now shows visible error messages instead of silent failure. |
-| S10-9 | **Admin: place book order on behalf of customer** | Add a "New Book Order" button in the admin Book Orders tab. Form fields: customer name, phone, book qty per title, address, payment mode (cash/UPI/divya-collected), delivery method. Creates a `confirmed` order directly (no WhatsApp flow). Needed for walk-in customers and teacher-forwarded orders (e.g. Divya). |
-| S10-10 | **Divya ledger: show own-book deductions** | `divya_ledger` currently only sums `via_divya=true` orders (commission earned). It must also surface `via_divya=false` rows from Divya's own phone (books she took for herself) as a deduction line, so the net settlement figure is accurate. Add `books_taken` and `books_cost` to the ledger response and display it in the admin Divya settlement view. |
+| S10-1 → S10-4 | ~~Meta Cloud API, bot flow, group filter, delivery flow~~ ✅ | Live since April |
+| S10-5 | ~~**B2B bot**~~ 🗑️ | RETIRED 2026-05-12 |
+| S10-6 | ~~**Xtraa book-order flow**~~ ✅ | Live 2026-06-02. **Still open:** confirm real book titles (placeholders) + live WhatsApp smoke test |
+| S10-7 | ~~**New-customer welcome auto-reply**~~ ✅ | Live 2026-06-02 |
+| S10-8 | ~~**Admin conversations 404 fix**~~ ✅ | Fixed 2026-06-02 |
+| S10-9 | **Admin: place book order on behalf of customer** | "New Book Order" in the Book Orders tab — walk-ins and teacher-forwarded orders |
+| S10-10 | **Divya ledger: show own-book deductions** | Surface `via_divya=false` rows from her own phone as a deduction; add `books_taken` / `books_cost` |
 
 ---
 
@@ -82,39 +93,57 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 
 | # | Task | Details |
 |---|------|---------|
-| S11-1 | **Cloud hosting for WhatsApp bot** | Bot goes offline when PC is off. Options: Hostinger VPS Rs.350/mo, Hetzner CX22 €4/mo, DigitalOcean $6/mo |
-| S11-2 | **PM2 for Node process** | Replace manual CMD window start with PM2 for auto-restart on crash |
-| S11-3 | **Job Centro DB** | Investigate silent auto-export of Konica job logs from Job Centro local DB |
-| S11-4 | **Binding store setup** ⏳ | Binding store opens 2026-07-02. Needs own PC + Cloudflare tunnel + Supabase store_id. **Blocked** until computers are installed on-site. Multi-store architecture already in place (`store_config.json` per PC). |
-| S11-5 | **Netlify OXYGEN team credit** | Monitor plan limit. Upgrade if needed or keep deploying via personal account |
+| S11-1 | **Cloud hosting for WhatsApp bot** | Bot dies with the PC. Hetzner CX22 €4/mo or similar. **Raised in priority by the 4-day outage.** |
+| S11-2 | **PM2 for the Node process** ⏳ | Auto-restart on crash — store-only → checklist §G |
+| S11-3 | **Job Centro DB** | Silent auto-export of Konica job logs |
+| S11-4 | ~~**Multi-store: second store live**~~ ✅ | `PRINTK` (Nattika) on `192.168.1.0/24`, `PRIOFF` dev box exempted; subnet→store mapping in `store_config.py`; jobs scoped by `assigned_store_id` (#59, #60) |
+| S11-5 | **Netlify OXYGEN team credit** | Monitor plan limit |
+| S11-6 | ~~**Store-PC liveness alerts**~~ ✅ | Heartbeat watcher + `/cron/store-pc-check`; see `docs/STORE_PC_SHUTDOWN_PING.md`. **Note: this did not surface the 08-12 → 08-16 outage — check whether the cron is firing.** |
+| S11-7 | **Supabase cost control** ⏳ | Egress + storage → N2 |
 
 ---
 
-## 🟣 SPRINT 12 — Advanced Print Automation (WFManager Port)
+## 🟣 SPRINT 12 — Advanced Print Automation
 
 | # | Task | Details |
 |---|------|---------|
-| S12-1 | **Operator Dashboard GUI** | Build a local Tkinter desktop dashboard on the store PC to view incoming jobs, DB status, and control the watcher. |
-| S12-2 | **Rule-Based Auto-Print** | Bypass the holding queue and auto-print specific workflows (e.g., B2B drops) directly to the OS spooler using `lpr` or shell commands. |
-| S12-3 | **Filename Auto-Pricing** | Match specific module filenames (e.g., "PHYSICS MODULE 1") to fixed-price packages in the DB to skip per-page counting. |
-| S12-4 | **Live Hardware Web Scraper** | Integrate `printer_poller.py` with Konica XML scraping to actively read printer meters before/after jobs to verify completion. |
+| S12-1 | **Operator Dashboard GUI** | Local Tkinter dashboard on the store PC |
+| S12-2 | ~~**Rule-based auto-print**~~ ✅ | `store_puller.py` `auto_print()` + `print_planner.plan_print_job()` — paid orders print unattended. See [HANDOFF_AUTOPRINT_FIDELITY.md](HANDOFF_AUTOPRINT_FIDELITY.md) |
+| S12-3 | **Filename auto-pricing** | Match module filenames to fixed-price packages |
+| S12-4 | ~~**Live hardware scraper**~~ ✅ | Konica XML + Epson HTML table scraper (`a6d28d2`) |
 
 ---
 
-## ✅ COMPLETED (Session 1–6 reference)
+## 🟤 SPRINT 13 — Order v2, DTP & CV Builder (August arc)
 
-- WhatsApp bot + file capture
-- Multi-file batch timer (30s/60s)
-- Razorpay payment link + webhook
-- Named Cloudflare tunnel (store/pay subdomains)
-- Print server (SumatraPDF, Konica + Epson)
-- Admin panel (login, job list, print panel, quote, payment modal)
-- Staff login/logout (PIN-based, per-PC)
-- Phone column in job list
-- Print preview iframe in panel
-- storePcUrl key mismatch fix
-- Auto-start via Windows Startup folder
-- Floating print panel under clicked job row
-- Home/remote PC access via store.printosky.com
-- Troubleshooting playbook created
-# Sprint 7
+| # | Task | Details |
+|---|------|---------|
+| S13-1 | ~~**order-v2 customer print options**~~ ✅ | Duplex, N-up + fill direction, mixed colour, page ranges → `jobs.print_spec` (JSONB) |
+| S13-2 | ~~**Full-fidelity auto-print**~~ ✅ | `print_planner.py` + `nup_imposer.py`; mixed jobs split B&W→Konica / colour→Epson |
+| S13-3 | ~~**Per-store jobs console**~~ ✅ | `jobs.html`, auto-scopes to the machine's `store_id` |
+| S13-4 | ~~**Staff walk-in order creation**~~ ✅ | `/order/staff-create`, multi-file staff mode (#54), Cash/UPI/Hold at creation (#63) |
+| S13-5 | ~~**Malayalam manuscript OCR / DTP**~~ ✅ | `cloud_transcription_worker.py` + `transcripts.html` (renamed DTP), output to `C:\DTP\<ddmmyy>` |
+| S13-6 | ~~**AI CV Builder (operator-only)**~~ ✅ | 9 templates, ATS scanner, admin-gated AI endpoints |
+| S13-7 | **jobs.html per-store scoping is partial** | Top stats strip + printer job log read `daily_summary` / `konica_jobs` / `epson_jobs`, which are **not** store-scoped — they show all-store totals. Per [HANDOFF_JOBS_ORDERV2.md](HANDOFF_JOBS_ORDERV2.md) §10. |
+| S13-8 | **`transcripts.html` dead references** | `trScrollToPage` / `trEditBalance` referenced but never defined (harmless) |
+| S13-9 | **Staff-create inline payment** | Optionally capture cash/UPI in order-v2 staff mode and mark paid in one step |
+
+---
+
+## 🧹 Housekeeping
+
+| # | Task | Details |
+|---|------|---------|
+| H1 | ~~**Retire stale store checklists**~~ ✅ | 2026-08-16 — `STORE_CHECKLIST_TODAY.html` + `TASKS_2026-04-13.md` → `retired/2026-08-16-stale-docs/`. Both still pointed staff at the retired Epson `.202`. |
+| H2 | ~~**Sweep retired-printer references**~~ ✅ | 2026-08-16 — `.202` / `WF-C21000` removed from live code paths; the four `epson_*.py` diagnostic scripts now read the IP from `store_config` |
+| H3 | **`docs/FEATURE_PIPELINE.md` is stale** | Last updated 2026-04-30; its "Done (last 7 days)" list is from May |
+| H4 | **`make_arch_pdf.py` credentials** | Confirm whether `Printosky@1234` / `@MIS2026` / `@Super2026` are real; if so rotate and move to `.env` |
+
+---
+
+## ✅ COMPLETED (Sessions 1–6 reference)
+
+WhatsApp bot + file capture · multi-file batch timer · Razorpay payment link +
+webhook · named Cloudflare tunnel · print server (SumatraPDF, Konica + Epson) ·
+admin panel · staff PIN login · print preview · auto-start via Windows Startup ·
+remote access via store.printosky.com · troubleshooting playbook

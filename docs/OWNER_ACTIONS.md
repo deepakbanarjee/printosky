@@ -7,11 +7,30 @@ secrets). Everything in the code backlog is done; these are the external steps.
 > name (e.g. `RAZORPAY_WEBHOOK_SECRET`) — copy the value from `C:\PY\printosky\.env`.
 > Never paste secret values into this file or any commit.
 
-Last updated: 2026-06-08
+Last updated: 2026-08-16
 
 ---
 
-## 🔴 Do now (1 minute each)
+## 🔴 Do now — Supabase quota, hard deadline 2026-09-11
+
+The org exceeded its free-tier quota in the previous billing cycle and
+**projects will be restricted from 11 Sep 2026** if it stays over. Readings on
+2026-08-16, four days into the 12 Aug – 12 Sep cycle: egress **2.903 / 5 GB**,
+storage **0.722 / 1 GB**.
+
+- [ ] **Restart the store-PC workers** — the poll-interval cuts shipped in #68
+  (store_puller 15s→45s, transcription 10s→60s, academic 30s→90s) do nothing
+  until the PC pulls and restarts. It has been running pre-08-12 code.
+  → [STORE_SETUP_CHECKLIST.md](../STORE_SETUP_CHECKLIST.md) §A
+- [ ] **Run the storage sweep** — `python tools/storage_cleanup.py` (dry run),
+  then `--apply`. Writes a CSV manifest before deleting; never touches a file a
+  job row references.
+- [ ] **Decide on the paid plan** if the projection still exceeds 5 GB after
+  both. Pro is $25/mo and lifts egress to 250 GB.
+
+---
+
+## 🔴 Also do now (1 minute each)
 
 - [ ] **Revoke the temporary Vercel token**
   - https://vercel.com/account/tokens → delete the token named `printosky-env-fix`
@@ -87,6 +106,11 @@ These are sequential — do them in order.
 
 - [ ] **TASK-004 — Verify & replace Epson cartridges** *(on-site)*
   - Check levels (ink alerts fire via `printer_poller.py`), replace as needed.
+  - Note: ink alerts have been silent since 2026-08-12 because `watcher.py` —
+    which starts the poller thread — has been down. Don't read "no alerts" as
+    "levels fine" until the workers are back up.
+
+The full on-site list is [STORE_SETUP_CHECKLIST.md](../STORE_SETUP_CHECKLIST.md).
 
 ---
 

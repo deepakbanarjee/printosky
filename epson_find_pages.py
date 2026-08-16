@@ -1,11 +1,15 @@
 """
 Find all available pages on Epson web UI by extracting links from known pages.
 """
+import os
 import requests, re, urllib3
 urllib3.disable_warnings()
 
-IP    = "192.168.55.202"
-import os
+from store_config import get_store_config
+
+# Read the IP from store config so this keeps working across printer swaps
+# (WF-C21000 192.168.55.202 → EM-C8100 192.168.55.214, 2026-06-29).
+IP    = os.environ.get("EPSON_IP") or get_store_config().printers.epson_ip
 BASE  = f"https://{IP}"
 USER  = os.environ.get("EPSON_USER", "Oxygen")
 PASS  = os.environ.get("EPSON_PASS") or exit("Set EPSON_PASS in .env or environment before running")

@@ -107,6 +107,39 @@ def get_epson_ip() -> str:
 def get_epson_url(endpoint: str) -> str:
     return f"https://{get_epson_ip()}/PRESENTATION/ADVANCED/{endpoint}"
 
+
+# `jobs.printer` holds the **Windows print-queue name** that print_server.py
+# dispatched to (PRINTERS['epson'], e.g. "EM-C8100 Series(Network)") — never an
+# IP. Delta attribution therefore has to match queue-name text, so keep this in
+# step with print_server.PRINTERS / store_config.printer_queue_names whenever a
+# unit is swapped. Both the current and retired model names stay listed so
+# historical rows keep attributing after a printer change.
+_EPSON_QUEUE_PATTERNS: tuple[str, ...] = (
+    "%epson%",
+    "%em-c8100%",     # OSP + PRINTK, installed 2026-06-29
+    "%c8100%",        # queue named without the "EM-" prefix
+    "%wf-c21000%",    # retired 2026-06-29; still on rows printed before then
+)
+
+
+def epson_printer_patterns() -> list[str]:
+    """Lowercase SQL LIKE patterns that identify a job printed on the Epson.
+
+    Starts from the store's configured queue name (so a store that renamed its
+    queue still attributes) and adds the known model names as fallbacks.
+    """
+    patterns = list(_EPSON_QUEUE_PATTERNS)
+    try:
+        queues = getattr(get_store_config(), "printer_queue_names", None) or {}
+        configured = (queues.get("epson") or "").strip().lower()
+    except Exception:
+        configured = ""
+    if configured:
+        pattern = f"%{configured}%"
+        if pattern not in patterns:
+            patterns.insert(0, pattern)
+    return patterns
+
 # ── Tier 1: Web log CSV (form login + SETUPTOKEN) ─────────────────────────────
 
 def _make_session() -> requests.Session:
@@ -408,13 +441,14 @@ def _delta_attribution(conn):
                 colour_delta = None
 
         # Find Printosky jobs printed on Epson in this window
-        jobs = conn.execute("""
+        patterns = epson_printer_patterns()
+        printer_match = " OR ".join("LOWER(printer) LIKE ?" for _ in patterns)
+        jobs = conn.execute(f"""
             SELECT job_id, page_count, copies
             FROM jobs
             WHERE printed_at BETWEEN ? AND ?
-              AND (LOWER(printer) LIKE '%epson%' OR LOWER(printer) LIKE '%wf%'
-                   OR LOWER(printer) LIKE '%192.168.55.202%')
-        """, (ts_before, ts_after)).fetchall()
+              AND ({printer_match})
+        """, (ts_before, ts_after, *patterns)).fetchall()
 
         if jobs:
             # Distribute delta proportionally by expected page count

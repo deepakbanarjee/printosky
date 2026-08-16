@@ -130,9 +130,9 @@ The installer asks **only physical-location questions**:
 | `store_id` | (auto-suggested `PT` from name) | unique short code |
 | City / location | `Thrissur` | appended to store_name |
 | Konica IP | `192.168.55.110` | LAN IP |
-| Epson IP | `192.168.55.202` | LAN IP |
+| Epson IP | `192.168.55.214` | LAN IP (OSP; EM-C8100 installed 2026-06-29) |
 | Konica Windows queue | `KONICA MINOLTA 1100 PS` | from Devices & Printers |
-| Epson Windows queue | `WF-C21000 Series(Network)` | from Devices & Printers |
+| Epson Windows queue | `EM-C8100 Series(Network)` | from Devices & Printers |
 | WhatsApp # (no `+`) | `919495706405` | inbound webhook routing |
 | Epson admin user | `Oxygen` | LAN-only printer login |
 | Epson admin password | (your value) | LAN-only printer login |

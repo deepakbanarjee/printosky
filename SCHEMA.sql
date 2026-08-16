@@ -272,7 +272,7 @@ VALUES (
   '+91 94957 06405',
   'Thriprayar, Thrissur',
   'Thriprayar, Irinjalakuda, Kodungallur',
-  'Konica Minolta bizhub PRO 1100, Epson WF-C21000',
+  'Konica Minolta bizhub PRO 1100, Epson EM-C8100',
   0,
   'Active',
   'Partner #1 — Hub store. System pilot location.',

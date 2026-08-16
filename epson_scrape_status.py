@@ -1,13 +1,18 @@
 """
-Scrape Epson WF-C21000 web UI for colour/mono page counters.
+Scrape the Epson web UI for colour/mono page counters.
 Tries several candidate URLs after login and dumps their content.
 Run once to find which page has the usage statistics.
+
+Written against the WF-C21000; the EM-C8100 that replaced it on 2026-06-29
+serves the same PRESENTATION/ADVANCED tree, so the candidate list still applies.
 """
+import os
 import requests, re, urllib3
 urllib3.disable_warnings()
 
-import os
-IP       = "192.168.55.202"
+from store_config import get_store_config
+
+IP       = os.environ.get("EPSON_IP") or get_store_config().printers.epson_ip
 BASE     = f"https://{IP}"
 USER     = os.environ.get("EPSON_USER", "Oxygen")
 PASS     = os.environ.get("EPSON_PASS") or exit("Set EPSON_PASS in .env or environment before running")

@@ -1,15 +1,22 @@
 """
 epson_snmp_discover.py
-Walks the Epson WF-C21000 SNMP tree and prints all OIDs
-that return numeric values. Run once to find the correct
+Walks the Epson SNMP tree and prints all OIDs that return numeric
+values. Run once against a newly installed unit to find the correct
 colour/BW counter OIDs.
 
-Usage:  python epson_snmp_discover.py
+The WALK_ROOTS below were chosen for the WF-C21000; re-run this after any
+printer swap (EM-C8100 installed 2026-06-29) to confirm the layout still holds.
+
+Usage:  python epson_snmp_discover.py            # IP from store_config
+        EPSON_IP=192.168.55.214 python epson_snmp_discover.py
 """
 import asyncio
+import os
 import sys
 
-EPSON_IP       = "192.168.55.202"
+from store_config import get_store_config
+
+EPSON_IP       = os.environ.get("EPSON_IP") or get_store_config().printers.epson_ip
 SNMP_COMMUNITY = "public"
 SNMP_TIMEOUT   = 5
 
@@ -68,7 +75,7 @@ async def main():
         print(s)
         lines.append(s)
 
-    out(f"Discovering Epson WF-C21000 SNMP OIDs at {EPSON_IP} ...")
+    out(f"Discovering Epson SNMP OIDs at {EPSON_IP} ...")
     out()
     all_results = []
     for root in WALK_ROOTS:

@@ -1,7 +1,16 @@
-"""Check current Epson SNMP colour counter values in DB and live."""
+"""Check current Epson SNMP colour counter values in DB and live.
+
+The printer IP comes from store_config (override with EPSON_IP) so this keeps
+working across swaps — WF-C21000 192.168.55.202 → EM-C8100 192.168.55.214,
+installed 2026-06-29.
+"""
+import os
 import sqlite3
 
-DB = r"C:\Printosky\Data\jobs.db"
+from store_config import get_store_config
+
+EPSON_IP = os.environ.get("EPSON_IP") or get_store_config().printers.epson_ip
+DB = os.environ.get("PRINTOSKY_DB") or get_store_config().db_path
 conn = sqlite3.connect(DB)
 
 print("=== Last 5 Epson SNMP readings ===")
@@ -42,7 +51,6 @@ async def snmp_get_async(ip, oid, community="public"):
         return f"EXCEPTION: {e}"
 
 async def probe_all():
-    EPSON_IP = "192.168.55.202"
     oids = {
         "total_pages":       "1.3.6.1.2.1.43.10.2.1.4.1.1",
         "A4_all":            "1.3.6.1.4.1.1248.1.2.2.6.1.1.4.1.2",
