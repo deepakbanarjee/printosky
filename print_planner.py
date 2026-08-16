@@ -162,15 +162,21 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
             # portrait). Let the printer honour the imposed page as-is.
             orientation = None
 
-            # Landscape N-up duplex must bind on the SHORT (top) edge: the pages
-            # sit side-by-side on a landscape sheet, so the back only registers
-            # with the front when the sheet flips top-to-bottom. Long-edge
-            # binding mis-aligns it (confirmed on the Konica). Portrait N-up and
-            # 2-up vertical keep long-edge.
+            # Every layout binds on the LONG edge. A driver's short-edge mode is
+            # long-edge plus a 180-degree rotation of the back image, and that
+            # rotation is never wanted here — the imposer already places slots
+            # for the flip via duplex_mirror_axis().
+            #
+            # History, because this looks like a regression and is not. Landscape
+            # N-up was forced to duplexshort after long-edge "mis-aligned" it on
+            # the Konica. With a 2x1 sheet the driver's 180 degrees swaps the two
+            # columns as well as flipping the content, so it cancelled the
+            # imposer's own column mirroring — right page order, back printed
+            # upside down (confirmed on paper 2026-08-16). Dropping both the
+            # forced short edge and the column mirroring fixes order and rotation
+            # together: landscape + long edge derives to "rows", a no-op at one
+            # row, which is exactly the placement that registers.
             binding_edge = "long"
-            if sides == "ds" and nup_orient.lower() == "landscape":
-                out_sides = "duplexshort"
-                binding_edge = "short"
 
             # Read sliced file bytes
             with open(current_pdf, "rb") as f:

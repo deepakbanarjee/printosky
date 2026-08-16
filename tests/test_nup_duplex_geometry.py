@@ -110,14 +110,27 @@ def test_every_sheet_side_uses_one_rotation():
 
 # ── slot mirroring stays, because the driver cannot do it ─────────────────────
 
-def test_2up_horizontal_short_edge_reverses_columns():
-    """Landscape sheet flipped about its short (vertical) edge — columns
-    reverse so the back registers with the front."""
+def test_2up_horizontal_long_edge_keeps_column_order():
+    """What the shop actually prints. A landscape sheet bound long-edge flips
+    top-to-bottom, so ROWS reverse — and at one row that is a no-op, leaving
+    the back in plain reading order. This is the placement that registers;
+    mirroring the columns here is what needed the driver's 180-degree
+    short-edge rotation to cancel it, and that rotation flipped the content."""
+    sides = _layout(nup_imposer.perform_nup(
+        _make_pdf(4), cols=2, rows=1, orientation="Landscape",
+        is_duplex=True, layout_direction="horizontal", binding_edge="long"))
+
+    assert _order(sides[0]) == ["1", "2"]
+    assert _order(sides[1]) == ["3", "4"]
+
+
+def test_2up_horizontal_short_edge_would_reverse_columns():
+    """The model still handles a short-edge bind correctly — it is simply not
+    what the planner asks for any more."""
     sides = _layout(nup_imposer.perform_nup(
         _make_pdf(4), cols=2, rows=1, orientation="Landscape",
         is_duplex=True, layout_direction="horizontal", binding_edge="short"))
 
-    assert _order(sides[0]) == ["1", "2"]
     assert _order(sides[1]) == ["4", "3"]
 
 

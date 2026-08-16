@@ -210,11 +210,14 @@ def test_mixed_colour_imposition_duplex(temp_pdf, tmp_path):
 # bind on. If these drift apart the back sheets come out mirrored.
 
 @pytest.mark.parametrize("nup,direction,expected_sides,expected_edge", [
-    (2, "horizontal", "duplexshort", "short"),   # 2x1 landscape sheet
-    (2, "vertical",   "ds",          "long"),    # 1x2 portrait sheet
-    (4, "horizontal", "ds",          "long"),    # 2x2 portrait sheet
-    (6, "horizontal", "duplexshort", "short"),   # 3x2 landscape sheet
-    (9, "horizontal", "ds",          "long"),    # 3x3 portrait sheet
+    # Every layout binds long-edge. Short-edge mode is long-edge plus a
+    # 180-degree back rotation, which printed landscape N-up upside down
+    # (confirmed on paper 2026-08-16) — see print_planner's binding_edge note.
+    (2, "horizontal", "ds", "long"),   # 2x1 landscape sheet
+    (2, "vertical",   "ds", "long"),   # 1x2 portrait sheet
+    (4, "horizontal", "ds", "long"),   # 2x2 portrait sheet
+    (6, "horizontal", "ds", "long"),   # 3x2 landscape sheet
+    (9, "horizontal", "ds", "long"),   # 3x3 portrait sheet
 ])
 def test_binding_edge_matches_duplex_mode(temp_pdf, tmp_path, monkeypatch,
                                           nup, direction, expected_sides,
@@ -255,4 +258,18 @@ def test_simplex_nup_does_not_request_a_binding_edge(temp_pdf, tmp_path, monkeyp
 
     assert seen["is_duplex"] is False
     assert actions[0]["sides"] == "ss"
+    print_planner.cleanup_temp_dir(temp_dir)
+
+
+def test_landscape_nup_no_longer_forces_short_edge(temp_pdf, tmp_path):
+    """Regression: forcing duplexshort on landscape N-up made the driver rotate
+    the back image 180 degrees, which cancelled the imposer's column mirroring
+    (right page order) but printed every back sheet upside down."""
+    spec = {"nup": 2, "nup_direction": "horizontal", "sides": "duplex",
+            "colour_mode": "bw", "paper_size": "A4"}
+    actions, temp_dir = print_planner.plan_print_job(
+        "J_NO_SHORT", temp_pdf, spec, str(tmp_path))
+
+    assert actions[0]["sides"] != "duplexshort"
+    assert actions[0]["sides"] == "ds"
     print_planner.cleanup_temp_dir(temp_dir)
