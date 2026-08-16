@@ -855,6 +855,50 @@ def _build_page_range_arg(page_list: str, total_pages: int) -> str:
     return page_list.strip()
 
 
+def _layout_to_nup(layout: str) -> int:
+    """print_items.layout ('1-up', '2-up', '4-up', ...) -> pages per sheet.
+
+    Anything unrecognised is 1-up, so a bad value prints normally rather than
+    imposing something nobody asked for.
+    """
+    try:
+        n = int(str(layout or "1").strip().lower().split("-")[0].replace("up", "") or 1)
+    except ValueError:
+        return 1
+    return n if n in (2, 4, 6, 9) else 1
+
+
+def _page_list_to_numbers(page_list: str, total_pages: int) -> list[int]:
+    """Expand a page_list expression to explicit 1-based page numbers.
+
+    Returns [] for 'all'/blank/unparseable, which the imposer reads as
+    "every page". Mirrors _build_page_range_arg / the spec-row page counter.
+    """
+    if not page_list or str(page_list).strip().lower() in ("all", ""):
+        return []
+
+    pages: list[int] = []
+    for part in str(page_list).strip().split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            if "-" in part:
+                a, b = part.split("-", 1)
+                a_i, b_i = int(a.strip()), int(b.strip())
+                if b_i >= a_i:
+                    pages.extend(range(a_i, b_i + 1))
+            else:
+                pages.append(int(part))
+        except ValueError:
+            continue
+
+    total = max(int(total_pages or 0), 0)
+    if total:
+        pages = [p for p in pages if 1 <= p <= total]
+    return sorted(set(pages))
+
+
 def update_job_quote(job_id: str, amount: float):
     """Update amount_quoted on the jobs table."""
     try:
@@ -1787,6 +1831,58 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
     layout    = item["layout"] or "1-up"
     page_list = item["page_list"] or "all"
 
+    job_size = job["size"] if "size" in job.keys() else None
+
+    # ── N-up: impose the sheet before printing ───────────────────────────────
+    # SumatraPDF has no N-up token — the "nup2"/"nup4" settings this path used
+    # to emit were silently discarded, so a staff N-up job printed one page per
+    # sheet with a duplex flag and no imposition at all. The sheet has to be
+    # built by nup_imposer, which is what the paid-order auto-print path in
+    # store_puller has always done. Both paths now go through print_planner so
+    # there is one imposition implementation, not two.
+    imposed_temp_dir = None
+    nup_n = _layout_to_nup(layout)
+    if nup_n > 1:
+        try:
+            import print_planner
+            spec = {
+                "nup": nup_n,
+                "nup_direction": "horizontal",
+                "sides": "duplex" if sides == "ds" else "simplex",
+                "colour_mode": "col" if colour == "col" else "bw",
+                "paper_size": job_size or "A4",
+                "copies": copies,
+            }
+            included = _page_list_to_numbers(page_list, job["page_count"] or 0)
+            if included:
+                spec["pages_included"] = included
+
+            actions, imposed_temp_dir = print_planner.plan_print_job(
+                job_id, filepath, spec, os.path.dirname(os.path.abspath(filepath)))
+            action = actions[0] if actions else None
+
+            if action and action.get("pdf_path") and os.path.exists(action["pdf_path"]):
+                filepath = action["pdf_path"]
+                # The planner sliced the pages and baked the sheet geometry, so
+                # neither may be applied a second time at print time.
+                page_list = "all"
+                sides = action.get("sides") or sides
+                warn = action.get("print_area_warning")
+                if warn:
+                    logging.warning(
+                        "Job %s item %d: content overflows the print area by %.1f%%",
+                        job_id, item_number, warn.get("overflow_pct", 0))
+                logging.info("Job %s item %d: imposed %d-up -> %s",
+                             job_id, item_number, nup_n, os.path.basename(filepath))
+            else:
+                logging.error("Job %s item %d: %d-up imposition produced nothing — "
+                              "printing un-imposed", job_id, item_number, nup_n)
+        except Exception as e:
+            # Never block a print on the imposer. Fall back to the original file
+            # and say so loudly, rather than failing the job at the counter.
+            logging.exception("Job %s item %d: %d-up imposition failed (%s) — "
+                              "printing un-imposed", job_id, item_number, nup_n, e)
+
     # Build -print-settings string
     settings_parts = [f"{copies}x"]
     if colour == "bw":
@@ -1794,18 +1890,12 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
     else:
         settings_parts.append("color")
 
-    if sides == "ds":
+    if sides in ("ds", "duplex", "duplexlong"):
         settings_parts.append("duplexlong")   # long-edge duplex
-
-    # Layout / n-up. NOTE: SumatraPDF's -print-settings has no N-up token, so
-    # these are no-ops today; kept to record intent until N-up is done another way.
-    if layout == "2-up":
-        settings_parts.append("nup2")
-    elif layout == "4-up":
-        settings_parts.append("nup4")
+    elif sides in ("duplexshort", "dss"):
+        settings_parts.append("duplexshort")
 
     # Paper size — read off the job row (guarded: legacy rows may lack the col).
-    job_size = job["size"] if "size" in job.keys() else None
     paper_tok = _sumatra_paper(job_size)
     if paper_tok:
         settings_parts.append(f"paper={paper_tok}")
@@ -1843,6 +1933,14 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
         return {"ok": False, "error": "Print command timed out after 90s"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+    finally:
+        # SumatraPDF has spooled by the time it exits, so the imposed file can go.
+        if imposed_temp_dir:
+            try:
+                import print_planner
+                print_planner.cleanup_temp_dir(imposed_temp_dir)
+            except Exception:
+                logging.warning("Could not clean up imposition temp dir %s", imposed_temp_dir)
 
     # ── Epson per-job accounting hook ─────────────────────────────────────────
     # On successful Epson dispatch, write a source='spec' row to epson_jobs so
