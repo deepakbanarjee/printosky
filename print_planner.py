@@ -3,6 +3,7 @@ import os
 import shutil
 import fitz  # PyMuPDF
 import nup_imposer
+from store_config import get_store_config
 
 logger = logging.getLogger("print_planner")
 
@@ -34,10 +35,9 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
     sides = "ss"
     if spec.get("sides") in ("duplex", "ds", "duplexlong"):
         sides = "ds"
-    # Print-time duplex binding edge, sent to the printer on each action. Kept
-    # separate from `sides` (which drives the internal sheet-pairing logic, and
-    # must stay "ss"/"ds"). Defaults to long-edge; landscape N-up flips it to
-    # short-edge below so the back side registers with the front.
+    # What the printer is told. Always plain "ss"/"ds" — duplexlong. No layout
+    # ever asks for a short-edge bind or an orientation flag: everything that
+    # decides how the sheet reads is baked into the imposed PDF instead.
     out_sides = sides
 
     # Set when the chosen scale would push content past the printable
@@ -184,30 +184,25 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
             # portrait). Let the printer honour the imposed page as-is.
             orientation = None
 
-            # Every layout binds on the LONG edge. A driver's short-edge mode is
-            # long-edge plus a 180-degree rotation of the back image, and that
-            # rotation is never wanted here — the imposer already places slots
-            # for the flip via duplex_mirror_axis().
+            # The printer is told one thing and one thing only: plain portrait
+            # duplex, long edge. It is never asked to choose a binding edge, an
+            # orientation, or an N-up mode. Everything that decides how the
+            # sheet reads is done here, in the PDF.
             #
-            # History, because this looks like a regression and is not. Landscape
-            # N-up was forced to duplexshort after long-edge "mis-aligned" it on
-            # the Konica. With a 2x1 sheet the driver's 180 degrees swaps the two
-            # columns as well as flipping the content, so it cancelled the
-            # imposer's own column mirroring — right page order, back printed
-            # upside down (confirmed on paper 2026-08-16). Dropping both the
-            # forced short edge and the column mirroring fixes order and rotation
-            # together: landscape + long edge derives to "rows", a no-op at one
-            # row, which is exactly the placement that registers.
-            binding_edge = "long"
+            # The single correction that cannot be done in the PDF alone is
+            # whether the back side needs turning 180 degrees, because that
+            # depends on how the duplex unit lays the back image down. That is
+            # one measured constant, the same for every printer — see the note
+            # at the top of nup_imposer.py for why it can only ever be 0 or 180.
+            try:
+                back_rotation = get_store_config().duplex_back_rotation
+            except Exception:
+                back_rotation = 0
 
             # Read sliced file bytes
             with open(current_pdf, "rb") as f:
                 pdf_bytes = f.read()
 
-            # binding_edge must be the same edge `out_sides` asks the printer
-            # for — the imposer reverses back-sheet slots along the axis the
-            # sheet is flipped about. If these two disagree the back sheets
-            # come out mirrored.
             # Warn (loudly, in the log and on the action) when the chosen scale
             # will push content past the printable slot — "actual size" on a
             # page larger than the paper silently clips otherwise.
@@ -228,7 +223,7 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                 orientation=nup_orient,
                 is_duplex=(sides == "ds"),
                 layout_direction=nup_dir,
-                binding_edge=binding_edge,
+                back_rotation=back_rotation,
                 scale_mode=scale_mode,
                 scale_percent=scale_percent
             )

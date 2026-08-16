@@ -1,12 +1,14 @@
-"""Duplex geometry for N-up imposition.
+"""Duplex back-side geometry.
 
-The bug these guard (the "double flip"): a duplex unit can only lay the back
-image down at 0 or 180 degrees — it cannot mirror slot positions. So the
-imposer owns *slot mirroring*, and the driver owns *content rotation*. The
-imposer was doing both: it reversed columns (correct) **and** rotated back-page
-content 90 where the front got 270 (wrong), a 180-degree difference on top of
-the driver's own back-side rotation. Rotated layouts — 2-up vertical — printed
-every back sheet upside down.
+The model, after five rounds of getting it wrong: the printer's duplex unit plus
+the reader's flip is a RIGID MOTION of the sheet. The only rigid motions that map
+a rectangle onto itself are 0 and 180 degrees, and ink on paper cannot be
+mirrored. So the correction is one bit — back side turned 180, or not — and it is
+a single measured constant, identical for every printer.
+
+What these guard is that the 180 stays a *rotation*: both slot axes reverse and
+the content turns with them. The previous model reversed columns without rotating
+content, which is a mirror, not a rigid motion, and could never have been right.
 """
 
 import io
@@ -32,7 +34,7 @@ def _make_pdf(pages: int) -> bytes:
 
 
 def _layout(stream: io.BytesIO):
-    """[(page_label, x, y, rotation_degrees)] per output sheet-side."""
+    """Per sheet-side: [(label, x, y, rotation)] in reading order."""
     doc = fitz.open("pdf", stream.getvalue())
     angles = {(1.0, 0.0): 0, (0.0, -1.0): 90, (-1.0, 0.0): 180, (0.0, 1.0): 270}
     out = []
@@ -60,116 +62,102 @@ def _rotations(side):
     return {t[3] for t in side}
 
 
-# ── duplex_mirror_axis: the model itself ──────────────────────────────────────
+def _impose(pages, cols, rows, back_rotation=0, direction="horizontal"):
+    return _layout(nup_imposer.perform_nup(
+        _make_pdf(pages), cols=cols, rows=rows, orientation="Portrait",
+        is_duplex=True, layout_direction=direction, back_rotation=back_rotation))
 
-@pytest.mark.parametrize("w,h,edge,expected", [
-    # portrait sheet: long edge is vertical, short edge is horizontal
-    (A4_W, A4_H, "long",  "cols"),
-    (A4_W, A4_H, "short", "rows"),
-    # landscape sheet: long edge is horizontal, short edge is vertical
-    (A4_H, A4_W, "long",  "rows"),
-    (A4_H, A4_W, "short", "cols"),
+
+# ── normalise_back_rotation ───────────────────────────────────────────────────
+
+@pytest.mark.parametrize("value,expected", [
+    (0, 0), (180, 180), ("180", 180), ("0", 0),
+    (360, 0), (540, 180), (-180, 180),
+    (90, 0), (270, 0),          # not rigid — refused
+    (None, 0), ("", 0), ("nonsense", 0),
 ])
-def test_mirror_axis_follows_the_physical_flip_edge(w, h, edge, expected):
-    assert nup_imposer.duplex_mirror_axis(w, h, edge) == expected
+def test_normalise_back_rotation(value, expected):
+    assert nup_imposer.normalise_back_rotation(value) == expected
 
 
-def test_mirror_axis_defaults_to_long_edge():
-    assert (nup_imposer.duplex_mirror_axis(A4_W, A4_H, "anything-else")
-            == nup_imposer.duplex_mirror_axis(A4_W, A4_H, "long"))
+# ── back_rotation = 0 : backs are plain sequential ────────────────────────────
 
-
-# ── the regression: back content rotation must equal front ────────────────────
-
-def test_2up_vertical_backs_are_not_upside_down():
-    """THE double-flip regression. 2-up vertical rotates portrait pages into
-    landscape slots; front and back must rotate the same way."""
-    sides = _layout(nup_imposer.perform_nup(
-        _make_pdf(8), cols=1, rows=2, orientation="Portrait",
-        is_duplex=True, layout_direction="vertical", binding_edge="long"))
-
-    front_rot = _rotations(sides[0])
-    back_rot = _rotations(sides[1])
-    assert front_rot == {270}
-    assert back_rot == front_rot, (
-        f"back rotated {back_rot} vs front {front_rot} — upside-down backs")
-
-
-def test_every_sheet_side_uses_one_rotation():
-    for cols, rows, orient, direction in [
-        (1, 2, "Portrait", "vertical"),
-        (2, 1, "Landscape", "horizontal"),
-        (2, 2, "Portrait", "horizontal"),
-    ]:
-        sides = _layout(nup_imposer.perform_nup(
-            _make_pdf(8), cols=cols, rows=rows, orientation=orient,
-            is_duplex=True, layout_direction=direction, binding_edge="long"))
-        rots = {r for side in sides for r in _rotations(side)}
-        assert len(rots) == 1, f"{cols}x{rows} {direction}: mixed rotations {rots}"
-
-
-# ── slot mirroring stays, because the driver cannot do it ─────────────────────
-
-def test_2up_horizontal_long_edge_keeps_column_order():
-    """What the shop actually prints. A landscape sheet bound long-edge flips
-    top-to-bottom, so ROWS reverse — and at one row that is a no-op, leaving
-    the back in plain reading order. This is the placement that registers;
-    mirroring the columns here is what needed the driver's 180-degree
-    short-edge rotation to cancel it, and that rotation flipped the content."""
-    sides = _layout(nup_imposer.perform_nup(
-        _make_pdf(4), cols=2, rows=1, orientation="Landscape",
-        is_duplex=True, layout_direction="horizontal", binding_edge="long"))
-
-    assert _order(sides[0]) == ["1", "2"]
-    assert _order(sides[1]) == ["3", "4"]
-
-
-def test_2up_horizontal_short_edge_would_reverse_columns():
-    """The model still handles a short-edge bind correctly — it is simply not
-    what the planner asks for any more."""
-    sides = _layout(nup_imposer.perform_nup(
-        _make_pdf(4), cols=2, rows=1, orientation="Landscape",
-        is_duplex=True, layout_direction="horizontal", binding_edge="short"))
-
-    assert _order(sides[1]) == ["4", "3"]
-
-
-def test_4up_long_edge_reverses_columns_not_rows():
-    sides = _layout(nup_imposer.perform_nup(
-        _make_pdf(8), cols=2, rows=2, orientation="Portrait",
-        is_duplex=True, layout_direction="horizontal", binding_edge="long"))
-
-    assert _order(sides[0]) == ["1", "2", "3", "4"]
-    # columns swap within each row; rows keep their order
-    assert _order(sides[1]) == ["6", "5", "8", "7"]
-
-
-def test_short_edge_on_portrait_reverses_rows():
-    """The axis is derived, not hardcoded to columns: a portrait sheet bound on
-    the short edge flips top-to-bottom, so rows reverse instead."""
-    sides = _layout(nup_imposer.perform_nup(
-        _make_pdf(8), cols=2, rows=2, orientation="Portrait",
-        is_duplex=True, layout_direction="horizontal", binding_edge="short"))
-
-    assert _order(sides[0]) == ["1", "2", "3", "4"]
-    assert _order(sides[1]) == ["7", "8", "5", "6"]
-
-
-def test_simplex_never_mirrors():
-    sides = _layout(nup_imposer.perform_nup(
-        _make_pdf(8), cols=2, rows=2, orientation="Portrait",
-        is_duplex=False, layout_direction="horizontal"))
-
+def test_no_rotation_leaves_backs_sequential():
+    sides = _impose(8, cols=2, rows=2, back_rotation=0)
     assert _order(sides[0]) == ["1", "2", "3", "4"]
     assert _order(sides[1]) == ["5", "6", "7", "8"]
 
 
-def test_front_sides_are_identical_under_both_binding_edges():
-    """Binding edge only ever affects backs."""
-    kw = dict(cols=2, rows=2, orientation="Portrait", is_duplex=True,
-              layout_direction="horizontal")
-    long_sides = _layout(nup_imposer.perform_nup(_make_pdf(8), binding_edge="long", **kw))
-    short_sides = _layout(nup_imposer.perform_nup(_make_pdf(8), binding_edge="short", **kw))
+def test_no_rotation_matches_front_orientation():
+    sides = _impose(8, cols=1, rows=2, back_rotation=0, direction="vertical")
+    assert _rotations(sides[0]) == _rotations(sides[1]) == {270}
 
-    assert _order(long_sides[0]) == _order(short_sides[0])
-    assert _order(long_sides[1]) != _order(short_sides[1])
+
+# ── back_rotation = 180 : a rigid turn of the whole side ──────────────────────
+
+def test_180_reverses_both_axes_together():
+    """A rotation, not a mirror: rows AND columns reverse."""
+    sides = _impose(8, cols=2, rows=2, back_rotation=180)
+
+    assert _order(sides[0]) == ["1", "2", "3", "4"]      # front untouched
+    # 1 2 / 3 4  turned 180  ->  8 7 / 6 5
+    assert _order(sides[1]) == ["8", "7", "6", "5"]
+
+
+def test_180_also_turns_the_content():
+    """Reversing slots without turning content would be a mirror — impossible
+    on paper, and the flaw in the model this replaces."""
+    sides = _impose(8, cols=2, rows=2, back_rotation=180)
+
+    assert _rotations(sides[0]) == {0}
+    assert _rotations(sides[1]) == {180}
+
+
+def test_180_on_a_rotated_layout_adds_to_the_slot_rotation():
+    sides = _impose(8, cols=1, rows=2, back_rotation=180, direction="vertical")
+
+    assert _rotations(sides[0]) == {270}
+    assert _rotations(sides[1]) == {90}        # 270 + 180
+    assert _order(sides[0]) == ["1", "2"]
+    assert _order(sides[1]) == ["4", "3"]      # single column: rows reverse
+
+
+def test_fronts_are_identical_whatever_the_setting():
+    """The constant only ever touches back sides."""
+    a = _impose(8, cols=2, rows=2, back_rotation=0)
+    b = _impose(8, cols=2, rows=2, back_rotation=180)
+
+    assert _order(a[0]) == _order(b[0])
+    assert _rotations(a[0]) == _rotations(b[0])
+    assert _order(a[1]) != _order(b[1])
+
+
+def test_a_180_is_its_own_inverse():
+    """Turning the back twice returns the original placement — the property
+    that makes this a rigid motion and the correction exactly one bit."""
+    once = _impose(8, cols=2, rows=2, back_rotation=180)[1]
+    plain = _impose(8, cols=2, rows=2, back_rotation=0)[1]
+
+    # reversing the 180-turned order and re-turning the content gives the plain side
+    assert list(reversed(_order(once))) == _order(plain)
+    assert {(r + 180) % 360 for r in _rotations(once)} == _rotations(plain)
+
+
+# ── simplex is never touched ──────────────────────────────────────────────────
+
+def test_simplex_ignores_back_rotation():
+    for rot in (0, 180):
+        sides = _layout(nup_imposer.perform_nup(
+            _make_pdf(8), cols=2, rows=2, orientation="Portrait",
+            is_duplex=False, layout_direction="horizontal", back_rotation=rot))
+        assert _order(sides[0]) == ["1", "2", "3", "4"]
+        assert _order(sides[1]) == ["5", "6", "7", "8"]
+        assert _rotations(sides[0]) == _rotations(sides[1]) == {0}
+
+
+# ── the retired model is gone ─────────────────────────────────────────────────
+
+def test_binding_edge_model_is_removed():
+    """duplex_mirror_axis reversed columns without rotating content — a mirror,
+    not a rigid motion. It cannot come back without reintroducing the bug."""
+    assert not hasattr(nup_imposer, "duplex_mirror_axis")

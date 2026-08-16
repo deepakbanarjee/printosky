@@ -8,5 +8,6 @@
   "hot_folder": "C:\\Printosky\\Jobs\\Incoming",
   "db_path": "C:\\Printosky\\Data\\jobs.db",
   "agent_secret": null,
-  "platform_url": null
+  "platform_url": null,
+  "duplex_back_rotation": 180
 }

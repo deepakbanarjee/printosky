@@ -1,4 +1,6 @@
 import os
+import types
+
 import pytest
 import fitz  # PyMuPDF
 import print_planner
@@ -204,50 +206,72 @@ def test_mixed_colour_imposition_duplex(temp_pdf, tmp_path):
     print_planner.cleanup_temp_dir(temp_dir)
 
 
-# ── Binding-edge sync (guards the duplex double-flip fix) ─────────────────────
-# The imposer reverses back-sheet slots along the axis the sheet is flipped
-# about, so the edge it imposes for MUST be the edge the printer is told to
-# bind on. If these drift apart the back sheets come out mirrored.
+# ── Duplex back rotation (replaces the binding-edge model) ───────────────────
+# The printer is told plain portrait duplex and nothing else. The one thing the
+# PDF cannot decide by itself — whether the duplex unit lays the back image down
+# turned 180 — is a single measured constant applied identically everywhere.
 
-@pytest.mark.parametrize("nup,direction,expected_sides,expected_edge", [
-    # Every layout binds long-edge. Short-edge mode is long-edge plus a
-    # 180-degree back rotation, which printed landscape N-up upside down
-    # (confirmed on paper 2026-08-16) — see print_planner's binding_edge note.
-    (2, "horizontal", "ds", "long"),   # 2x1 landscape sheet
-    (2, "vertical",   "ds", "long"),   # 1x2 portrait sheet
-    (4, "horizontal", "ds", "long"),   # 2x2 portrait sheet
-    (6, "horizontal", "ds", "long"),   # 3x2 landscape sheet
-    (9, "horizontal", "ds", "long"),   # 3x3 portrait sheet
+@pytest.mark.parametrize("nup,direction", [
+    (2, "horizontal"), (2, "vertical"), (4, "horizontal"),
+    (6, "horizontal"), (9, "horizontal"),
 ])
-def test_binding_edge_matches_duplex_mode(temp_pdf, tmp_path, monkeypatch,
-                                          nup, direction, expected_sides,
-                                          expected_edge):
+def test_planner_passes_the_configured_back_rotation(temp_pdf, tmp_path,
+                                                     monkeypatch, nup, direction):
+    import store_config
     seen = {}
     real = nup_imposer.perform_nup
 
     def spy(*args, **kwargs):
-        seen["binding_edge"] = kwargs.get("binding_edge")
+        seen["back_rotation"] = kwargs.get("back_rotation")
         return real(*args, **kwargs)
 
     monkeypatch.setattr(print_planner.nup_imposer, "perform_nup", spy)
+    monkeypatch.setattr(
+        print_planner, "get_store_config",
+        lambda: types.SimpleNamespace(duplex_back_rotation=180))
 
     spec = {"nup": nup, "nup_direction": direction, "sides": "duplex",
             "colour_mode": "bw", "paper_size": "A4"}
     actions, temp_dir = print_planner.plan_print_job(
-        f"J_EDGE_{nup}{direction}", temp_pdf, spec, str(tmp_path))
+        f"J_ROT_{nup}{direction}", temp_pdf, spec, str(tmp_path))
 
-    assert seen["binding_edge"] == expected_edge
-    assert actions[0]["sides"] == expected_sides
+    assert seen["back_rotation"] == 180
+    # The printer instruction never varies, whatever the layout.
+    assert actions[0]["sides"] == "ds"
+    assert actions[0]["orientation"] is None
     print_planner.cleanup_temp_dir(temp_dir)
 
 
-def test_simplex_nup_does_not_request_a_binding_edge(temp_pdf, tmp_path, monkeypatch):
+def test_planner_survives_an_unreadable_store_config(temp_pdf, tmp_path, monkeypatch):
+    """A missing or broken config must not stop a print — it falls back to 0."""
+    seen = {}
+    real = nup_imposer.perform_nup
+
+    def spy(*args, **kwargs):
+        seen["back_rotation"] = kwargs.get("back_rotation")
+        return real(*args, **kwargs)
+
+    def boom():
+        raise RuntimeError("no config")
+
+    monkeypatch.setattr(print_planner.nup_imposer, "perform_nup", spy)
+    monkeypatch.setattr(print_planner, "get_store_config", boom)
+
+    spec = {"nup": 2, "sides": "duplex", "colour_mode": "bw", "paper_size": "A4"}
+    actions, temp_dir = print_planner.plan_print_job(
+        "J_ROT_NOCFG", temp_pdf, spec, str(tmp_path))
+
+    assert seen["back_rotation"] == 0
+    assert actions[0]["sides"] == "ds"
+    print_planner.cleanup_temp_dir(temp_dir)
+
+
+def test_simplex_nup_is_not_given_a_back_rotation(temp_pdf, tmp_path, monkeypatch):
     seen = {}
     real = nup_imposer.perform_nup
 
     def spy(*args, **kwargs):
         seen["is_duplex"] = kwargs.get("is_duplex")
-        seen["binding_edge"] = kwargs.get("binding_edge")
         return real(*args, **kwargs)
 
     monkeypatch.setattr(print_planner.nup_imposer, "perform_nup", spy)

@@ -90,6 +90,53 @@ def _describe(path: str):
     return out
 
 
+def _calibrate(args, current: int) -> int:
+    """Two sheets, one duplex print, and the answer is unambiguous."""
+    src = os.path.join(os.path.dirname(os.path.abspath(args.out)) or ".",
+                       "nup_doctor_calibration_source.pdf")
+    _make_source(src, 4)
+    with open(src, "rb") as fh:
+        src_bytes = fh.read()
+
+    out = fitz.open()
+    for label, rotation in (("A", 0), ("B", 180)):
+        imposed = nup_imposer.perform_nup(
+            src_bytes, cols=1, rows=2, paper_size=args.paper,
+            orientation="Portrait", is_duplex=True,
+            layout_direction="horizontal", back_rotation=rotation)
+        sheet = fitz.open("pdf", imposed.getvalue())
+        for n, pg in enumerate(sheet):
+            band = (0.11, 0.42, 0.29) if label == "B" else (0.35, 0.38, 0.40)
+            pg.draw_rect(fitz.Rect(0, 0, pg.rect.width, 30), color=None, fill=band)
+            pg.insert_text((14, 21),
+                           f"SHEET {label}   ({'FRONT' if n % 2 == 0 else 'BACK'})"
+                           f"   duplex_back_rotation = {rotation}",
+                           fontsize=12, fontname="hebo", color=(1, 1, 1))
+        out.insert_pdf(sheet)
+        sheet.close()
+    out.save(args.out)
+    out.close()
+    os.remove(src)
+
+    print(LINE)
+    print("  CALIBRATION SHEET")
+    print(LINE)
+    print(f"  saved -> {os.path.abspath(args.out)}")
+    print()
+    print("  1. Print it: DUPLEX, LONG EDGE, portrait, 2 sheets.")
+    print("  2. Turn each sheet over like a book (flip about the LEFT edge).")
+    print("  3. Exactly one sheet reads 1,2 then 3,4 the right way up.")
+    print()
+    print("     sheet A reads correctly  ->  duplex_back_rotation = 0")
+    print("     sheet B reads correctly  ->  duplex_back_rotation = 180")
+    print()
+    print(f"  Currently configured: {current}")
+    print("  To change it, set this in store_config.json and restart:")
+    print('      "duplex_back_rotation": 0     (or 180)')
+    print(LINE)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("pdf", nargs="?", help="PDF to impose")
@@ -101,6 +148,9 @@ def main() -> int:
     ap.add_argument("--scale", default="fit")
     ap.add_argument("--pages", type=int, default=8,
                     help="pages in the generated source (default 8)")
+    ap.add_argument("--calibrate", action="store_true",
+                    help="emit a 2-sheet A/B test that names the correct "
+                         "duplex_back_rotation in one duplex print")
     ap.add_argument("-o", "--out", default="nup_doctor_output.pdf")
     args = ap.parse_args()
 
@@ -116,6 +166,18 @@ def main() -> int:
     with open(print_planner.__file__, encoding="utf-8") as fh:
         has_rule = "PORTRAIT CANVAS RULE" in fh.read()
     print(f"  portrait-canvas rule present : {'YES' if has_rule else 'NO — STALE CODE'}")
+
+    try:
+        from store_config import get_store_config
+        cfg_rotation = get_store_config().duplex_back_rotation
+    except Exception as exc:
+        cfg_rotation = 0
+        print(f"  store_config unreadable ({exc}) — assuming 0")
+    print(f"  duplex_back_rotation : {cfg_rotation}  "
+          f"(the one calibration constant; same for every printer)")
+
+    if args.calibrate:
+        return _calibrate(args, cfg_rotation)
 
     src = args.pdf
     nup, sides, paper = args.nup, ("ss" if args.simplex else "ds"), args.paper

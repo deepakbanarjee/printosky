@@ -92,35 +92,36 @@ def check_fit(page_w: float, page_h: float, slot_w: float, slot_h: float,
     }
 
 
-def duplex_mirror_axis(out_width: float, out_height: float, binding_edge: str) -> str:
-    """Which slot axis mirrors on the back of a duplexed sheet.
+# ── Duplex back-side correction ───────────────────────────────────────────────
+#
+# The printer's duplex unit plus the reader's flip is a RIGID MOTION of the
+# sheet. The only rigid motions that map a rectangle onto itself are 0 and 180
+# degrees, and ink on paper cannot be mirrored. So whatever a printer does, the
+# residual error we could ever need to correct is exactly one bit: does the back
+# side need turning 180 degrees, or not?
+#
+# That is why the earlier model here was wrong. It reversed the slot columns
+# WITHOUT rotating the content, which is not a rigid motion and therefore can
+# never be the correct correction for a physical flip. Several rounds of
+# reasoning about long edge vs short edge were built on it, and every one of
+# them printed wrong.
+#
+# The correction is now a single measured constant (store_config
+# duplex_back_rotation), applied identically for every printer — the whole point
+# of imposing the sheet ourselves is that the printer only ever receives plain
+# portrait duplex and has nothing left to decide.
 
-    A duplex unit can only lay the back image down at 0 or 180 degrees — it
-    cannot mirror slot positions. So when the reader flips the sheet, the slots
-    on the back appear reversed along the flip axis, and the imposer has to
-    pre-reverse them. Which axis that is depends on the physical edge the sheet
-    is flipped about:
+BACK_ROTATIONS = (0, 180)
 
-        flip about a VERTICAL edge (left/right) -> columns reverse
-        flip about a HORIZONTAL edge (top/bottom) -> rows reverse
 
-    and which edge is which depends on the sheet's own aspect:
+def normalise_back_rotation(value) -> int:
+    """Coerce a configured duplex_back_rotation to 0 or 180."""
+    try:
+        v = int(value) % 360
+    except (TypeError, ValueError):
+        return 0
+    return 180 if v == 180 else 0
 
-        portrait  sheet: long edge = vertical,   short edge = horizontal
-        landscape sheet: long edge = horizontal, short edge = vertical
-
-    Returns "cols" or "rows".
-
-    Content *rotation* is deliberately NOT handled here — the driver already
-    rotates the back image for the binding mode it was given. Rotating it again
-    in the imposed PDF is the double flip that printed upside-down backs.
-    """
-    sheet_is_landscape = out_width > out_height
-    if str(binding_edge).lower().startswith("short"):
-        edge_is_vertical = sheet_is_landscape
-    else:  # long edge (default)
-        edge_is_vertical = not sheet_is_landscape
-    return "cols" if edge_is_vertical else "rows"
 
 def perform_nup(
     file_bytes: bytes, cols: int, rows: int, margin_x: float = 20.0, margin_y: float = 20.0, 
@@ -129,14 +130,15 @@ def perform_nup(
     is_duplex: bool = False, scale_behavior: str = "Auto-Fit", maintain_aspect: bool = True, is_centered: bool = True,
     custom_scale_width: float = 200.0, custom_scale_height: float = 200.0,
     n_repeat: int = 1, is_collate: bool = False, draw_crop_marks: bool = False,
-    layout_direction: str = "horizontal", binding_edge: str = "long",
+    layout_direction: str = "horizontal", back_rotation: int = 0,
     scale_mode: str | None = None, scale_percent: float = 100.0
 ) -> io.BytesIO:
     """Perform N-up imposition on input PDF bytes.
 
-    ``binding_edge`` ("long"/"short") must match the duplex mode actually sent
-    to the printer — it decides which slot axis is reversed on back sheets.
-    See :func:`duplex_mirror_axis`. Ignored when ``is_duplex`` is False.
+    ``back_rotation`` (0 or 180) turns every back sheet-side as one rigid
+    piece — both slot axes reverse and the content turns with them. It is the
+    single calibration constant that absorbs whatever the printer does to the
+    back image. Ignored when ``is_duplex`` is False.
 
     ``scale_mode`` is one of :data:`SCALE_MODES`. When None the legacy
     ``scale_behavior`` argument is used instead, so existing callers keep
@@ -199,7 +201,7 @@ def perform_nup(
             sheets.append((back_chunk, True))
             idx += slots_per_page
 
-    mirror_axis = duplex_mirror_axis(out_width, out_height, binding_edge)
+    back_rotation = normalise_back_rotation(back_rotation)
 
     # Draw loop
     for sheet_indices, is_back_page in sheets:
@@ -220,14 +222,14 @@ def perform_nup(
                 row = slot // cols
                 col = slot % cols
 
-            # 3. Double sided — reverse the slot order along the flip axis so
-            # the back registers with the front once the sheet is turned over.
+            # 3. Double sided — turn the whole back side rigidly by the
+            # calibrated amount. Reversing both axes together *is* the 180, so
+            # this stays a rotation and never becomes a mirror.
             eff_col, eff_row = col, row
-            if is_duplex and is_back_page:
-                if mirror_axis == "cols":
-                    eff_col = (cols - 1) - col
-                else:
-                    eff_row = (rows - 1) - row
+            back_turn = 180 if (is_duplex and is_back_page and back_rotation == 180) else 0
+            if back_turn:
+                eff_col = (cols - 1) - col
+                eff_row = (rows - 1) - row
 
             slot_x0 = margin_x + eff_col * (slot_width + gutter_x)
             slot_y0 = margin_y + eff_row * (slot_height + gutter_y)
@@ -243,15 +245,14 @@ def perform_nup(
                 needs_rotation = (slot_is_landscape and page_is_portrait) or (not slot_is_landscape and not page_is_portrait)
 
                 if needs_rotation:
-                    # Same rotation on both sides. A back page previously got 90
-                    # where the front got 270 — a 180-degree difference on top of
-                    # the driver's own back-side rotation, which printed every
-                    # back sheet upside down on rotated layouts (2-up vertical).
                     rot = 270
                     eff_w, eff_h = in_h, in_w
                 else:
                     rot = 0
                     eff_w, eff_h = in_w, in_h
+                # Fronts and backs place content identically; the only
+                # difference a back side ever carries is the rigid turn above.
+                rot = (rot + back_turn) % 360
 
                 # 4 & 5. Scaling & Centering Logic
                 if scale_mode is not None:

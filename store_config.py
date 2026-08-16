@@ -92,6 +92,8 @@ _LEGACY_OXYGEN_DEFAULTS: dict[str, Any] = {
     "db_path": r"C:\Printosky\Data\jobs.db",
     "agent_secret": None,
     "platform_url": None,
+    # Measured on the Oxygen Konica bizhub PRO 1100, 2026-08-16.
+    "duplex_back_rotation": 180,
 }
 
 
@@ -115,6 +117,13 @@ class StoreConfig:
     # to redirect 'epson' to 'Microsoft Print to PDF' so test dispatches don't
     # consume real ink. Keys: 'konica', 'epson'. Missing keys keep defaults.
     printer_queue_names: dict[str, str] | None = None
+    # Duplex back-side correction, in degrees: 0 or 180. One value for every
+    # printer, deliberately — we impose the sheet ourselves and hand the printer
+    # nothing but plain portrait duplex, so there is nothing left for it to
+    # decide differently. Measured once with `python tools/nup_doctor.py
+    # --calibrate`; see the note at the top of nup_imposer.py for why the
+    # correction can only ever be 0 or 180.
+    duplex_back_rotation: int = 180
     source_path: str | None = field(default=None, compare=False)
 
     @property
@@ -203,6 +212,19 @@ def _merge_with_defaults(raw: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _back_rotation(value: Any) -> int:
+    """Coerce duplex_back_rotation to 0 or 180; anything else falls back to 180
+    (the measured default) rather than silently printing every back wrong."""
+    try:
+        v = int(value) % 360
+    except (TypeError, ValueError):
+        return 180
+    if v not in (0, 180):
+        log.warning("store_config: duplex_back_rotation=%r is not 0 or 180; using 180", value)
+        return 180
+    return v
+
+
 def _build(raw: dict[str, Any], source: str | None) -> StoreConfig:
     printers_raw = raw.get("printers", {}) or {}
     pq_raw = raw.get("printer_queue_names")
@@ -224,6 +246,7 @@ def _build(raw: dict[str, Any], source: str | None) -> StoreConfig:
         agent_secret=raw.get("agent_secret"),
         platform_url=raw.get("platform_url"),
         printer_queue_names=printer_queue_names,
+        duplex_back_rotation=_back_rotation(raw.get("duplex_back_rotation")),
         source_path=source,
     )
 
