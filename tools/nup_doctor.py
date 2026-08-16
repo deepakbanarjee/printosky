@@ -9,9 +9,13 @@ It does NOT print. It reports, and saves the imposed PDF so it can be looked
 at (or sent on) directly.
 
 Usage:
-    python tools/nup_doctor.py <file.pdf>
-    python tools/nup_doctor.py <file.pdf> --nup 4 --simplex
+    python tools/nup_doctor.py                       (generates its own source)
+    python tools/nup_doctor.py --nup 4 --simplex
+    python tools/nup_doctor.py <file.pdf> --nup 2
     python tools/nup_doctor.py --job OSKY-20260816-0001    (use a real job row)
+
+With no file it builds a labelled test document itself, so there is nothing to
+copy onto the store PC first.
 """
 
 from __future__ import annotations
@@ -46,6 +50,25 @@ def _git(*args) -> str:
         return "unknown"
 
 
+def _make_source(path: str, pages: int = 8) -> str:
+    """A labelled test document: big page number, and a bar along the page's
+    own TOP edge so the imposed sheet shows where each page's top ended up."""
+    doc = fitz.open()
+    for n in range(1, pages + 1):
+        pg = doc.new_page(width=595.28, height=841.89)
+        colour = (0.76, 0.09, 0.43) if n % 2 else (0.0, 0.47, 0.62)
+        pg.draw_rect(fitz.Rect(0, 0, 595.28, 34), color=None, fill=colour)
+        pg.insert_text((22, 23), "T O P   O F   P A G E", fontsize=15,
+                       fontname="hebo", color=(1, 1, 1))
+        pg.insert_text((220, 470), str(n), fontsize=260, fontname="hebo",
+                       color=(0.07, 0.15, 0.35))
+        pg.insert_text((22, 600), f"page {n} of {pages}", fontsize=20,
+                       fontname="hebo", color=colour)
+    doc.save(path)
+    doc.close()
+    return path
+
+
 def _describe(path: str):
     """Per sheet-side: page labels found, their positions and rotations."""
     out = []
@@ -76,6 +99,8 @@ def main() -> int:
     ap.add_argument("--paper", default="A4")
     ap.add_argument("--direction", default="horizontal")
     ap.add_argument("--scale", default="fit")
+    ap.add_argument("--pages", type=int, default=8,
+                    help="pages in the generated source (default 8)")
     ap.add_argument("-o", "--out", default="nup_doctor_output.pdf")
     args = ap.parse_args()
 
@@ -116,7 +141,10 @@ def main() -> int:
         print(f"  job row  : {args.job}  layout={nup}-up sides={sides} paper={paper}")
 
     if not src:
-        return print("  give a PDF path or --job") or 1
+        src = os.path.join(os.path.dirname(os.path.abspath(args.out)) or ".",
+                           "nup_doctor_source.pdf")
+        _make_source(src, args.pages)
+        print(f"  generated: {os.path.basename(src)} ({args.pages} labelled pages)")
     if not os.path.exists(src):
         return print(f"  file not found: {src}") or 1
 
