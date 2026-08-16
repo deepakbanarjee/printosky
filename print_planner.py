@@ -16,7 +16,9 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
         - "sides": str ("ss" | "ds")
         - "paper_size": str | None
         - "orientation": str | None
-        
+        - "print_area_warning": dict | None — set when the chosen scale mode
+          pushes content past the printable slot (see nup_imposer.check_fit)
+
     Also returns (actions_list, temp_dir_path).
     If no spec or invalid, returns a single default action and None for temp_dir.
     """
@@ -37,6 +39,10 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
     # must stay "ss"/"ds"). Defaults to long-edge; landscape N-up flips it to
     # short-edge below so the back side registers with the front.
     out_sides = sides
+
+    # Set when the chosen scale would push content past the printable
+    # slot. Carried on every action so staff see it, not just the log.
+    fit_warning = None
 
     paper_size = spec.get("paper_size")
     orientation = spec.get("orientation", "auto")
@@ -118,7 +124,19 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
         except (TypeError, ValueError):
             pass
 
-        if nup > 1:
+        scale_mode = str(spec.get("scale_mode") or "fit").strip().lower()
+        if scale_mode not in nup_imposer.SCALE_MODES:
+            scale_mode = "fit"
+        try:
+            scale_percent = float(spec.get("scale_percent") or 100.0)
+        except (TypeError, ValueError):
+            scale_percent = 100.0
+
+        # A 1-up job normally skips imposition entirely, so a non-default scale
+        # would be silently dropped. Route it through a 1x1 imposition instead.
+        needs_scale_pass = nup == 1 and scale_mode != "fit"
+
+        if nup > 1 or needs_scale_pass:
             # Determine Grid & default orientation
             # 2-up -> 2x1 landscape, 4-up -> 2x2 portrait, 6-up -> 3x2 landscape, 9-up -> 3x3 portrait
             nup_map = {
@@ -128,6 +146,9 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                 9: (3, 3, "Portrait")
             }
             grid = nup_map.get(nup, (2, 2, "Portrait")) # default 4-up shape if unknown
+            if nup == 1:
+                # Scale-only pass: one slot, sheet keeps the requested orientation.
+                grid = (1, 1, "Landscape" if str(orientation).lower() == "landscape" else "Portrait")
             cols, rows, nup_orient = grid
             nup_dir = str(spec.get("nup_direction", "horizontal")).lower()
             # 2-up: horizontal = two side-by-side (landscape); vertical = two
@@ -146,19 +167,42 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
             # with the front when the sheet flips top-to-bottom. Long-edge
             # binding mis-aligns it (confirmed on the Konica). Portrait N-up and
             # 2-up vertical keep long-edge.
+            binding_edge = "long"
             if sides == "ds" and nup_orient.lower() == "landscape":
                 out_sides = "duplexshort"
+                binding_edge = "short"
 
             # Read sliced file bytes
             with open(current_pdf, "rb") as f:
                 pdf_bytes = f.read()
+
+            # binding_edge must be the same edge `out_sides` asks the printer
+            # for — the imposer reverses back-sheet slots along the axis the
+            # sheet is flipped about. If these two disagree the back sheets
+            # come out mirrored.
+            # Warn (loudly, in the log and on the action) when the chosen scale
+            # will push content past the printable slot — "actual size" on a
+            # page larger than the paper silently clips otherwise.
+            fit_report = _check_print_area(
+                current_pdf, cols, rows, paper_size or "A4", nup_orient,
+                scale_mode, scale_percent)
+            if fit_report and not fit_report["fits"]:
+                fit_warning = fit_report
+                logger.warning(
+                    "Job %s: content overflows the print area by %.1f%% "
+                    "(scale=%s, %d-up %s %s) — output will be clipped",
+                    job_id, fit_report["overflow_pct"], scale_mode, nup,
+                    paper_size or "A4", nup_orient)
 
             imposed_stream = nup_imposer.perform_nup(
                 pdf_bytes, cols=cols, rows=rows,
                 paper_size=paper_size or "A4",
                 orientation=nup_orient,
                 is_duplex=(sides == "ds"),
-                layout_direction=nup_dir
+                layout_direction=nup_dir,
+                binding_edge=binding_edge,
+                scale_mode=scale_mode,
+                scale_percent=scale_percent
             )
             
             imposed_path = os.path.join(temp_dir, "imposed.pdf")
@@ -222,7 +266,8 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                     "copies": copies,
                     "sides": out_sides,
                     "paper_size": paper_size,
-                    "orientation": orientation
+                    "orientation": orientation,
+                    "print_area_warning": fit_warning
                 }], temp_dir
 
             # Otherwise, split into multiple sequential PDF files
@@ -240,7 +285,8 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                     "copies": copies,
                     "sides": out_sides,
                     "paper_size": paper_size,
-                    "orientation": orientation
+                    "orientation": orientation,
+                    "print_area_warning": fit_warning
                 })
             return actions, temp_dir
 
@@ -253,7 +299,8 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                 "copies": copies,
                 "sides": out_sides,
                 "paper_size": paper_size,
-                "orientation": orientation
+                "orientation": orientation,
+                "print_area_warning": fit_warning
             }], temp_dir
 
     except Exception as e:
@@ -269,6 +316,41 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
             "paper_size": None,
             "orientation": None
         }], None
+
+
+def _check_print_area(pdf_path: str, cols: int, rows: int, paper_size: str,
+                      orientation: str, scale_mode: str, scale_percent: float,
+                      margin: float = 20.0, gutter: float = 10.0) -> dict | None:
+    """Fit-check the widest source page against one imposition slot.
+
+    Mirrors the slot maths in nup_imposer.perform_nup. Returns None when the
+    PDF cannot be read — a fit check must never block a print.
+    """
+    try:
+        out_w, out_h = nup_imposer.PAPER_SIZES.get(
+            paper_size, nup_imposer.PAPER_SIZES["A4"])
+        if str(orientation).lower() == "landscape":
+            out_w, out_h = max(out_w, out_h), min(out_w, out_h)
+        else:
+            out_w, out_h = min(out_w, out_h), max(out_w, out_h)
+
+        slot_w = (out_w - 2 * margin - gutter * (cols - 1)) / cols
+        slot_h = (out_h - 2 * margin - gutter * (rows - 1)) / rows
+        if slot_w <= 0 or slot_h <= 0:
+            slot_w, slot_h = out_w / cols, out_h / rows
+
+        worst = None
+        with fitz.open(pdf_path) as doc:
+            for page in doc:
+                report = nup_imposer.check_fit(
+                    page.rect.width, page.rect.height, slot_w, slot_h,
+                    scale_mode=scale_mode, scale_percent=scale_percent)
+                if worst is None or report["overflow_pct"] > worst["overflow_pct"]:
+                    worst = report
+        return worst
+    except Exception as e:
+        logger.debug("Print-area check skipped for %s: %s", pdf_path, e)
+        return None
 
 
 def get_imposed_colour_sheets(total_logical_pages: int, current_colour_pages: set[int], cols: int, rows: int, is_duplex: bool) -> list[int]:

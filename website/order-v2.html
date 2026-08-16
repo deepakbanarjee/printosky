@@ -166,6 +166,26 @@
 
   .ov2-select { width: 100%; padding: 8px 10px; border: 1.5px solid #e5e7eb; border-radius: 6px; font-size: 13px; color: #111827; background: #fff; cursor: pointer; outline: none; appearance: none; }
 
+  /* Scale + print-area fit */
+  .ov2-scale-custom { display: none; align-items: center; gap: 8px; margin-top: 10px; }
+  .ov2-scale-custom.on { display: flex; }
+  .ov2-scale-range { flex: 1; accent-color: var(--blue); cursor: pointer; }
+  .ov2-scale-num { width: 62px; padding: 6px 8px; border: 1.5px solid #e5e7eb; border-radius: 6px; font-size: 13px; text-align: right; color: #111827; outline: none; }
+  .ov2-scale-num:focus { border-color: var(--blue); }
+  .ov2-scale-hint { font-size: 11px; color: #6b7280; margin-top: 8px; line-height: 1.45; }
+
+  .ov2-fit-alert {
+    display: none; gap: 9px; align-items: flex-start; margin-top: 10px;
+    padding: 10px 12px; border-radius: 8px; font-size: 12px; line-height: 1.5;
+    border: 1.5px solid #f0b100; background: #fffaeb; color: #7a4f01;
+  }
+  .ov2-fit-alert.on { display: flex; }
+  .ov2-fit-alert.severe { border-color: #dc2626; background: #fef2f2; color: #991b1b; }
+  .ov2-fit-alert b { display: block; margin-bottom: 2px; }
+  .ov2-fit-icon { font-size: 15px; line-height: 1.2; flex-shrink: 0; }
+  .ov2-fit-fix { margin-top: 6px; background: none; border: none; padding: 0; font: inherit;
+    font-weight: 700; color: inherit; text-decoration: underline; cursor: pointer; }
+
   .ov2-nup-row { display: flex; gap: 10px; align-items: flex-start; }
   .ov2-nup-toggles { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
   .ov2-nup-sheet { width: 56px; height: 74px; border: 2px solid var(--blue); border-radius: 4px; background: #f8f9ff; padding: 4px; display: grid; gap: 3px; flex-shrink: 0; }
@@ -380,6 +400,36 @@
           </div>
 
           <div class="ov2-card full">
+            <div class="ov2-card-label">Page scale</div>
+            <div class="ov2-tog-group">
+              <div class="ov2-tog active" data-scale="fit" id="ov2-sc-fit">↔️ Fit to page</div>
+              <div class="ov2-tog" data-scale="actual" id="ov2-sc-actual">1:1 Actual size</div>
+              <div class="ov2-tog" data-scale="shrink" id="ov2-sc-shrink">⤵️ Shrink oversized</div>
+              <div class="ov2-tog" data-scale="custom" id="ov2-sc-custom">% Custom</div>
+            </div>
+            <div class="ov2-scale-custom" id="ov2-scaleCustomRow">
+              <input type="range" class="ov2-scale-range" id="ov2-scaleRange"
+                     min="10" max="400" step="5" value="100"
+                     aria-label="Custom scale percentage">
+              <input type="number" class="ov2-scale-num" id="ov2-scaleNum"
+                     min="10" max="400" step="1" value="100"
+                     aria-label="Custom scale percentage">
+              <span style="font-size:13px;color:#6b7280">%</span>
+            </div>
+            <div class="ov2-scale-hint" id="ov2-scaleHint">
+              Pages are resized to fill the printable area.
+            </div>
+            <div class="ov2-fit-alert" id="ov2-fitAlert" role="status" aria-live="polite">
+              <span class="ov2-fit-icon" id="ov2-fitIcon">⚠️</span>
+              <span>
+                <b id="ov2-fitTitle"></b>
+                <span id="ov2-fitBody"></span>
+                <button type="button" class="ov2-fit-fix" id="ov2-fitFix"></button>
+              </span>
+            </div>
+          </div>
+
+          <div class="ov2-card full">
             <div class="ov2-card-label">Print sides</div>
             <div class="ov2-tog-group">
               <div class="ov2-tog active" data-sides="single" id="ov2-sd-single">Single-sided</div>
@@ -431,6 +481,7 @@
           <span class="ov2-tag" id="ov2-s-nup" style="display:none;">1-up</span>
           <span class="ov2-tag" id="ov2-s-copies">1 copy</span>
           <span class="ov2-tag" id="ov2-s-paper">A4</span>
+          <span class="ov2-tag" id="ov2-s-scale" style="display:none;">Fit to page</span>
           <span class="ov2-tag" id="ov2-s-sides">Single-sided</span>
           <span class="ov2-tag" id="ov2-s-orient" style="display:none;">Portrait</span>
           <span class="ov2-tag" id="ov2-s-bind">No binding</span>

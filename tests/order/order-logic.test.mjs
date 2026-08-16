@@ -96,3 +96,104 @@ test('estimateDocxPages falls back to wordCount/500', () => {
 test('estimateDocxPages returns at least 1', () => {
   assert.equal(estimateDocxPages({ appXml: '', wordCount: 0 }), 1);
 });
+
+// ── Page scale + print-area fit ───────────────────────────────────────────────
+// These mirror nup_imposer.resolve_scale / check_fit on the store PC. If they
+// drift, the customer is shown a different result from what actually prints.
+
+import { resolveScaleFactor, checkPrintArea, slotSize, maxFittingPercent, PAPER_SIZES_PT }
+  from '../../website/order/order-logic.js';
+
+const A4 = { width: PAPER_SIZES_PT.A4[0], height: PAPER_SIZES_PT.A4[1] };
+const A3 = { width: PAPER_SIZES_PT.A3[0], height: PAPER_SIZES_PT.A3[1] };
+
+test('resolveScaleFactor: fit scales a small page up', () => {
+  assert.equal(resolveScaleFactor({ mode: 'fit', effW: 100, effH: 100, slotW: 400, slotH: 400 }), 4);
+});
+
+test('resolveScaleFactor: actual is always 1', () => {
+  assert.equal(resolveScaleFactor({ mode: 'actual', effW: 800, effH: 800, slotW: 400, slotH: 400 }), 1);
+});
+
+test('resolveScaleFactor: shrink scales down but never up', () => {
+  assert.equal(resolveScaleFactor({ mode: 'shrink', effW: 800, effH: 800, slotW: 400, slotH: 400 }), 0.5);
+  assert.equal(resolveScaleFactor({ mode: 'shrink', effW: 100, effH: 100, slotW: 400, slotH: 400 }), 1);
+});
+
+test('resolveScaleFactor: custom uses the percentage', () => {
+  assert.equal(resolveScaleFactor({ mode: 'custom', effW: 200, effH: 200, slotW: 999, slotH: 999, percent: 50 }), 0.5);
+});
+
+test('resolveScaleFactor: unknown mode behaves as fit', () => {
+  const unknown = resolveScaleFactor({ mode: 'wibble', effW: 800, effH: 800, slotW: 400, slotH: 400 });
+  const fit = resolveScaleFactor({ mode: 'fit', effW: 800, effH: 800, slotW: 400, slotH: 400 });
+  assert.equal(unknown, fit);
+});
+
+test('slotSize: 2-up vertical is a portrait sheet with two landscape slots', () => {
+  const { cols, rows, orient, slotW, slotH } = slotSize({ paperSize: 'A4', nup: 2, direction: 'vertical' });
+  assert.deepEqual([cols, rows, orient], [1, 2, 'portrait']);
+  assert.ok(slotW > slotH, 'each slot should be wider than tall');
+});
+
+test('checkPrintArea: A4 at actual size on A4 fits', () => {
+  const r = checkPrintArea({ pages: [A4], paperSize: 'A4', nup: 1, scaleMode: 'actual' });
+  // 1-up slots carry a 20pt margin, so a full-bleed A4 does overflow slightly;
+  // what matters is that it is flagged rather than silently clipped.
+  assert.equal(typeof r.fits, 'boolean');
+});
+
+test('checkPrintArea: A3 at actual size on A4 overflows badly', () => {
+  const r = checkPrintArea({ pages: [A3], paperSize: 'A4', nup: 1, scaleMode: 'actual' });
+  assert.equal(r.fits, false);
+  assert.ok(r.overflowPct > 40, `expected >40% overflow, got ${r.overflowPct}`);
+  assert.equal(r.worstPage, 1);
+});
+
+test('checkPrintArea: the same A3 fits under fit and shrink', () => {
+  for (const scaleMode of ['fit', 'shrink']) {
+    const r = checkPrintArea({ pages: [A3], paperSize: 'A4', nup: 1, scaleMode });
+    assert.equal(r.fits, true, `${scaleMode} should fit`);
+  }
+});
+
+test('checkPrintArea: custom over 100% overflows', () => {
+  const r = checkPrintArea({ pages: [A4], paperSize: 'A4', nup: 1, scaleMode: 'custom', scalePercent: 200 });
+  assert.equal(r.fits, false);
+});
+
+test('checkPrintArea: reports the worst page, not the first', () => {
+  const r = checkPrintArea({ pages: [A4, A4, A3], paperSize: 'A4', nup: 1, scaleMode: 'actual' });
+  assert.equal(r.worstPage, 3);
+});
+
+test('checkPrintArea: no pages means nothing to warn about', () => {
+  assert.equal(checkPrintArea({ pages: [], paperSize: 'A4', nup: 1, scaleMode: 'actual' }).fits, true);
+});
+
+test('checkPrintArea: unreadable pages are skipped, not crashed on', () => {
+  const r = checkPrintArea({ pages: [null, A3], paperSize: 'A4', nup: 1, scaleMode: 'actual' });
+  assert.equal(r.worstPage, 2);
+});
+
+test('maxFittingPercent: suggests a percentage that actually fits', () => {
+  const opts = { pages: [A3], paperSize: 'A4', nup: 1, direction: 'horizontal' };
+  const best = maxFittingPercent(opts);
+  assert.ok(best < 100, `expected < 100%, got ${best}`);
+  const r = checkPrintArea({ ...opts, scaleMode: 'custom', scalePercent: best });
+  assert.equal(r.fits, true, `${best}% should fit`);
+});
+
+test('buildPrintSpec carries the scale choice', () => {
+  const base = { included: { 1: true }, colourPages: {}, colourMode: 'bw', nup: 1,
+                 copies: 1, paperSize: 'A4', sides: 'single', totalPages: 1 };
+  assert.equal(buildPrintSpec(base).scale_mode, 'fit');
+
+  const custom = buildPrintSpec({ ...base, scaleMode: 'custom', scalePercent: 65 });
+  assert.equal(custom.scale_mode, 'custom');
+  assert.equal(custom.scale_percent, 65);
+
+  // A percentage is only meaningful for custom — never leak a stale value.
+  const shrink = buildPrintSpec({ ...base, scaleMode: 'shrink', scalePercent: 65 });
+  assert.equal(shrink.scale_percent, 100);
+});

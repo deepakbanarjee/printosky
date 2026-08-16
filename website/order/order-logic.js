@@ -10,6 +10,100 @@ export function computeSheets({ pages, nup, duplex, copies }) {
 
 const LAYOUT_FOR_NUP = { 1: '1-up', 2: '2-up', 4: '4-up', 6: '4-up', 9: '4-up' };
 
+// ── Print-area fit ────────────────────────────────────────────────────────────
+// Mirrors nup_imposer.resolve_scale / check_fit on the store PC. Keep the two
+// in step: this is what the customer is shown, that is what actually prints.
+
+export const PAPER_SIZES_PT = {
+  A4: [595.28, 841.89], A3: [841.89, 1190.55], A5: [419.53, 595.28],
+  Letter: [612.0, 792.0], Legal: [612.0, 1008.0],
+};
+
+// Same grid table as print_planner.plan_print_job.
+const NUP_GRID = {
+  1: [1, 1, 'portrait'], 2: [2, 1, 'landscape'], 4: [2, 2, 'portrait'],
+  6: [3, 2, 'landscape'], 9: [3, 3, 'portrait'],
+};
+const MARGIN_PT = 20, GUTTER_PT = 10, FIT_TOLERANCE_PT = 1;
+
+export function resolveScaleFactor({ mode, effW, effH, slotW, slotH, percent = 100 }) {
+  if (effW <= 0 || effH <= 0) return 1;
+  const fit = Math.min(slotW / effW, slotH / effH);
+  switch ((mode || 'fit').toLowerCase()) {
+    case 'actual': return 1;
+    case 'shrink': return Math.min(1, fit);
+    case 'custom': return Math.max(0.01, (Number(percent) || 100) / 100);
+    default: return fit;
+  }
+}
+
+/** Slot geometry for a given paper size / N-up / direction, in points. */
+export function slotSize({ paperSize = 'A4', nup = 1, direction = 'horizontal' }) {
+  let [cols, rows, orient] = NUP_GRID[nup] || NUP_GRID[4];
+  if (nup === 2 && direction === 'vertical') { cols = 1; rows = 2; orient = 'portrait'; }
+
+  const [pw, ph] = PAPER_SIZES_PT[paperSize] || PAPER_SIZES_PT.A4;
+  const outW = orient === 'landscape' ? Math.max(pw, ph) : Math.min(pw, ph);
+  const outH = orient === 'landscape' ? Math.min(pw, ph) : Math.max(pw, ph);
+
+  let slotW = (outW - 2 * MARGIN_PT - GUTTER_PT * (cols - 1)) / cols;
+  let slotH = (outH - 2 * MARGIN_PT - GUTTER_PT * (rows - 1)) / rows;
+  if (slotW <= 0 || slotH <= 0) { slotW = outW / cols; slotH = outH / rows; }
+  return { slotW, slotH, cols, rows, orient };
+}
+
+/**
+ * Will `pages` fit the printable area under these settings?
+ * `pages` is [{ width, height }] in PDF points.
+ * Returns { fits, overflowPct, worstPage, factor, slotW, slotH }.
+ */
+export function checkPrintArea({ pages, paperSize = 'A4', nup = 1,
+                                 direction = 'horizontal', scaleMode = 'fit',
+                                 scalePercent = 100 }) {
+  const { slotW, slotH } = slotSize({ paperSize, nup, direction });
+  let worst = { fits: true, overflowPct: 0, worstPage: null, factor: 1, slotW, slotH };
+
+  (pages || []).forEach((pg, i) => {
+    if (!pg || !pg.width || !pg.height) return;
+    // The imposer rotates a page whose orientation mismatches the slot.
+    const slotIsLandscape = slotW > slotH;
+    const pageIsPortrait = pg.height > pg.width;
+    const rotate = (slotIsLandscape && pageIsPortrait) || (!slotIsLandscape && !pageIsPortrait);
+    const effW = rotate ? pg.height : pg.width;
+    const effH = rotate ? pg.width : pg.height;
+
+    const factor = resolveScaleFactor({ mode: scaleMode, effW, effH, slotW, slotH, percent: scalePercent });
+    const overW = Math.max(0, effW * factor - slotW);
+    const overH = Math.max(0, effH * factor - slotH);
+    const pct = Math.max(overW / slotW, overH / slotH) * 100;
+
+    if (pct > worst.overflowPct) {
+      worst = {
+        fits: overW <= FIT_TOLERANCE_PT && overH <= FIT_TOLERANCE_PT,
+        overflowPct: pct, worstPage: i + 1, factor, slotW, slotH,
+      };
+    }
+  });
+  return worst;
+}
+
+/** Largest whole percent that still fits every page — for the "fix it" action. */
+export function maxFittingPercent(opts) {
+  const { slotW, slotH } = slotSize(opts);
+  let smallest = Infinity;
+  (opts.pages || []).forEach((pg) => {
+    if (!pg || !pg.width || !pg.height) return;
+    const slotIsLandscape = slotW > slotH;
+    const pageIsPortrait = pg.height > pg.width;
+    const rotate = (slotIsLandscape && pageIsPortrait) || (!slotIsLandscape && !pageIsPortrait);
+    const effW = rotate ? pg.height : pg.width;
+    const effH = rotate ? pg.width : pg.height;
+    smallest = Math.min(smallest, Math.min(slotW / effW, slotH / effH));
+  });
+  if (!isFinite(smallest)) return 100;
+  return Math.max(10, Math.floor(smallest * 100));
+}
+
 export function buildPrintItems({ includedCount, colourCount, nup, duplex, copies, paperSize = 'A4' }) {
   const sides = duplex ? 'ds' : 'ss';
   const layout = LAYOUT_FOR_NUP[nup] || '1-up';
@@ -44,6 +138,8 @@ export function buildPrintSpec(s) {
     nup: s.nup, copies: s.copies, paper_size: s.paperSize, sides: s.sides,
     orientation: s.orientation || 'auto',
     nup_direction: s.direction || 'horizontal',   // 'horizontal' | 'vertical' (N-up fill order)
+    scale_mode: s.scaleMode || 'fit',             // 'fit' | 'actual' | 'shrink' | 'custom'
+    scale_percent: s.scaleMode === 'custom' ? (s.scalePercent || 100) : 100,
     binding: s.binding, sheet_count, amount_estimated: s.amountEstimated, price_exact: s.priceExact,
   };
 }

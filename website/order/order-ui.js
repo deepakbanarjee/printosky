@@ -8,6 +8,8 @@ import {
   buildPrintSpec,
   buildOperatorNote,
   estimateDocxPages,
+  checkPrintArea,
+  maxFittingPercent,
 } from './order-logic.js';
 // Logged-in account detection: prefills/hides the Step 2 identity fields and
 // supplies the Bearer token sent on /order/create. No-op for guests.
@@ -40,6 +42,8 @@ const state = {
   sides: 'single',   // 'single' | 'duplex'
   orientation: 'auto', // 'auto' | 'portrait' | 'landscape'
   direction: 'horizontal', // 'horizontal' | 'vertical' (N-up page fill order)
+  scaleMode: 'fit',  // 'fit' | 'actual' | 'shrink' | 'custom'
+  scalePercent: 100, // only meaningful when scaleMode === 'custom'
   binding: 'none',   // 'none' | 'staple' | 'spiral' | 'wiro' | 'soft' | 'perfect' | 'project' | 'record' | 'thesis'
   amountEstimated: 0,
   priceExact: true,
@@ -51,6 +55,7 @@ const runtime = {
   originalBytes: null,  // ArrayBuffer of the uploaded file (for pdf-lib extract / upload)
   contentType: 'application/octet-stream',
   rendered: {},         // { pageNo: true } once a thumbnail canvas is painted
+  pageSizes: [],        // [{ width, height }] in PDF points — drives the fit check
   observer: null,       // IntersectionObserver for lazy thumbnails
   delivery: 0,
   pickup_store: 'thriprayar',  // which location fulfils — 'thriprayar' | 'nattika'
@@ -72,6 +77,7 @@ function thumbEl(pg) {
 // ── File upload + page-count detection ────────────────────────────────────────
 function resetForNewFile() {
   runtime.pdf = null;
+  runtime.pageSizes = [];
   runtime.originalBytes = null;
   runtime.rendered = {};
   if (runtime.observer) { runtime.observer.disconnect(); runtime.observer = null; }
@@ -152,6 +158,8 @@ async function loadPdf(bytes) {
   state.priceExact = true;
   initPages(pdf.numPages);
   $('ov2-pagecount').textContent = pdf.numPages + (pdf.numPages === 1 ? ' page' : ' pages');
+  await cachePageSizes(pdf);
+  updateFitAlert();
 }
 
 function loadImage() {
@@ -438,8 +446,115 @@ function setOrientation(mode) {
   updateSummary();
 }
 
+// ── Page scale + print-area fit ───────────────────────────────────────────────
+
+const SCALE_HINT = {
+  fit: 'Pages are resized to fill the printable area.',
+  actual: 'Printed at 100% — no resizing. Anything larger than the printable area is cut off.',
+  shrink: 'Oversized pages are scaled down to fit; pages that already fit stay at 100%.',
+  custom: 'Printed at the percentage you choose, measured against the original page size.',
+};
+const SCALE_LABEL = {
+  fit: 'Fit to page', actual: 'Actual size', shrink: 'Shrink oversized', custom: 'Custom scale',
+};
+
+/** Record every page's size in points — pdf.js is the only source for this. */
+async function cachePageSizes(pdf) {
+  const sizes = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    try {
+      const vp = (await pdf.getPage(i)).getViewport({ scale: 1 });
+      sizes.push({ width: vp.width, height: vp.height });
+    } catch {
+      sizes.push(null);   // unreadable page — skipped by the fit check
+    }
+  }
+  runtime.pageSizes = sizes;
+}
+
+/** Only the pages the customer actually kept can overflow. */
+function includedPageSizes() {
+  return (runtime.pageSizes || []).filter((_, i) => state.included[i + 1]);
+}
+
+function setScale(mode) {
+  state.scaleMode = mode;
+  document.querySelectorAll('[data-scale]').forEach((el) => {
+    el.classList.toggle('active', el.dataset.scale === mode);
+  });
+  $('ov2-scaleCustomRow').classList.toggle('on', mode === 'custom');
+  $('ov2-scaleHint').textContent = SCALE_HINT[mode] || SCALE_HINT.fit;
+  updateSummary();   // recomputes the fit alert
+}
+
+function setScalePercent(pct) {
+  const v = Math.max(10, Math.min(400, Math.round(Number(pct) || 100)));
+  state.scalePercent = v;
+  const range = $('ov2-scaleRange');
+  const num = $('ov2-scaleNum');
+  if (range && range.value !== String(v)) range.value = v;
+  if (num && num.value !== String(v)) num.value = v;
+  updateSummary();   // recomputes the fit alert
+}
+
+/**
+ * Warn when the chosen settings push content past the printable area.
+ * Mirrors print_planner's server-side check so the two never disagree.
+ */
+function updateFitAlert() {
+  const box = $('ov2-fitAlert');
+  if (!box) return;
+
+  const pages = includedPageSizes();
+  if (!pages.length) { box.classList.remove('on'); return; }
+
+  const report = checkPrintArea({
+    pages,
+    paperSize: state.paperSize,
+    nup: state.nup,
+    direction: state.direction,
+    scaleMode: state.scaleMode,
+    scalePercent: state.scalePercent,
+  });
+
+  if (report.fits) { box.classList.remove('on'); return; }
+
+  const pct = Math.round(report.overflowPct);
+  const severe = pct >= 15;
+  box.classList.add('on');
+  box.classList.toggle('severe', severe);
+  $('ov2-fitIcon').textContent = severe ? '⛔' : '⚠️';
+  $('ov2-fitTitle').textContent = severe
+    ? `Content will be cut off — about ${pct}% over the printable area`
+    : `Content slightly overflows the printable area (~${pct}%)`;
+
+  const where = report.worstPage ? ` Worst on page ${report.worstPage}.` : '';
+  $('ov2-fitBody').textContent =
+    `At ${SCALE_LABEL[state.scaleMode]} on ${state.paperSize}` +
+    (state.nup > 1 ? ` at ${state.nup}-up` : '') +
+    `, the edges fall outside what the printer can put on the sheet.${where} `;
+
+  const fix = $('ov2-fitFix');
+  if (state.scaleMode === 'custom') {
+    const best = maxFittingPercent({
+      pages, paperSize: state.paperSize, nup: state.nup, direction: state.direction,
+    });
+    fix.textContent = `Use ${best}% instead`;
+    fix.onclick = () => setScalePercent(best);
+  } else {
+    fix.textContent = 'Switch to Shrink oversized';
+    fix.onclick = () => setScale('shrink');
+  }
+}
+
 function setBinding(mode) {
   state.binding = mode;
+  document.querySelectorAll('[data-scale]').forEach((el) =>
+    el.addEventListener('click', () => setScale(el.dataset.scale)));
+  const scRange = $('ov2-scaleRange');
+  const scNum = $('ov2-scaleNum');
+  if (scRange) scRange.addEventListener('input', () => setScalePercent(scRange.value));
+  if (scNum) scNum.addEventListener('change', () => setScalePercent(scNum.value));
   document.querySelectorAll('[data-binding]').forEach((el) => {
     el.classList.toggle('active', el.dataset.binding === mode);
   });
@@ -490,6 +605,18 @@ function updateSummary() {
   flashTag(cTag);
 
   $('ov2-s-paper').textContent = state.paperSize;
+
+  const scTag = $('ov2-s-scale');
+  if (scTag) {
+    if (state.scaleMode === 'fit') { scTag.style.display = 'none'; }
+    else {
+      scTag.style.display = '';
+      scTag.textContent = state.scaleMode === 'custom'
+        ? state.scalePercent + '%'
+        : SCALE_LABEL[state.scaleMode];
+      flashTag(scTag);
+    }
+  }
   $('ov2-s-sides').textContent = state.sides === 'single' ? 'Single-sided' : 'Duplex';
 
   const orientTag = $('ov2-s-orient');
@@ -505,6 +632,10 @@ function updateSummary() {
   const shTag = $('ov2-s-sheets');
   shTag.textContent = sheets + (sheets === 1 ? ' sheet' : ' sheets');
   flashTag(shTag);
+
+  // Paper size, N-up, fill direction and page inclusion all move the slot, so
+  // re-run the print-area check on every summary refresh.
+  updateFitAlert();
 }
 
 // ── Live price (debounced /order/quote) ───────────────────────────────────────

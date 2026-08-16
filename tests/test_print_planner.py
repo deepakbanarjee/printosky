@@ -202,3 +202,57 @@ def test_mixed_colour_imposition_duplex(temp_pdf, tmp_path):
     doc.close()
     
     print_planner.cleanup_temp_dir(temp_dir)
+
+
+# ── Binding-edge sync (guards the duplex double-flip fix) ─────────────────────
+# The imposer reverses back-sheet slots along the axis the sheet is flipped
+# about, so the edge it imposes for MUST be the edge the printer is told to
+# bind on. If these drift apart the back sheets come out mirrored.
+
+@pytest.mark.parametrize("nup,direction,expected_sides,expected_edge", [
+    (2, "horizontal", "duplexshort", "short"),   # 2x1 landscape sheet
+    (2, "vertical",   "ds",          "long"),    # 1x2 portrait sheet
+    (4, "horizontal", "ds",          "long"),    # 2x2 portrait sheet
+    (6, "horizontal", "duplexshort", "short"),   # 3x2 landscape sheet
+    (9, "horizontal", "ds",          "long"),    # 3x3 portrait sheet
+])
+def test_binding_edge_matches_duplex_mode(temp_pdf, tmp_path, monkeypatch,
+                                          nup, direction, expected_sides,
+                                          expected_edge):
+    seen = {}
+    real = nup_imposer.perform_nup
+
+    def spy(*args, **kwargs):
+        seen["binding_edge"] = kwargs.get("binding_edge")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(print_planner.nup_imposer, "perform_nup", spy)
+
+    spec = {"nup": nup, "nup_direction": direction, "sides": "duplex",
+            "colour_mode": "bw", "paper_size": "A4"}
+    actions, temp_dir = print_planner.plan_print_job(
+        f"J_EDGE_{nup}{direction}", temp_pdf, spec, str(tmp_path))
+
+    assert seen["binding_edge"] == expected_edge
+    assert actions[0]["sides"] == expected_sides
+    print_planner.cleanup_temp_dir(temp_dir)
+
+
+def test_simplex_nup_does_not_request_a_binding_edge(temp_pdf, tmp_path, monkeypatch):
+    seen = {}
+    real = nup_imposer.perform_nup
+
+    def spy(*args, **kwargs):
+        seen["is_duplex"] = kwargs.get("is_duplex")
+        seen["binding_edge"] = kwargs.get("binding_edge")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(print_planner.nup_imposer, "perform_nup", spy)
+
+    spec = {"nup": 4, "sides": "simplex", "colour_mode": "bw", "paper_size": "A4"}
+    actions, temp_dir = print_planner.plan_print_job(
+        "J_EDGE_SIMPLEX", temp_pdf, spec, str(tmp_path))
+
+    assert seen["is_duplex"] is False
+    assert actions[0]["sides"] == "ss"
+    print_planner.cleanup_temp_dir(temp_dir)
