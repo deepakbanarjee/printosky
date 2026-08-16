@@ -273,3 +273,60 @@ def test_landscape_nup_no_longer_forces_short_edge(temp_pdf, tmp_path):
     assert actions[0]["sides"] != "duplexshort"
     assert actions[0]["sides"] == "ds"
     print_planner.cleanup_temp_dir(temp_dir)
+
+
+# ── Portrait canvas rule ──────────────────────────────────────────────────────
+# Every imposed sheet is portrait. "Long edge" and "short edge" are defined
+# relative to the sheet's own aspect, so a landscape sheet inverts their meaning
+# and every duplex decision has to be re-derived — which is where back sheets
+# kept coming out flipped on the Konica. Portrait sheets make the long edge
+# unambiguously vertical, so duplexlong is always the plain book flip.
+
+@pytest.mark.parametrize("nup,direction", [
+    (2, "horizontal"), (2, "vertical"), (4, "horizontal"),
+    (6, "horizontal"), (9, "horizontal"),
+])
+def test_every_imposed_sheet_is_portrait(temp_pdf, tmp_path, nup, direction):
+    spec = {"nup": nup, "nup_direction": direction, "sides": "duplex",
+            "colour_mode": "bw", "paper_size": "A4"}
+    actions, temp_dir = print_planner.plan_print_job(
+        f"J_PORTRAIT_{nup}{direction}", temp_pdf, spec, str(tmp_path))
+
+    with fitz.open(actions[0]["pdf_path"]) as doc:
+        for i, page in enumerate(doc):
+            assert page.rect.height > page.rect.width, (
+                f"{nup}-up {direction}: sheet {i + 1} is landscape "
+                f"({page.rect.width:.0f}x{page.rect.height:.0f})")
+    print_planner.cleanup_temp_dir(temp_dir)
+
+
+@pytest.mark.parametrize("nup,direction", [
+    (2, "horizontal"), (2, "vertical"), (4, "horizontal"),
+    (6, "horizontal"), (9, "horizontal"),
+])
+def test_no_layout_asks_for_short_edge(temp_pdf, tmp_path, nup, direction):
+    """Short-edge mode makes the driver rotate the back image 180 degrees."""
+    spec = {"nup": nup, "nup_direction": direction, "sides": "duplex",
+            "colour_mode": "bw", "paper_size": "A4"}
+    actions, temp_dir = print_planner.plan_print_job(
+        f"J_LONGEDGE_{nup}{direction}", temp_pdf, spec, str(tmp_path))
+
+    assert actions[0]["sides"] == "ds"
+    print_planner.cleanup_temp_dir(temp_dir)
+
+
+def test_both_2up_directions_produce_the_same_sheet(temp_pdf, tmp_path):
+    """Under the portrait-canvas rule the two 2-up directions converge: both
+    are a 1x2 portrait sheet read with a quarter turn. They only differed
+    because "horizontal" meant "emit a landscape sheet"."""
+    out = {}
+    for direction in ("horizontal", "vertical"):
+        spec = {"nup": 2, "nup_direction": direction, "sides": "duplex",
+                "colour_mode": "bw", "paper_size": "A4"}
+        actions, temp_dir = print_planner.plan_print_job(
+            f"J_2UP_{direction}", temp_pdf, spec, str(tmp_path / direction))
+        with fitz.open(actions[0]["pdf_path"]) as doc:
+            out[direction] = (len(doc), doc[0].rect.width, doc[0].rect.height)
+        print_planner.cleanup_temp_dir(temp_dir)
+
+    assert out["horizontal"] == out["vertical"]

@@ -19,10 +19,13 @@ export const PAPER_SIZES_PT = {
   Letter: [612.0, 792.0], Legal: [612.0, 1008.0],
 };
 
-// Same grid table as print_planner.plan_print_job.
+// Same grid table as print_planner.plan_print_job — every imposed sheet is
+// portrait (the "portrait canvas rule"; see the long note in print_planner).
+// Keep these two in step or the quoted sheet count and the print-area warning
+// stop matching what actually prints.
 const NUP_GRID = {
-  1: [1, 1, 'portrait'], 2: [2, 1, 'landscape'], 4: [2, 2, 'portrait'],
-  6: [3, 2, 'landscape'], 9: [3, 3, 'portrait'],
+  1: [1, 1, 'portrait'], 2: [1, 2, 'portrait'], 4: [2, 2, 'portrait'],
+  6: [2, 3, 'portrait'], 9: [3, 3, 'portrait'],
 };
 const MARGIN_PT = 20, GUTTER_PT = 10, FIT_TOLERANCE_PT = 1;
 
@@ -39,8 +42,7 @@ export function resolveScaleFactor({ mode, effW, effH, slotW, slotH, percent = 1
 
 /** Slot geometry for a given paper size / N-up / direction, in points. */
 export function slotSize({ paperSize = 'A4', nup = 1, direction = 'horizontal' }) {
-  let [cols, rows, orient] = NUP_GRID[nup] || NUP_GRID[4];
-  if (nup === 2 && direction === 'vertical') { cols = 1; rows = 2; orient = 'portrait'; }
+  const [cols, rows, orient] = NUP_GRID[nup] || NUP_GRID[4];
 
   const [pw, ph] = PAPER_SIZES_PT[paperSize] || PAPER_SIZES_PT.A4;
   const outW = orient === 'landscape' ? Math.max(pw, ph) : Math.min(pw, ph);

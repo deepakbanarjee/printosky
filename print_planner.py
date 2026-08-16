@@ -137,12 +137,32 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
         needs_scale_pass = nup == 1 and scale_mode != "fit"
 
         if nup > 1 or needs_scale_pass:
-            # Determine Grid & default orientation
-            # 2-up -> 2x1 landscape, 4-up -> 2x2 portrait, 6-up -> 3x2 landscape, 9-up -> 3x3 portrait
+            # PORTRAIT CANVAS RULE — every imposed sheet is portrait.
+            #
+            # A layout that logically wants landscape is composed transposed
+            # (cols and rows swapped) and the imposer's own slot-orientation
+            # detection rotates each page into place. The ink on the paper is
+            # identical to a landscape sheet; the difference is that the PDF
+            # page handed to the driver is portrait.
+            #
+            # Why this matters: "long edge" and "short edge" are defined
+            # relative to the sheet's own aspect, so a landscape page inverts
+            # their meaning and every duplex decision has to be re-derived —
+            # which is where the back sheets kept coming out flipped. On a
+            # portrait sheet the long edge is always the vertical one, so
+            # duplexlong is always the plain book flip and the driver applies
+            # no back rotation.
+            #
+            # Empirically (Konica bizhub PRO 1100, 2026-08-16): 2-up vertical
+            # is the only layout that already emitted a portrait sheet, and it
+            # is the only layout that printed correctly. Landscape 2-up printed
+            # with the back rotated. Konica's driver also carries its own
+            # Binding Position setting whose factory default is Top Bind, so
+            # the fewer assumptions we make about sheet orientation the better.
             nup_map = {
-                2: (2, 1, "Landscape"),
+                2: (1, 2, "Portrait"),
                 4: (2, 2, "Portrait"),
-                6: (3, 2, "Landscape"),
+                6: (2, 3, "Portrait"),
                 9: (3, 3, "Portrait")
             }
             grid = nup_map.get(nup, (2, 2, "Portrait")) # default 4-up shape if unknown
@@ -151,10 +171,12 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                 grid = (1, 1, "Landscape" if str(orientation).lower() == "landscape" else "Portrait")
             cols, rows, nup_orient = grid
             nup_dir = str(spec.get("nup_direction", "horizontal")).lower()
-            # 2-up: horizontal = two side-by-side (landscape); vertical = two
-            # stacked, page 1 on top (1 col x 2 rows, portrait).
-            if nup == 2 and nup_dir == "vertical":
-                cols, rows, nup_orient = 1, 2, "Portrait"
+            # Under the portrait-canvas rule both 2-up directions land on the
+            # same 1x2 sheet: two slots stacked, each page rotated, read by
+            # turning the sheet a quarter turn. They were only ever different
+            # because "horizontal" meant "emit a landscape sheet" — the very
+            # thing that broke. nup_direction is still carried through for the
+            # multi-column grids, where fill order genuinely differs.
             # The imposition below bakes the final orientation into the imposed
             # PDF's page geometry (via nup_orient). Do NOT also pass an
             # orientation flag to the printer — SumatraPDF would apply it a
