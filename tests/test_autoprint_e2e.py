@@ -148,7 +148,10 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
     assert col_call["printer_key"] == "epson"
     assert col_call["colour_mode"] == "colour"
     assert col_call["copies"] == 3
-    assert col_call["sides"] == "duplexshort"  # landscape 2-up binds short/top edge
+    # The printer is told long-edge duplex for every layout. The landscape
+    # back-side correction is a 180-degree rigid turn baked into the
+    # imposition; asking the driver for short-edge too would cancel it.
+    assert col_call["sides"] == "ds"
     assert col_call["paper_size"] == "A4"
     # Imposed N-up jobs carry no orientation flag — the imposition already bakes
     # the final (landscape) geometry into the page, and passing an orientation to
@@ -171,7 +174,7 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
     assert bw_call["printer_key"] == "konica"
     assert bw_call["colour_mode"] == "bw"
     assert bw_call["copies"] == 3
-    assert bw_call["sides"] == "duplexshort"  # landscape 2-up binds short/top edge
+    assert bw_call["sides"] == "ds"  # long-edge for every layout, as above
     assert bw_call["paper_size"] == "A4"
     assert bw_call["orientation"] is None  # imposed N-up carries no orientation flag
     # Final sub-job → marks the job Printed exactly once (HIGH-1).

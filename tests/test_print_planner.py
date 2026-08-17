@@ -202,3 +202,64 @@ def test_mixed_colour_imposition_duplex(temp_pdf, tmp_path):
     doc.close()
     
     print_planner.cleanup_temp_dir(temp_dir)
+
+def test_customer_orientation_drives_the_imposed_grid(temp_pdf, tmp_path):
+    """An explicit landscape/portrait choice picks the sheet shape, not the n-up."""
+    landscape, temp_dir = print_planner.plan_print_job(
+        "J_ORIENT_L", temp_pdf,
+        {"nup": 4, "orientation": "landscape", "sides": "duplex"}, str(tmp_path))
+    doc = fitz.open(landscape[0]["pdf_path"])
+    assert doc[0].rect.width > doc[0].rect.height
+    doc.close()
+    print_planner.cleanup_temp_dir(temp_dir)
+
+    portrait, temp_dir = print_planner.plan_print_job(
+        "J_ORIENT_P", temp_pdf,
+        {"nup": 4, "orientation": "portrait", "sides": "duplex"}, str(tmp_path))
+    doc = fitz.open(portrait[0]["pdf_path"])
+    assert doc[0].rect.width < doc[0].rect.height
+    doc.close()
+    print_planner.cleanup_temp_dir(temp_dir)
+
+
+def test_landscape_nup_still_binds_long_edge(temp_pdf, tmp_path):
+    """The printer is told `ds` (long edge) for every layout.
+
+    The landscape back-side correction is a 180-degree rigid turn baked into
+    the imposition. Asking the driver for short-edge as well would apply that
+    turn a second time and cancel it out.
+    """
+    actions, temp_dir = print_planner.plan_print_job(
+        "J_LONG_EDGE", temp_pdf,
+        {"nup": 2, "orientation": "landscape", "sides": "duplex"}, str(tmp_path))
+    assert actions[0]["sides"] == "ds"
+    print_planner.cleanup_temp_dir(temp_dir)
+
+
+def test_single_page_landscape_is_imposed_but_portrait_is_not(temp_pdf, tmp_path):
+    """1-up landscape turns the page 90/-90; 1-up portrait is a pass-through."""
+    actions, temp_dir = print_planner.plan_print_job(
+        "J_1UP_LAND", temp_pdf,
+        {"nup": 1, "orientation": "landscape", "sides": "duplex"}, str(tmp_path))
+    assert actions[0]["pdf_path"] != temp_pdf
+    doc = fitz.open(actions[0]["pdf_path"])
+    assert doc[0].rect.width > doc[0].rect.height
+    doc.close()
+    print_planner.cleanup_temp_dir(temp_dir)
+
+    actions, temp_dir = print_planner.plan_print_job(
+        "J_1UP_PORT", temp_pdf,
+        {"nup": 1, "orientation": "portrait", "sides": "duplex"}, str(tmp_path))
+    assert actions[0]["pdf_path"] == temp_pdf  # untouched
+    print_planner.cleanup_temp_dir(temp_dir)
+
+
+def test_two_up_vertical_still_means_stacked_on_a_portrait_sheet(temp_pdf, tmp_path):
+    """Existing UI meaning is preserved when orientation is left on auto."""
+    actions, temp_dir = print_planner.plan_print_job(
+        "J_2UP_V", temp_pdf,
+        {"nup": 2, "nup_direction": "vertical", "sides": "duplex"}, str(tmp_path))
+    doc = fitz.open(actions[0]["pdf_path"])
+    assert doc[0].rect.width < doc[0].rect.height
+    doc.close()
+    print_planner.cleanup_temp_dir(temp_dir)

@@ -32,10 +32,10 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
     sides = "ss"
     if spec.get("sides") in ("duplex", "ds", "duplexlong"):
         sides = "ds"
-    # Print-time duplex binding edge, sent to the printer on each action. Kept
-    # separate from `sides` (which drives the internal sheet-pairing logic, and
-    # must stay "ss"/"ds"). Defaults to long-edge; landscape N-up flips it to
-    # short-edge below so the back side registers with the front.
+    # The printer is told one thing, always: long-edge duplex. The back-side
+    # correction for landscape sheets is a 180-degree rigid turn baked into the
+    # imposition (see the rotation model in nup_imposer). Asking the driver for
+    # short-edge as well would apply that same turn a second time and cancel it.
     out_sides = sides
 
     paper_size = spec.get("paper_size")
@@ -118,36 +118,26 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
         except (TypeError, ValueError):
             pass
 
-        if nup > 1:
-            # Determine Grid & default orientation
-            # 2-up -> 2x1 landscape, 4-up -> 2x2 portrait, 6-up -> 3x2 landscape, 9-up -> 3x3 portrait
-            nup_map = {
-                2: (2, 1, "Landscape"),
-                4: (2, 2, "Portrait"),
-                6: (3, 2, "Landscape"),
-                9: (3, 3, "Portrait")
-            }
-            grid = nup_map.get(nup, (2, 2, "Portrait")) # default 4-up shape if unknown
-            cols, rows, nup_orient = grid
-            nup_dir = str(spec.get("nup_direction", "horizontal")).lower()
-            # 2-up: horizontal = two side-by-side (landscape); vertical = two
-            # stacked, page 1 on top (1 col x 2 rows, portrait).
-            if nup == 2 and nup_dir == "vertical":
-                cols, rows, nup_orient = 1, 2, "Portrait"
+        # Grid and sheet orientation come from the one rotation model in
+        # nup_imposer, so the planner, the imposer, the matrix tool and the
+        # tests can never drift apart. An explicit customer orientation wins;
+        # "auto" falls back to each n-up's natural shape (2-up -> landscape
+        # unless stacked vertically, 4-up -> portrait, 6-up -> landscape,
+        # 9-up -> portrait).
+        nup_dir = str(spec.get("nup_direction", "horizontal")).lower()
+        nup_orient = nup_imposer.resolve_orientation(nup, orientation, nup_dir)
+        cols, rows = nup_imposer.sheet_grid(nup, orientation, nup_dir)
+
+        # 1-up on a landscape sheet is still an imposition: the page turns 90
+        # degrees on the front and -90 on the back. 1-up portrait is a pure
+        # pass-through and never touches the imposer.
+        if nup > 1 or nup_orient == "landscape":
             # The imposition below bakes the final orientation into the imposed
             # PDF's page geometry (via nup_orient). Do NOT also pass an
             # orientation flag to the printer — SumatraPDF would apply it a
             # second time and flip the sheet (a landscape 2-up came out
             # portrait). Let the printer honour the imposed page as-is.
             orientation = None
-
-            # Landscape N-up duplex must bind on the SHORT (top) edge: the pages
-            # sit side-by-side on a landscape sheet, so the back only registers
-            # with the front when the sheet flips top-to-bottom. Long-edge
-            # binding mis-aligns it (confirmed on the Konica). Portrait N-up and
-            # 2-up vertical keep long-edge.
-            if sides == "ds" and nup_orient.lower() == "landscape":
-                out_sides = "duplexshort"
 
             # Read sliced file bytes
             with open(current_pdf, "rb") as f:
