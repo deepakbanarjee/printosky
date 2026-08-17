@@ -185,24 +185,68 @@ than the other. If the store wants the opposite handedness, swap 90 ↔ 270 in
 
 ---
 
-## Still to confirm on paper
+## Verified on paper
 
-Nothing here has been through a printer since the model changed to a portrait
-canvas. The earlier 2-up result was measured on a landscape sheet with the
-driver set to short-edge, so it does not carry over. Print one sheet of each
-before trusting it at the counter:
+**All twelve A4 combinations pass — OSP, Konica bizhub PRO 1100, 2026-08-17.**
+Run with `tools/proof_run.py --printer konica` at commit `3dbea4d`, checked
+sheet by sheet against the matrix above.
 
-| Combination | Status |
+| Combination | A4 | A3 | A5 |
+|---|---|---|---|
+| 1-up portrait / landscape | ✅ | ⏳ | ⏳ |
+| 2-up portrait / landscape | ✅ | ⏳ | ⏳ |
+| 4-up portrait / landscape, both directions | ✅ | ⏳ | ⏳ |
+| 6-up portrait / landscape, both directions | ✅ | ⏳ | ⏳ |
+| 9-up, either orientation | ⏳ | ⏳ | ⏳ |
+
+That result settles the two open questions this model was carrying:
+
+* **The turn direction is right.** Landscape turns 90°, page 1 lands at the
+  bottom, and the sheet reads when turned clockwise. The paired flip in
+  `layout_rotation` + `slot_position` does not need reversing.
+* **Portrait duplex needs no back turn on the Konica.** The `duplex_back_rotation
+  = 180` recorded in `PRINT_IMPOSITION.md` does not apply here: tying the 180° to
+  the landscape selection is correct, and portrait at 0° prints right way up. Do
+  not reintroduce a global back rotation on the strength of that older note.
+
+### Not yet on paper
+
+* **A3 and A5.** Only A4 has been run. Slot arithmetic is paper-size independent,
+  but the Konica's duplex unit is not guaranteed to be.
+* **9-up.** Never printed at any size.
+* **The Epson EM-C8100.** Nattika (PRINTK) is a finishing/collection store with
+  no Konica, so everything there routes to the Epson — a different duplex unit,
+  and the A4 pass above says nothing about it. See
+  `print_server._effective_printer_key`.
+* **Mixed colour + duplex**, which splits across both printers — the one case
+  where a single global rule could bite.
+
+### Store PC state, 2026-08-17
+
+The OSP store PC ran `claude/oxygen-store-tasks-ys0j66` until this test and now
+tracks `main`. That branch is **unmerged and carries a competing imposition
+model** — `tools/nup_doctor.py`, `store_config.duplex_back_rotation`,
+`tests/test_nup_duplex_geometry.py`, and JS mirror changes in `website/order/`.
+Pulling `main` from it merges rather than switches, and conflicts in
+`nup_imposer.py`, `print_planner.py` and two test files. Use
+`git checkout -B main origin/main`, never a plain pull, and do not hand-resolve
+those conflicts — the two models are not compatible.
+
+---
+
+## If a sheet ever comes out wrong
+
+The symptom names the owner:
+
+| What you see | Where it lives |
 |---|---|
-| 2-up portrait duplex | ⏳ never printed |
-| 2-up landscape duplex | ⏳ never printed under this model |
-| 1-up landscape duplex | ⏳ never printed — the 90/−90 rule is new |
-| 4-up / 6-up / 9-up, either orientation | ⏳ never printed |
-| Vertical fill direction, any layout | ⏳ never printed |
+| Sheet is landscape | Imposition never ran — stale code, restart Printosky |
+| Front reads 2 then 1 | Turn direction — `layout_rotation` **and** `slot_position`, flipped together |
+| Back upside down, right pages | `back_rotation` |
+| Back right way up, wrong slots | `effective_slot` — a mirror, not a rigid turn |
+| Pages cropped at the edge | Margins or gutters in `perform_nup`, not rotation |
+| Wrong sheet count | Pagination in `impose_plan`, not geometry |
 
-One thing to watch. `PRINT_IMPOSITION.md` recorded `duplex_back_rotation = 180`
-for a **portrait** 2-up on the Konica. This model gives a portrait layout a back
-turn of **0°**, because the 180° is tied to the landscape selection. If portrait
-duplex comes off the Konica upside down on the back, that measurement was right
-and the trigger belongs on every duplex job rather than on the orientation
-choice — a one-line change in `back_rotation()`.
+`python tools/proof_run.py <pdf>` imposes all twelve without printing, so the
+geometry can be read before any paper is committed; `--send --printer konica`
+then prints them.

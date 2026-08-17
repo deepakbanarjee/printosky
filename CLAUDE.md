@@ -17,6 +17,21 @@ Manual start commands + full port map → [docs/ARCHITECTURE.md](docs/ARCHITECTU
 Full detail → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 Schema reference (28 tables, owners, columns) → [docs/SCHEMA.md](docs/SCHEMA.md)
 
+## Printing / imposition
+Every imposed sheet is **portrait**; the printer is told `duplexlong` and no
+orientation flag, for every layout. Landscape turns the content 90° and puts
+page 1 at the bottom. **All 12 A4 combinations verified on paper — OSP Konica,
+2026-08-17.** A3, A5, 9-up and the Nattika Epson are untested.
+
+Rules, the full rotation matrix and the failure decoder →
+[docs/PRINT_ROTATION_MATRIX.md](docs/PRINT_ROTATION_MATRIX.md)
+Read it before touching `nup_imposer.py` or `print_planner.py`.
+
+```bash
+python tools/nup_matrix.py            # every combination, as sheets
+python tools/proof_run.py FILE.pdf    # impose all 12; --send to print
+```
+
 ## Key REPL Commands (`watcher.py`)
 ```
 pending                              → list pending jobs
