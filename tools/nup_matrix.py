@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Print every page-rotation combination the imposer can produce.
 
-Enumerates 1-up / 2-up / 4-up / 6-up (and 9-up) duplex, on portrait and
-landscape sheets, in horizontal and vertical fill order, and reports for each
-sheet-side which logical page lands in which physical slot and at what angle.
+Enumerates 1-up / 2-up / 4-up / 6-up (and 9-up) duplex, for a portrait and a
+landscape selection, in horizontal and vertical fill order, and reports for
+each sheet-side which logical page lands in which physical slot and at what
+angle.
+
+Note that "portrait"/"landscape" below is the LAYOUT the customer asked for.
+The sheet itself is always portrait -- the whole document goes to the printer
+as portrait duplex.
 
 Numbers come straight out of ``nup_imposer.impose_plan`` -- the same function
 ``perform_nup`` uses -- so this table is the imposer, not a description of it.
@@ -59,7 +64,7 @@ def describe(nup, orientation, direction, is_duplex, pages):
     back = nup_imposer.back_rotation(orientation)
     head = (f"{nup}-up  {orientation:<9} {direction:<10} "
             f"{'duplex' if is_duplex else 'simplex':<8} "
-            f"grid {cols}x{rows}  back turn {back}deg")
+            f"portrait sheet, grid {cols}x{rows}  back turn {back}deg")
     return head, plan
 
 
@@ -114,7 +119,8 @@ def main():
     duplex_modes = [True, False] if args.simplex else [True]
 
     if args.markdown:
-        print("| Layout | Sheet | Direction | Grid | Front side | Back side | Back turn |")
+        print("Every sheet is portrait; the orientation column is the customer's choice.\n")
+        print("| Layout | Orientation | Direction | Grid | Front side | Back side | Back turn |")
         print("|---|---|---|---|---|---|---|")
         for nup, orientation, direction, is_duplex in combinations(
                 nups, ORIENTATIONS, DIRECTIONS, duplex_modes):
@@ -124,7 +130,9 @@ def main():
 
     print("Page rotation matrix — angles are applied to a PORTRAIT source page.")
     print("Cells read `page@angle`, laid out in the physical slot positions.")
-    print("The printer is always told `duplexlong`; the back turn below is ours.\n")
+    print("Every imposed sheet is PORTRAIT; the orientation named is the layout")
+    print("the customer chose. The printer is always told `duplexlong`; the back")
+    print("turn below is ours.\n")
     for nup, orientation, direction, is_duplex in combinations(
             nups, ORIENTATIONS, DIRECTIONS, duplex_modes):
         pages = args.pages if args.pages else nup * 2

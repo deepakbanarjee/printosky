@@ -1,15 +1,19 @@
 """The page-rotation matrix — every combination, locked down.
 
+EVERY IMPOSED SHEET IS PORTRAIT. The whole document goes to the printer as
+portrait duplex; "portrait"/"landscape" here name the LAYOUT the customer
+chose, never the paper.
+
 The owner's rules, stated in full:
 
-* For a LANDSCAPE sheet, the back side turns 180°. That is the N-up case.
-* For SINGLE (1-up) with landscape selected, the front turns 90° and the back
-  turns -90°.
+* Choosing LANDSCAPE turns the back side 180°. Portrait stays at 0°.
+* On SINGLE (1-up), landscape also turns the front 90°, so the back lands on
+  -90° (90 + 180 = 270).
 
-Both come out of one law, which is what these tests actually check: a page
-turns 90° only when it does not match its slot, and every back sheet-side then
-turns a further 180° iff the physical sheet is landscape. The two stated cases
-are pinned individually below so a future refactor cannot quietly drift.
+On N-up, landscape does not turn the content — a portrait document must read
+without turning the sheet — which is why N-up fronts sit at 0° and their
+landscape backs at exactly 180°. Both stated cases are pinned individually
+below so a future refactor cannot quietly drift.
 """
 import itertools
 
@@ -58,8 +62,8 @@ def test_single_landscape_turns_front_90_and_back_minus_90(direction):
 
 @pytest.mark.parametrize("nup", NUPS)
 @pytest.mark.parametrize("direction", DIRECTIONS)
-def test_portrait_sheets_never_turn_the_back(nup, direction):
-    """A portrait sheet flips about its vertical long edge — nothing to correct."""
+def test_portrait_layouts_never_turn_the_back(nup, direction):
+    """Nothing turns unless landscape was asked for."""
     assert rotations(nup, "portrait", direction, "front") == {0}
     assert rotations(nup, "portrait", direction, "back") == {0}
 
@@ -120,14 +124,16 @@ def test_every_page_lands_in_exactly_one_slot(nup, orientation, direction):
 # Grid shapes and fill order
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("nup,orientation,expected", [
-    (1, "portrait", (1, 1)), (1, "landscape", (1, 1)),
-    (2, "portrait", (1, 2)), (2, "landscape", (2, 1)),
-    (4, "portrait", (2, 2)), (4, "landscape", (2, 2)),
-    (6, "portrait", (2, 3)), (6, "landscape", (3, 2)),
-    (9, "portrait", (3, 3)), (9, "landscape", (3, 3)),
+@pytest.mark.parametrize("nup,expected", [
+    (1, (1, 1)), (2, (1, 2)), (4, (2, 2)), (6, (2, 3)), (9, (3, 3)),
 ])
-def test_grid_shape(nup, orientation, expected):
+@pytest.mark.parametrize("orientation", ORIENTATIONS)
+def test_grid_shape_is_the_same_on_the_portrait_sheet(nup, orientation, expected):
+    """The sheet is always portrait, so a landscape layout uses the same grid.
+
+    Transposing a landscape arrangement onto a portrait sheet swaps its axes,
+    which lands back on the portrait grid.
+    """
     assert nup_imposer.sheet_grid(nup, orientation) == expected
 
 
@@ -139,15 +145,15 @@ def test_grid_holds_exactly_nup_slots(nup, orientation, direction):
 
 def test_horizontal_fills_row_major_and_vertical_fills_column_major():
     """Direction changes the fill order of the slots. It never changes an angle."""
-    horizontal = nup_imposer.impose_plan(6, nup=6, orientation="landscape",
+    horizontal = nup_imposer.impose_plan(6, nup=6, orientation="portrait",
                                          direction="horizontal")[0]["slots"]
-    vertical = nup_imposer.impose_plan(6, nup=6, orientation="landscape",
+    vertical = nup_imposer.impose_plan(6, nup=6, orientation="portrait",
                                        direction="vertical")[0]["slots"]
-    # 3 cols x 2 rows. Row-major: 1 2 3 / 4 5 6. Column-major: 1 3 5 / 2 4 6.
+    # 2 cols x 3 rows. Row-major: 1 2 / 3 4 / 5 6. Column-major: 1 4 / 2 5 / 3 6.
     assert [(s["col"], s["row"], s["page"]) for s in horizontal] == [
-        (0, 0, 1), (1, 0, 2), (2, 0, 3), (0, 1, 4), (1, 1, 5), (2, 1, 6)]
+        (0, 0, 1), (1, 0, 2), (0, 1, 3), (1, 1, 4), (0, 2, 5), (1, 2, 6)]
     assert [(s["col"], s["row"], s["page"]) for s in vertical] == [
-        (0, 0, 1), (0, 1, 2), (1, 0, 3), (1, 1, 4), (2, 0, 5), (2, 1, 6)]
+        (0, 0, 1), (0, 1, 2), (0, 2, 3), (1, 0, 4), (1, 1, 5), (1, 2, 6)]
 
 
 @pytest.mark.parametrize("nup,orientation,direction", ALL_COMBINATIONS)
@@ -162,17 +168,12 @@ def test_direction_never_changes_a_rotation(nup, orientation, direction):
 # Orientation resolution
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("nup,expected", [(1, "portrait"), (2, "landscape"),
-                                          (4, "portrait"), (6, "landscape"),
-                                          (9, "portrait")])
-def test_auto_orientation_falls_back_to_the_natural_shape(nup, expected):
-    assert nup_imposer.resolve_orientation(nup, "auto") == expected
-    assert nup_imposer.resolve_orientation(nup, None) == expected
-
-
-def test_two_up_stacked_vertically_defaults_to_a_portrait_sheet():
-    assert nup_imposer.resolve_orientation(2, "auto", "vertical") == "portrait"
-    assert nup_imposer.resolve_orientation(2, "auto", "horizontal") == "landscape"
+@pytest.mark.parametrize("nup", NUPS)
+@pytest.mark.parametrize("direction", DIRECTIONS)
+def test_auto_orientation_is_portrait(nup, direction):
+    """Nothing turns unless someone asks for it."""
+    assert nup_imposer.resolve_orientation(nup, "auto", direction) == "portrait"
+    assert nup_imposer.resolve_orientation(nup, None, direction) == "portrait"
 
 
 @pytest.mark.parametrize("nup,orientation,direction", ALL_COMBINATIONS)
@@ -204,8 +205,13 @@ def test_a_page_that_already_matches_its_slot_does_not_turn():
 
 def test_single_slot_honours_the_deliberate_landscape_choice():
     """1-up has no slot to fill — landscape is the customer asking for a turn."""
-    assert nup_imposer.fit_rotation(page_is_portrait=True, slot_is_landscape=True,
-                                    is_single_slot=True) == 90
+    assert nup_imposer.layout_rotation("landscape", is_single_slot=True) == 90
+    assert nup_imposer.layout_rotation("portrait", is_single_slot=True) == 0
+
+
+def test_n_up_landscape_follows_the_transpose_switch():
+    expected = 90 if nup_imposer.TRANSPOSE_LANDSCAPE_NUP else 0
+    assert nup_imposer.layout_rotation("landscape", is_single_slot=False) == expected
 
 
 # --------------------------------------------------------------------------
@@ -242,6 +248,23 @@ def _marker_positions(page):
     return {w[4]: (w[0], w[1]) for w in page.get_text("words")}
 
 
+def test_every_imposed_sheet_is_portrait():
+    """The whole document goes to the printer as portrait duplex, always."""
+    for nup, (cols, rows) in nup_imposer.SHEET_GRIDS.items():
+        for orientation in ORIENTATIONS:
+            imposed = nup_imposer.perform_nup(_marked_pdf(nup * 2), cols=cols,
+                                              rows=rows, orientation=orientation,
+                                              is_duplex=True)
+            doc = fitz.open("pdf", imposed.getvalue())
+            try:
+                rect = doc[0].rect
+                assert rect.width < rect.height, (
+                    f"{nup}-up {orientation} produced a "
+                    f"{rect.width:.0f}x{rect.height:.0f}pt sheet")
+            finally:
+                doc.close()
+
+
 def test_imposed_pdf_matches_the_plan_for_landscape_two_up():
     """2-up landscape duplex on paper: back slots reversed AND content turned.
 
@@ -249,26 +272,25 @@ def test_imposed_pdf_matches_the_plan_for_landscape_two_up():
     bottom-right of its slot on the back — both axes reversed, content turned
     with them. Bottom-right alone would be a mirror.
     """
-    imposed = nup_imposer.perform_nup(_marked_pdf(4), cols=2, rows=1,
+    imposed = nup_imposer.perform_nup(_marked_pdf(4), cols=1, rows=2,
                                       orientation="landscape", is_duplex=True)
     doc = fitz.open("pdf", imposed.getvalue())
     try:
         assert len(doc) == 2  # one sheet, two sides
         sheet_w, sheet_h = doc[0].rect.width, doc[0].rect.height
-        assert sheet_w > sheet_h  # landscape sheet
+        assert sheet_w < sheet_h  # portrait sheet, always
 
         front = _marker_positions(doc[0])
         back = _marker_positions(doc[1])
         assert set(front) == {"P1", "P2"} and set(back) == {"P3", "P4"}
 
-        # Front: pages 1,2 left to right, markers in the top half.
-        assert front["P1"][0] < sheet_w / 2 < front["P2"][0]
-        assert front["P1"][1] < sheet_h / 2 and front["P2"][1] < sheet_h / 2
+        # Front: pages 1,2 top to bottom.
+        assert front["P1"][1] < sheet_h / 2 < front["P2"][1]
 
-        # Back: turned 180 — page 3 moves to the RIGHT slot, page 4 to the
-        # left, and both markers drop into the bottom half.
-        assert back["P4"][0] < sheet_w / 2 < back["P3"][0]
-        assert back["P3"][1] > sheet_h / 2 and back["P4"][1] > sheet_h / 2
+        # Back: turned 180 — page 3 moves to the BOTTOM slot, page 4 to the
+        # top, and both markers cross to the right of the sheet.
+        assert back["P4"][1] < sheet_h / 2 < back["P3"][1]
+        assert back["P3"][0] > sheet_w / 2 and back["P4"][0] > sheet_w / 2
     finally:
         doc.close()
 
@@ -298,7 +320,7 @@ def test_imposed_single_page_landscape_turns_90_then_270():
     try:
         assert len(doc) == 2
         sheet_w, sheet_h = doc[0].rect.width, doc[0].rect.height
-        assert sheet_w > sheet_h
+        assert sheet_w < sheet_h  # portrait sheet, always
 
         front = _marker_positions(doc[0])["P1"]
         back = _marker_positions(doc[1])["P2"]

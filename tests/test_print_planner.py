@@ -203,23 +203,24 @@ def test_mixed_colour_imposition_duplex(temp_pdf, tmp_path):
     
     print_planner.cleanup_temp_dir(temp_dir)
 
-def test_customer_orientation_drives_the_imposed_grid(temp_pdf, tmp_path):
-    """An explicit landscape/portrait choice picks the sheet shape, not the n-up."""
-    landscape, temp_dir = print_planner.plan_print_job(
-        "J_ORIENT_L", temp_pdf,
-        {"nup": 4, "orientation": "landscape", "sides": "duplex"}, str(tmp_path))
-    doc = fitz.open(landscape[0]["pdf_path"])
-    assert doc[0].rect.width > doc[0].rect.height
-    doc.close()
-    print_planner.cleanup_temp_dir(temp_dir)
-
-    portrait, temp_dir = print_planner.plan_print_job(
-        "J_ORIENT_P", temp_pdf,
-        {"nup": 4, "orientation": "portrait", "sides": "duplex"}, str(tmp_path))
-    doc = fitz.open(portrait[0]["pdf_path"])
-    assert doc[0].rect.width < doc[0].rect.height
-    doc.close()
-    print_planner.cleanup_temp_dir(temp_dir)
+def test_every_imposed_sheet_leaves_as_portrait(temp_pdf, tmp_path):
+    """Whatever the customer picks, the printer gets portrait duplex."""
+    for nup in (1, 2, 4, 6, 9):
+        for orientation in ("portrait", "landscape"):
+            actions, temp_dir = print_planner.plan_print_job(
+                f"J_ORIENT_{nup}_{orientation}", temp_pdf,
+                {"nup": nup, "orientation": orientation, "sides": "duplex"},
+                str(tmp_path))
+            doc = fitz.open(actions[0]["pdf_path"])
+            rect = doc[0].rect
+            doc.close()
+            assert rect.width < rect.height, (
+                f"{nup}-up {orientation} left as {rect.width:.0f}x{rect.height:.0f}pt")
+            if actions[0]["pdf_path"] != temp_pdf:
+                # An imposed sheet already carries its final geometry, so the
+                # printer must not be handed an orientation flag as well.
+                assert actions[0]["orientation"] is None
+            print_planner.cleanup_temp_dir(temp_dir)
 
 
 def test_landscape_nup_still_binds_long_edge(temp_pdf, tmp_path):
@@ -243,7 +244,7 @@ def test_single_page_landscape_is_imposed_but_portrait_is_not(temp_pdf, tmp_path
         {"nup": 1, "orientation": "landscape", "sides": "duplex"}, str(tmp_path))
     assert actions[0]["pdf_path"] != temp_pdf
     doc = fitz.open(actions[0]["pdf_path"])
-    assert doc[0].rect.width > doc[0].rect.height
+    assert doc[0].rect.width < doc[0].rect.height  # portrait sheet, turned content
     doc.close()
     print_planner.cleanup_temp_dir(temp_dir)
 
@@ -254,12 +255,13 @@ def test_single_page_landscape_is_imposed_but_portrait_is_not(temp_pdf, tmp_path
     print_planner.cleanup_temp_dir(temp_dir)
 
 
-def test_two_up_vertical_still_means_stacked_on_a_portrait_sheet(temp_pdf, tmp_path):
-    """Existing UI meaning is preserved when orientation is left on auto."""
-    actions, temp_dir = print_planner.plan_print_job(
-        "J_2UP_V", temp_pdf,
-        {"nup": 2, "nup_direction": "vertical", "sides": "duplex"}, str(tmp_path))
-    doc = fitz.open(actions[0]["pdf_path"])
-    assert doc[0].rect.width < doc[0].rect.height
-    doc.close()
-    print_planner.cleanup_temp_dir(temp_dir)
+def test_two_up_is_stacked_on_a_portrait_sheet(temp_pdf, tmp_path):
+    """2-up is 1x2 on portrait paper whichever fill direction is asked for."""
+    for direction in ("horizontal", "vertical"):
+        actions, temp_dir = print_planner.plan_print_job(
+            f"J_2UP_{direction}", temp_pdf,
+            {"nup": 2, "nup_direction": direction, "sides": "duplex"}, str(tmp_path))
+        doc = fitz.open(actions[0]["pdf_path"])
+        assert doc[0].rect.width < doc[0].rect.height
+        doc.close()
+        print_planner.cleanup_temp_dir(temp_dir)

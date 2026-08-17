@@ -13,77 +13,76 @@ PAPER_SIZES = {
 # The rotation model
 # ---------------------------------------------------------------------------
 #
-# One law, two halves:
+# EVERY IMPOSED SHEET IS PORTRAIT. The whole document goes to the printer as
+# portrait duplex, always -- one paper shape, one `duplexlong` token, no
+# orientation flag. A layout that logically wants landscape is composed
+# TRANSPOSED onto that portrait sheet (cols and rows swapped) rather than being
+# handed to the driver as a landscape page.
 #
-#   1. FIT      A page turns 90° only when its own orientation does not match
-#               the slot it lands in. Otherwise it stays at 0°.
+# On top of that portrait canvas, two turns:
 #
-#   2. BACKING  Every back sheet-side is then turned a further 180° -- but only
-#               when the physical sheet is LANDSCAPE. The printer is always
-#               told `duplexlong`, so the flip happens about the sheet's long
-#               edge: vertical on a portrait sheet (back comes up the right way
-#               up, nothing to correct), horizontal on a landscape sheet (back
-#               comes up upside down, so we turn it 180°).
+#   1. LAYOUT   Choosing "landscape" turns the content 90°. On 1-up that is the
+#               whole point of the choice -- there is no slot to fill, the
+#               customer is asking for a turned page. On N-up it is governed by
+#               TRANSPOSE_LANDSCAPE_NUP below.
+#
+#   2. BACKING  A back sheet-side is turned a further 180° when -- and only
+#               when -- landscape was selected.
 #
 # The 180° is applied as a TRUE RIGID TURN: both slot axes reverse *and* the
 # content turns with them. Reversing slot columns alone is a mirror, and ink on
 # paper cannot be mirrored -- that is what the old `eff_col`-only code did, and
 # it is why landscape 2-up duplex printed with the back upside down.
 #
-# Both of the rules the owner stated fall straight out of this:
+# The owner's stated rules:
 #
 #   1-up landscape   front  +90°, back  +90 + 180 = 270° (= -90°)
-#   N-up landscape   front    0°, back    0 + 180 = 180°
+#   N-up landscape   front    0°, back    0 + 180 = 180°     (transpose off)
 #   N-up portrait    front    0°, back            =   0°
 #
 # Layout direction (horizontal / vertical) changes the *fill order* of the
 # slots only. It never changes a rotation.
 
-#: (cols, rows) for each n-up on each sheet orientation.
-SHEET_GRIDS = {
-    1: {"portrait": (1, 1), "landscape": (1, 1)},
-    2: {"portrait": (1, 2), "landscape": (2, 1)},
-    4: {"portrait": (2, 2), "landscape": (2, 2)},
-    6: {"portrait": (2, 3), "landscape": (3, 2)},
-    9: {"portrait": (3, 3), "landscape": (3, 3)},
-}
+#: Whether an N-up LANDSCAPE selection also turns the content 90°, so the ink
+#: matches what a landscape sheet would have carried and the reader turns the
+#: sheet. False keeps portrait pages upright -- the owner's rule that a portrait
+#: document must read without turning the sheet, even where turning it would
+#: fill the slot better (on 2-up, the ~47%-scale handout look). 1-up is
+#: unaffected either way: it always honours the landscape choice.
+TRANSPOSE_LANDSCAPE_NUP = False
 
-#: Sheet orientation used when the customer left orientation on "auto".
-DEFAULT_SHEET_ORIENTATION = {1: "portrait", 2: "landscape", 4: "portrait",
-                             6: "landscape", 9: "portrait"}
+#: (cols, rows) on the portrait sheet. A landscape layout uses the same grid --
+#: transposing a landscape arrangement onto a portrait sheet swaps its axes,
+#: which lands on exactly these shapes.
+SHEET_GRIDS = {1: (1, 1), 2: (1, 2), 4: (2, 2), 6: (2, 3), 9: (3, 3)}
 
 
 def resolve_orientation(nup: int, orientation: str | None = None,
                         direction: str = "horizontal") -> str:
-    """Return "portrait" or "landscape" for the imposed sheet.
+    """Return the LAYOUT orientation, "portrait" or "landscape".
 
-    An explicit customer choice always wins. On "auto" (or nothing) each n-up
-    falls back to its natural shape, except 2-up, where a vertical fill order
-    means "two stacked" and therefore a portrait sheet.
+    This is the customer's choice, not the sheet: the sheet is always portrait.
+    An explicit choice always wins. On "auto" (or nothing) everything is
+    portrait, which is how the store prints unless someone asks otherwise.
     """
     o = str(orientation or "auto").strip().lower()
-    if o in ("portrait", "landscape"):
-        return o
-    if int(nup or 1) == 2 and str(direction or "").strip().lower() == "vertical":
-        return "portrait"
-    return DEFAULT_SHEET_ORIENTATION.get(int(nup or 1), "portrait")
+    return o if o in ("portrait", "landscape") else "portrait"
 
 
 def sheet_grid(nup: int, orientation: str | None = None,
                direction: str = "horizontal") -> tuple[int, int]:
-    """Return (cols, rows) for this n-up on its resolved sheet orientation."""
+    """Return (cols, rows) on the portrait sheet. Orientation does not change it."""
     nup = int(nup or 1)
-    sheet = resolve_orientation(nup, orientation, direction)
     grid = SHEET_GRIDS.get(nup)
-    if grid is None:
-        # Unknown n-up: squarest grid that holds it, long side across a
-        # landscape sheet.
-        cols = int(nup ** 0.5) or 1
-        while cols > 1 and nup % cols:
-            cols -= 1
-        rows = max(1, nup // cols)
-        return (max(cols, rows), min(cols, rows)) if sheet == "landscape" else (min(cols, rows), max(cols, rows))
-    return grid[sheet]
+    if grid is not None:
+        return grid
+    # Unknown n-up: squarest grid that holds it, long side down the portrait
+    # sheet.
+    cols = int(nup ** 0.5) or 1
+    while cols > 1 and nup % cols:
+        cols -= 1
+    rows = max(1, nup // cols)
+    return min(cols, rows), max(cols, rows)
 
 
 def slot_position(slot: int, cols: int, rows: int,
@@ -98,56 +97,61 @@ def slot_position(slot: int, cols: int, rows: int,
     return slot % max(cols, 1), slot // max(cols, 1)
 
 
-def back_rotation(sheet_orientation: str) -> int:
-    """Degrees the whole back sheet-side is turned. 180 on landscape, else 0.
+def back_rotation(orientation: str) -> int:
+    """Degrees the whole back sheet-side is turned: 180 on landscape, else 0."""
+    return 180 if str(orientation or "").strip().lower() == "landscape" else 0
 
-    See the note at the top of this module: `duplexlong` flips about the
-    sheet's long edge, which is horizontal on a landscape sheet.
+
+def layout_rotation(orientation: str, is_single_slot: bool = True) -> int:
+    """Degrees the content turns because the customer chose landscape.
+
+    1-up always honours the choice -- there is no slot to fill, so landscape is
+    simply a request for a turned page. N-up follows TRANSPOSE_LANDSCAPE_NUP.
     """
-    return 180 if str(sheet_orientation or "").strip().lower() == "landscape" else 0
+    if str(orientation or "").strip().lower() != "landscape":
+        return 0
+    return 90 if (is_single_slot or TRANSPOSE_LANDSCAPE_NUP) else 0
 
 
 def fit_rotation(page_is_portrait: bool, slot_is_landscape: bool,
                  is_single_slot: bool = True) -> int:
-    """Degrees a page turns to match its slot: 90, or 0.
+    """Degrees a LANDSCAPE source page turns to fit a portrait-shaped slot.
 
-    Three cases:
-
-    * The page already matches its slot -- nothing to do, 0°.
-    * A PORTRAIT page in an N-up slot -- still 0°. A portrait document must
-      read without turning the sheet, even where turning it would fill the slot
-      better; on 2-up that means the ordinary ~47%-scale handout look. This is
-      why every N-up front side sits at 0° regardless of sheet orientation.
-    * Anything else -- 90°. That covers a LANDSCAPE source turning into a
-      portrait slot (left upright it would be squeezed smaller and be harder to
-      read), and the deliberate 1-up landscape choice, where there is no slot
-      to fill and the customer asked for a turned page.
+    Portrait pages never turn to fill a slot: a portrait document must read
+    without turning the sheet, even where turning it would fill the slot better
+    -- on 2-up that means the ordinary ~47%-scale handout look. A landscape
+    source is different; left upright it would be squeezed smaller and be
+    harder to read, so the objection does not apply.
     """
-    if page_is_portrait != slot_is_landscape:
+    if page_is_portrait:
         return 0
-    if page_is_portrait and not is_single_slot:
-        return 0
-    return 90
+    return 0 if slot_is_landscape else 90
 
 
 def slot_rotation(page_is_portrait: bool, slot_is_landscape: bool,
-                  is_back: bool, sheet_orientation: str,
+                  is_back: bool, orientation: str,
                   is_single_slot: bool = True) -> int:
-    """Total rotation for one page in one slot: fit, plus the back-side turn."""
-    rot = fit_rotation(page_is_portrait, slot_is_landscape, is_single_slot)
+    """Total rotation for one page in one slot.
+
+    Layout turn, plus a landscape source's fit turn where the layout did not
+    already supply one, plus the back-side turn.
+    """
+    rot = layout_rotation(orientation, is_single_slot)
+    if rot == 0:
+        rot = fit_rotation(page_is_portrait, slot_is_landscape, is_single_slot)
     if is_back:
-        rot += back_rotation(sheet_orientation)
+        rot += back_rotation(orientation)
     return rot % 360
 
 
 def effective_slot(col: int, row: int, cols: int, rows: int,
-                   is_back: bool, sheet_orientation: str) -> tuple[int, int]:
+                   is_back: bool, orientation: str) -> tuple[int, int]:
     """Where a slot physically lands, after the back side's rigid turn.
 
     A 180° turn reverses *both* axes. Reversing one axis alone would be a
     mirror; see the module note.
     """
-    if is_back and back_rotation(sheet_orientation) == 180:
+    if is_back and back_rotation(orientation) == 180:
         return (cols - 1) - col, (rows - 1) - row
     return col, row
 
@@ -170,10 +174,10 @@ def impose_plan(total_pages: int, nup: int = 1, orientation: str | None = None,
     `tools/nup_matrix.py`. `perform_nup` below applies exactly these numbers.
     """
     nup = max(1, int(nup or 1))
-    sheet = resolve_orientation(nup, orientation, direction)
+    layout = resolve_orientation(nup, orientation, direction)
     cols, rows = sheet_grid(nup, orientation, direction)
     slots_per_side = cols * rows
-    slot_is_landscape = _slot_is_landscape(cols, rows, sheet)
+    slot_is_landscape = _slot_is_landscape(cols, rows)
 
     order = list(range(1, max(0, int(total_pages)) + 1))
     plan: list[dict] = []
@@ -190,36 +194,37 @@ def impose_plan(total_pages: int, nup: int = 1, orientation: str | None = None,
             slots = []
             for slot in range(slots_per_side):
                 col, row = slot_position(slot, cols, rows, direction)
-                eff_col, eff_row = effective_slot(col, row, cols, rows, is_back, sheet)
+                eff_col, eff_row = effective_slot(col, row, cols, rows, is_back, layout)
                 slots.append({
                     "slot": slot,
                     "col": eff_col,
                     "row": eff_row,
                     "page": chunk[slot],
                     "rotation": slot_rotation(source_is_portrait, slot_is_landscape,
-                                              is_back, sheet,
+                                              is_back, layout,
                                               is_single_slot=(slots_per_side == 1)),
                 })
             plan.append({
                 "sheet": sheet_no,
                 "side": side,
-                "orientation": sheet,
+                "orientation": layout,
                 "cols": cols,
                 "rows": rows,
-                "back_rotation": back_rotation(sheet) if is_back else 0,
+                "back_rotation": back_rotation(layout) if is_back else 0,
                 "slots": slots,
             })
     return plan
 
 
-def _slot_is_landscape(cols: int, rows: int, sheet_orientation: str,
-                       paper_size: str = "A4") -> bool:
-    """Whether one slot on this grid is wider than it is tall."""
+def portrait_sheet(paper_size: str = "A4") -> tuple[float, float]:
+    """The sheet every imposition draws on. Always portrait, never landscape."""
     w, h = PAPER_SIZES.get(paper_size, PAPER_SIZES["A4"])
-    if str(sheet_orientation or "").lower() == "landscape":
-        w, h = max(w, h), min(w, h)
-    else:
-        w, h = min(w, h), max(w, h)
+    return min(w, h), max(w, h)
+
+
+def _slot_is_landscape(cols: int, rows: int, paper_size: str = "A4") -> bool:
+    """Whether one slot on this grid is wider than it is tall."""
+    w, h = portrait_sheet(paper_size)
     return (w / max(cols, 1)) > (h / max(rows, 1))
 
 
@@ -239,20 +244,16 @@ def perform_nup(
     doc_in = fitz.open("pdf", file_bytes)
     doc_out = fitz.open()
 
-    # 1 & 2. Paper Size and Orientation
+    # 1 & 2. Paper size. The sheet is ALWAYS portrait -- the whole document
+    # goes to the printer as portrait duplex, and a landscape layout is
+    # composed transposed onto that portrait sheet. `orientation` here names
+    # the LAYOUT the customer asked for, never the paper.
     if paper_size == "Custom":
-        out_width, out_height = custom_width, custom_height
+        out_width, out_height = min(custom_width, custom_height), max(custom_width, custom_height)
     else:
-        out_width, out_height = PAPER_SIZES.get(paper_size, PAPER_SIZES["A4"])
+        out_width, out_height = portrait_sheet(paper_size)
 
-    if orientation.lower() == "landscape":
-        out_width, out_height = max(out_width, out_height), min(out_width, out_height)
-    else:
-        out_width, out_height = min(out_width, out_height), max(out_width, out_height)
-
-    # The sheet that actually leaves the printer decides the back-side turn.
-    sheet_orientation = "landscape" if out_width > out_height else "portrait"
-    back_turn = back_rotation(sheet_orientation)
+    layout = resolve_orientation(cols * rows, orientation)
 
     slots_per_page = cols * rows
     if slots_per_page < 1:
@@ -313,7 +314,7 @@ def perform_nup(
             #    axes reverse and the content turns with them (see module note).
             eff_col, eff_row = effective_slot(col, row, cols, rows,
                                               is_duplex and is_back_page,
-                                              sheet_orientation)
+                                              layout)
 
             slot_x0 = margin_x + eff_col * (slot_width + gutter_x)
             slot_y0 = margin_y + eff_row * (slot_height + gutter_y)
@@ -322,15 +323,13 @@ def perform_nup(
                 in_page = doc_in[in_pg_idx]
                 in_w, in_h = in_page.rect.width, in_page.rect.height
 
-                # Turn the page into the slot only when their orientations
-                # disagree, then add the back-side turn on top.
+                # The layout turn, a landscape source's fit turn where the
+                # layout did not already supply one, then the back turn.
                 slot_is_landscape = slot_width > slot_height
                 page_is_portrait = in_h > in_w
-                rot = fit_rotation(page_is_portrait, slot_is_landscape,
-                                   is_single_slot=(slots_per_page == 1))
-                if is_duplex and is_back_page:
-                    rot += back_turn
-                rot %= 360
+                rot = slot_rotation(page_is_portrait, slot_is_landscape,
+                                    is_duplex and is_back_page, layout,
+                                    is_single_slot=(slots_per_page == 1))
 
                 if rot in (90, 270):
                     eff_w, eff_h = in_h, in_w
