@@ -17,6 +17,24 @@ Manual start commands + full port map → [docs/ARCHITECTURE.md](docs/ARCHITECTU
 Full detail → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 Schema reference (28 tables, owners, columns) → [docs/SCHEMA.md](docs/SCHEMA.md)
 
+## Printing / N-up imposition
+**Read [docs/PRINT_IMPOSITION.md](docs/PRINT_IMPOSITION.md) before touching
+`nup_imposer.py`, `print_planner.py`, or the print path in `print_server.py`.**
+It carries the rules and, more importantly, the models that were tried and are
+wrong. Short version:
+- Every imposed sheet is **portrait**; landscape layouts are composed transposed.
+- A **portrait page is never rotated** — it reads without turning the sheet.
+- The printer is only ever told `paper=<size>, duplexlong`. Nothing else.
+- One constant absorbs the printer's back-side behaviour:
+  `store_config.duplex_back_rotation` (0 or 180, currently **180**).
+
+```bash
+python tools/nup_doctor.py --nup 2      # what this PC would actually print
+python tools/nup_doctor.py --calibrate  # A/B a printer in one duplex print
+```
+Run the doctor before spending paper. If the doctor is right and the paper is
+wrong, it's the printer — calibrate, don't change code.
+
 ## Key REPL Commands (`watcher.py`)
 ```
 pending                              → list pending jobs

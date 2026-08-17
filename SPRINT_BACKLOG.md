@@ -15,7 +15,7 @@ Owner/dashboard tasks live in [docs/OWNER_ACTIONS.md](docs/OWNER_ACTIONS.md).
 |---|------|-----------------|
 | **N1** | **Store PC is running code from before 2026-08-12** | `watcher.log` stale since 08-12, no `cloud_worker.log`. Eight commits (#62–#69) that run on that PC are not live, including the `store_puller` startup-crash fix (#67). While `watcher.py` is down there are no SNMP readings, no ink alerts and no Epson attribution. → checklist §A |
 | **N2** | **Supabase quota — projects restricted from 2026-09-11** | 2.903/5 GB egress **4 days into** the 12 Aug–12 Sep cycle; storage 0.722/1 GB. The #68 interval cuts only take effect after N1; `tools/storage_cleanup.py --apply` still needs running. → checklist §B |
-| **N3** | **Print fidelity never verified on paper** | The whole August auto-print arc (N-up, duplex, mixed colour, per-page colour billing) has unit tests only. → checklist §D |
+| **N3** | **Print fidelity — 2-up done, the rest untested** | 2-up duplex verified on paper 2026-08-16 in B&W and colour after the imposition rewrite. 4-up/6-up/9-up, mixed colour, and the scale modes have never been printed. Rules + status: [docs/PRINT_IMPOSITION.md](docs/PRINT_IMPOSITION.md) → checklist §D |
 | **N4** | **TASK-001 — Razorpay webhook still not repointed** | 0 Razorpay webhooks have ever been processed; no online payment is recorded anywhere. → OWNER_ACTIONS |
 | **N5** | **PR #51 stale** | `feat/store-scoped-jobs`, open since 08-05, likely superseded by the `jobs.html` work in #54–#60. Close or rebase. |
 
@@ -111,6 +111,7 @@ Owner/dashboard tasks live in [docs/OWNER_ACTIONS.md](docs/OWNER_ACTIONS.md).
 | S12-2 | ~~**Rule-based auto-print**~~ ✅ | `store_puller.py` `auto_print()` + `print_planner.plan_print_job()` — paid orders print unattended. See [HANDOFF_AUTOPRINT_FIDELITY.md](HANDOFF_AUTOPRINT_FIDELITY.md) |
 | S12-3 | **Filename auto-pricing** | Match module filenames to fixed-price packages |
 | S12-4 | ~~**Live hardware scraper**~~ ✅ | Konica XML + Epson HTML table scraper (`a6d28d2`) |
+| S12-5 | ~~**N-up imposition actually works**~~ ✅ | 2026-08-16. Staff `/print` never called the imposer at all (`nup2`/`nup4` are not real SumatraPDF tokens); both paths now share `plan_print_job`. Portrait canvas, portraits never rotated, printer told only `duplexlong`, and one measured `duplex_back_rotation` absorbs the printer's back-side behaviour. Model + retired approaches: [docs/PRINT_IMPOSITION.md](docs/PRINT_IMPOSITION.md) |
 
 ---
 

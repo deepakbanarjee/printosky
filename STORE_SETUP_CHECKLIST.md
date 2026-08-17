@@ -121,11 +121,18 @@ Billing cycle 12 Aug – 12 Sep, checked 2026-08-16:
 The August auto-print work shipped with unit tests but **no physical
 verification**. Print one of each and check the sheets:
 
-- [ ] **2-up duplex, long edge** — `9105d81` added slot-orientation detection and
-      a 180° back-page rotation. Confirm the backs are not upside down.
-- [ ] **Landscape N-up** — should bind short-edge (#64).
-- [ ] **Mixed B&W + colour document** — must come out pre-collated in document
-      order, from a single printer (#62/#64).
+> Rules and history: [docs/PRINT_IMPOSITION.md](docs/PRINT_IMPOSITION.md).
+> Run `python tools\nup_doctor.py --nup N` before spending paper — if the
+> doctor is right and the sheet is wrong, it's the printer, not the code.
+
+- [x] **2-up duplex, B&W and colour** ✅ 2026-08-16 — worth one more sheet since
+      the no-rotate-portraits rule landed after it (fronts moved 270° → 0°).
+- [ ] **4-up duplex** — never printed. Page 5 must sit behind page 1; this is the
+      first layout where slot reversal actually moves pages.
+- [ ] **6-up / 9-up duplex** — never printed.
+- [ ] **Mixed B&W + colour duplex** — splits across **both** printers, the one
+      case where a single global `duplex_back_rotation` could bite. Worth
+      running `--calibrate` on the Epson too.
 - [ ] **Colour duplex quote** — #61 changed colour to bill per page; run a quote
       and check the total against the rate card.
 - [ ] **S9-4 — A3 end-to-end** (bot → quote → print). Never tested.
