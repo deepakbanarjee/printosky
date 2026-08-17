@@ -10,7 +10,9 @@ Calculates print job cost based on:
 - Layout (1-up, 2-up, 4-up)
 - Copies
 - Finishing (spiral, wiro, staple, soft, project, record, lamination, etc.)
-- Student discount flag
+- Student discount flag (2 Rs/sheet)
+- Extra discount flag (1.50 Rs/sheet, overrides student rate)
+- Bulk rate flag (1.25 Rs/sheet for >1000 sheets, lowest priority)
 - Urgent surcharge flag
 
 BILLING RULE (confirmed with owner):
@@ -20,6 +22,12 @@ BILLING RULE (confirmed with owner):
   Sheets for DS = ceil(pages/2), rounded UP to next even number.
   Layout 2-up: pages = ceil(original/2) before applying sides rule.
   Layout 4-up: pages = ceil(original/4) before applying sides rule.
+
+B&W RATE HIERARCHY (highest to lowest priority):
+  1. Extra discount: 1.50 Rs/sheet (if extra_discount=True)
+  2. Student rate: 2.0 Rs/sheet (if is_student=True)
+  3. Bulk rate: 1.25 Rs/sheet (if sheets > 1000)
+  4. Standard rate: 3.0 Rs/sheet (default)
 """
 
 import math
@@ -32,8 +40,9 @@ import logging
 # ─────────────────────────────────────────────────────────────────────────────
 
 PRINT_RATES = {
-    # A4 B&W — same rate SS and DS (billing per sheet)
-    "A4_BW":              {"ss": 3.0, "ds": 3.0},
+    # A4 B&W — same rate SS and DS (billing per sheet, tiered by volume)
+    "A4_BW":              {"ss": 3.0, "ds": 3.0},   # ≤1000 sheets
+    "A4_BW_bulk":         {"ss": 1.25, "ds": 1.25}, # >1000 sheets: bulk rate
     "A4_BW_student":      {"ss": 2.0, "ds": 2.0},   # student rate: 2 Rs/sheet
     "A4_BW_extra_disc":   {"ss": 1.5, "ds": 1.5},   # extra discount: 1.50 Rs/sheet
 
@@ -270,18 +279,20 @@ def get_print_rate(paper_type: str, sides: str, sheets: int,
 
     paper_type: 'A4_BW' | 'A4_col' | 'A4_bond_col' | 'Legal_BW' | 'A3_BW' | etc.
     sides:      'ss' | 'ds'
-    sheets:     total sheet count (used for colour tier selection)
+    sheets:     total sheet count (used for colour tier selection + bulk rates)
     is_student: apply student rate (B&W only, 2 Rs/sheet)
     extra_discount: apply extra discount (B&W only, 1.50 Rs/sheet, overrides student rate)
     """
     sides = sides if sides in ("ss", "ds") else "ss"
 
-    # A4 B&W — discount rate overrides
+    # A4 B&W — discount rate overrides, then bulk rate for volume
     if paper_type == "A4_BW":
         if extra_discount:
             return PRINT_RATES["A4_BW_extra_disc"].get(sides, PRINT_RATES["A4_BW_extra_disc"]["ss"])
         elif is_student:
             return PRINT_RATES["A4_BW_student"].get(sides, PRINT_RATES["A4_BW_student"]["ss"])
+        elif sheets > 1000:
+            return PRINT_RATES["A4_BW_bulk"].get(sides, PRINT_RATES["A4_BW_bulk"]["ss"])
 
     # A4 Colour — tiered by sheet count
     if paper_type == "A4_col":
