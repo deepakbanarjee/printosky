@@ -64,11 +64,8 @@ def check_fit(page_w: float, page_h: float, slot_w: float, slot_h: float,
     mirrored by the order-v2 UI so the customer sees it at selection time.
     """
     eff_w, eff_h = page_w, page_h
-    if allow_rotation:
-        slot_is_landscape = slot_w > slot_h
-        page_is_portrait = page_h > page_w
-        if (slot_is_landscape and page_is_portrait) or (not slot_is_landscape and not page_is_portrait):
-            eff_w, eff_h = page_h, page_w
+    if allow_rotation and should_rotate_into_slot(page_w, page_h, slot_w, slot_h):
+        eff_w, eff_h = page_h, page_w
 
     target_w, target_h, factor = resolve_scale(
         scale_mode, eff_w, eff_h, slot_w, slot_h, scale_percent)
@@ -112,6 +109,26 @@ def check_fit(page_w: float, page_h: float, slot_w: float, slot_h: float,
 # portrait duplex and has nothing left to decide.
 
 BACK_ROTATIONS = (0, 180)
+
+
+def should_rotate_into_slot(page_w: float, page_h: float,
+                            slot_w: float, slot_h: float) -> bool:
+    """Should this source page be turned a quarter turn to fill its slot?
+
+    **A portrait page is never rotated.** Owner's rule, 2026-08-16: a portrait
+    document must come off the printer readable without turning the sheet, even
+    though standing it upright in a wide slot wastes some width. What goes in
+    portrait comes out portrait.
+
+    A landscape source still turns to fit a portrait slot — left upright it
+    would be squeezed to a fraction of the slot height and be less readable,
+    not more.
+    """
+    page_is_portrait = page_h > page_w
+    if page_is_portrait:
+        return False
+    slot_is_portrait = slot_h > slot_w
+    return slot_is_portrait
 
 
 def normalise_back_rotation(value) -> int:
@@ -238,13 +255,7 @@ def perform_nup(
                 in_page = doc_in[in_pg_idx]
                 in_w, in_h = in_page.rect.width, in_page.rect.height
 
-                # Auto-detect if input page needs rotation to best fit slot orientation
-                # (e.g., portrait page in landscape slot)
-                slot_is_landscape = slot_width > slot_height
-                page_is_portrait = in_h > in_w
-                needs_rotation = (slot_is_landscape and page_is_portrait) or (not slot_is_landscape and not page_is_portrait)
-
-                if needs_rotation:
+                if should_rotate_into_slot(in_w, in_h, slot_width, slot_height):
                     rot = 270
                     eff_w, eff_h = in_h, in_w
                 else:

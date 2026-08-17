@@ -89,16 +89,16 @@ def test_custom_over_100_percent_overflows():
     assert r["overflow_pct"] == pytest.approx(50.0, abs=0.5)
 
 
-def test_rotation_is_considered_when_matching_page_to_slot():
-    """A portrait page into a landscape slot is rotated before fitting, so it
-    must not be reported as overflowing on width."""
-    r = nup_imposer.check_fit(A4_W, A4_H, A4_H, A4_W,
-                              scale_mode="actual", allow_rotation=True)
-    assert r["fits"]
+def test_fit_check_uses_the_same_no_rotate_portraits_rule():
+    """A portrait page is never turned, so it is measured upright — and against
+    a landscape slot that means it really does overflow on height. The check
+    must agree with the imposer or the customer is warned about the wrong thing."""
+    r = nup_imposer.check_fit(A4_W, A4_H, A4_H, A4_W, scale_mode="actual")
+    assert not r["fits"], "portrait page measured as if it had been turned"
 
-    r_no_rot = nup_imposer.check_fit(A4_W, A4_H, A4_H, A4_W,
-                                     scale_mode="actual", allow_rotation=False)
-    assert not r_no_rot["fits"]
+    # A landscape source into a portrait slot still turns, so it fits.
+    r_land = nup_imposer.check_fit(A4_H, A4_W, A4_W, A4_H, scale_mode="actual")
+    assert r_land["fits"]
 
 
 # ── end to end through the planner ────────────────────────────────────────────

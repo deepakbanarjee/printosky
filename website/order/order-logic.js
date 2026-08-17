@@ -29,6 +29,16 @@ const NUP_GRID = {
 };
 const MARGIN_PT = 20, GUTTER_PT = 10, FIT_TOLERANCE_PT = 1;
 
+/**
+ * Should a source page be turned a quarter turn to fill its slot?
+ * Mirrors nup_imposer.should_rotate_into_slot — a PORTRAIT page is never
+ * rotated, so a portrait document reads without turning the sheet.
+ */
+export function shouldRotateIntoSlot(pageW, pageH, slotW, slotH) {
+  if (pageH > pageW) return false;      // portrait source — never rotate
+  return slotH > slotW;                 // landscape source into a portrait slot
+}
+
 export function resolveScaleFactor({ mode, effW, effH, slotW, slotH, percent = 100 }) {
   if (effW <= 0 || effH <= 0) return 1;
   const fit = Math.min(slotW / effW, slotH / effH);
@@ -67,10 +77,7 @@ export function checkPrintArea({ pages, paperSize = 'A4', nup = 1,
 
   (pages || []).forEach((pg, i) => {
     if (!pg || !pg.width || !pg.height) return;
-    // The imposer rotates a page whose orientation mismatches the slot.
-    const slotIsLandscape = slotW > slotH;
-    const pageIsPortrait = pg.height > pg.width;
-    const rotate = (slotIsLandscape && pageIsPortrait) || (!slotIsLandscape && !pageIsPortrait);
+    const rotate = shouldRotateIntoSlot(pg.width, pg.height, slotW, slotH);
     const effW = rotate ? pg.height : pg.width;
     const effH = rotate ? pg.width : pg.height;
 
@@ -95,9 +102,7 @@ export function maxFittingPercent(opts) {
   let smallest = Infinity;
   (opts.pages || []).forEach((pg) => {
     if (!pg || !pg.width || !pg.height) return;
-    const slotIsLandscape = slotW > slotH;
-    const pageIsPortrait = pg.height > pg.width;
-    const rotate = (slotIsLandscape && pageIsPortrait) || (!slotIsLandscape && !pageIsPortrait);
+    const rotate = shouldRotateIntoSlot(pg.width, pg.height, slotW, slotH);
     const effW = rotate ? pg.height : pg.width;
     const effH = rotate ? pg.width : pg.height;
     smallest = Math.min(smallest, Math.min(slotW / effW, slotH / effH));

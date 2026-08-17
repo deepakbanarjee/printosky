@@ -90,7 +90,8 @@ def test_no_rotation_leaves_backs_sequential():
 
 def test_no_rotation_matches_front_orientation():
     sides = _impose(8, cols=1, rows=2, back_rotation=0, direction="vertical")
-    assert _rotations(sides[0]) == _rotations(sides[1]) == {270}
+    # Portrait sources are never turned, so both sides sit at 0.
+    assert _rotations(sides[0]) == _rotations(sides[1]) == {0}
 
 
 # ── back_rotation = 180 : a rigid turn of the whole side ──────────────────────
@@ -113,11 +114,11 @@ def test_180_also_turns_the_content():
     assert _rotations(sides[1]) == {180}
 
 
-def test_180_on_a_rotated_layout_adds_to_the_slot_rotation():
+def test_180_on_a_single_column_reverses_the_rows():
     sides = _impose(8, cols=1, rows=2, back_rotation=180, direction="vertical")
 
-    assert _rotations(sides[0]) == {270}
-    assert _rotations(sides[1]) == {90}        # 270 + 180
+    assert _rotations(sides[0]) == {0}
+    assert _rotations(sides[1]) == {180}
     assert _order(sides[0]) == ["1", "2"]
     assert _order(sides[1]) == ["4", "3"]      # single column: rows reverse
 
@@ -161,3 +162,35 @@ def test_binding_edge_model_is_removed():
     """duplex_mirror_axis reversed columns without rotating content — a mirror,
     not a rigid motion. It cannot come back without reintroducing the bug."""
     assert not hasattr(nup_imposer, "duplex_mirror_axis")
+
+
+# ── portrait pages are never turned ───────────────────────────────────────────
+
+def test_portrait_source_is_never_rotated():
+    """Owner's rule: a portrait document reads without turning the sheet, even
+    where turning it would fill the slot better."""
+    portrait_slot_shapes = [
+        (1, 2),   # 2-up: wide, short slots — the case that used to rotate
+        (2, 3),   # 6-up: near-square slots
+        (2, 2), (3, 3),
+    ]
+    for cols, rows in portrait_slot_shapes:
+        sides = _impose(8, cols=cols, rows=rows, back_rotation=0)
+        assert _rotations(sides[0]) == {0}, f"{cols}x{rows} rotated a portrait page"
+
+
+@pytest.mark.parametrize("page_w,page_h,slot_w,slot_h,expected", [
+    # portrait source — never, whatever the slot
+    (595, 842, 555, 396, False),      # wide slot: would fill better turned
+    (595, 842, 272, 396, False),
+    (595, 842, 842, 595, False),
+    # landscape source into a portrait slot — still turns
+    (842, 595, 272, 396, True),
+    # landscape source into a landscape slot — already fits
+    (842, 595, 555, 396, False),
+    # square-ish source counts as landscape (not taller than wide)
+    (500, 500, 272, 396, True),
+])
+def test_should_rotate_into_slot(page_w, page_h, slot_w, slot_h, expected):
+    assert nup_imposer.should_rotate_into_slot(
+        page_w, page_h, slot_w, slot_h) is expected
