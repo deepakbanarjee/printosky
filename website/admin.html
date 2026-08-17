@@ -2011,9 +2011,14 @@
         <label>Service Type</label>
         <input type="text" id="nj-service" placeholder="e.g. B&W Print, Colour Print, Binding…">
       </div>
-      <label style="display:flex;align-items:center;gap:.5rem;font-size:.7rem;color:var(--muted);font-family:var(--mono);margin-bottom:.6rem;cursor:pointer">
-        <input type="checkbox" id="nj-student" onchange="njFetchQuote()"> Student discount
-      </label>
+      <div style="display:flex;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:.5rem;font-size:.7rem;color:var(--muted);font-family:var(--mono);cursor:pointer">
+          <input type="checkbox" id="nj-student" onchange="njFetchQuote()"> Student rate (₹2)
+        </label>
+        <label style="display:flex;align-items:center;gap:.5rem;font-size:.7rem;color:var(--muted);font-family:var(--mono);cursor:pointer">
+          <input type="checkbox" id="nj-extra-disc" onchange="njFetchQuote()"> Extra discount (₹1.50)
+        </label>
+      </div>
       <div class="nj-quote-box">
         <div>
           <div class="nj-quote-lbl">Estimated Quote</div>
@@ -2828,6 +2833,7 @@ let selectedJob   = null;
 let editItems     = [];      // [ { item_number, page_list, colour, sides, layout, copies, paper_gsm, printer, status, pages } ]
 let editFinishing = "none";
 let editIsStudent = false;
+let editExtraDisc = false;
 let editUrgent    = false;
 let editPaperSize = "A4";
 let quoteTimer    = null;
@@ -2881,7 +2887,8 @@ function panelHTML() {
             </select>
           </div>
           <div class="pp-check-row">
-            <label><input type="checkbox" id="jp-student" onchange="editIsStudent=this.checked; scheduleQuote()"> Student rate</label>
+            <label><input type="checkbox" id="jp-student" onchange="editIsStudent=this.checked; scheduleQuote()"> Student rate (₹2)</label>
+            <label><input type="checkbox" id="jp-extra-disc" onchange="editExtraDisc=this.checked; scheduleQuote()"> Extra discount (₹1.50)</label>
             <label><input type="checkbox" id="jp-urgent"  onchange="editUrgent=this.checked; scheduleQuote()"> Urgent +Rs.20</label>
           </div>
           <div class="quote-box">
@@ -2939,6 +2946,7 @@ function selectJob(jobId) {
   // Init edit state from job
   editFinishing = job.finishing || "none";
   editIsStudent = !!(job.is_student);
+  editExtraDisc = !!(job.extra_discount);
   editUrgent    = !!(job.urgent);
   editPaperSize = job.paper_size || "A4";
   editItems = [{
@@ -3419,6 +3427,7 @@ function renderJobPanel() {
   document.getElementById("jp-finishing").value   = editFinishing;
   document.getElementById("jp-paper-size").value  = editPaperSize;
   document.getElementById("jp-student").checked   = editIsStudent;
+  document.getElementById("jp-extra-disc").checked = editExtraDisc;
   document.getElementById("jp-urgent").checked    = editUrgent;
 
   const done       = j.status === "Completed";
@@ -3537,7 +3546,7 @@ async function fetchAndShowQuote() {
       const pt = it.colour === "col" ? "A4_col" : "A4_BW";
       const p  = new URLSearchParams({ pages, paper_type: pt, sides: it.sides,
         layout: it.layout, copies: it.copies, finishing: "none",
-        is_student: editIsStudent, urgent: false, paper_size: editPaperSize });
+        is_student: editIsStudent, extra_discount: editExtraDisc, urgent: false, paper_size: editPaperSize });
       const r = await fetch(`${STORE_PC_URL}/quote?${p}`);
       if (!r.ok) continue;
       const q = await r.json();
@@ -3551,7 +3560,7 @@ async function fetchAndShowQuote() {
     if (editFinishing && editFinishing !== "none") {
       const fp = new URLSearchParams({ pages: totalPages, paper_type: "A4_BW",
         sides: "ss", finishing: editFinishing, is_student: editIsStudent,
-        urgent: editUrgent, paper_size: editPaperSize });
+        extra_discount: editExtraDisc, urgent: editUrgent, paper_size: editPaperSize });
       const fr = await fetch(`${STORE_PC_URL}/quote?${fp}`);
       if (fr.ok) {
         const fq = await fr.json();
@@ -3580,6 +3589,7 @@ async function saveJobSpecs() {
       staff_id:    sessionStorage.getItem("staff_id"),
       finishing:   editFinishing,
       is_student:  editIsStudent,
+      extra_discount: editExtraDisc,
       urgent:      editUrgent,
       paper_size:  editPaperSize,
       print_items: editItems.map((it, idx) => ({
@@ -6367,6 +6377,7 @@ function openNewJobModal() {
   document.getElementById("nj-finishing").value = "none";
   document.getElementById("nj-service").value = "";
   document.getElementById("nj-student").checked = false;
+  document.getElementById("nj-extra-disc").checked = false;
   document.getElementById("nj-quote-val").textContent = "₹—";
   document.getElementById("nj-quote-breakdown").textContent = "—";
   document.getElementById("nj-amount").value  = "";
@@ -6473,9 +6484,10 @@ async function njFetchQuote() {
     const paper    = document.getElementById("nj-paper").value;
     const finishing= document.getElementById("nj-finishing").value;
     const student  = document.getElementById("nj-student").checked;
+    const extraDisc= document.getElementById("nj-extra-disc").checked;
 
     try {
-      const qs = `pages=${pages}&colour=${colour}&sides=${sides}&paper_size=${paper}&finishing=${finishing}&copies=${copies}&is_student=${student}`;
+      const qs = `pages=${pages}&colour=${colour}&sides=${sides}&paper_size=${paper}&finishing=${finishing}&copies=${copies}&is_student=${student}&extra_discount=${extraDisc}`;
       const r  = await fetch(`${PC}/quote?${qs}`);
       const d  = await r.json();
       njQuotedAmount = d.total || 0;
@@ -6541,6 +6553,7 @@ async function njSubmit() {
     finishing:       document.getElementById("nj-finishing").value,
     service_type:    document.getElementById("nj-service").value.trim(),
     is_student:      document.getElementById("nj-student").checked,
+    extra_discount:  document.getElementById("nj-extra-disc").checked,
     amount_quoted:   njQuotedAmount,
     amount_collected: mode === "full"    ? amountInput : 0,
     amount_partial:   mode === "partial" ? amountInput : 0,

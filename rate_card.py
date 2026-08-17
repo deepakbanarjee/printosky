@@ -34,8 +34,8 @@ import logging
 PRINT_RATES = {
     # A4 B&W — same rate SS and DS (billing per sheet)
     "A4_BW":              {"ss": 3.0, "ds": 3.0},
-    "A4_BW_student_100":  {"ss": 2.0, "ds": 2.0},   # student, ≤100 sheets
-    "A4_BW_student_100p": {"ss": 1.5, "ds": 1.5},   # student, >100 sheets
+    "A4_BW_student":      {"ss": 2.0, "ds": 2.0},   # student rate: 2 Rs/sheet
+    "A4_BW_extra_disc":   {"ss": 1.5, "ds": 1.5},   # extra discount: 1.50 Rs/sheet
 
     # A4 Colour — tiered by total sheet count (see get_print_rate)
     "A4_col_30":          {"ss": 10.0, "ds": 20.0},  # ≤30 sheets
@@ -263,22 +263,25 @@ def get_thermal_binding_rate(sheets: int) -> int:
 
 
 def get_print_rate(paper_type: str, sides: str, sheets: int,
-                   is_student: bool = False) -> float:
+                   is_student: bool = False, extra_discount: bool = False) -> float:
     """
     Get per-sheet print rate based on paper type, sides, sheet count and
-    student status.
+    discount flags.
 
     paper_type: 'A4_BW' | 'A4_col' | 'A4_bond_col' | 'Legal_BW' | 'A3_BW' | etc.
     sides:      'ss' | 'ds'
     sheets:     total sheet count (used for colour tier selection)
-    is_student: apply student discount (B&W only)
+    is_student: apply student rate (B&W only, 2 Rs/sheet)
+    extra_discount: apply extra discount (B&W only, 1.50 Rs/sheet, overrides student rate)
     """
     sides = sides if sides in ("ss", "ds") else "ss"
 
-    # A4 B&W — student rate override
-    if paper_type == "A4_BW" and is_student:
-        key = "A4_BW_student_100" if sheets <= 100 else "A4_BW_student_100p"
-        return PRINT_RATES[key].get(sides, PRINT_RATES[key]["ss"])
+    # A4 B&W — discount rate overrides
+    if paper_type == "A4_BW":
+        if extra_discount:
+            return PRINT_RATES["A4_BW_extra_disc"].get(sides, PRINT_RATES["A4_BW_extra_disc"]["ss"])
+        elif is_student:
+            return PRINT_RATES["A4_BW_student"].get(sides, PRINT_RATES["A4_BW_student"]["ss"])
 
     # A4 Colour — tiered by sheet count
     if paper_type == "A4_col":
@@ -297,7 +300,7 @@ def get_print_rate(paper_type: str, sides: str, sheets: int,
 
 def calculate_item_cost(pages: int, paper_type: str, sides: str,
                         layout: str, copies: int,
-                        is_student: bool = False) -> dict:
+                        is_student: bool = False, extra_discount: bool = False) -> dict:
     """
     Calculate print cost for a single print item (one line in a mixed job).
 
@@ -311,7 +314,7 @@ def calculate_item_cost(pages: int, paper_type: str, sides: str,
     # per-page rate. B&W keeps the per-sheet model (duplex still ~halves it).
     bill_sides = "ss" if is_colour else sides
     sheets = calc_sheets(pages, bill_sides, layout)
-    rate   = get_print_rate(paper_type, bill_sides, sheets, is_student)
+    rate   = get_print_rate(paper_type, bill_sides, sheets, is_student, extra_discount)
     cost   = round(sheets * copies * rate, 2)
 
     sides_label  = "SS" if sides == "ss" else "DS"
@@ -375,6 +378,7 @@ def calculate_finishing_cost(finishing: str, sheets: int,
 
 def calculate_quote(print_items: list, finishing: str = "none",
                     urgent: bool = False, is_student: bool = False,
+                    extra_discount: bool = False,
                     paper_size: str = "A4",
                     project_cover: str = "white",
                     with_print: bool = True) -> dict:
@@ -406,7 +410,7 @@ def calculate_quote(print_items: list, finishing: str = "none",
         layout     = item.get("layout", "1-up")
         copies     = int(item.get("copies", 1))
 
-        r = calculate_item_cost(pages, ptype, sides, layout, copies, is_student)
+        r = calculate_item_cost(pages, ptype, sides, layout, copies, is_student, extra_discount)
         total_sheets += r["sheets"]
         print_cost   += r["print_cost"]
         prefix = f"Item {i}: " if len(print_items) > 1 else ""

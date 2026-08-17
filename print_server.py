@@ -831,7 +831,7 @@ def _send_whatsapp(phone: str, message: str) -> bool:
 
 
 def _job_quote(print_items: list, finishing: str, is_student: bool,
-               urgent: bool, paper_size: str = "A4") -> dict:
+               urgent: bool, extra_discount: bool = False, paper_size: str = "A4") -> dict:
     """Calculate quote using rate_card. Returns {total, print_cost, finishing_cost, breakdown}."""
     if _rc is None:
         return {"total": 0, "print_cost": 0, "finishing_cost": 0, "breakdown": []}
@@ -839,6 +839,7 @@ def _job_quote(print_items: list, finishing: str, is_student: bool,
         print_items=print_items,
         finishing=finishing or "none",
         is_student=bool(is_student),
+        extra_discount=bool(extra_discount),
         urgent=bool(urgent),
         paper_size=paper_size or "A4",
     )
@@ -873,13 +874,14 @@ def handle_update_job(body: dict) -> dict:
     PUT /update-job
     Save print_items + finishing + flags to DB. Recalculate and store quote.
     """
-    job_id    = body.get("job_id", "")
-    staff_id  = body.get("staff_id", "")
-    finishing = body.get("finishing", "none")
-    is_student= bool(body.get("is_student", False))
-    urgent    = bool(body.get("urgent", False))
-    paper_size= body.get("paper_size", "A4")
-    items_raw = body.get("print_items", [])
+    job_id        = body.get("job_id", "")
+    staff_id      = body.get("staff_id", "")
+    finishing     = body.get("finishing", "none")
+    is_student    = bool(body.get("is_student", False))
+    extra_discount= bool(body.get("extra_discount", False))
+    urgent        = bool(body.get("urgent", False))
+    paper_size    = body.get("paper_size", "A4")
+    items_raw     = body.get("print_items", [])
 
     if not job_id:
         return {"ok": False, "error": "job_id required"}
@@ -921,14 +923,14 @@ def handle_update_job(body: dict) -> dict:
 
     # Update main job flags
     conn.execute("""
-        UPDATE jobs SET finishing=?, is_student=?, urgent=?, paper_size=?,
+        UPDATE jobs SET finishing=?, is_student=?, extra_discount=?, urgent=?, paper_size=?,
                notes=COALESCE(notes||' | ','') || ?
         WHERE job_id=?
-    """, (finishing, int(is_student), int(urgent), paper_size,
+    """, (finishing, int(is_student), int(extra_discount), int(urgent), paper_size,
           f"Specs updated at {_now()} by {staff_id}", job_id))
 
     # Calculate quote
-    quote = _job_quote(rc_items, finishing, is_student, urgent, paper_size)
+    quote = _job_quote(rc_items, finishing, is_student, urgent, extra_discount, paper_size)
     conn.execute("UPDATE jobs SET amount_quoted=? WHERE job_id=?",
                  (quote["total"], job_id))
 
@@ -1205,6 +1207,7 @@ def handle_create_job(body: dict) -> dict:
     finishing        = body.get("finishing", "none")
     pages            = max(1, int(body.get("pages") or 1))
     is_student       = bool(body.get("is_student", False))
+    extra_discount   = bool(body.get("extra_discount", False))
     urgent           = bool(body.get("urgent", False))
     amount_quoted    = float(body.get("amount_quoted") or 0)
     amount_collected = float(body.get("amount_collected") or 0)
@@ -1240,7 +1243,7 @@ def handle_create_job(body: dict) -> dict:
         rc_items = [{"pages": pages, "paper_type": paper_type_rc,
                      "sides": sides, "layout": "1-up", "copies": copies}]
         try:
-            result = _rc.calculate_quote(rc_items, finishing, urgent, is_student, paper_size)
+            result = _rc.calculate_quote(rc_items, finishing, urgent, is_student, extra_discount, paper_size)
             amount_quoted = result["total"]
         except Exception as exc:
             logging.warning("Quote calc failed for %s: %s", job_id, exc)
@@ -1255,8 +1258,9 @@ def handle_create_job(body: dict) -> dict:
           (job_id, received_at, filename, file_extension, source, sender,
            customer_name, service_type, colour, sides, copies, finishing,
            paper_size, page_count, amount_quoted, amount_collected, amount_partial,
-           payment_mode, override_reason, status, queued_at, filepath, notes, staff_notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           payment_mode, override_reason, status, queued_at, filepath, notes, staff_notes,
+           is_student, extra_discount)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         job_id, now_str,
         filename or "Manual Entry", ext,
@@ -1273,6 +1277,7 @@ def handle_create_job(body: dict) -> dict:
         filepath_stored or None,
         notes or None,
         f"Manual entry at {now_str} by {staff_id}",
+        int(is_student), int(extra_discount),
     ))
     conn.commit()
 
@@ -1414,20 +1419,21 @@ def handle_vendor_return(body: dict) -> dict:
 def handle_quote(qs: dict) -> dict:
     """
     GET /quote?pages=34&paper_type=A4_BW&sides=ds&layout=1-up&copies=1&finishing=spiral
-             &is_student=false&urgent=false
+             &is_student=false&extra_discount=false&urgent=false
     Returns price breakdown without writing to DB.
     """
     if _rc is None:
         return {"total": 0, "error": "rate_card not loaded"}
 
-    pages      = int(qs.get("pages", [1])[0])
-    sides      = qs.get("sides", ["ss"])[0]
-    layout     = qs.get("layout", ["1-up"])[0]
-    copies     = int(qs.get("copies", [1])[0])
-    finishing  = qs.get("finishing", ["none"])[0]
-    is_student = qs.get("is_student", ["false"])[0].lower() in ("true", "1")
-    urgent     = qs.get("urgent",     ["false"])[0].lower() in ("true", "1")
-    paper_size = qs.get("paper_size", ["A4"])[0].upper()
+    pages           = int(qs.get("pages", [1])[0])
+    sides           = qs.get("sides", ["ss"])[0]
+    layout          = qs.get("layout", ["1-up"])[0]
+    copies          = int(qs.get("copies", [1])[0])
+    finishing       = qs.get("finishing", ["none"])[0]
+    is_student      = qs.get("is_student", ["false"])[0].lower() in ("true", "1")
+    extra_discount  = qs.get("extra_discount", ["false"])[0].lower() in ("true", "1")
+    urgent          = qs.get("urgent",     ["false"])[0].lower() in ("true", "1")
+    paper_size      = qs.get("paper_size", ["A4"])[0].upper()
 
     # paper_type: accept explicit param OR derive from colour + paper_size shorthand
     colour_raw = qs.get("colour", [""])[0].lower()
@@ -1440,7 +1446,7 @@ def handle_quote(qs: dict) -> dict:
 
     items = [{"pages": pages, "paper_type": paper_type, "sides": sides,
               "layout": layout, "copies": copies}]
-    result = _rc.calculate_quote(items, finishing, urgent, is_student, paper_size)
+    result = _rc.calculate_quote(items, finishing, urgent, is_student, extra_discount, paper_size)
     sheets = _rc.calc_sheets(pages, sides, layout)
 
     return {
