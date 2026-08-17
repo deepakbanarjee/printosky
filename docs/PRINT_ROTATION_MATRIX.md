@@ -30,19 +30,29 @@ level, where it also checks no orientation flag reaches SumatraPDF.
 
 ## The rules
 
-**1. Choosing landscape turns the back side 180°.** Portrait stays at 0°.
+**1. Choosing landscape turns every page 90°, and turns the back side a further
+180°.** So fronts sit at 90° and backs at 270° — which is −90°. 1-up and N-up
+alike, one turn direction for the whole model.
 
-**2. On single (1-up), landscape also turns the front 90° — so the back lands
-on −90°.** 90 + 180 = 270, which is −90.
+**2. Portrait turns nothing.** Fronts and backs both at 0°, whatever the
+layout.
 
-On N-up, landscape does **not** turn the content: a portrait document must read
-without turning the sheet, even where turning it would fill the slot better. On
-2-up that means roughly 47% scale with white bands either side — the ordinary
-portrait handout look. That is why every N-up front in the matrix sits at 0°,
-and the back on landscape sits at exactly 180°, as specified.
+**3. On a landscape N-up, page 1 lands at the BOTTOM.** The pages are laid out
+in the logical landscape arrangement, and that whole arrangement is turned 90°
+anticlockwise onto the portrait sheet. The landscape sheet's left edge becomes
+the portrait sheet's bottom, so the reader turns the sheet clockwise to read
+it and finds page 1 first:
 
-1-up is the exception because there is no slot to fill: landscape there is the
-customer deliberately asking for a turned page, so it gets one.
+```
+landscape arrangement          on the portrait sheet
++-----+-----+                  +-----+-----+
+|  1  |  2  |        -->       |  2  |  4  |
++-----+-----+                  +-----+-----+
+|  3  |  4  |                  |  1  |  3  |
++-----+-----+                  +-----+-----+
+```
+
+`nup_imposer.slot_position` does the placement; `layout_rotation` the angle.
 
 Notice the back is always exactly 180° from the front, or not turned at all.
 That is not a coincidence — the duplex unit plus the reader's flip is a rigid
@@ -55,13 +65,13 @@ When the back turns 180°, **both slot axes reverse and the content turns with
 them**:
 
 ```
-front (1x2)          back (1x2), turned 180
-+---------+          +---------+
-| 1 @ 0   |          | 4 @ 180 |
-+---------+          +---------+
-| 2 @ 0   |          | 3 @ 180 |
-+---------+          +---------+
-                     page order reversed AND content upside down
+2-up landscape front     back, turned a rigid 180
++-----------+            +-----------+
+|  2 @ 90   |            |  3 @ 270  |
++-----------+            +-----------+
+|  1 @ 90   |            |  4 @ 270  |
++-----------+            +-----------+
+                         slots reversed AND content turned with them
 ```
 
 Reversing one axis *without* turning the content is a mirror. That was the old
@@ -92,20 +102,20 @@ sheet as it prints.
 | 1-up | landscape | vertical | 1×1 | 1@90° | 2@270° | 180° |
 | 2-up | portrait | horizontal | 1×2 | 1@0° 2@0° | 3@0° 4@0° | 0° |
 | 2-up | portrait | vertical | 1×2 | 1@0° 2@0° | 3@0° 4@0° | 0° |
-| 2-up | landscape | horizontal | 1×2 | 1@0° 2@0° | 4@180° 3@180° | 180° |
-| 2-up | landscape | vertical | 1×2 | 1@0° 2@0° | 4@180° 3@180° | 180° |
+| 2-up | landscape | horizontal | 1×2 | 2@90° 1@90° | 3@270° 4@270° | 180° |
+| 2-up | landscape | vertical | 1×2 | 2@90° 1@90° | 3@270° 4@270° | 180° |
 | 4-up | portrait | horizontal | 2×2 | 1@0° 2@0° 3@0° 4@0° | 5@0° 6@0° 7@0° 8@0° | 0° |
 | 4-up | portrait | vertical | 2×2 | 1@0° 3@0° 2@0° 4@0° | 5@0° 7@0° 6@0° 8@0° | 0° |
-| 4-up | landscape | horizontal | 2×2 | 1@0° 2@0° 3@0° 4@0° | 8@180° 7@180° 6@180° 5@180° | 180° |
-| 4-up | landscape | vertical | 2×2 | 1@0° 3@0° 2@0° 4@0° | 8@180° 6@180° 7@180° 5@180° | 180° |
+| 4-up | landscape | horizontal | 2×2 | 2@90° 4@90° 1@90° 3@90° | 7@270° 5@270° 8@270° 6@270° | 180° |
+| 4-up | landscape | vertical | 2×2 | 3@90° 4@90° 1@90° 2@90° | 6@270° 5@270° 8@270° 7@270° | 180° |
 | 6-up | portrait | horizontal | 2×3 | 1@0° 2@0° 3@0° 4@0° 5@0° 6@0° | 7@0° 8@0° 9@0° 10@0° 11@0° 12@0° | 0° |
 | 6-up | portrait | vertical | 2×3 | 1@0° 4@0° 2@0° 5@0° 3@0° 6@0° | 7@0° 10@0° 8@0° 11@0° 9@0° 12@0° | 0° |
-| 6-up | landscape | horizontal | 2×3 | 1@0° 2@0° 3@0° 4@0° 5@0° 6@0° | 12@180° 11@180° 10@180° 9@180° 8@180° 7@180° | 180° |
-| 6-up | landscape | vertical | 2×3 | 1@0° 4@0° 2@0° 5@0° 3@0° 6@0° | 12@180° 9@180° 11@180° 8@180° 10@180° 7@180° | 180° |
-| 9-up | portrait | horizontal | 3×3 | 1@0° … 9@0° | 10@0° … 18@0° | 0° |
-| 9-up | portrait | vertical | 3×3 | 1@0° 4@0° 7@0° … | 10@0° 13@0° 16@0° … | 0° |
-| 9-up | landscape | horizontal | 3×3 | 1@0° … 9@0° | 18@180° 17@180° … 10@180° | 180° |
-| 9-up | landscape | vertical | 3×3 | 1@0° 4@0° 7@0° … | 18@180° 15@180° 12@180° … | 180° |
+| 6-up | landscape | horizontal | 2×3 | 3@90° 6@90° 2@90° 5@90° 1@90° 4@90° | 10@270° 7@270° 11@270° 8@270° 12@270° 9@270° | 180° |
+| 6-up | landscape | vertical | 2×3 | 5@90° 6@90° 3@90° 4@90° 1@90° 2@90° | 8@270° 7@270° 10@270° 9@270° 12@270° 11@270° | 180° |
+| 9-up | portrait | horizontal | 3×3 | 1@0° 2@0° 3@0° 4@0° 5@0° 6@0° 7@0° 8@0° 9@0° | 10@0° 11@0° 12@0° 13@0° 14@0° 15@0° 16@0° 17@0° 18@0° | 0° |
+| 9-up | portrait | vertical | 3×3 | 1@0° 4@0° 7@0° 2@0° 5@0° 8@0° 3@0° 6@0° 9@0° | 10@0° 13@0° 16@0° 11@0° 14@0° 17@0° 12@0° 15@0° 18@0° | 0° |
+| 9-up | landscape | horizontal | 3×3 | 3@90° 6@90° 9@90° 2@90° 5@90° 8@90° 1@90° 4@90° 7@90° | 16@270° 13@270° 10@270° 17@270° 14@270° 11@270° 18@270° 15@270° 12@270° | 180° |
+| 9-up | landscape | vertical | 3×3 | 7@90° 8@90° 9@90° 4@90° 5@90° 6@90° 1@90° 2@90° 3@90° | 12@270° 11@270° 10@270° 15@270° 14@270° 13@270° 18@270° 17@270° 16@270° | 180° |
 
 Simplex is the front row of each combination, with no back side. Add
 `--simplex` to the tool to print those too.
@@ -117,18 +127,18 @@ positions, which is easier to check against paper:
 
 ```
 2-up  landscape horizontal duplex   portrait sheet, grid 1x2  back turn 180deg
-  sheet 1 [FRONT]    1@0
-                     2@0
-  sheet 1 [BACK ]    4@180
-                     3@180
+  sheet 1 [FRONT]    2@90 
+                     1@90 
+  sheet 1 [BACK ]    3@270
+                     4@270
 
 6-up  landscape horizontal duplex   portrait sheet, grid 2x3  back turn 180deg
-  sheet 1 [FRONT]    1@0     2@0
-                     3@0     4@0
-                     5@0     6@0
-  sheet 1 [BACK ]   12@180  11@180
-                    10@180   9@180
-                     8@180   7@180
+  sheet 1 [FRONT]    3@90    6@90 
+                     2@90    5@90 
+                     1@90    4@90 
+  sheet 1 [BACK ]   10@270   7@270
+                    11@270   8@270
+                    12@270   9@270
 ```
 
 ---
@@ -150,24 +160,19 @@ sheet swaps its axes and lands back on the same shape.
 On `auto` — or nothing — the orientation resolves to portrait. Nothing turns
 unless someone asks for it.
 
-## The N-up landscape switch
+## One turn direction, everywhere
 
-`nup_imposer.TRANSPOSE_LANDSCAPE_NUP`, currently **False**.
-
-* **False** (the matrix above): an N-up landscape selection keeps pages
-  upright. Front 0°, back 180°.
-* **True**: it also turns the content 90°, so the ink matches what a landscape
-  sheet would have carried and pages fill their slots. Front 90°, back 270° —
-  the reader turns the sheet, and the back no longer sits on 180°.
-
-1-up is unaffected either way; it always honours the landscape choice.
+There is no per-layout switch. Landscape always turns the content 90° and
+always transposes the arrangement, 1-up and N-up alike. An earlier draft kept
+N-up pages upright at 0°; that was rejected on the sample sheets — a landscape
+selection means a landscape reading, so the pages turn and fill their slots.
 
 ### Landscape sources
 
-A landscape source page still turns 90° to fit a portrait-shaped slot — left
-upright it would be squeezed smaller and be harder to read, so the
-"never turn a portrait" objection does not apply. The back-side +180° rides on
-top exactly as in the table.
+On a PORTRAIT layout, a landscape source page still turns 90° to fit a
+portrait-shaped slot — left upright it would be squeezed smaller and be harder
+to read. On a landscape layout the 90° is already applied to everything, so
+there is nothing extra to do. The back-side +180° rides on top either way.
 
 ## Which turn is +90?
 
@@ -175,7 +180,8 @@ top exactly as in the table.
 back are 180° apart either way, so page *registration* is unaffected by the
 handedness — but a 1-up landscape sheet will read when turned one way rather
 than the other. If the store wants the opposite handedness, swap 90 ↔ 270 in
-`nup_imposer.layout_rotation` and nothing else changes.
+`nup_imposer.layout_rotation`, and flip the anticlockwise turn in
+`slot_position` to match, or page 1 stops landing where it should.
 
 ---
 
