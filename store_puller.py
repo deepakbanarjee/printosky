@@ -224,7 +224,7 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
                 "paper_size": paper_size,
                 "orientation": orientation,
                 "colour_mode": c_mode,
-                "sides": "simplex"
+                "sides": "duplex"
             }
 
         # Mixed-colour jobs are split into ordered B&W/colour sub-jobs. Each
