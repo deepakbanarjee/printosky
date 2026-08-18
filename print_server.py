@@ -2191,8 +2191,12 @@ class PrintHandler(BaseHTTPRequestHandler):
             try:
                 with open(txt_path, "r", encoding="utf-8") as f:
                     content_text = f.read()
-            except Exception:
-                pass
+            except OSError as exc:
+                # The file is there but unreadable. Falls through to the cloud
+                # copy below, but say so — a silently empty transcript reads to
+                # the operator exactly like one that was never transcribed.
+                logging.warning("transcript %s exists but could not be read: %s",
+                                txt_path, exc)
 
         if not content_text and os.environ.get("SUPABASE_URL"):
             try:
