@@ -23,11 +23,13 @@ BILLING RULE (confirmed with owner):
   Layout 2-up: pages = ceil(original/2) before applying sides rule.
   Layout 4-up: pages = ceil(original/4) before applying sides rule.
 
-B&W RATE HIERARCHY (highest to lowest priority):
-  1. Extra discount: 1.50 Rs/sheet (if extra_discount=True)
-  2. Student rate: 2.0 Rs/sheet (if is_student=True)
-  3. Bulk rate: 1.25 Rs/sheet (if sheets > 1000)
-  4. Standard rate: 3.0 Rs/sheet (default)
+B&W RATE HIERARCHY — A4 B&W (highest to lowest priority):
+  1. Extra discount: 1.50 Rs/sheet (if extra_discount=True) — permanent override
+  2. Student rate: 2.0 Rs/sheet (if is_student=True) — permanent override
+  3. Volume-based tiering (if no discount flags):
+     a. ≤100 sheets: 3.0 Rs/sheet (standard rate)
+     b. 101–1000 sheets: 1.5 Rs/sheet (bulk tier)
+     c. >1000 sheets: 1.25 Rs/sheet (volume discount)
 """
 
 import math
@@ -41,10 +43,11 @@ import logging
 
 PRINT_RATES = {
     # A4 B&W — same rate SS and DS (billing per sheet, tiered by volume)
-    "A4_BW":              {"ss": 3.0, "ds": 3.0},   # ≤1000 sheets
-    "A4_BW_bulk":         {"ss": 1.25, "ds": 1.25}, # >1000 sheets: bulk rate
-    "A4_BW_student":      {"ss": 2.0, "ds": 2.0},   # student rate: 2 Rs/sheet
-    "A4_BW_extra_disc":   {"ss": 1.5, "ds": 1.5},   # extra discount: 1.50 Rs/sheet
+    "A4_BW_100":          {"ss": 3.0, "ds": 3.0},   # ≤100 sheets: standard rate
+    "A4_BW_1000":         {"ss": 1.5, "ds": 1.5},   # 101-1000 sheets: bulk tier
+    "A4_BW_bulk":         {"ss": 1.25, "ds": 1.25}, # >1000 sheets: volume discount
+    "A4_BW_student":      {"ss": 2.0, "ds": 2.0},   # student rate: 2 Rs/sheet (override)
+    "A4_BW_extra_disc":   {"ss": 1.5, "ds": 1.5},   # extra discount: 1.50 Rs/sheet (override)
 
     # A4 Colour — tiered by total sheet count (see get_print_rate)
     "A4_col_30":          {"ss": 10.0, "ds": 20.0},  # ≤30 sheets
@@ -280,19 +283,24 @@ def get_print_rate(paper_type: str, sides: str, sheets: int,
     paper_type: 'A4_BW' | 'A4_col' | 'A4_bond_col' | 'Legal_BW' | 'A3_BW' | etc.
     sides:      'ss' | 'ds'
     sheets:     total sheet count (used for colour tier selection + bulk rates)
-    is_student: apply student rate (B&W only, 2 Rs/sheet)
-    extra_discount: apply extra discount (B&W only, 1.50 Rs/sheet, overrides student rate)
+    is_student: apply student rate (B&W only, 2 Rs/sheet override)
+    extra_discount: apply extra discount (B&W only, 1.50 Rs/sheet override)
     """
     sides = sides if sides in ("ss", "ds") else "ss"
 
-    # A4 B&W — discount rate overrides, then bulk rate for volume
+    # A4 B&W — discount overrides take priority, then volume-based tiering
     if paper_type == "A4_BW":
         if extra_discount:
             return PRINT_RATES["A4_BW_extra_disc"].get(sides, PRINT_RATES["A4_BW_extra_disc"]["ss"])
         elif is_student:
             return PRINT_RATES["A4_BW_student"].get(sides, PRINT_RATES["A4_BW_student"]["ss"])
+        # Volume-based tiering (published on pricing.html)
         elif sheets > 1000:
             return PRINT_RATES["A4_BW_bulk"].get(sides, PRINT_RATES["A4_BW_bulk"]["ss"])
+        elif sheets > 100:
+            return PRINT_RATES["A4_BW_1000"].get(sides, PRINT_RATES["A4_BW_1000"]["ss"])
+        else:
+            return PRINT_RATES["A4_BW_100"].get(sides, PRINT_RATES["A4_BW_100"]["ss"])
 
     # A4 Colour — tiered by sheet count
     if paper_type == "A4_col":
