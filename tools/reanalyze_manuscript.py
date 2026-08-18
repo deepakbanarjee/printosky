@@ -98,20 +98,10 @@ def reanalyze_file(filename_query):
         img_target.thumbnail((768, 768))
 
         try:
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=[img_target, PROMPT_TEMPLATE],
-                    config=types.GenerateContentConfig(response_logprobs=True)
-                )
-            except Exception as gen_err:
-                if "Logprobs is not enabled" in str(gen_err) or "400" in str(gen_err):
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=[img_target, PROMPT_TEMPLATE]
-                    )
-                else:
-                    raise gen_err
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[img_target, PROMPT_TEMPLATE]
+            )
             raw_text = (response.text or "").strip()
             
             page_words = []
