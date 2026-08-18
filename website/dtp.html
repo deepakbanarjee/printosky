@@ -324,7 +324,7 @@
       
       <div style="display:flex;justify-content:flex-end;gap:8px;">
         <button class="ctrl-btn" style="background:#10b981;color:#fff;" onclick="trExportWord(trActiveFile)">Export Word ⬇</button>
-        <button class="ctrl-btn" style="background:#16a34a;color:#fff;" onclick="trSaveTranscript()">Save Changes</button>
+        <button class="ctrl-btn" id="tr-save-btn" style="background:#16a34a;color:#fff;" onclick="trSaveTranscript()">Save Changes</button>
         <button class="ctrl-btn" style="background:#4b5563;color:#fff;" onclick="trCloseModal()">Close</button>
       </div>
     </div>
@@ -810,12 +810,19 @@ function trOpenPDFInNewTab() {
 
 async function trSaveTranscript() {
   if (!trActiveFile) return;
+  const saveBtn = document.getElementById("tr-save-btn");
   const text = document.getElementById("tr-modal-textarea").value;
   const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
   const fileObj = trFilesList.find(f => f.filename === trActiveFile);
   
   if (!fileObj) return;
-  
+
+  const originalText = saveBtn ? saveBtn.innerText : "Save Changes";
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerText = "Saving...";
+  }
+
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/manuscript_transcripts?id=eq.${fileObj.id}`, {
       method: "PATCH",
@@ -828,13 +835,30 @@ async function trSaveTranscript() {
     });
     
     if (res.ok) {
-      alert("Transcript saved successfully!");
-      trCloseModal();
-      loadTranscripts();
+      fileObj.content = text;
+      if (saveBtn) {
+        saveBtn.innerText = "✓ Saved!";
+        saveBtn.style.background = "#059669";
+        setTimeout(() => {
+          saveBtn.innerText = originalText;
+          saveBtn.style.background = "#16a34a";
+          saveBtn.disabled = false;
+        }, 1500);
+      }
     } else {
       alert("Failed to save to database");
+      if (saveBtn) {
+        saveBtn.innerText = originalText;
+        saveBtn.disabled = false;
+      }
     }
-  } catch (e) { alert("Error saving transcript: " + e.message); }
+  } catch (e) {
+    alert("Error saving transcript: " + e.message);
+    if (saveBtn) {
+      saveBtn.innerText = originalText;
+      saveBtn.disabled = false;
+    }
+  }
 }
 
 function trExportWord(filename) {
