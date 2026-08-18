@@ -4,8 +4,10 @@ name: Printosky crons (SLA watchdog + abandoned book carts + store-PC watch)
 # driven from GitHub Actions instead:
 #   /cron/sla-check       — message the owner if a customer has waited > 1h
 #   /cron/abandoned-carts — nudge customers who left a book order unfinished
-#   /cron/store-pc-check  — alert the owner when the store PC goes up/down,
-#                           with day/week/month logs at closing
+#   /cron/store-pc-check  — per store: alert when a PC goes up/down (with
+#                           day/week/month logs at closing for the main store),
+#                           and when a PC is up but its printer counters have
+#                           frozen — see docs/FAIL_LOUD.md
 on:
   schedule:
     - cron: "*/30 * * * *"   # every 30 minutes (UTC)

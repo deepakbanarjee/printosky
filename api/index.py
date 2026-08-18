@@ -2539,6 +2539,15 @@ STORE_PC_MONITOR_IDS = [s.strip() for s in os.environ.get(
 # liveness is not enough: the cloud also checks that the data is moving.
 STORE_COUNTER_STALE_MIN = int(os.environ.get("STORE_COUNTER_STALE_MIN", "180"))
 
+# Stores that are not expected to write printer counters at all. PRIOFF is a
+# back-office box sharing the Nattika counter's Epson with poll_printers=false,
+# so it will never write a counter row — alerting that its "printer pipeline is
+# dead" would be pure noise, every time, forever. These get liveness monitoring
+# only. A store that HAS printers must never be listed here: silence about a
+# real printer is the failure this whole change exists to prevent.
+STORE_PC_NO_PRINTER_IDS = [s.strip() for s in os.environ.get(
+    "STORE_PC_NO_PRINTER_IDS", "PRIOFF").split(",") if s.strip()]
+
 
 def _sd_week_start(d):
     """Monday of d's week as 'YYYY-MM-DD'."""
@@ -2694,9 +2703,12 @@ def _store_pc_check_one(c, sd, store_id, now_ist, now_iso, digest: bool) -> dict
                           f"Heartbeat resumed at {last_hb_str}."):
                 sent.append("online")
 
-    # Pipeline freshness — only meaningful while the PC is up.
+    # Pipeline freshness — only meaningful while the PC is up, and only for a
+    # store that owns printers in the first place.
     counters_age = _counters_age_min(c, store_id, now_ist)
-    stale = bool(online and (counters_age is None or counters_age > STORE_COUNTER_STALE_MIN))
+    expects_counters = store_id not in STORE_PC_NO_PRINTER_IDS
+    stale = bool(online and expects_counters
+                 and (counters_age is None or counters_age > STORE_COUNTER_STALE_MIN))
     if online and stale and not was_stale:
         if _alert_ops(f"{store_id} printer data has stopped",
                       f"🔴 *{store_id}: printer pipeline dead*\n\n"
@@ -2734,7 +2746,8 @@ def _store_pc_check_one(c, sd, store_id, now_ist, now_iso, digest: bool) -> dict
         "store_id": store_id, "online": online,
         "age_min": round(age_min, 1) if age_min is not None else None,
         "counters_age_min": round(counters_age, 1) if counters_age is not None else None,
-        "counters_stale": stale, "state": new_state, "sent": sent,
+        "counters_stale": stale, "counters_expected": expects_counters,
+        "state": new_state, "sent": sent,
     }
 
 

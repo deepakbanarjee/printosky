@@ -138,6 +138,36 @@ def test_a_store_that_never_wrote_a_counter_is_stale(api):
     assert "never" in api._test_alerts[-1][1]
 
 
+def test_a_box_with_no_printers_of_its_own_is_not_nagged(api):
+    """PRIOFF shares the counter's Epson and does not poll it, so it will never
+    write a counter row. Alerting that its pipeline is dead would fire every
+    30 minutes forever — and an alert channel that cries wolf is how the next
+    real outage gets ignored."""
+    client = _FakeClient(heartbeat=_hb(2), counters=[], status=[{"state": "up"}])
+    result = _run(api, client, store_id="PRIOFF")
+
+    assert result["online"] is True
+    assert result["counters_expected"] is False
+    assert result["counters_stale"] is False
+    assert result["sent"] == []
+    assert api._test_alerts == []
+
+
+def test_a_store_with_printers_is_still_nagged(api):
+    """The exemption must not leak: PRINTK owns an Epson."""
+    client = _FakeClient(heartbeat=_hb(2), counters=[], status=[{"state": "up"}])
+    result = _run(api, client, store_id="PRINTK")
+    assert result["counters_expected"] is True
+    assert result["counters_stale"] is True
+
+
+def test_an_exempt_box_is_still_watched_for_liveness(api):
+    client = _FakeClient(heartbeat=_hb(600), counters=[], status=[{"state": "up"}])
+    result = _run(api, client, store_id="PRIOFF")
+    assert result["online"] is False
+    assert "offline" in result["sent"]
+
+
 # ── PC liveness for non-digest stores ─────────────────────────────────────────
 
 def test_offline_secondary_store_gets_a_plain_alert_not_a_digest(api):

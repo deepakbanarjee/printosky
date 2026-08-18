@@ -86,6 +86,7 @@ Alerts go to the ops WhatsApp number via `whatsapp_notify.send_staff_alert`.
 | `OPS_ALERTS_ENABLED` | `1` | `0` on a dev box: keeps the bookkeeping, sends nothing |
 | `STORE_PC_MONITOR_IDS` | `OSP,PRINTK,PRIOFF` | Stores the cloud cron watches |
 | `STORE_COUNTER_STALE_MIN` | `180` | Minutes of frozen printer counters before the cloud calls a live store PC's pipeline dead |
+| `STORE_PC_NO_PRINTER_IDS` | `PRIOFF` | Boxes with no printers of their own — liveness only, never a frozen-counter alert. Never list a store that HAS printers: silence about a real printer is the failure this all exists to prevent |
 
 ## Where the checks live
 
