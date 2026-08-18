@@ -2000,6 +2000,9 @@ def _build_transcript_docx_bytes(content_text: str) -> bytes:
     from docx.shared import Pt
     import io
 
+    # Strip inline low-confidence markers if present
+    content_text = re.sub(r"\[low:\d+%\](.*?)\[/low\]", r"\1", content_text)
+
     doc = docx.Document()
     lines = content_text.splitlines()
     first_page = True

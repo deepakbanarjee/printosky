@@ -824,8 +824,27 @@ function trRenderConfidenceOverlay() {
   
   // Filter for current page
   const curPageNum = trCurrentPage + 1;
-  const pageItems = confData.filter(item => (item.page || 1) === curPageNum);
-  const lowConfItems = pageItems.filter(item => item.flagged || (item.confidence && item.confidence < 75.0));
+  let pageItems = confData.filter(item => (item.page || 1) === curPageNum);
+  let lowConfItems = pageItems.filter(item => item.flagged || (item.confidence && item.confidence < 75.0));
+
+  // Fallback: parse inline [low:54%]word[/low] tags from current page text
+  if (lowConfItems.length === 0) {
+    const textVal = document.getElementById("tr-modal-textarea") ? document.getElementById("tr-modal-textarea").value : "";
+    const pageRegex = new RegExp(`=== PAGE ${curPageNum} ===([\\s\\S]*?)(?:=== PAGE \\d+ ===|$)`, "i");
+    const pageMatch = textVal.match(pageRegex);
+    const pageText = pageMatch ? pageMatch[1] : textVal;
+    
+    const tagRegex = /\[low:(\d+)%\](.*?)\[\/low\]/g;
+    let match;
+    while ((match = tagRegex.exec(pageText)) !== null) {
+      lowConfItems.push({
+        word: match[2].strip ? match[2].strip() : match[2].trim(),
+        confidence: parseInt(match[1], 10),
+        flagged: true,
+        page: curPageNum
+      });
+    }
+  }
 
   if (!trConfidenceModeActive || lowConfItems.length === 0) {
     if (bar) bar.style.display = "none";
