@@ -129,3 +129,251 @@ function getStoreId() {
   } catch (e) { /* unset/invalid storePcUrl — fall through */ }
   return stored;
 }
+
+// ── Printer fleet per store (shared) ────────────────────────────────────────
+// What is actually installed where, so a console never shows — or offers to
+// print to — a machine the counter does not have:
+//
+//   OSP    (Thriprayar) : Konica Bizhub Pro 1100 (B&W) + Epson EM-C8100 (colour)
+//   PRINTK (Nattika)    : Epson EM-C8100 only. A finishing/collection store with
+//                         no Konica, so B&W prints on the Epson too — the store
+//                         PC applies the same redirect server-side, see
+//                         print_server._effective_printer_key().
+//   PRIOFF (office)     : back-office box, no Konica.
+//
+// The Epson is an EM-C8100 everywhere: it replaced the WF-C21000 at OSP on
+// 2026-06-29, and Nattika runs its own EM-C8100 (SPRINT_BACKLOG S11-4).
+const EPSON_EM_C8100 = { key: "epson",  label: "Epson",  model: "EM-C8100" };
+const KONICA_PRO_1100 = { key: "konica", label: "Konica", model: "Bizhub Pro 1100" };
+
+const STORE_FLEETS = {
+  OSP:    { konica: KONICA_PRO_1100, epson: EPSON_EM_C8100 },
+  PRINTK: { konica: null,            epson: EPSON_EM_C8100 },
+  PRIOFF: { konica: null,            epson: EPSON_EM_C8100 },
+};
+
+// Shop counters. PRIOFF is back-office, not a counter, so its consoles follow
+// the location filter rather than being pinned to that box's own printers.
+const COUNTER_STORE_IDS = ["OSP", "PRINTK"];
+
+// Every printer any store has — the "All locations" union, and the safe default
+// for a store code this page does not know about.
+const FULL_FLEET = { konica: KONICA_PRO_1100, epson: EPSON_EM_C8100 };
+
+function storeFleet(storeId) {
+  if (!storeId || storeId === "all") return FULL_FLEET;
+  return STORE_FLEETS[storeId] || FULL_FLEET;
+}
+
+// Which store's *hardware* the console is looking at. A shop counter only ever
+// has its own printers, whichever location's jobs are on screen, so it stays
+// pinned to its own store; the office/owner box follows the location filter.
+function printerViewStore(locationFilter) {
+  const machine = getStoreId();
+  if (COUNTER_STORE_IDS.includes(machine)) return machine;
+  return locationFilter || "all";
+}
+
+function storeHasKonica(storeId) {
+  // For this machine's own store, its print server is the ground truth: any
+  // store can drop its Konica in store_config.json, not just the ones mapped
+  // above. /status reports has_konica; older store PCs omit it, so fall back.
+  if (storeId && storeId !== "all" && storeId === getStoreId()) {
+    const live = localStorage.getItem("machineHasKonica");
+    if (live === "1") return true;
+    if (live === "0") return false;
+  }
+  return !!storeFleet(storeId).konica;
+}
+
+// Printer keys to render, in display order, for a store.
+function fleetPrinterKeys(storeId) {
+  return storeHasKonica(storeId) ? ["konica", "epson"] : ["epson"];
+}
+
+// Full name for the UI, e.g. "Epson EM-C8100".
+function printerLabel(key, storeId) {
+  const p = storeFleet(storeId)[key];
+  if (p) return `${p.label} ${p.model}`;
+  return key === "epson" ? "Epson" : "Konica";
+}
+
+// Short name for tags and buttons, e.g. "Epson".
+function printerShortLabel(key, storeId) {
+  const p = storeFleet(storeId)[key];
+  return p ? p.label : (key === "epson" ? "Epson" : "Konica");
+}
+
+// jobs.printer holds the Windows *queue* name the store PC dispatched to
+// ("EM-C8100 Series(Network)", "KONICA MINOLTA 1100 PS") — a model, not a
+// brand. Match on model families, or every EM-C8100 job reads as a Konica.
+const EPSON_QUEUE_RE  = /epson|em-?c|wf-?c/i;
+const KONICA_QUEUE_RE = /konica|minolta|bizhub/i;
+
+function printerKeyFromName(name) {
+  const s = String(name || "");
+  if (EPSON_QUEUE_RE.test(s))  return "epson";
+  if (KONICA_QUEUE_RE.test(s)) return "konica";
+  return "";
+}
+
+// Mirror of print_server._effective_printer_key(): a B&W item at a store with
+// no Konica actually prints on the Epson, so the console must say Epson.
+function effectivePrinterKey(key, storeId) {
+  return (key === "konica" && !storeHasKonica(storeId)) ? "epson" : key;
+}
+
+// ── Store identity in the header (shared) ───────────────────────────────────
+// The console header is authored with the Oxygen name; a Nattika PC must not
+// claim to be Oxygen. Unknown/blank store ids keep whatever the page ships with.
+const STORE_NAMES = {
+  OSP:    "Oxygen Students Paradise · Thriprayar",
+  PRINTK: "Printosky · Nattika",
+  PRIOFF: "Printosky Office · Nattika",
+};
+
+function storeName(storeId) {
+  return STORE_NAMES[storeId] || "";
+}
+
+function renderStoreHeader() {
+  const el = document.getElementById("hdr-store");
+  const name = storeName(getStoreId());
+  if (el && name) el.textContent = name;
+}
+
+// ── Fail-loud in the console (shared) ───────────────────────────────────────
+// The rule: this page must never present a broken pipeline as an empty one.
+//
+// On 18 Aug 2026 the Nattika console showed a green "Live" dot, zero rows and
+// the words "No Konica job records for this period" — while that store's
+// printer data had not moved since the 11th. The dot only ever meant "Supabase
+// answered". These helpers add the missing half: is the store PC reachable, are
+// its checks passing, and is the data we are drawing actually current?
+//
+// Anything unhealthy gets a banner at the top of the page. Nothing unhealthy is
+// ever left to be inferred from an empty table.
+
+// Printer counters are written every 5 minutes by a healthy store PC, so
+// silence this long means the pipeline is down, not quiet. Matches the cloud
+// cron's STORE_COUNTER_STALE_MIN.
+const HEALTH_STALE_MIN = 180;
+
+async function fetchStorePcHealth() {
+  const pcUrl = localStorage.getItem("storePcUrl");
+  if (!pcUrl) return { reachable: null, reason: "store PC URL not set — use ⚙ PC Setup" };
+  try {
+    const r = await fetch(`${pcUrl}/health`);
+    if (!r.ok) return { reachable: false, reason: `HTTP ${r.status} from ${pcUrl}` };
+    return { reachable: true, data: await r.json() };
+  } catch (e) {
+    return { reachable: false, reason: `${pcUrl} did not answer (${e.message})` };
+  }
+}
+
+// Minutes since this store last wrote a printer counter — null if it never has.
+async function fetchCountersAgeMin(storeId) {
+  const scope = storeId && storeId !== "all" ? `&store_id=eq.${storeId}` : "";
+  try {
+    const rows = await sbFetch("printer_counters",
+      `select=polled_at&order=polled_at.desc&limit=1${scope}`);
+    if (!rows || !rows.length) return null;
+    const last = new Date(String(rows[0].polled_at).replace(" ", "T"));
+    if (isNaN(last)) return null;
+    return (Date.now() - last.getTime()) / 60000;
+  } catch (e) {
+    return undefined;            // could not tell — reported separately
+  }
+}
+
+function humanAge(minutes) {
+  if (minutes == null) return "never";
+  if (minutes < 90) return `${Math.round(minutes)} min`;
+  if (minutes < 2880) return `${(minutes / 60).toFixed(1)} h`;
+  return `${Math.floor(minutes / 1440)} days`;
+}
+
+// Collect everything wrong right now. Returns [{level, title, detail}].
+async function collectHealthProblems(storeId) {
+  const problems = [];
+
+  const pc = await fetchStorePcHealth();
+  if (pc.reachable === false) {
+    problems.push({
+      level: "error",
+      title: "Store PC unreachable",
+      detail: `${pc.reason}. Printing and live status are unavailable; the rows below are whatever last reached the cloud.`,
+    });
+  } else if (pc.reachable && pc.data) {
+    const wd = pc.data.watchdog || {};
+    for (const name of (wd.failing || [])) {
+      const c = (wd.checks || {})[name] || {};
+      problems.push({
+        level: "error",
+        title: name,
+        detail: `${c.detail || "check failing"}${c.for ? ` — for ${c.for}` : ""}`,
+      });
+    }
+    if (pc.data.internet === false) {
+      problems.push({ level: "warn", title: "Store PC is offline",
+                      detail: "No internet at the store — payments and cloud sync are paused." });
+    }
+  }
+
+  const age = await fetchCountersAgeMin(storeId);
+  if (age === undefined) {
+    problems.push({ level: "warn", title: "Could not check data freshness",
+                    detail: "printer_counters query failed — treat the figures below as unverified." });
+  } else if (age === null) {
+    problems.push({ level: "warn", title: "No printer data for this location, ever",
+                    detail: "This store has never written a printer counter. If it has printers, its poller has never worked." });
+  } else if (age > HEALTH_STALE_MIN) {
+    problems.push({
+      level: "error",
+      title: `Printer data is ${humanAge(age)} old`,
+      detail: "The poller has stopped writing counters. Usually the printer is off or its IP changed — check the printer panel, then epson_ip/konica_ip in store_config.json on that PC.",
+    });
+  }
+  return problems;
+}
+
+// Paint (or clear) the banner. Creates its own container under the header, so
+// no page needs markup for it.
+function renderHealthBanner(problems) {
+  let host = document.getElementById("health-banner");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "health-banner";
+    const main = document.querySelector("main") || document.body;
+    main.parentNode.insertBefore(host, main);
+  }
+  if (!problems || !problems.length) { host.innerHTML = ""; host.style.display = "none"; return; }
+
+  const worst = problems.some(p => p.level === "error") ? "error" : "warn";
+  const colour = worst === "error" ? "#ff5252" : "#ffab40";
+  host.style.display = "block";
+  host.style.cssText += `;display:block;margin:.6rem 1rem 0;border:1px solid ${colour};`
+    + `border-left-width:4px;background:rgba(255,82,82,.08);padding:.6rem .9rem;`
+    + `font-family:var(--mono,monospace);font-size:.72rem;line-height:1.5`;
+  host.innerHTML =
+    `<div style="color:${colour};font-weight:600;margin-bottom:.3rem">`
+    + `⚠ ${problems.length} thing${problems.length > 1 ? "s are" : " is"} not working</div>`
+    + problems.map(p =>
+        `<div style="margin-top:.15rem"><span style="color:${p.level === "error" ? colour : "#ffab40"}">●</span> `
+        + `<b>${escHealth(p.title)}</b> — ${escHealth(p.detail)}</div>`).join("");
+}
+
+function escHealth(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+}
+
+// One call for a page to make on every load/refresh.
+async function refreshHealthBanner(storeId) {
+  try {
+    renderHealthBanner(await collectHealthProblems(storeId));
+  } catch (e) {
+    // Even the health check failing is news — say so rather than showing nothing.
+    renderHealthBanner([{ level: "warn", title: "Health check failed",
+                          detail: e.message || String(e) }]);
+  }
+}

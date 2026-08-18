@@ -38,10 +38,39 @@ Storage bucket: `academic-outputs` (public)
 
 ---
 
+## Per-location config
+
+Each PC carries its own `store_config.json`; templates for every machine we run
+are in [`config/stores/`](../config/stores/README.md).
+
+| Machine | store_id | Konica | Epson | Polls printers |
+|---|---|---|---|---|
+| Oxygen counter, Thriprayar | `OSP` | `192.168.55.110` | `192.168.55.214` | yes |
+| Printosky counter, Nattika | `PRINTK` | none | `192.168.1.250` | yes |
+| Printosky office, Nattika | `PRIOFF` | none | `192.168.1.250` | no |
+
+Which box does the shared work is decided at runtime by a **lease**, not by
+per-machine config: see [MULTI_BOX.md](MULTI_BOX.md). `poll_printers: false` is
+an explicit veto for a machine that must never touch the printers. Printing is
+made exactly-once by an atomic claim on `jobs.print_claimed_at`, and a counter
+job printed on the counter PC never goes to the cloud at all.
+
+## Monitoring — fail loud
+
+Every pipeline reports to `ops_watchdog`; a failure alerts the ops WhatsApp
+number immediately, repeats every 6 h while broken, and announces its recovery.
+State is surfaced on `print_server /health` and `/status`, and as a banner on the
+admin and jobs consoles. The cloud cron (`/cron/store-pc-check`) covers what a
+dead store PC cannot report about itself — per store: PC offline, and PC alive
+but printer counters frozen.
+
+Rule, check list and env knobs → [FAIL_LOUD.md](FAIL_LOUD.md)
+
 ## Supporting Modules (store PC, imported/threaded)
 
 | Module | Role |
 |--------|------|
+| `ops_watchdog.py` | Shared health/alert bus: `report()` / `guard()`, SQLite-backed dedup, WhatsApp ops alerts |
 | `rate_card.py` | Pricing: paper × sides × layout × copies × finishing |
 | `razorpay_integration.py` | Creates payment links; verifies Razorpay webhook sigs |
 | `supabase_sync.py` | Background thread; upserts jobs + counters every 5 min |
@@ -126,6 +155,29 @@ Academic orders:
 `website/admin.html` — static HTML on Netlify (`sprint/session-9`).
 Reads Supabase via anon key. Staff PIN + admin password checked client-side (SHA-256).
 Includes academic orders tab (added session 9).
+
+### Printers are rendered per store
+
+`website/admin-shared.js` holds `STORE_FLEETS`, the single map of what is
+installed where, and admin.html / jobs.html render from it:
+
+| Store | Printers |
+|-------|----------|
+| `OSP` (Thriprayar) | Konica Bizhub Pro 1100 (B&W) + Epson EM-C8100 (colour) |
+| `PRINTK` (Nattika) | Epson EM-C8100 only — no Konica |
+| `PRIOFF` (office) | no Konica |
+
+- A store with no Konica shows no Konica panel, no Konica job-log section, and
+  issues no `konica_jobs` request; its B&W jobs are counted on the Epson, which
+  is where they print (`print_server._effective_printer_key`).
+- A shop counter renders its own printers whatever location filter is on screen;
+  the office box follows the filter.
+- The store PC is the authority for its own store: `GET /status` returns
+  `has_konica` (from the configured `konica_ip`), which the consoles cache and
+  prefer over the map.
+- `jobs.printer` holds the Windows *queue* name (`EM-C8100 Series(Network)`), so
+  printers are identified by model family — `printerKeyFromName()` — never by a
+  bare "epson" substring, which filed every EM-C8100 job under the Konica.
 
 ---
 

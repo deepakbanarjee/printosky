@@ -17,6 +17,33 @@ Manual start commands + full port map → [docs/ARCHITECTURE.md](docs/ARCHITECTU
 Full detail → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 Schema reference (28 tables, owners, columns) → [docs/SCHEMA.md](docs/SCHEMA.md)
 
+## Many PCs per store
+Boxes coordinate at runtime, not by per-machine config: a **lease** picks the one
+box that polls the printers, and an atomic **claim** (`jobs.print_claimed_at`)
+makes printing exactly-once. A counter job prints from the counter PC without
+going to the cloud at all (`print_server /local-print`).
+
+Design, failure modes and how to add a box → [docs/MULTI_BOX.md](docs/MULTI_BOX.md)
+
+## Hard rule: fail loud
+**If something is not working as expected, alert. No silent failures — anywhere.**
+
+A log line, an empty table or a green dot is not an alert. Use `ops_watchdog`:
+
+```python
+from ops_watchdog import report, guard
+report("printer.epson", ok, f"UNREACHABLE at {ip} — powered off, or the IP changed")
+with guard("epson.weblog"):        # exception -> alert (use reraise=False to continue)
+    rows = fetch_weblog()
+```
+
+First failure alerts immediately; repeats every 6h; recovery is announced. Health
+shows on `print_server /health`, `/status`, and as a banner on the admin and jobs
+consoles. `tests/test_fail_loud_rule.py` fails the build if a new
+`except Exception: pass` appears.
+
+Full contract, check list and knobs → [docs/FAIL_LOUD.md](docs/FAIL_LOUD.md)
+
 ## Printing / imposition
 Every imposed sheet is **portrait**; the printer is told `duplexlong` and no
 orientation flag, for every layout. Landscape turns the content 90° and puts

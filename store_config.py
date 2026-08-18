@@ -92,6 +92,7 @@ _LEGACY_OXYGEN_DEFAULTS: dict[str, Any] = {
     "db_path": r"C:\Printosky\Data\jobs.db",
     "agent_secret": None,
     "platform_url": None,
+    "poll_printers": True,
 }
 
 
@@ -115,6 +116,14 @@ class StoreConfig:
     # to redirect 'epson' to 'Microsoft Print to PDF' so test dispatches don't
     # consume real ink. Keys: 'konica', 'epson'. Missing keys keep defaults.
     printer_queue_names: dict[str, str] | None = None
+    # Whether THIS machine polls the printers (SNMP counters, supply levels,
+    # the Epson's own job log). Set false on a second PC that shares a shop's
+    # printers with the counter PC: both boxes polling means the same printer
+    # jobs are imported twice under two store ids and the counters are
+    # double-counted — which is exactly what Nattika's PRINTK and PRIOFF boxes
+    # were doing (all 388 of PRINTK's Epson job rows are also PRIOFF's).
+    # One machine per physical printer should own polling.
+    poll_printers: bool = True
     source_path: str | None = field(default=None, compare=False)
 
     @property
@@ -224,6 +233,7 @@ def _build(raw: dict[str, Any], source: str | None) -> StoreConfig:
         agent_secret=raw.get("agent_secret"),
         platform_url=raw.get("platform_url"),
         printer_queue_names=printer_queue_names,
+        poll_printers=bool(raw.get("poll_printers", True)),
         source_path=source,
     )
 

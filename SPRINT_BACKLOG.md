@@ -56,8 +56,14 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 | S9-2 | ~~**Konica job export URL**~~ ✅ | Jobs loading correctly — confirmed 2026-04-20 |
 | S9-3 | ~~**Epson ink alerts**~~ ✅ | `_send_ink_alerts()` in printer_poller.py:434. Fires on threshold crossing (EMPTY at 0%, LOW at ≤10%). Called in poll_once() for both printers. |
 | S9-4 | **A3 printing** | Test A3 job end-to-end (bot → quote → print) |
+| S9-7 | ~~**Fail-loud alerting**~~ ✅ | `ops_watchdog.py` + checks across poller/fetcher/sync/print server, multi-store cloud cron, console health banner. Built after Nattika's printer pipeline died 11–18 Aug 2026 behind six layers of silence. Rule: [docs/FAIL_LOUD.md](docs/FAIL_LOUD.md) |
+| S9-9 | **Nattika records no jobs** ⏳ | `PRINTK` has **zero** rows in `jobs`, ever, and `daily_summary` reports 0 jobs every day since 4 Aug; no staff has ever logged in as PRINTK. Meanwhile its Epson's own weblog shows real printing (388 jobs to 14 Aug, Windows user `Oxygen`). So Nattika prints straight from Windows and the counter never touches Printosky — no hot-folder drops, no walk-in entries, no quotes, no revenue. Decide: put the Nattika counter on the console, or accept PRINTK as printer-metering only and stop showing it a jobs console. |
+| S9-11 | ~~**Multi-box coordination**~~ ✅ | Leases (`store_role_leases`) elect one poller per store; `jobs.print_claimed_at` makes printing exactly-once across boxes; `/local-print` keeps counter jobs off the cloud. Migration `SCHEMA_v28_device_coordination.sql` (applied 2026-08-18). See [docs/MULTI_BOX.md](docs/MULTI_BOX.md). |
+| S9-12 | **Retire the duplicate backup tables** ⏳ | `backup_20260818_nattika_epson_jobs` / `_counters` hold the pre-dedup snapshot (811 + 339 rows). Drop them once the consolidated PRINTK history has been eyeballed. |
+| S9-10 | ~~**Nattika double-polling**~~ ✅ | Both Nattika PCs polled the same Epson: all 388 PRINTK Epson job rows are also PRIOFF's, and two sets of counters for one printer. Fixed by leases (S9-11), with `poll_printers` as a veto. The 388 historic duplicate rows were merged and removed 2026-08-18; Nattika's printer history is now one series under PRINTK. |
+| S9-8 | **Work down the silent handlers** ⏳ | 82 `except Exception: pass` sites remain; `tests/test_fail_loud_rule.py` ratchets the count so it cannot grow. Convert to `ops_watchdog.guard()` when next in each file, then lower that file's budget. |
 | S9-5 | ~~**Receipt printer**~~ 🗑️ | RETIRED 2026-05-12 — hardware never purchased, stub returned "not configured" on every call. See `retired/2026-05-12-graveyard/receipt_printer.py` for code + revival path. |
-| S9-6 | **Epson per-job mono/colour tracking** ⏳ | Re-scoped to **Epson EM-C8100** (OSP unit, IP `192.168.55.214`, installed 2026-06-29). Prior work: (a) ✅ delta dedup on Supabase; (b) ✅ `source='spec'` rows on Epson dispatch in print_server.py. Remaining: (c) ⏳ store-PC redeploy after new printer install; (d) ⏳ admin-UI spec ↔ weblog reconciliation. Note: binding store gets its own separate EM-C8100 (see S11-4). |
+| S9-6 | **Epson per-job mono/colour tracking** ⏳ | Re-scoped to **Epson EM-C8100** (OSP unit, IP `192.168.55.214`, installed 2026-06-29). Prior work: (a) ✅ delta dedup on Supabase; (b) ✅ `source='spec'` rows on Epson dispatch in print_server.py; (c) ✅ delta attribution now matches the EM-C8100 queue name — it looked for "epson"/"wf"/`.202`, none of which appear in `EM-C8100 Series(Network)`, so every delta since the swap was filed unattributed. Remaining: (d) ⏳ store-PC redeploy after new printer install; (e) ⏳ admin-UI spec ↔ weblog reconciliation. Note: binding store gets its own separate EM-C8100 (see S11-4). |
 
 ---
 
@@ -85,7 +91,7 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 | S11-1 | **Cloud hosting for WhatsApp bot** | Bot goes offline when PC is off. Options: Hostinger VPS Rs.350/mo, Hetzner CX22 €4/mo, DigitalOcean $6/mo |
 | S11-2 | **PM2 for Node process** | Replace manual CMD window start with PM2 for auto-restart on crash |
 | S11-3 | **Job Centro DB** | Investigate silent auto-export of Konica job logs from Job Centro local DB |
-| S11-4 | **Binding store setup** ⏳ | Binding store opens 2026-07-02. Needs own PC + Cloudflare tunnel + Supabase store_id. **Blocked** until computers are installed on-site. Multi-store architecture already in place (`store_config.json` per PC). |
+| S11-4 | **Binding store setup** ⏳ | Binding store opens 2026-07-02. Needs own PC + Cloudflare tunnel + Supabase store_id. **Blocked** until computers are installed on-site. Multi-store architecture already in place (`store_config.json` per PC). Console side is ready: leave `konica_ip` blank and the admin/jobs pages drop every Konica panel, `/status` reports `has_konica: false`, and B&W routes to the Epson. |
 | S11-5 | **Netlify OXYGEN team credit** | Monitor plan limit. Upgrade if needed or keep deploying via personal account |
 
 ---

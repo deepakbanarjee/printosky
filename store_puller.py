@@ -320,6 +320,36 @@ def reconcile_stranded(client, store_id: str, conn: sqlite3.Connection) -> int:
     return len(strand)
 
 
+def _claim(job_id: str) -> bool:
+    """Claim `job_id` so that exactly one box at this store prints it.
+
+    Every PC at a store runs this puller, and each keeps its own local
+    `pulled_jobs` table — which one box cannot see in another. Without a shared
+    claim, two boxes both see the same paid job and both print it. The claim is
+    an atomic conditional update in Supabase: the first box wins.
+
+    Fails CLOSED (no claim, no print) — wasted paper cannot be undone, and the
+    job is retried next cycle. If the coordination module is missing entirely
+    (an older deployment), fall through to the previous single-box behaviour
+    rather than refusing to print at all.
+    """
+    try:
+        from device_lease import claim_job
+    except ImportError:
+        return True
+    return claim_job(job_id)
+
+
+def _unclaim(job_id: str) -> None:
+    """Hand a job back after a failed print so the retry can proceed."""
+    try:
+        from device_lease import release_job
+        release_job(job_id)
+    except ImportError:
+        logger.debug("store_puller: device_lease not deployed — nothing to release "
+                     "for %s (single-box behaviour)", job_id)
+
+
 def pull_once(
     client,
     store_id: str,
@@ -355,11 +385,16 @@ def pull_once(
     pulled: list[str] = []
     for row in todo:
         job_id = row["job_id"]
+        # Claim before the download: no point spending bandwidth, let alone
+        # paper, on a job another box at this store is already printing.
+        if not _claim(job_id):
+            continue
         dest = os.path.join(dest_dir, safe_filename(job_id, row.get("filename")))
         try:
             n = downloader(row["file_url"], dest)
         except Exception as exc:
             logger.error("store_puller: download failed for %s: %s", job_id, exc)
+            _unclaim(job_id)          # we are not printing it; let a retry have it
             continue
         logger.info("store_puller: pulled %s -> %s (%s bytes)", job_id, dest, n)
         printed = None
@@ -379,6 +414,7 @@ def pull_once(
             pulled.append(job_id)
         else:
             logger.warning("store_puller: %s did not print — leaving un-recorded to retry next poll", job_id)
+            _unclaim(job_id)
     return pulled
 
 

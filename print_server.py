@@ -10,6 +10,7 @@ Endpoints:
   GET  /active-staff   — ?pc_id=PC1 → { staff_id, name, session_id }
   GET  /status         — health check
   GET  /printers       — list configured printers
+  POST /local-print    — save + print a file on THIS PC (no cloud round trip)
   GET  /health         — full system health
   POST /create-job     — { customer_name, phone, source, colour, sides, copies, pages, paper_size, finishing, amount_collected|amount_partial, payment_mode, override_reason }
   POST /upload-file    — { filename, file_data (base64) } → saves to hot folder
@@ -336,6 +337,8 @@ def check_printer_reachable(ip: str | None, timeout=2) -> bool:
     except Exception:
         return False
 
+from ops_watchdog import report as _report_health
+
 _PRINTERS_CFG = get_store_config().printers
 PRINTER_IPS = {
     "konica": _PRINTERS_CFG.konica_ip,
@@ -378,10 +381,29 @@ def get_system_health() -> dict:
         mode = "manual"
         mode_label = "Manual mode — no internet, no printers"
 
+    # Every failing watchdog check, so one request tells a console the whole
+    # truth: printers, poller, fetchers, cloud sync. Reporting them here also
+    # keeps /health honest when nobody has polled recently.
+    try:
+        from ops_watchdog import health as _ops_health, report as _report_health
+        if has_konica():
+            _report_health("printer.konica", konica_ok,
+                           f"reachable at {PRINTER_IPS['konica']}" if konica_ok else
+                           f"UNREACHABLE at {PRINTER_IPS['konica']} — powered off, "
+                           "or the IP changed")
+        _report_health("printer.epson", epson_ok,
+                       f"reachable at {PRINTER_IPS['epson']}" if epson_ok else
+                       f"UNREACHABLE at {PRINTER_IPS['epson']} — powered off, or the IP changed")
+        watchdog = _ops_health()
+    except Exception as exc:                      # never let /health itself 500
+        watchdog = {"healthy": None, "error": str(exc), "checks": {}, "failing": []}
+
     return {
         "internet":     internet,
         "konica":       konica_ok,
         "epson":        epson_ok,
+        "has_konica":   has_konica(),
+        "printer_ips":  PRINTER_IPS,
         "mode":         mode,
         "mode_label":   mode_label,
         "active_staff": list(_active_sessions.keys()),
@@ -389,6 +411,8 @@ def get_system_health() -> dict:
         "time":         datetime.now().strftime("%H:%M:%S"),
         "uptime_s":     int(_time.monotonic() - _SERVER_START),
         "db_ok":        __import__("os").path.exists(DB_PATH),
+        "watchdog":     watchdog,
+        "healthy":      bool(internet and (konica_ok or epson_ok)) and watchdog.get("healthy") is not False,
     }
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -557,6 +581,30 @@ def _sumatra_paper(size: str | None) -> str | None:
             "STATEMENT": "statement"}.get(u)
 
 
+def has_konica() -> bool:
+    """True iff this store actually has a Konica.
+
+    PRINTERS always carries a Konica queue name (the OSP default is inherited by
+    every store), so presence is decided by the configured IP instead: a
+    finishing/collection store like Nattika sets `konica_ip` to null or "" in
+    store_config.json. The string "None" is accepted as empty too — that is what
+    a JSON null becomes once it has been through str().
+    """
+    ip = PRINTER_IPS.get("konica")
+    return bool(ip) and ip != "None"
+
+
+def _watchdog_summary() -> dict:
+    """Compact health headline for /status: what is broken, right now."""
+    try:
+        from ops_watchdog import health
+        h = health()
+        return {"healthy": h.get("healthy"), "failing": h.get("failing", []),
+                "checks": {k: v for k, v in h.get("checks", {}).items() if not v.get("ok")}}
+    except Exception as exc:
+        return {"healthy": None, "error": str(exc), "failing": []}
+
+
 def _effective_printer_key(printer_key: str, job_id: str = "") -> str:
     """Resolve the printer to actually use, applying the no-Konica redirect.
 
@@ -567,7 +615,7 @@ def _effective_printer_key(printer_key: str, job_id: str = "") -> str:
     every print path so they cannot drift. No-op for any other key, or when a
     real Konica IP is configured.
     """
-    if printer_key == "konica" and (not PRINTER_IPS.get("konica") or PRINTER_IPS.get("konica") == "None"):
+    if printer_key == "konica" and not has_konica():
         logging.info("no Konica on this store — routing job %s to epson", job_id or "?")
         return "epson"
     return printer_key
@@ -1303,6 +1351,104 @@ def handle_create_job(body: dict) -> dict:
             notes=f"source={source} amount={amount_quoted} payment={payment_mode or 'none'}")
 
     return {"ok": True, "job_id": job_id, "status": status, "amount_quoted": amount_quoted}
+
+
+# ── Local-first printing (no cloud round trip) ────────────────────────────────
+
+# Files printed here stay here. NOT the hot folder: dropping a file there
+# triggers watcher intake, which creates a second job and WhatsApps the customer
+# a quote for something they are standing at the counter paying for.
+LOCAL_JOBS_DIR = r"C:\Printosky\Jobs\Local"
+
+
+def handle_local_print(body: dict) -> dict:
+    """
+    POST /local-print
+    Body: { filename, file_data (base64), print_spec?, plus the /create-job
+            fields (customer_name, phone, colour, copies, …) }
+
+    Take the bytes, keep them on this PC, print them on this PC.
+
+    A walk-in used to travel: browser -> Supabase Storage -> a jobs row with a
+    file_url -> store_puller notices it -> downloads it back to this same PC ->
+    prints. A round trip through the internet for a file that never leaves the
+    room, which also made counter printing fail whenever the line did.
+
+    The job record still syncs to the cloud the normal way (metadata only), so
+    the admin console sees it. Because no file_url is ever set, store_puller
+    skips the job — it cannot be pulled and printed a second time.
+    """
+    import base64 as _b64
+
+    filename  = (body.get("filename") or "").strip()
+    file_data = body.get("file_data") or ""
+    if not filename or not file_data:
+        return {"ok": False, "error": "filename and file_data required"}
+
+    safe_name = Path(filename).name
+    if not safe_name:
+        return {"ok": False, "error": "Invalid filename"}
+
+    try:
+        raw = _b64.b64decode(file_data)
+    except Exception as exc:
+        return {"ok": False, "error": f"base64 decode failed: {exc}"}
+    if not raw:
+        return {"ok": False, "error": "empty file"}
+
+    dest_dir = Path(LOCAL_JOBS_DIR)
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return {"ok": False, "error": f"cannot write to {dest_dir}: {exc}"}
+
+    stamp = datetime.now().strftime("%H%M%S")
+    dest = dest_dir / f"{stamp}_{safe_name}"
+    i = 1
+    while dest.exists():
+        dest = dest_dir / f"{stamp}_{i}_{safe_name}"
+        i += 1
+    dest.write_bytes(raw)
+
+    # Reuse the walk-in path so quoting, print_items and the audit trail are
+    # identical to a job created through the console.
+    created = handle_create_job({**body,
+                                "filename": safe_name,
+                                "filepath": str(dest),
+                                "source": body.get("source") or "Walk-in"})
+    if not created.get("ok"):
+        return created
+    job_id = created["job_id"]
+
+    result = {"ok": True, "job_id": job_id, "filepath": str(dest),
+              "status": created.get("status"),
+              "amount_quoted": created.get("amount_quoted"), "local": True}
+
+    if not body.get("print", True):
+        return result
+
+    try:
+        from store_puller import auto_print
+        printed = auto_print(
+            job_id, str(dest),
+            body.get("colour"), body.get("copies") or 1,
+            paper_size=body.get("paper_size"),
+            orientation=body.get("orientation"),
+            print_spec=body.get("print_spec"),
+        )
+    except Exception as exc:
+        logging.error("local-print: %s failed to print: %s", job_id, exc)
+        _report_health("print.local", False, f"{type(exc).__name__}: {exc}")
+        result.update(printed=False, error=str(exc))
+        return result
+
+    _report_health("print.local", bool(printed),
+                   "local printing OK" if printed else
+                   f"{job_id} saved to {dest} but did not print — print it manually")
+    result["printed"] = bool(printed)
+    if not printed:
+        result["error"] = "saved but not printed — print manually from the console"
+    return result
 
 
 # ── A6: Send to vendor ────────────────────────────────────────────────────────
@@ -2045,8 +2191,12 @@ class PrintHandler(BaseHTTPRequestHandler):
             try:
                 with open(txt_path, "r", encoding="utf-8") as f:
                     content_text = f.read()
-            except Exception:
-                pass
+            except OSError as exc:
+                # The file is there but unreadable. Falls through to the cloud
+                # copy below, but say so — a silently empty transcript reads to
+                # the operator exactly like one that was never transcribed.
+                logging.warning("transcript %s exists but could not be read: %s",
+                                txt_path, exc)
 
         if not content_text and os.environ.get("SUPABASE_URL"):
             try:
@@ -2153,7 +2303,17 @@ class PrintHandler(BaseHTTPRequestHandler):
                 "store_id": get_store_config().store_id,
                 "sumatra": sumatra or "not found (will use shell fallback)",
                 "printers": PRINTERS,
+                # Which printers this store physically has. A console cannot
+                # infer it from `printers` above — that map always names a
+                # Konica queue, even at a store with no Konica (see
+                # _effective_printer_key) — so report presence explicitly and
+                # let the admin/jobs pages hide what is not there.
+                "printer_ips": PRINTER_IPS,
+                "has_konica": has_konica(),
                 "db": os.path.exists(DB_PATH),
+                # Headline health, so the console can flag a broken store PC
+                # from the call it already makes on every load.
+                "watchdog": _watchdog_summary(),
             })
         elif path == "/printers":
             self._json(200, {"printers": PRINTERS})
@@ -2358,6 +2518,12 @@ class PrintHandler(BaseHTTPRequestHandler):
             self._json(200 if result.get("ok") else 400, result)
             return
 
+        if path == "/local-print":
+            body = self._read_body()
+            result = handle_local_print(body)
+            self._json(200 if result.get("ok") else 400, result)
+            return
+
         if path == "/vendor-send":
             body = self._read_body()
             self._json(200, handle_vendor_send(body))
@@ -2485,7 +2651,10 @@ def start_print_server():
     init_staff_tables(DB_PATH)
     server = HTTPServer(("0.0.0.0", PORT), PrintHandler)
     logging.info("🖨️  Print server running on port %d", PORT)
-    logging.info("   Konica : %s", PRINTERS["konica"])
+    if has_konica():
+        logging.info("   Konica : %s", PRINTERS["konica"])
+    else:
+        logging.info("   Konica : none at this store — B&W routes to the Epson")
     logging.info("   Epson  : %s", PRINTERS["epson"])
     sumatra = find_sumatra()
     if sumatra:

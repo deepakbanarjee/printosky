@@ -759,10 +759,88 @@ async function buildUploadBytesFrom(spec, bytes) {
   return await newDoc.save();
 }
 
+// ── Local-first printing ──────────────────────────────────────────────────────
+// A walk-in printed at the counter used to travel: browser -> Supabase Storage
+// -> a jobs row with a file_url -> the store PC's puller downloads it back ->
+// prints. A round trip through the internet for a file that never leaves the
+// room, and counter printing that broke whenever the line did.
+//
+// When this browser IS the fulfilling store's PC (⚙ PC Setup has been done and
+// its store matches the job's), hand the bytes straight to the local print
+// server. The job record still syncs to the cloud, so the console sees it; no
+// file_url is ever set, so the puller cannot print it a second time.
+//
+// Returns a created-job object, or null when local printing is not available —
+// in which case the caller falls back to the cloud path unchanged.
+async function tryLocalPrint(rec, cust, bytes) {
+  const pcUrl = (localStorage.getItem('storePcUrl') || '').trim();
+  const token = localStorage.getItem('storeToken') || '';
+  const machineStore = (localStorage.getItem('storeId') || '').toUpperCase();
+  if (!pcUrl || !token) return null;                      // this box is not a store PC
+  if (!machineStore || machineStore !== staffStoreId()) return null;  // fulfilling elsewhere
+
+  const spec = buildPrintSpec(rec.spec);
+  const mode = staffPaymentMode();
+  try {
+    const res = await fetch(pcUrl + '/local-print', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Store-Token': token },
+      body: JSON.stringify({
+        filename: rec.spec.fileName,
+        file_data: bytesToBase64(bytes),
+        print_spec: spec,
+        // The record gets bw/col; the actual print is driven by print_spec, which
+        // carries the per-page colour list for a mixed job.
+        colour: spec.colour_mode === 'bw' ? 'bw' : 'col',
+        copies: spec.copies || 1,
+        paper_size: spec.paper_size || 'A4',
+        orientation: spec.orientation || null,
+        sides: spec.sides === 'duplex' ? 'ds' : 'ss',
+        pages: (spec.pages_included && spec.pages_included.length) || spec.total_pages || 1,
+        // Bill what the customer was quoted on screen. Without this the store PC
+        // would re-quote from colour alone and overcharge a mixed job.
+        amount_quoted: spec.amount_estimated || 0,
+        customer_name: cust.name,
+        phone: cust.phone,
+        source: 'Walk-in',
+        payment_mode: mode === 'upi' ? 'UPI' : 'Cash',
+        amount_collected: 0,
+        override_reason: mode === 'hold' ? 'Counter job — payment on collection' : '',
+        staff_id: sessionStorage.getItem('staff_id') || 'counter',
+        operator_note: buildOperatorNote(rec.spec),
+      }),
+    });
+    if (!res.ok) throw new Error('local-print http ' + res.status);
+    const data = await res.json();
+    if (!data.job_id) throw new Error('no job id');
+    return { job_id: data.job_id, total: data.amount_quoted || 0,
+             paid: mode !== 'hold', mode: mode, local: true, printed: !!data.printed };
+  } catch (e) {
+    // Never block a counter job on the local path — fall back to the cloud.
+    console.warn('local print unavailable, falling back to upload:', e);
+    return null;
+  }
+}
+
+function bytesToBase64(bytes) {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = '';
+  const chunk = 0x8000;                     // chunked: apply() blows the stack on big files
+  for (let i = 0; i < arr.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, arr.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 // Upload one file to storage and create one staff job. Throws on failure
 // (message '403' for an auth failure so the caller can show the login hint).
 async function uploadAndCreateStaff(rec, cust) {
   const bytes = await buildUploadBytesFrom(rec.spec, rec.bytes);
+
+  // Printing here? Then keep the file here.
+  const local = await tryLocalPrint(rec, cust, bytes);
+  if (local) return local;
+
   const signRes = await fetch(API + '/order/upload-sign', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ filename: rec.spec.fileName }),

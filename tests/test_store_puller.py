@@ -140,6 +140,15 @@ class TestFetchAssignedPaid:
 # ---------- pull_once (orchestration) ------------------------------------------
 
 class TestPullOnce:
+    @pytest.fixture(autouse=True)
+    def _claim_granted(self, monkeypatch):
+        """These tests predate multi-box coordination and drive a single box.
+        Grant every claim so they keep testing what they were written to test;
+        TestPrintClaim below covers the claim itself."""
+        import store_puller as sp
+        monkeypatch.setattr(sp, "_claim", lambda job_id: True)
+        monkeypatch.setattr(sp, "_unclaim", lambda job_id: None)
+
     def _rows(self):
         return [
             {"job_id": "J1", "assigned_store_id": "NTK", "status": "Paid",
@@ -246,6 +255,80 @@ class TestPullOnce:
 
 
 # ---------- auto-print helpers -------------------------------------------------
+
+class TestPrintClaim:
+    """Every PC at a store runs this puller. Without a claim shared between
+    them, two boxes see the same paid job and both print it — on paper, in
+    front of the customer. `pulled_jobs` is local to a box and cannot help."""
+
+    def _rows(self):
+        return [{"job_id": "J1", "filename": "a.pdf", "file_url": "http://x/a.pdf",
+                 "status": "Paid", "assigned_store_id": "NTK"},
+                {"job_id": "J2", "filename": "b.pdf", "file_url": "http://x/b.pdf",
+                 "status": "Paid", "assigned_store_id": "NTK"}]
+
+    def _conn(self):
+        conn = sqlite3.connect(":memory:")
+        ensure_pulled_table(conn)
+        return conn
+
+    def test_an_unclaimed_job_is_skipped_entirely(self, tmp_path, monkeypatch):
+        import store_puller as sp
+        monkeypatch.setattr(sp, "_claim", lambda job_id: job_id == "J1")
+        downloaded = []
+        pulled = pull_once(_FakeClient(self._rows()), "NTK", str(tmp_path), self._conn(),
+                           downloader=lambda url, dest: downloaded.append(dest) or 10)
+        assert pulled == ["J1"]
+        assert len(downloaded) == 1, "a job claimed by another box must not even download"
+
+    def test_nothing_prints_when_no_claim_can_be_taken(self, tmp_path, monkeypatch):
+        """Fails closed: Supabase unreachable means we cannot know whether
+        another box is printing this, so we wait rather than duplicate."""
+        import store_puller as sp
+        monkeypatch.setattr(sp, "_claim", lambda job_id: False)
+        pulled = pull_once(_FakeClient(self._rows()), "NTK", str(tmp_path), self._conn(),
+                           downloader=lambda url, dest: 10)
+        assert pulled == []
+
+    def test_a_failed_print_hands_the_claim_back(self, tmp_path, monkeypatch):
+        import store_puller as sp
+        released = []
+        monkeypatch.setattr(sp, "_claim", lambda job_id: True)
+        monkeypatch.setattr(sp, "_unclaim", lambda job_id: released.append(job_id))
+        pulled = pull_once(_FakeClient(self._rows()[:1]), "NTK", str(tmp_path), self._conn(),
+                           downloader=lambda url, dest: 10,
+                           on_pulled=lambda row, dest: False)     # print failed
+        assert pulled == []
+        assert released == ["J1"], "an unprinted job must be released for the retry"
+
+    def test_a_failed_download_hands_the_claim_back(self, tmp_path, monkeypatch):
+        import store_puller as sp
+        released = []
+        monkeypatch.setattr(sp, "_claim", lambda job_id: True)
+        monkeypatch.setattr(sp, "_unclaim", lambda job_id: released.append(job_id))
+
+        def _boom(url, dest):
+            raise OSError("network")
+
+        pull_once(_FakeClient(self._rows()[:1]), "NTK", str(tmp_path), self._conn(),
+                  downloader=_boom)
+        assert released == ["J1"]
+
+    def test_claim_falls_through_when_coordination_is_not_deployed(self, monkeypatch):
+        """An older store PC without device_lease keeps its previous behaviour
+        rather than refusing to print."""
+        import builtins
+        import store_puller as sp
+        real_import = builtins.__import__
+
+        def _no_device_lease(name, *a, **k):
+            if name == "device_lease":
+                raise ImportError("not deployed here")
+            return real_import(name, *a, **k)
+
+        monkeypatch.setattr(builtins, "__import__", _no_device_lease)
+        assert sp._claim("J1") is True
+
 
 class TestPrinterRouting:
     def test_printer_key_colour_to_epson(self):

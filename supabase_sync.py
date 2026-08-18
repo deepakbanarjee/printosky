@@ -23,6 +23,7 @@ from datetime import datetime, date
 from dotenv import load_dotenv
 
 from store_config import get_store_config
+from ops_watchdog import report as _report_health
 
 load_dotenv()
 
@@ -309,11 +310,17 @@ def _record_sync_success() -> None:
     global _last_successful_sync, _last_sync_error
     _last_successful_sync = datetime.now()
     _last_sync_error = None
+    _report_health("sync.supabase", True, "sync cycle completed")
 
 
 def _record_sync_failure(msg: str) -> None:
     global _last_sync_error
     _last_sync_error = msg
+    # Everything the consoles show comes through this sync. When it stops, the
+    # admin does not go blank — it goes STALE, which looks identical to a quiet
+    # day. So a failed sync is an alert, not just a log line.
+    _report_health("sync.supabase", False,
+                   f"{msg} — the admin console is now showing stale data")
 
 
 def get_sync_status() -> dict:
@@ -381,6 +388,9 @@ def start_sync(db_path, interval=SYNC_INTERVAL):
         logger.error("Supabase NOT configured (SUPABASE_URL/KEY empty) — admin sync is "
                      "DISABLED. The admin dashboard will show stale data until "
                      "SUPABASE_URL and SUPABASE_KEY are set in the environment.")
+        _report_health("sync.supabase", False,
+                       "SUPABASE_URL/KEY not set on this PC — nothing this store does "
+                       "will reach the admin console")
         return None
 
     def loop():

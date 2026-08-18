@@ -1243,12 +1243,13 @@
       <div class="stat"><div class="stat-label">Revenue Today</div><div class="stat-value green" id="s-rev">—</div><div class="stat-sub" id="s-rev-sub">—</div></div>
     </div>
 
-    <!-- Printer breakdown -->
+    <!-- Printer breakdown — panels are shown per store (see storeFleet in
+         admin-shared.js): a store with no Konica never renders the Konica panel. -->
     <div class="printer-breakdown">
       <!-- Konica -->
-      <div class="panel">
+      <div class="panel" id="pb-konica-panel">
         <div class="panel-hdr">
-          <div class="panel-title">▣ Konica — B&amp;W Jobs</div>
+          <div class="panel-title" id="pb-konica-title">▣ Konica — B&amp;W Jobs</div>
           <span class="panel-badge" id="konica-count">—</span>
         </div>
         <div class="pb-stat-row"><span class="k">Received Today</span><span class="v accent" id="konica-received">—</span></div>
@@ -1259,9 +1260,9 @@
         </div>
       </div>
       <!-- Epson -->
-      <div class="panel">
+      <div class="panel" id="pb-epson-panel">
         <div class="panel-hdr">
-          <div class="panel-title" style="color:var(--green)">▣ Epson — Colour Jobs</div>
+          <div class="panel-title" style="color:var(--green)" id="pb-epson-title">▣ Epson — Colour Jobs</div>
           <span class="panel-badge" id="epson-count">—</span>
         </div>
         <div class="pb-stat-row"><span class="k">Received Today</span><span class="v accent" id="epson-received">—</span></div>
@@ -1283,8 +1284,9 @@
           <option value="all">All</option>
         </select>
       </div>
-      <!-- Konica job log -->
-      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:6px 0 4px">Konica — B&amp;W</div>
+      <!-- Konica job log — hidden at stores with no Konica -->
+      <div id="pjl-konica">
+      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:6px 0 4px" id="pjl-konica-title">Konica — B&amp;W</div>
       <div class="table-wrap" style="max-height:220px">
         <table>
           <thead><tr>
@@ -1303,8 +1305,9 @@
           </tbody>
         </table>
       </div>
+      </div>
       <!-- Epson job log -->
-      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px">Epson — Colour</div>
+      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px" id="pjl-epson-title">Epson — Colour</div>
       <div class="table-wrap" style="max-height:220px">
         <table>
           <thead><tr>
@@ -2443,6 +2446,12 @@ async function fetchStoreConfig() {
     if (data && data.store_id) {
       localStorage.setItem("storeId", data.store_id);
     }
+    // Whether this store actually has a Konica — the console hides the Konica
+    // panels where there is none (Nattika). Older store PCs don't send the
+    // field; leave any previous answer alone rather than guessing.
+    if (data && typeof data.has_konica === "boolean") {
+      localStorage.setItem("machineHasKonica", data.has_konica ? "1" : "0");
+    }
   } catch (e) {
     console.warn("Failed to fetch store configuration:", e);
   }
@@ -2452,6 +2461,7 @@ async function fetchStoreConfig() {
 window.addEventListener("DOMContentLoaded", async () => {
   setupPC(); // ensure PC ID + server URL are set
   await fetchStoreConfig();
+  renderStoreHeader();   // name this PC's own store, not always Oxygen
   if (sessionStorage.getItem("p_auth") === "1") showDashboard();
 });
 
@@ -2496,17 +2506,26 @@ async function loadAll() {
     renderPrinterBreakdown();
     loadPrinterJobs();
     setSyncState(isDemo ? "demo" : "ok");
+    // "Supabase answered" is not "the store is working" — check the store PC
+    // and the freshness of what we just drew, and banner anything broken.
+    if (!isDemo) refreshHealthBanner(printerViewStore(storeFilter));
   } catch (e) {
     setSyncState("err", e.message);
+    renderHealthBanner([{ level: "error", title: "Could not load the console",
+                          detail: e.message }]);
   }
 }
 
 // ── Sync indicator ──────────────────────────────────────────────────────────
+// The dot reports THIS PAGE's last Supabase fetch and nothing more — a green
+// dot has never meant the store is healthy. Whether the store is actually
+// working is the health banner's job (refreshHealthBanner), so the label says
+// what it really knows.
 function setSyncState(s, msg) {
   const dot   = document.getElementById("sync-dot");
   const label = document.getElementById("sync-label");
   dot.className = "sync-dot " + (s === "ok" ? "ok" : s === "err" ? "err" : "");
-  label.textContent = s === "ok"   ? "Live · " + now()
+  label.textContent = s === "ok"   ? "Loaded · " + now()
                     : s === "demo" ? "Demo Mode — start watcher at store to see live data"
                     : s === "err"  ? "Sync error: " + msg
                     : "Refreshing…";
@@ -2538,6 +2557,7 @@ function setStoreFilter(v) {
   renderPrinterBreakdown();
   loadPrinterJobs();
   updateStoreDiag();
+  if (!isDemo) refreshHealthBanner(printerViewStore(storeFilter));
 }
 
 // Default the store filter once, to THIS PC's store (the 🏪 Store setting):
@@ -2618,13 +2638,19 @@ function renderTable() {
 }
 
 // ── Print ─────────────────────────────────────────────────────────────────────
-function guessprinter(j) {
-  // Use stored printer column first, then guess from colour field / service
-  if (j.printer) return j.printer.toLowerCase().includes("epson") ? "epson" : "konica";
+// Which printer a job belongs to. The stored printer column wins, but it holds
+// the Windows queue name ("EM-C8100 Series(Network)"), so it is matched by model
+// family via printerKeyFromName — a plain "epson" substring test filed every
+// EM-C8100 job under Konica. Falls back to the colour/service fields, then
+// resolves against the store's fleet: where there is no Konica, it's the Epson.
+function guessprinter(j, viewStore) {
+  const store = viewStore || printerViewStore(storeFilter);
+  const stored = printerKeyFromName(j.printer);
+  if (stored) return effectivePrinterKey(stored, store);
   const svc = (j.service_type || "").toLowerCase();
   const col = (j.colour || "").toLowerCase();
-  if (col === "col" || col === "colour" || svc.includes("colour") || svc.includes("color")) return "epson";
-  return "konica";
+  const isColour = col === "col" || col === "colour" || svc.includes("colour") || svc.includes("color");
+  return effectivePrinterKey(isColour ? "epson" : "konica", store);
 }
 
 function colourMode(j) {
@@ -2662,8 +2688,13 @@ async function printJob(jobId, filepath, printerKey, copies, colourMode) {
 }
 
 // ── Printer Breakdown ─────────────────────────────────────────────────────────
+// One panel per printer the store actually has, named after the installed unit.
+// A store with no Konica (Nattika) gets the Epson panel only, and its B&W jobs
+// are counted there — that is where they print.
 function renderPrinterBreakdown() {
   const todayStr = today();
+  const store    = printerViewStore(storeFilter);
+  const keys     = fleetPrinterKeys(store);
   const todayJobs = allJobs.filter(j => {
     if (!(j.received_at || "").startsWith(todayStr)) return false;
     if (storeFilter !== "all" && j.store_id && j.store_id !== storeFilter) return false;
@@ -2671,16 +2702,19 @@ function renderPrinterBreakdown() {
   });
 
   ["konica", "epson"].forEach(p => {
-    const isEpson = p === "epson";
-    const pJobs = todayJobs.filter(j => {
-      const printer = (j.printer || "").toLowerCase();
-      if (printer) return isEpson ? printer.includes("epson") : printer.includes("konica");
-      // fallback: guess from colour
-      const col = (j.colour || "").toLowerCase();
-      const svc = (j.service_type || "").toLowerCase();
-      const isColour = col === "col" || col === "colour" || svc.includes("colour");
-      return isEpson ? isColour : !isColour;
-    });
+    const panel = document.getElementById(`pb-${p}-panel`);
+    const shown = keys.includes(p);
+    if (panel) panel.style.display = shown ? "" : "none";
+    if (!shown) return;
+
+    const title = document.getElementById(`pb-${p}-title`);
+    if (title) {
+      title.textContent = `▣ ${printerLabel(p, store)} — `
+        + (p === "epson" && keys.length === 1 ? "All Jobs"
+           : p === "epson" ? "Colour Jobs" : "B&W Jobs");
+    }
+
+    const pJobs = todayJobs.filter(j => guessprinter(j, store) === p);
     const printed = pJobs.filter(j => j.status === "Printed" || j.status === "Completed").length;
     const pending = pJobs.filter(j => j.status === "Paid" || j.status === "Received" || j.status === "In Progress").length;
 
@@ -2721,16 +2755,28 @@ async function loadPrinterJobs() {
     storeParam = `&store_id=eq.${storeFilter}`;
   }
 
+  // Only the printers this store has: no Konica (Nattika) means no Konica
+  // section and no konica_jobs request at all.
+  const store   = printerViewStore(storeFilter);
+  const keys    = fleetPrinterKeys(store);
+  const wantK   = keys.includes("konica");
+  const kSect   = document.getElementById("pjl-konica");
+  if (kSect) kSect.style.display = wantK ? "" : "none";
+  const kTitle  = document.getElementById("pjl-konica-title");
+  if (kTitle && wantK) kTitle.textContent = `${printerLabel("konica", store)} — B&W`;
+  const eTitle  = document.getElementById("pjl-epson-title");
+  if (eTitle) eTitle.textContent = `${printerLabel("epson", store)} — ${wantK ? "Colour" : "All Jobs"}`;
+
   const [konicaRows, epsonRows] = await Promise.all([
-    sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}${storeParam}`).catch(() => []),
+    wantK ? sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}${storeParam}`).catch(() => []) : [],
     sbFetch("epson_jobs",  `source=eq.weblog&order=job_date.desc&limit=200${dateParam}${storeParam}`).catch(() => []),
   ]);
 
   // Konica table
-  const kt = document.getElementById("konica-jobs-tbody");
+  const kt = wantK ? document.getElementById("konica-jobs-tbody") : null;
   if (kt) {
     if (!konicaRows || !konicaRows.length) {
-      kt.innerHTML = `<tr><td colspan="9" class="empty">No Konica job records for this period</td></tr>`;
+      kt.innerHTML = `<tr><td colspan="9" class="empty">No Konica job records for this period — if that is unexpected, see the health banner at the top</td></tr>`;
     } else {
       kt.innerHTML = konicaRows.map(r => `
         <tr>
@@ -2751,7 +2797,7 @@ async function loadPrinterJobs() {
   const et = document.getElementById("epson-jobs-tbody");
   if (et) {
     if (!epsonRows || !epsonRows.length) {
-      et.innerHTML = `<tr><td colspan="8" class="empty">No Epson job records yet — delta attribution populates after each print cycle</td></tr>`;
+      et.innerHTML = `<tr><td colspan="8" class="empty">No Epson job records for this period — if that is unexpected, see the health banner at the top</td></tr>`;
     } else {
       et.innerHTML = epsonRows.map(r => `
         <tr>
@@ -3027,11 +3073,15 @@ function renderColourPanel(j) {
   if (!cmap.has_colour) {
     html += '<div style="color:var(--muted);font-size:.72rem">All pages are B&amp;W — no colour detected.</div>';
   } else if (!cmap.is_mixed) {
-    html += `<div style="font-size:.72rem">All <b>${cmap.colour.length}</b> pages are colour → <span style="color:#ff9a3c">Epson</span></div>`;
+    html += `<div style="font-size:.72rem">All <b>${cmap.colour.length}</b> pages are colour → <span style="color:#ff9a3c">${esc(printerShortLabel("epson", printerViewStore(storeFilter)))}</span></div>`;
   } else {
+    // Where there is no Konica the B&W half prints on the Epson too, so name
+    // the printer this store will actually use.
+    const bwStore = printerViewStore(storeFilter);
+    const bwName  = esc(printerShortLabel(effectivePrinterKey("konica", bwStore), bwStore));
     html += `<div style="font-size:.72rem;margin-bottom:4px">
-      <span style="color:#ff9a3c"><b>${cmap.colour.length} colour pages</b></span> → Epson &nbsp;|&nbsp;
-      <span style="color:var(--muted)"><b>${cmap.bw.length} B&amp;W pages</b></span> → Konica
+      <span style="color:#ff9a3c"><b>${cmap.colour.length} colour pages</b></span> → ${esc(printerShortLabel("epson", bwStore))} &nbsp;|&nbsp;
+      <span style="color:var(--muted)"><b>${cmap.bw.length} B&amp;W pages</b></span> → ${bwName}
     </div>`;
     if (cmap.colour.length <= 20) {
       html += `<div style="font-size:.67rem;color:var(--amber)">Colour pages: ${cmap.colour.join(", ")}</div>`;
@@ -3444,15 +3494,20 @@ function renderItems() {
 }
 
 function itemHTML(it, idx) {
-  const printer  = it.printer || (it.colour === "col" ? "epson" : "konica");
+  // The store PC redirects a 'konica' item to the Epson where there is no
+  // Konica, so resolve the same way here — the tag and the button must name the
+  // printer the job will really come out of.
+  const store    = printerViewStore(storeFilter);
+  const printer  = effectivePrinterKey(it.printer || (it.colour === "col" ? "epson" : "konica"), store);
   const isEpson  = printer === "epson";
+  const pName    = printerShortLabel(printer, store);
   const printed  = it.status === "Printed";
   const jid      = selectedJob ? esc(selectedJob.job_id) : "";
   return `
   <div class="print-item" id="pi-${idx}">
     <div class="pi-hdr">
       <span class="pi-label">Item ${idx + 1}</span>
-      <span class="pi-printer-tag ${isEpson ? "epson" : ""}">${isEpson ? "EPSON (colour)" : "KONICA (b&w)"}</span>
+      <span class="pi-printer-tag ${isEpson ? "epson" : ""}">${esc(pName.toUpperCase())} (${it.colour === "col" ? "colour" : "b&w"})</span>
       ${editItems.length > 1 ? `<button class="pi-remove" onclick="removeItem(${idx})">✕</button>` : ""}
     </div>
     <div class="pp-row">
@@ -3497,7 +3552,7 @@ function itemHTML(it, idx) {
     <button class="pi-print-btn${printed ? " printed" : ""}"
             id="piprint-${idx}" onclick="printItem('${jid}', ${idx + 1})"
             ${printed ? "" : ""}>
-      ${printed ? "✓ Printed on " + (isEpson ? "Epson" : "Konica") : "Print on " + (isEpson ? "Epson →" : "Konica →")}
+      ${printed ? "✓ Printed on " + esc(pName) : "Print on " + esc(pName) + " →"}
     </button>
   </div>`;
 }

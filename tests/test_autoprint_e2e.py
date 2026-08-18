@@ -114,6 +114,14 @@ def test_full_pipeline_e2e(dummy_6page_pdf, tmp_path, monkeypatch):
             print_spec=row.get("print_spec"),
         )
 
+    # This test drives the print pipeline, not multi-box coordination: grant the
+    # claim so it exercises what it was written for. The claim itself (and its
+    # fail-closed behaviour when Supabase is unreachable) is covered by
+    # tests/test_store_puller.py::TestPrintClaim and tests/test_device_lease.py.
+    import store_puller as _sp
+    monkeypatch.setattr(_sp, "_claim", lambda job_id: True)
+    monkeypatch.setattr(_sp, "_unclaim", lambda job_id: None)
+
     # Run the E2E poll cycle
     pulled = pull_once(
         client=client,

@@ -2526,6 +2526,19 @@ def _handle_cron_sla_check(h) -> None:
 STORE_PC_MONITOR_ID  = os.environ.get("STORE_PC_MONITOR_ID", "OSP")
 STORE_PC_OFFLINE_MIN = int(os.environ.get("STORE_PC_OFFLINE_MIN", "20"))
 
+# Every store whose PC is watched for liveness. The one above additionally gets
+# the opening/closing digest ritual; the rest get plain offline/online alerts.
+# Nattika was absent from this list for its whole life, so a dead PRINTK PC
+# could never have raised anything.
+STORE_PC_MONITOR_IDS = [s.strip() for s in os.environ.get(
+    "STORE_PC_MONITOR_IDS", "OSP,PRINTK,PRIOFF").split(",") if s.strip()]
+
+# A live store PC writes printer counters every 5 minutes. When PRINTK's Epson
+# moved to a new IP on ~11 Aug 2026 the PC kept syncing happily while its
+# printer pipeline was dead — heartbeat green, counters frozen for a week. So
+# liveness is not enough: the cloud also checks that the data is moving.
+STORE_COUNTER_STALE_MIN = int(os.environ.get("STORE_COUNTER_STALE_MIN", "180"))
+
 
 def _sd_week_start(d):
     """Monday of d's week as 'YYYY-MM-DD'."""
@@ -2571,63 +2584,87 @@ def _sd_summary_range(c, store_id, start_str, end_str):
     return [by_date[d] for d in sorted(by_date)]
 
 
-def _handle_cron_store_pc_check(h) -> None:
-    """GET /cron/store-pc-check — store-PC liveness watcher (heartbeat absence).
+def _counters_age_min(c, store_id, now_ist):
+    """Minutes since this store last wrote a printer counter, or None if never.
 
-    Reads the monitored store's heartbeat (latest daily_summary.synced_at),
-    compares to now (IST), and on an up<->down transition messages the owner:
-      - down -> up : opening message
-      - up -> down : closing message + day log (+ weekly on Sat, + monthly on the
-                     last working day of the month)
-    Catches every shutdown type (clean, crash, power cut) — not just clean ones.
-
-    Auth: optional `Authorization: Bearer ${CRON_SECRET}` when CRON_SECRET is set.
+    A store PC can be perfectly alive and still have a dead printer pipeline —
+    that is exactly what happened at Nattika — so the heartbeat alone does not
+    prove the store is working.
     """
-    expected = os.environ.get("CRON_SECRET", "")
-    if expected and h.headers.get("Authorization", "") != f"Bearer {expected}":
-        _json_response(h, 401, {"error": "Unauthorized"})
-        return
+    from datetime import datetime
     try:
-        from datetime import timedelta, timezone
-        import store_digest as sd
-        from db_cloud import _client
-        from whatsapp_notify import _send
+        r = (c.table("printer_counters").select("polled_at")
+             .eq("store_id", store_id).order("polled_at", desc=True)
+             .limit(1).execute())
+    except Exception as exc:
+        logger.warning("counters age lookup failed for %s: %s", store_id, exc)
+        return None
+    rows = r.data or []
+    if not rows:
+        return None
+    try:
+        last = datetime.strptime(str(rows[0]["polled_at"])[:19], "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError, KeyError):
+        return None
+    return (now_ist - last).total_seconds() / 60.0
 
-        store_id = STORE_PC_MONITOR_ID
-        now_ist = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=5, minutes=30)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        c = _client()
 
-        # Heartbeat = latest synced_at for this store (ISO text -> lexicographic max).
-        hb = c.table("daily_summary").select("synced_at").eq("store_id", store_id).execute()
-        vals = [d.get("synced_at") for d in (hb.data or []) if d.get("synced_at")]
-        last_hb_str = max(vals) if vals else None
+def _fmt_age(minutes):
+    if minutes is None:
+        return "never"
+    if minutes < 90:
+        return f"{int(minutes)} min"
+    if minutes < 2880:
+        return f"{minutes / 60:.1f} h"
+    return f"{int(minutes // 1440)} days"
 
-        def _parse(ts):
-            try:
-                return datetime.strptime(str(ts)[:19], "%Y-%m-%d %H:%M:%S")
-            except (ValueError, TypeError):
-                return None
 
-        last_hb = _parse(last_hb_str)
-        age_min = ((now_ist - last_hb).total_seconds() / 60.0) if last_hb else None
-        online = age_min is not None and age_min < STORE_PC_OFFLINE_MIN
+def _store_pc_check_one(c, sd, store_id, now_ist, now_iso, digest: bool) -> dict:
+    """One store's liveness + pipeline-freshness tick.
 
-        st = c.table("store_pc_status").select("*").eq("store_id", store_id).limit(1).execute()
-        row = st.data[0] if st.data else {}
-        prev_state = row.get("state", "unknown")
-        clean = bool(row.get("clean_shutdown"))
+    `digest=True` adds the opening/closing summary ritual (the main store only).
+    Every store, digest or not, gets:
+      - offline / back-online alerts (the PC itself), and
+      - counters-stale / counters-flowing alerts (the PC is up but its printer
+        pipeline is dead — the failure mode that hid for a week at Nattika).
 
-        close_d = last_hb.date() if last_hb else now_ist.date()
-        decision = sd.decide_transition(
-            online=online, prev_state=prev_state,
-            today_str=now_ist.strftime("%Y-%m-%d"),
-            close_date_str=close_d.strftime("%Y-%m-%d"),
-            opening_sent_date=row.get("opening_sent_date"),
-            closing_sent_date=row.get("closing_sent_date"),
-        )
+    Alert dedup rides on the existing `state` column, so no schema change:
+    'up' | 'up_stale' | 'down'. Digest logic sees a normalised 'up'.
+    """
+    from datetime import datetime
 
-        sent = []
+    def _parse(ts):
+        try:
+            return datetime.strptime(str(ts)[:19], "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return None
+
+    hb = c.table("daily_summary").select("synced_at").eq("store_id", store_id).execute()
+    vals = [d.get("synced_at") for d in (hb.data or []) if d.get("synced_at")]
+    last_hb_str = max(vals) if vals else None
+    last_hb = _parse(last_hb_str)
+    age_min = ((now_ist - last_hb).total_seconds() / 60.0) if last_hb else None
+    online = age_min is not None and age_min < STORE_PC_OFFLINE_MIN
+
+    st = c.table("store_pc_status").select("*").eq("store_id", store_id).limit(1).execute()
+    row = st.data[0] if st.data else {}
+    prev_raw = row.get("state", "unknown")
+    prev_state = "up" if str(prev_raw).startswith("up") else prev_raw
+    was_stale = prev_raw == "up_stale"
+    clean = bool(row.get("clean_shutdown"))
+
+    close_d = last_hb.date() if last_hb else now_ist.date()
+    decision = sd.decide_transition(
+        online=online, prev_state=prev_state,
+        today_str=now_ist.strftime("%Y-%m-%d"),
+        close_date_str=close_d.strftime("%Y-%m-%d"),
+        opening_sent_date=row.get("opening_sent_date"),
+        closing_sent_date=row.get("closing_sent_date"),
+    )
+
+    sent = []
+
+    if digest:
         if decision["send_opening"]:
             _open_msg = sd.compose_opening_message(now_ist.date())
             if _alert_ops("Store is open — printers online", _open_msg):
@@ -2642,27 +2679,105 @@ def _handle_cron_store_pc_check(h) -> None:
             msg = sd.compose_closing_message(close_d, daily, weekly, monthly, clean=clean)
             if _alert_ops(f"Store closed {close_str} — daily summary ready", msg):
                 sent.append("closing")
+    else:
+        # Secondary stores get plain liveness alerts instead of the digest.
+        if decision["send_closing"]:
+            if _alert_ops(f"{store_id} store PC offline",
+                          f"🔴 *{store_id} store PC is offline*\n\n"
+                          f"Last heartbeat: {last_hb_str or 'never'} "
+                          f"({_fmt_age(age_min)} ago).\n"
+                          "Nothing from that store is reaching the console."):
+                sent.append("offline")
+        if decision["send_opening"]:
+            if _alert_ops(f"{store_id} store PC back online",
+                          f"🟢 *{store_id} store PC is back online*\n\n"
+                          f"Heartbeat resumed at {last_hb_str}."):
+                sent.append("online")
 
-        update = {
-            "store_id": store_id,
-            "state": decision["new_state"],
-            "last_heartbeat_at": last_hb_str,
-            "opening_sent_date": decision["opening_sent_date"],
-            "closing_sent_date": decision["closing_sent_date"],
-            "updated_at": now_iso,
-        }
-        if online:
-            update["last_up_at"] = now_iso
-            update["clean_shutdown"] = False
-        else:
-            update["last_down_at"] = now_iso
-        c.table("store_pc_status").upsert(update).execute()
+    # Pipeline freshness — only meaningful while the PC is up.
+    counters_age = _counters_age_min(c, store_id, now_ist)
+    stale = bool(online and (counters_age is None or counters_age > STORE_COUNTER_STALE_MIN))
+    if online and stale and not was_stale:
+        if _alert_ops(f"{store_id} printer data has stopped",
+                      f"🔴 *{store_id}: printer pipeline dead*\n\n"
+                      f"The PC is online and syncing, but no printer counters have "
+                      f"been written for {_fmt_age(counters_age)}.\n\n"
+                      "Usually the printer is off, or its IP changed — check the "
+                      "printer panel, then epson_ip/konica_ip in store_config.json."):
+            sent.append("counters_stale")
+    elif online and was_stale and not stale:
+        if _alert_ops(f"{store_id} printer data flowing again",
+                      f"🟢 *{store_id}: printer counters are flowing again* "
+                      f"(last write {_fmt_age(counters_age)} ago)."):
+            sent.append("counters_ok")
 
-        _json_response(h, 200, {
-            "store_id": store_id, "online": online,
-            "age_min": round(age_min, 1) if age_min is not None else None,
-            "state": decision["new_state"], "sent": sent,
-        })
+    new_state = decision["new_state"]
+    if new_state == "up" and stale:
+        new_state = "up_stale"
+
+    update = {
+        "store_id": store_id,
+        "state": new_state,
+        "last_heartbeat_at": last_hb_str,
+        "opening_sent_date": decision["opening_sent_date"],
+        "closing_sent_date": decision["closing_sent_date"],
+        "updated_at": now_iso,
+    }
+    if online:
+        update["last_up_at"] = now_iso
+        update["clean_shutdown"] = False
+    else:
+        update["last_down_at"] = now_iso
+    c.table("store_pc_status").upsert(update).execute()
+
+    return {
+        "store_id": store_id, "online": online,
+        "age_min": round(age_min, 1) if age_min is not None else None,
+        "counters_age_min": round(counters_age, 1) if counters_age is not None else None,
+        "counters_stale": stale, "state": new_state, "sent": sent,
+    }
+
+
+def _handle_cron_store_pc_check(h) -> None:
+    """GET /cron/store-pc-check — per-store liveness + pipeline-freshness watcher.
+
+    Runs over every store in STORE_PC_MONITOR_IDS (not just the one that gets
+    the digest). For each: reads the heartbeat (latest daily_summary.synced_at)
+    and how long ago the store last wrote a printer counter, then alerts on the
+    transitions —
+      - down -> up : opening message (digest store) or "PC back online"
+      - up -> down : closing message + day log (digest store) or "PC offline"
+      - up but counters frozen -> "printer pipeline dead", and its recovery
+    Catches every shutdown type (clean, crash, power cut), plus the nastier case
+    of a PC that is alive and syncing while its printers are unreachable.
+
+    Auth: optional `Authorization: Bearer ${CRON_SECRET}` when CRON_SECRET is set.
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected and h.headers.get("Authorization", "") != f"Bearer {expected}":
+        _json_response(h, 401, {"error": "Unauthorized"})
+        return
+    try:
+        from datetime import timedelta, timezone
+        import store_digest as sd
+        from db_cloud import _client
+        from whatsapp_notify import _send
+
+        now_ist = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=5, minutes=30)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        c = _client()
+
+        # One store's lookup failing must not blind the others — check them all
+        # and report what broke, rather than 500-ing the whole sweep.
+        results = []
+        for sid in STORE_PC_MONITOR_IDS:
+            try:
+                results.append(_store_pc_check_one(
+                    c, sd, sid, now_ist, now_iso, digest=(sid == STORE_PC_MONITOR_ID)))
+            except Exception as exc:
+                logger.error("store-pc-check failed for %s: %s", sid, exc)
+                results.append({"store_id": sid, "error": str(exc)})
+        _json_response(h, 200, {"stores": results})
     except Exception as exc:
         logger.error("store-pc-check cron error: %s", exc)
         _json_response(h, 500, {"error": str(exc)})

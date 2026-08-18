@@ -27,6 +27,19 @@ HTTP_PORT = 5000
 WS_PORT   = 5001
 _ws_clients = set()
 
+# ── This store's identity and fleet ───────────────────────────────────────────
+# A finishing/collection store (Nattika) has no Konica: konica_ip is blank in
+# store_config.json, printer_poller skips it, and the Konica cards below are
+# dropped rather than left showing a permanent "Not yet polled".
+try:
+    from store_config import get_store_config
+    _CFG        = get_store_config()
+    STORE_NAME  = _CFG.store_name
+    HAS_KONICA  = bool(_CFG.printers.konica_ip) and _CFG.printers.konica_ip != "None"
+except Exception:
+    STORE_NAME  = "Printosky"
+    HAS_KONICA  = True
+
 # ── data ──────────────────────────────────────────────────────────────────────
 def get_db():
     if not os.path.exists(DB_PATH): return None
@@ -235,7 +248,7 @@ tr:hover td{background:#fafafa}
 <div class="hdr">
   <div class="hdr-l">
     <div class="dot" id="dot"></div>
-    <div><h1>PRINTOSKY</h1><div class="store">Oxygen Students Paradise &nbsp;·&nbsp; Live Tracker</div></div>
+    <div><h1>PRINTOSKY</h1><div class="store">STORE_NAME_PLACEHOLDER &nbsp;·&nbsp; Live Tracker</div></div>
   </div>
   <div class="hdr-r"><div id="ts">Connecting…</div><div style="opacity:.6;margin-top:2px">Live · auto-updates</div></div>
 </div>
@@ -261,7 +274,7 @@ tr:hover td{background:#fafafa}
   </div>
   <div class="sec" id="printer-sec"><h2>🖨️ Printer Counters</h2>
     <div style="display:flex;gap:16px;flex-wrap:wrap">
-      <div style="flex:1;min-width:220px;background:#f8f9fa;border-radius:10px;padding:16px">
+      <div style="flex:1;min-width:220px;background:#f8f9fa;border-radius:10px;padding:16px;KONICA_DISPLAY_PLACEHOLDER">
         <div style="font-weight:700;margin-bottom:10px">⬛ Konica Bizhub Pro 1100</div>
         <div style="font-size:12px;color:#888;margin-bottom:8px" id="konica-ts">Not yet polled</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -291,7 +304,7 @@ tr:hover td{background:#fafafa}
         <div style="font-size:28px;font-weight:700" id="cv-files">—</div>
         <div style="font-size:11px;color:#888;margin-top:4px">jobs in hot folder</div>
       </div>
-      <div style="flex:1;min-width:180px;background:#f0f7ff;border-radius:10px;padding:14px">
+      <div style="flex:1;min-width:180px;background:#f0f7ff;border-radius:10px;padding:14px;KONICA_DISPLAY_PLACEHOLDER">
         <div style="font-size:11px;color:#888;margin-bottom:4px">Konica Pages Today</div>
         <div style="font-size:28px;font-weight:700" id="cv-konica">—</div>
         <div style="font-size:11px;color:#aaa;margin-top:4px" id="cv-konica-detail">print + copy</div>
@@ -393,7 +406,9 @@ connect();
 setInterval(()=>{if(ws&&ws.readyState===1)ws.send('ping');},10000);
 </script>
 </body>
-</html>""".replace("WS_PORT_PLACEHOLDER", str(WS_PORT))
+</html>""".replace("WS_PORT_PLACEHOLDER", str(WS_PORT)) \
+           .replace("KONICA_DISPLAY_PLACEHOLDER", "" if HAS_KONICA else "display:none") \
+           .replace("STORE_NAME_PLACEHOLDER", STORE_NAME)
 
 # ── http ──────────────────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):

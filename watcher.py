@@ -158,8 +158,9 @@ GSHEETS_WORKSHEET_NAME = "Job Log"
 # â”€â”€ Phase 3: Printer IPs (confirmed 2026-03-12 via arp -a) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _PRINTERS  = get_store_config().printers
 KONICA_IP  = _PRINTERS.konica_ip   # Konica Bizhub Pro 1100 (MAC: 00-50-aa-2c-78-4c)
-EPSON_IP   = _PRINTERS.epson_ip    # Epson WF-C21000       (MAC: e0-bb-9e-d6-52-2e)
-# Access EWS at: http://192.168.55.110  and  http://192.168.55.202
+EPSON_IP   = _PRINTERS.epson_ip    # Epson EM-C8100        (OSP: 192.168.55.214, installed 2026-06-29)
+# Access each printer's EWS at http://<its IP> — both come from store_config.json,
+# so a store with no Konica (Nattika) leaves KONICA_IP empty.
 # Phase 3 will poll these for page counts to cross-check jobs received vs printed
 
 # File types to track (ignore temp files, system files)

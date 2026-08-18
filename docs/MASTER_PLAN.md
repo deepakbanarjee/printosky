@@ -172,9 +172,10 @@ The layout selector in the print panel must show **visual diagrams** of how the 
 
 Staff or customer can look at the visual and immediately understand what they're selecting. No guessing from text labels.
 
-### Collation Correction — Epson WFC 21000 Only
-Pages come out in correct sequence ONLY when printed on **Epson WFC 21000**.
-- **Epson WFC 21000** (colour printer) → sequence preserved ✓
+### Collation Correction — Epson Only
+Pages come out in correct sequence ONLY when printed on the **Epson** (EM-C8100
+since 2026-06-29; the WF-C21000 it replaced behaved the same way).
+- **Epson EM-C8100** (colour printer) → sequence preserved ✓
 - **Konica** (B&W) → sequence depends on Konica model; assume manual collation needed
 - For **mixed jobs** (split between Konica + Epson):
   - Colour pages → Epson → in sequence ✓
@@ -556,7 +557,7 @@ When a job is split between Konica and Epson:
 When a job is split between Konica (B&W) and Epson (Colour), show:
 ```
 ⚠️  Mixed job — B&W pages → Konica, Colour pages → Epson
-    Epson (WFC 21000) outputs in sequence.
+    Epson (EM-C8100) outputs in sequence.
     Konica output will need manual collation with colour pages.
     Confirm before printing.  [Yes, I understand]
 ```

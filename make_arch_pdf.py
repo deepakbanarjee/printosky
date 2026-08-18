@@ -191,7 +191,7 @@ Jobs\Incoming\  -------> |   whatsapp_bot.py      |
 | :9100    |  +------------------+---------------+
 |          |                     |
 | Epson    |                     | reads live data
-| WF-C21000|                     v
+| EM-C8100 |                     v
 +----------+    +---------------------------------+
                 |  printosky.com  (Netlify)       |
                 |                                 |
@@ -393,7 +393,8 @@ def build_story():
             b("<b>POST /staff-logout</b>: closes the session, records on-duty time."),
             b("<b>GET /active-staff</b>: returns which staff member is logged in on this PC."),
             b("<b>GET /health</b>: checks internet connectivity + printer reachability (port 9100)."),
-            b("Printers: Konica bizhub (192.168.55.110) and Epson WF-C21000 (192.168.55.202)."),
+            b("Printers: Konica bizhub (192.168.55.110) and Epson EM-C8100 (192.168.55.214). "
+              "Nattika has no Konica — B&W prints on its Epson."),
         ]),
         sp(8),
     ]

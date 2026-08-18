@@ -95,7 +95,7 @@ _All from [SECURITY.md](SECURITY.md) — restating priorities here for cross-ref
 | SEC1 | P0 | Verify `RAZORPAY_ACADEMIC_WEBHOOK_SECRET` set on Vercel + Razorpay dashboard |
 | SEC2 | P0 | Verify `ADMIN_PASSWORD_HASH` set on Vercel |
 | SEC3 | P0 | Confirm `pin_salt` migration ran on Supabase |
-| SEC4 | P1 | Change Epson `192.168.55.202` admin/admin default password |
+| SEC4 | P1 | Check/change the Epson web-panel password on the EM-C8100s (OSP `192.168.55.214`, Nattika) — the retired WF-C21000 was on `admin/admin` |
 | SEC5 | P1 | Move STORE_TOKEN from localStorage → httpOnly cookie + CSP |
 | SEC6 | P2 | Scoped Supabase role to replace service_role key on store PC |
 | SEC7 | P2 | Random suffix on academic project IDs (PROJ-2026-001 → enumerable) |
