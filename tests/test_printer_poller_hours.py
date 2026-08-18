@@ -4,6 +4,10 @@ An unreachable printer during open hours is a real fault; outside open hours it
 just means the shop is closed and the printers are powered off. The poller skips
 quietly when closed+unreachable, but still polls if someone is working late and
 the printers are on. See multistore-pivot "Store-tier model & metering".
+
+Since 2026-08-18 the skip is quiet but no longer silent: every cycle probes the
+printers and reports each to ops_watchdog first, so "skipped, closed" is a
+visible state rather than the absence of one (docs/FAIL_LOUD.md).
 """
 from datetime import datetime
 
@@ -72,16 +76,24 @@ class TestPollOnceHoursAware:
         pp.poll_once(str(tmp_path / "jobs.db"))
         assert "konica_xml" in calls and "epson_web" in calls
 
-    def test_polls_when_open_without_probing(self, monkeypatch, tmp_path):
-        # When open, reachability must not even be probed (short-circuit).
+    def test_probes_every_cycle_so_printer_state_is_always_known(self, monkeypatch, tmp_path):
+        """Probing used to be short-circuited away while the store was open.
+
+        That saved two TCP connects per five minutes and cost us a week: with no
+        probe, an unreachable printer during open hours surfaced only as absent
+        counters, which nothing alerted on. The probe now runs every cycle
+        because it is what produces the useful message ("UNREACHABLE at <ip> —
+        powered off, or the IP changed"). See docs/FAIL_LOUD.md.
+        """
         calls = []
         self._patch_polls(monkeypatch, calls)
         monkeypatch.setattr(pp, "is_store_open", lambda *a, **k: True)
 
-        def _boom():
-            raise AssertionError("reachability should not be probed when open")
-        monkeypatch.setattr(pp, "_any_printer_reachable", _boom)
+        probed = []
+        monkeypatch.setattr(pp, "_any_printer_reachable",
+                            lambda: probed.append(True) or True)
         pp.poll_once(str(tmp_path / "jobs.db"))
+        assert probed, "printers must be probed even while the store is open"
         assert "konica_xml" in calls
 
 

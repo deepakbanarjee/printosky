@@ -38,10 +38,22 @@ Storage bucket: `academic-outputs` (public)
 
 ---
 
+## Monitoring — fail loud
+
+Every pipeline reports to `ops_watchdog`; a failure alerts the ops WhatsApp
+number immediately, repeats every 6 h while broken, and announces its recovery.
+State is surfaced on `print_server /health` and `/status`, and as a banner on the
+admin and jobs consoles. The cloud cron (`/cron/store-pc-check`) covers what a
+dead store PC cannot report about itself — per store: PC offline, and PC alive
+but printer counters frozen.
+
+Rule, check list and env knobs → [FAIL_LOUD.md](FAIL_LOUD.md)
+
 ## Supporting Modules (store PC, imported/threaded)
 
 | Module | Role |
 |--------|------|
+| `ops_watchdog.py` | Shared health/alert bus: `report()` / `guard()`, SQLite-backed dedup, WhatsApp ops alerts |
 | `rate_card.py` | Pricing: paper × sides × layout × copies × finishing |
 | `razorpay_integration.py` | Creates payment links; verifies Razorpay webhook sigs |
 | `supabase_sync.py` | Background thread; upserts jobs + counters every 5 min |

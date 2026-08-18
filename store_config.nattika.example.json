@@ -1,0 +1,13 @@
+{
+  "_comment": "Nattika (PRINTK) — finishing/collection store. No Konica: konica_ip is null, so B&W routes to the Epson and every console hides the Konica panels. The Epson moved to 192.168.1.250 on 2026-08-18; the previous address (.201/.204) is what silently stopped the printer pipeline between 11 and 18 August.",
+  "store_id": "PRINTK",
+  "store_name": "Printosky, Nattika",
+  "printers": {
+    "konica_ip": null,
+    "epson_ip": "192.168.1.250"
+  },
+  "hot_folder": "C:\\Printosky\\Jobs\\Incoming",
+  "db_path": "C:\\Printosky\\Data\\jobs.db",
+  "agent_secret": null,
+  "platform_url": null
+}

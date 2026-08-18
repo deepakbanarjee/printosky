@@ -2506,17 +2506,26 @@ async function loadAll() {
     renderPrinterBreakdown();
     loadPrinterJobs();
     setSyncState(isDemo ? "demo" : "ok");
+    // "Supabase answered" is not "the store is working" — check the store PC
+    // and the freshness of what we just drew, and banner anything broken.
+    if (!isDemo) refreshHealthBanner(printerViewStore(storeFilter));
   } catch (e) {
     setSyncState("err", e.message);
+    renderHealthBanner([{ level: "error", title: "Could not load the console",
+                          detail: e.message }]);
   }
 }
 
 // ── Sync indicator ──────────────────────────────────────────────────────────
+// The dot reports THIS PAGE's last Supabase fetch and nothing more — a green
+// dot has never meant the store is healthy. Whether the store is actually
+// working is the health banner's job (refreshHealthBanner), so the label says
+// what it really knows.
 function setSyncState(s, msg) {
   const dot   = document.getElementById("sync-dot");
   const label = document.getElementById("sync-label");
   dot.className = "sync-dot " + (s === "ok" ? "ok" : s === "err" ? "err" : "");
-  label.textContent = s === "ok"   ? "Live · " + now()
+  label.textContent = s === "ok"   ? "Loaded · " + now()
                     : s === "demo" ? "Demo Mode — start watcher at store to see live data"
                     : s === "err"  ? "Sync error: " + msg
                     : "Refreshing…";
@@ -2548,6 +2557,7 @@ function setStoreFilter(v) {
   renderPrinterBreakdown();
   loadPrinterJobs();
   updateStoreDiag();
+  if (!isDemo) refreshHealthBanner(printerViewStore(storeFilter));
 }
 
 // Default the store filter once, to THIS PC's store (the 🏪 Store setting):
@@ -2766,7 +2776,7 @@ async function loadPrinterJobs() {
   const kt = wantK ? document.getElementById("konica-jobs-tbody") : null;
   if (kt) {
     if (!konicaRows || !konicaRows.length) {
-      kt.innerHTML = `<tr><td colspan="9" class="empty">No Konica job records for this period</td></tr>`;
+      kt.innerHTML = `<tr><td colspan="9" class="empty">No Konica job records for this period — if that is unexpected, see the health banner at the top</td></tr>`;
     } else {
       kt.innerHTML = konicaRows.map(r => `
         <tr>
@@ -2787,7 +2797,7 @@ async function loadPrinterJobs() {
   const et = document.getElementById("epson-jobs-tbody");
   if (et) {
     if (!epsonRows || !epsonRows.length) {
-      et.innerHTML = `<tr><td colspan="8" class="empty">No Epson job records yet — delta attribution populates after each print cycle</td></tr>`;
+      et.innerHTML = `<tr><td colspan="8" class="empty">No Epson job records for this period — if that is unexpected, see the health banner at the top</td></tr>`;
     } else {
       et.innerHTML = epsonRows.map(r => `
         <tr>

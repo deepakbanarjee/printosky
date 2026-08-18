@@ -34,6 +34,7 @@ import urllib3
 from datetime import datetime
 
 from store_config import get_store_config
+from ops_watchdog import report as _report_health
 
 try:
     from dotenv import load_dotenv
@@ -85,7 +86,14 @@ EXPORT_URL  = f"{EPSON_BASE}/PRESENTATION/ADVANCED/INFO_JOBHISTORY/OUTPUT.CSV"
 
 # Session-level state
 _weblog_fail_count = 0
-_weblog_available  = True   # set to False after _WEBLOG_FAIL_LIMIT failures
+_weblog_available  = True   # False while cooling down after _WEBLOG_FAIL_LIMIT failures
+_weblog_retry_at   = 0.0    # monotonic deadline after which Tier 1 is retried
+
+# Tier 1 used to switch itself off "for this session" after three failures — a
+# store PC runs for weeks, so that meant permanently, silently. It now cools
+# down and retries, so a printer that comes back (or an IP that gets fixed)
+# heals without anyone remembering to restart the watcher.
+_WEBLOG_RETRY_SECONDS = int(os.environ.get("EPSON_WEBLOG_RETRY_SECONDS", "3600"))
 
 
 # ── DB init ────────────────────────────────────────────────────────────────────
@@ -124,9 +132,20 @@ def init_epson_jobs_table(conn):
 
 
 def get_epson_ip() -> str:
-    cfg_ip = get_store_config().printers.epson_ip
-    if not cfg_ip or cfg_ip == "192.168.1.204":
-        return "192.168.1.201"
+    """This store's Epson IP, straight from store_config.json.
+
+    There used to be a silent remap here — a configured 192.168.1.204 was
+    rewritten to 192.168.1.201 — so the fetcher could be talking to a different
+    printer than the config named, with nothing in the logs saying so. Both
+    addresses are now stale anyway (Nattika's Epson is 192.168.1.250 as of
+    2026-08-18). A missing IP is reported, not papered over.
+    """
+    cfg_ip = (get_store_config().printers.epson_ip or "").strip()
+    if not cfg_ip:
+        _report_health("config.epson_ip", False,
+                       "epson_ip is empty in store_config.json — the Epson job log "
+                       "and delta attribution cannot run")
+        return ""
     return cfg_ip
 
 def get_epson_url(endpoint: str) -> str:
@@ -499,12 +518,17 @@ def fetch_and_import(db_path):
       1. Tier 1 — try Epson web log (unless disabled after repeated failures)
       2. Tier 2 — SNMP delta attribution (always)
     """
-    global _weblog_fail_count, _weblog_available
+    global _weblog_fail_count, _weblog_available, _weblog_retry_at
 
     conn = sqlite3.connect(db_path)
     init_epson_jobs_table(conn)
 
-    # Tier 1
+    # Tier 1 — retry once the cooldown expires rather than staying off forever.
+    if not _weblog_available and time.monotonic() >= _weblog_retry_at:
+        logger.info("Epson web log: cooldown elapsed — retrying Tier 1")
+        _weblog_available = True
+        _weblog_fail_count = 0
+
     if _weblog_available:
         try:
             session = _make_session()
@@ -519,24 +543,36 @@ def fetch_and_import(db_path):
                 elif fmt == "parsed_rows":
                     _import_weblog_rows(conn, data_obj)
                 _weblog_fail_count = 0
+                _report_health("epson.weblog", True, f"job log imported from {get_epson_ip()}")
             else:
                 _weblog_fail_count += 1
                 logger.debug(f"Epson web log probe: no data ({_weblog_fail_count}/{_WEBLOG_FAIL_LIMIT})")
                 if _weblog_fail_count >= _WEBLOG_FAIL_LIMIT:
                     _weblog_available = False
-                    logger.info(
+                    _weblog_retry_at = time.monotonic() + _WEBLOG_RETRY_SECONDS
+                    logger.warning(
                         f"Epson web log unavailable after {_WEBLOG_FAIL_LIMIT} attempts — "
-                        "falling back to delta-only mode for this session"
+                        f"delta-only until the next retry in {_WEBLOG_RETRY_SECONDS}s"
                     )
+                    _report_health(
+                        "epson.weblog", False,
+                        f"no job log from the Epson at {get_epson_ip()} after "
+                        f"{_WEBLOG_FAIL_LIMIT} attempts. Per-job colour/mono tracking is "
+                        "stopped until this clears. Wrong IP, or web login rejected?")
         except Exception as e:
             logger.warning(f"Epson Tier 1 error: {e}")
             _weblog_fail_count += 1
+            if _weblog_fail_count >= _WEBLOG_FAIL_LIMIT:
+                _report_health("epson.weblog", False,
+                               f"{type(e).__name__}: {e} (at {get_epson_ip()})")
 
     # Tier 2
     try:
         _delta_attribution(conn)
+        _report_health("epson.delta", True, "delta attribution ran")
     except Exception as e:
         logger.error(f"Epson delta attribution error: {e}")
+        _report_health("epson.delta", False, f"{type(e).__name__}: {e}")
 
     conn.close()
 
@@ -555,8 +591,10 @@ def start_fetcher(db_path, interval=FETCH_INTERVAL):
         while True:
             try:
                 fetch_and_import(db_path)
+                _report_health("fetcher.epson", True, "fetch cycle completed")
             except Exception as e:
                 logger.error(f"Epson fetcher error: {e}")
+                _report_health("fetcher.epson", False, f"{type(e).__name__}: {e}")
             time.sleep(interval)
 
     t = threading.Thread(target=loop, daemon=True, name="EpsonJobFetcher")

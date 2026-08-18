@@ -378,10 +378,29 @@ def get_system_health() -> dict:
         mode = "manual"
         mode_label = "Manual mode — no internet, no printers"
 
+    # Every failing watchdog check, so one request tells a console the whole
+    # truth: printers, poller, fetchers, cloud sync. Reporting them here also
+    # keeps /health honest when nobody has polled recently.
+    try:
+        from ops_watchdog import health as _ops_health, report as _report_health
+        if has_konica():
+            _report_health("printer.konica", konica_ok,
+                           f"reachable at {PRINTER_IPS['konica']}" if konica_ok else
+                           f"UNREACHABLE at {PRINTER_IPS['konica']} — powered off, "
+                           "or the IP changed")
+        _report_health("printer.epson", epson_ok,
+                       f"reachable at {PRINTER_IPS['epson']}" if epson_ok else
+                       f"UNREACHABLE at {PRINTER_IPS['epson']} — powered off, or the IP changed")
+        watchdog = _ops_health()
+    except Exception as exc:                      # never let /health itself 500
+        watchdog = {"healthy": None, "error": str(exc), "checks": {}, "failing": []}
+
     return {
         "internet":     internet,
         "konica":       konica_ok,
         "epson":        epson_ok,
+        "has_konica":   has_konica(),
+        "printer_ips":  PRINTER_IPS,
         "mode":         mode,
         "mode_label":   mode_label,
         "active_staff": list(_active_sessions.keys()),
@@ -389,6 +408,8 @@ def get_system_health() -> dict:
         "time":         datetime.now().strftime("%H:%M:%S"),
         "uptime_s":     int(_time.monotonic() - _SERVER_START),
         "db_ok":        __import__("os").path.exists(DB_PATH),
+        "watchdog":     watchdog,
+        "healthy":      bool(internet and (konica_ok or epson_ok)) and watchdog.get("healthy") is not False,
     }
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -568,6 +589,17 @@ def has_konica() -> bool:
     """
     ip = PRINTER_IPS.get("konica")
     return bool(ip) and ip != "None"
+
+
+def _watchdog_summary() -> dict:
+    """Compact health headline for /status: what is broken, right now."""
+    try:
+        from ops_watchdog import health
+        h = health()
+        return {"healthy": h.get("healthy"), "failing": h.get("failing", []),
+                "checks": {k: v for k, v in h.get("checks", {}).items() if not v.get("ok")}}
+    except Exception as exc:
+        return {"healthy": None, "error": str(exc), "failing": []}
 
 
 def _effective_printer_key(printer_key: str, job_id: str = "") -> str:
@@ -2037,6 +2069,9 @@ class PrintHandler(BaseHTTPRequestHandler):
                 "printer_ips": PRINTER_IPS,
                 "has_konica": has_konica(),
                 "db": os.path.exists(DB_PATH),
+                # Headline health, so the console can flag a broken store PC
+                # from the call it already makes on every load.
+                "watchdog": _watchdog_summary(),
             })
         elif path == "/printers":
             self._json(200, {"printers": PRINTERS})

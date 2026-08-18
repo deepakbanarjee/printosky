@@ -241,3 +241,139 @@ function renderStoreHeader() {
   const name = storeName(getStoreId());
   if (el && name) el.textContent = name;
 }
+
+// ── Fail-loud in the console (shared) ───────────────────────────────────────
+// The rule: this page must never present a broken pipeline as an empty one.
+//
+// On 18 Aug 2026 the Nattika console showed a green "Live" dot, zero rows and
+// the words "No Konica job records for this period" — while that store's
+// printer data had not moved since the 11th. The dot only ever meant "Supabase
+// answered". These helpers add the missing half: is the store PC reachable, are
+// its checks passing, and is the data we are drawing actually current?
+//
+// Anything unhealthy gets a banner at the top of the page. Nothing unhealthy is
+// ever left to be inferred from an empty table.
+
+// Printer counters are written every 5 minutes by a healthy store PC, so
+// silence this long means the pipeline is down, not quiet. Matches the cloud
+// cron's STORE_COUNTER_STALE_MIN.
+const HEALTH_STALE_MIN = 180;
+
+async function fetchStorePcHealth() {
+  const pcUrl = localStorage.getItem("storePcUrl");
+  if (!pcUrl) return { reachable: null, reason: "store PC URL not set — use ⚙ PC Setup" };
+  try {
+    const r = await fetch(`${pcUrl}/health`);
+    if (!r.ok) return { reachable: false, reason: `HTTP ${r.status} from ${pcUrl}` };
+    return { reachable: true, data: await r.json() };
+  } catch (e) {
+    return { reachable: false, reason: `${pcUrl} did not answer (${e.message})` };
+  }
+}
+
+// Minutes since this store last wrote a printer counter — null if it never has.
+async function fetchCountersAgeMin(storeId) {
+  const scope = storeId && storeId !== "all" ? `&store_id=eq.${storeId}` : "";
+  try {
+    const rows = await sbFetch("printer_counters",
+      `select=polled_at&order=polled_at.desc&limit=1${scope}`);
+    if (!rows || !rows.length) return null;
+    const last = new Date(String(rows[0].polled_at).replace(" ", "T"));
+    if (isNaN(last)) return null;
+    return (Date.now() - last.getTime()) / 60000;
+  } catch (e) {
+    return undefined;            // could not tell — reported separately
+  }
+}
+
+function humanAge(minutes) {
+  if (minutes == null) return "never";
+  if (minutes < 90) return `${Math.round(minutes)} min`;
+  if (minutes < 2880) return `${(minutes / 60).toFixed(1)} h`;
+  return `${Math.floor(minutes / 1440)} days`;
+}
+
+// Collect everything wrong right now. Returns [{level, title, detail}].
+async function collectHealthProblems(storeId) {
+  const problems = [];
+
+  const pc = await fetchStorePcHealth();
+  if (pc.reachable === false) {
+    problems.push({
+      level: "error",
+      title: "Store PC unreachable",
+      detail: `${pc.reason}. Printing and live status are unavailable; the rows below are whatever last reached the cloud.`,
+    });
+  } else if (pc.reachable && pc.data) {
+    const wd = pc.data.watchdog || {};
+    for (const name of (wd.failing || [])) {
+      const c = (wd.checks || {})[name] || {};
+      problems.push({
+        level: "error",
+        title: name,
+        detail: `${c.detail || "check failing"}${c.for ? ` — for ${c.for}` : ""}`,
+      });
+    }
+    if (pc.data.internet === false) {
+      problems.push({ level: "warn", title: "Store PC is offline",
+                      detail: "No internet at the store — payments and cloud sync are paused." });
+    }
+  }
+
+  const age = await fetchCountersAgeMin(storeId);
+  if (age === undefined) {
+    problems.push({ level: "warn", title: "Could not check data freshness",
+                    detail: "printer_counters query failed — treat the figures below as unverified." });
+  } else if (age === null) {
+    problems.push({ level: "warn", title: "No printer data for this location, ever",
+                    detail: "This store has never written a printer counter. If it has printers, its poller has never worked." });
+  } else if (age > HEALTH_STALE_MIN) {
+    problems.push({
+      level: "error",
+      title: `Printer data is ${humanAge(age)} old`,
+      detail: "The poller has stopped writing counters. Usually the printer is off or its IP changed — check the printer panel, then epson_ip/konica_ip in store_config.json on that PC.",
+    });
+  }
+  return problems;
+}
+
+// Paint (or clear) the banner. Creates its own container under the header, so
+// no page needs markup for it.
+function renderHealthBanner(problems) {
+  let host = document.getElementById("health-banner");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "health-banner";
+    const main = document.querySelector("main") || document.body;
+    main.parentNode.insertBefore(host, main);
+  }
+  if (!problems || !problems.length) { host.innerHTML = ""; host.style.display = "none"; return; }
+
+  const worst = problems.some(p => p.level === "error") ? "error" : "warn";
+  const colour = worst === "error" ? "#ff5252" : "#ffab40";
+  host.style.display = "block";
+  host.style.cssText += `;display:block;margin:.6rem 1rem 0;border:1px solid ${colour};`
+    + `border-left-width:4px;background:rgba(255,82,82,.08);padding:.6rem .9rem;`
+    + `font-family:var(--mono,monospace);font-size:.72rem;line-height:1.5`;
+  host.innerHTML =
+    `<div style="color:${colour};font-weight:600;margin-bottom:.3rem">`
+    + `⚠ ${problems.length} thing${problems.length > 1 ? "s are" : " is"} not working</div>`
+    + problems.map(p =>
+        `<div style="margin-top:.15rem"><span style="color:${p.level === "error" ? colour : "#ffab40"}">●</span> `
+        + `<b>${escHealth(p.title)}</b> — ${escHealth(p.detail)}</div>`).join("");
+}
+
+function escHealth(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+}
+
+// One call for a page to make on every load/refresh.
+async function refreshHealthBanner(storeId) {
+  try {
+    renderHealthBanner(await collectHealthProblems(storeId));
+  } catch (e) {
+    // Even the health check failing is news — say so rather than showing nothing.
+    renderHealthBanner([{ level: "warn", title: "Health check failed",
+                          detail: e.message || String(e) }]);
+  }
+}

@@ -44,6 +44,7 @@ import requests
 import urllib3
 
 from store_config import get_store_config
+from ops_watchdog import report as _report_health
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
@@ -856,17 +857,47 @@ def has_konica() -> bool:
 
 
 def _any_printer_reachable():
-    """True if either printer answers — i.e. someone may be working late."""
-    return (has_konica() and _printer_reachable(KONICA_IP)) or _printer_reachable(EPSON_IP)
+    """True if any printer this store has answers — i.e. someone may be working late.
+
+    Probing also reports each printer to the watchdog: this is the single place
+    printers are probed, so every cycle refreshes their health whether or not
+    the poll that follows is skipped.
+    """
+    return any(_probe_and_report().values())
+
+
+def _probe_and_report():
+    """TCP-probe every printer this store has and report each to the watchdog.
+
+    This is the check that was missing when Nattika's Epson moved to a new IP:
+    the probe failed, the cycle was skipped as an out-of-hours power-down, and
+    the store stayed dark for a week with nobody told.
+    """
+    results = {}
+    for key, ip in (("konica", KONICA_IP), ("epson", EPSON_IP)):
+        if key == "konica" and not has_konica():
+            continue          # nothing to probe — not a failure
+        if not ip:
+            _report_health(f"printer.{key}", False,
+                           f"no {key}_ip configured in store_config.json")
+            results[key] = False
+            continue
+        ok = _printer_reachable(ip)
+        results[key] = ok
+        _report_health(f"printer.{key}", ok,
+                       f"reachable at {ip}" if ok else
+                       f"UNREACHABLE at {ip} — powered off, or the IP changed "
+                       f"(check the printer panel, then store_config.json)")
+    return results
 
 
 def poll_once(db_path):
     """Run one poll cycle for both printers."""
-    # Out of hours the printers are powered off, so an unreachable printer is
-    # EXPECTED — skip quietly (no log noise, no wasted SNMP timeouts). If someone
-    # is working late and the printers are actually on, fall through and poll so
-    # the cycle is still captured.
-    if not is_store_open() and not _any_printer_reachable():
+    # Probe first, every cycle, and always report the result (see
+    # _any_printer_reachable). Out of hours the printers are genuinely powered
+    # off and the cycle below is skipped — but "skipped" is now a visible state
+    # with an alert behind it, not silence.
+    if not _any_printer_reachable() and not is_store_open():
         logger.info("Store closed and printers unreachable — expected "
                     "(powered off out of hours); skipping poll cycle")
         return
@@ -882,6 +913,11 @@ def poll_once(db_path):
             logger.info("Konica XML gave no counters — trying SNMP fallback")
             konica_data = poll_konica_snmp()
         save_reading(conn, "konica", konica_data)
+        _report_health("counters.konica",
+                       bool(konica_data and konica_data.get("total_pages") is not None),
+                       "counters read OK" if konica_data else
+                       f"no page counters from the Konica at {KONICA_IP} "
+                       "(XML and SNMP both returned nothing)")
         # Try XML first (requires admin auth — usually falls through), then vendor SNMP
         konica_supplies = poll_konica_supplies_xml()
         if not konica_supplies:
@@ -895,6 +931,11 @@ def poll_once(db_path):
         logger.info("Epson web scrape failed — falling back to SNMP")
         epson_data = poll_epson_snmp()
     save_reading(conn, "epson", epson_data)
+    _report_health("counters.epson",
+                   bool(epson_data and epson_data.get("total_pages") is not None),
+                   "counters read OK" if epson_data else
+                   f"no page counters from the Epson at {EPSON_IP} — web scrape and "
+                   "SNMP both failed. Wrong IP, or the web password changed?")
     epson_supplies = poll_supplies(EPSON_IP, "epson")
     save_supplies(conn, "epson", epson_supplies)
     _send_ink_alerts("epson", epson_supplies, conn)
@@ -917,8 +958,10 @@ def start_poller(db_path, interval=POLL_INTERVAL):
         while True:
             try:
                 poll_once(db_path)
+                _report_health("poller.cycle", True, "poll cycle completed")
             except Exception as e:
                 logger.error(f"Poller error: {e}")
+                _report_health("poller.cycle", False, f"{type(e).__name__}: {e}")
             time.sleep(interval)
 
     t = threading.Thread(target=loop, daemon=True, name="PrinterPoller")
