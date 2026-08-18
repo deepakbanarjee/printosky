@@ -198,11 +198,58 @@ def process_transcription_job(job):
             
             while not success and retries > 0:
                 try:
+                    # Pass config with logprobs enabled
+                    config_args = {}
+                    try:
+                        from google.genai import types
+                        config_args["config"] = types.GenerateContentConfig(response_logprobs=True)
+                    except Exception:
+                        config_args["config"] = {"response_logprobs": True}
+
                     response = client.models.generate_content(
                         model=model_name,
-                        contents=[img_target, PROMPT_TEMPLATE]
+                        contents=[img_target, PROMPT_TEMPLATE],
+                        **config_args
                     )
-                    text = response.text
+                    text = response.text or ""
+                    
+                    # Extract logprobs token confidence if present
+                    page_word_confidence = []
+                    try:
+                        cand = response.candidates[0]
+                        logprob_result = getattr(cand, "logprobs_result", None)
+                        if logprob_result and hasattr(logprob_result, "chosen_candidates"):
+                            curr_word = ""
+                            curr_probs = []
+                            for token_info in logprob_result.chosen_candidates:
+                                tok = getattr(token_info, "token", "")
+                                lp = getattr(token_info, "logprob", 0.0)
+                                p = math.exp(lp) * 100.0 if lp <= 0 else 99.0
+                                if tok.startswith(" ") or tok.startswith("\n") or not curr_word:
+                                    if curr_word.strip():
+                                        avg_p = sum(curr_probs) / len(curr_probs) if curr_probs else 95.0
+                                        page_word_confidence.append({
+                                            "word": curr_word.strip(),
+                                            "confidence": round(avg_p, 1),
+                                            "flagged": avg_p < 75.0,
+                                            "page": idx + 1
+                                        })
+                                    curr_word = tok
+                                    curr_probs = [p]
+                                else:
+                                    curr_word += tok
+                                    curr_probs.append(p)
+                            if curr_word.strip():
+                                avg_p = sum(curr_probs) / len(curr_probs) if curr_probs else 95.0
+                                page_word_confidence.append({
+                                    "word": curr_word.strip(),
+                                    "confidence": round(avg_p, 1),
+                                    "flagged": avg_p < 75.0,
+                                    "page": idx + 1
+                                })
+                    except Exception as lp_err:
+                        log.warning(f"Logprob extraction fallback: {lp_err}")
+
                     success = True
                 except APIError as e:
                     if e.code == 429:
@@ -226,10 +273,21 @@ def process_transcription_job(job):
             page_header = f"\n\n=== PAGE {idx + 1} ===\n\n"
             current_content += page_header + text
             
+            # Fetch existing confidence data from DB and append
+            existing_confidence = []
+            try:
+                curr_rec = sb.table("manuscript_transcripts").select("confidence_data").eq("id", job_id).execute().data[0]
+                existing_confidence = curr_rec.get("confidence_data") or []
+            except Exception:
+                pass
+            if page_word_confidence:
+                existing_confidence.extend(page_word_confidence)
+
             # Push live update to Supabase
             sb.table("manuscript_transcripts").update({
                 "transcribed_pages": idx + 1,
                 "content": current_content,
+                "confidence_data": existing_confidence,
                 "total_pages": total_pages
             }).eq("id", job_id).execute()
             

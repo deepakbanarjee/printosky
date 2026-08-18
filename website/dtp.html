@@ -290,34 +290,47 @@
   <div id="tr-edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;align-items:center;justify-content:center">
     <div style="background:var(--surface);padding:20px;width:100vw;height:100vh;display:flex;flex-direction:column;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h3 id="tr-modal-title" style="font-size:1.1rem;font-weight:600;color:var(--accent);word-break:break-all;max-width:50%;">File Name</h3>
+        <h3 id="tr-modal-title" style="font-size:1.1rem;font-weight:600;color:var(--accent);word-break:break-all;max-width:35%;">File Name</h3>
         <div style="display:flex; gap:10px; align-items:center;">
           <button class="ctrl-btn" onclick="trPrevPage()">◀ Prev</button>
           <span id="tr-page-indicator" style="font-family:var(--mono); font-size:.9rem; color:var(--text)">Page 1 of 1</span>
           <button class="ctrl-btn" onclick="trNextPage()">Next ▶</button>
         </div>
-        <button class="ctrl-btn" id="tr-modal-pdf-btn" onclick="trOpenPDFInNewTab()" style="background:#2563eb;color:#fff;">Open PDF ↗</button>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button class="ctrl-btn" id="tr-confidence-toggle-btn" onclick="trToggleConfidenceMode()" style="background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3);" title="Toggle low-confidence OCR word highlights (<75%)">⚡ Highlight Low Confidence</button>
+          <button class="ctrl-btn" id="tr-modal-pdf-btn" onclick="trOpenPDFInNewTab()" style="background:#2563eb;color:#fff;">Open PDF ↗</button>
+        </div>
       </div>
       
       <!-- Side-by-Side layout -->
       <div style="flex:1; display:flex; gap:15px; min-height:0; margin-bottom:12px;">
-        <!-- Left: Image Viewer -->
+        <!-- Left: Image Viewer with PDF Bounding Box Overlay -->
         <div style="flex:1; border:1px solid var(--border); border-radius:6px; background:#0c1015; overflow:auto; position:relative;">
           <!-- Floating zoom controls -->
-          <div style="position: absolute; top: 10px; left: 10px; z-index: 10; display: flex; gap: 5px;">
+          <div style="position: absolute; top: 10px; left: 10px; z-index: 20; display: flex; gap: 5px;">
             <button class="ctrl-btn" onclick="trZoomOut()" style="padding: 4px 10px; font-weight: bold; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; cursor: pointer;">-</button>
             <span id="tr-zoom-label" style="background: rgba(0,0,0,0.7); color: #fff; padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; display: flex; align-items: center; border: 1px solid rgba(255,255,255,0.2); font-family: var(--mono);">100%</span>
             <button class="ctrl-btn" onclick="trZoomIn()" style="padding: 4px 10px; font-weight: bold; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; cursor: pointer;">+</button>
             <button class="ctrl-btn" onclick="trZoomReset()" style="padding: 4px 8px; font-size: 0.8rem; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; cursor: pointer;">Reset</button>
           </div>
-          <!-- Centered wrapper for image -->
+          <!-- Centered wrapper for image + PDF Bounding Box Layer -->
           <div id="tr-img-wrapper" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; min-height: 100%;">
-            <img id="tr-modal-img" src="" style="max-width:100%; max-height:100%; object-fit:contain; display:block;" alt="Manuscript Page scan">
+            <div id="tr-img-container" style="position: relative; display: inline-block;">
+              <img id="tr-modal-img" src="" style="max-width:100%; max-height:100%; object-fit:contain; display:block;" alt="Manuscript Page scan" onload="trRenderConfidenceOverlay()">
+              <div id="tr-bbox-overlay" style="position:absolute; inset:0; pointer-events:none; z-index:10;"></div>
+            </div>
           </div>
         </div>
         
-        <!-- Right: Text Editor -->
+        <!-- Right: Text Editor + Low Confidence Review Panel -->
         <div style="flex:1; display:flex; flex-direction:column;">
+          <div id="tr-confidence-bar" style="display:none; padding:8px 12px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.25); border-radius:6px; margin-bottom:8px; font-size:.8rem; color:#fbbf24;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span>⚠️ <strong id="tr-low-conf-count">0</strong> low-confidence word(s) flagged (<75%)</span>
+              <button class="ctrl-btn" onclick="trNextLowConfWord()" style="padding:2px 8px; font-size:.75rem; background:#f59e0b; color:#000; border:none; font-weight:bold; cursor:pointer;">Next Word ➔</button>
+            </div>
+            <div id="tr-low-conf-words-list" style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px; max-height:60px; overflow-y:auto;"></div>
+          </div>
           <textarea id="tr-modal-textarea" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--sans);font-size:1rem;padding:12px;resize:none;outline:none;line-height:1.6;" placeholder="Transcript text..."></textarea>
         </div>
       </div>
@@ -784,11 +797,139 @@ async function trLoadPageImage() {
   }
 }
 
+let trConfidenceModeActive = true;
+let trCurrentFlaggedIndex = 0;
+
+function trToggleConfidenceMode() {
+  trConfidenceModeActive = !trConfidenceModeActive;
+  const btn = document.getElementById("tr-confidence-toggle-btn");
+  if (btn) {
+    btn.style.background = trConfidenceModeActive ? "rgba(245,158,11,0.25)" : "transparent";
+    btn.style.color = trConfidenceModeActive ? "#fbbf24" : "var(--text)";
+  }
+  trRenderConfidenceOverlay();
+}
+
+function trRenderConfidenceOverlay() {
+  const overlay = document.getElementById("tr-bbox-overlay");
+  const bar = document.getElementById("tr-confidence-bar");
+  const wordsList = document.getElementById("tr-low-conf-words-list");
+  const img = document.getElementById("tr-modal-img");
+  
+  if (!overlay || !img) return;
+  overlay.innerHTML = "";
+  
+  const fileObj = trFilesList.find(f => f.filename === trActiveFile);
+  const confData = fileObj ? (fileObj.confidence_data || []) : [];
+  
+  // Filter for current page
+  const curPageNum = trCurrentPage + 1;
+  const pageItems = confData.filter(item => (item.page || 1) === curPageNum);
+  const lowConfItems = pageItems.filter(item => item.flagged || (item.confidence && item.confidence < 75.0));
+
+  if (!trConfidenceModeActive || lowConfItems.length === 0) {
+    if (bar) bar.style.display = "none";
+    return;
+  }
+  
+  if (bar) bar.style.display = "block";
+  document.getElementById("tr-low-conf-count").innerText = lowConfItems.length;
+  
+  if (wordsList) {
+    wordsList.innerHTML = "";
+    lowConfItems.forEach((item, i) => {
+      const tag = document.createElement("span");
+      tag.style.cssText = "cursor:pointer; background:rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); padding:2px 6px; border-radius:4px; font-size:.75rem; font-family:var(--mono);";
+      tag.innerText = `${item.word} (${item.confidence}%)`;
+      tag.onclick = () => trFocusWord(item.word, i);
+      wordsList.appendChild(tag);
+    });
+  }
+
+  // Render bounding box overlays over PDF image if box_2d coordinates exist
+  const imgW = img.clientWidth || img.width;
+  const imgH = img.clientHeight || img.height;
+  if (imgW <= 0 || imgH <= 0) return;
+
+  lowConfItems.forEach((item, i) => {
+    if (!item.box_2d || item.box_2d.length < 4) return;
+    const [ymin, xmin, ymax, xmax] = item.box_2d;
+    
+    const top = (ymin / 1000.0) * imgH;
+    const left = (xmin / 1000.0) * imgW;
+    const width = ((xmax - xmin) / 1000.0) * imgW;
+    const height = ((ymax - ymin) / 1000.0) * imgH;
+    
+    const box = document.createElement("div");
+    box.className = `tr-bbox-box bbox-idx-${i}`;
+    box.title = `⚠️ ${item.word} (${item.confidence}% confidence)`;
+    box.style.cssText = `
+      position: absolute;
+      top: ${top}px;
+      left: ${left}px;
+      width: ${width}px;
+      height: ${height}px;
+      background: rgba(245, 158, 11, 0.25);
+      border: 2px dashed #f59e0b;
+      border-radius: 3px;
+      pointer-events: auto;
+      cursor: pointer;
+      box-sizing: border-box;
+      transition: all 0.2s ease;
+    `;
+    box.onclick = () => trFocusWord(item.word, i);
+    box.onmouseover = () => { box.style.background = "rgba(245, 158, 11, 0.45)"; box.style.border = "2px solid #ef4444"; };
+    box.onmouseout = () => { box.style.background = "rgba(245, 158, 11, 0.25)"; box.style.border = "2px dashed #f59e0b"; };
+    overlay.appendChild(box);
+  });
+}
+
+function trFocusWord(wordText, idx) {
+  const textarea = document.getElementById("tr-modal-textarea");
+  if (!textarea || !wordText) return;
+
+  const content = textarea.value;
+  const wordPos = content.indexOf(wordText);
+  
+  if (wordPos !== -1) {
+    textarea.focus();
+    textarea.setSelectionRange(wordPos, wordPos + wordText.length);
+  }
+
+  // Highlight target PDF bounding box if present
+  document.querySelectorAll(".tr-bbox-box").forEach(b => {
+    b.style.background = "rgba(245, 158, 11, 0.25)";
+    b.style.border = "2px dashed #f59e0b";
+  });
+  if (idx !== undefined) {
+    const targetBox = document.querySelector(`.bbox-idx-${idx}`);
+    if (targetBox) {
+      targetBox.style.background = "rgba(239, 68, 68, 0.45)";
+      targetBox.style.border = "3px solid #ef4444";
+      targetBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
+}
+
+function trNextLowConfWord() {
+  const fileObj = trFilesList.find(f => f.filename === trActiveFile);
+  const confData = fileObj ? (fileObj.confidence_data || []) : [];
+  const curPageNum = trCurrentPage + 1;
+  const lowConfItems = confData.filter(item => (item.page || 1) === curPageNum && (item.flagged || (item.confidence && item.confidence < 75.0)));
+  
+  if (lowConfItems.length === 0) return;
+  
+  trCurrentFlaggedIndex = (trCurrentFlaggedIndex + 1) % lowConfItems.length;
+  const item = lowConfItems[trCurrentFlaggedIndex];
+  trFocusWord(item.word, trCurrentFlaggedIndex);
+}
+
 function trPrevPage() {
   if (trCurrentPage > 0) {
     trCurrentPage--;
     trUpdatePageIndicator();
     trLoadPageImage();
+    trRenderConfidenceOverlay();
     trScrollToPage(trCurrentPage);
   }
 }
@@ -798,6 +939,7 @@ function trNextPage() {
     trCurrentPage++;
     trUpdatePageIndicator();
     trLoadPageImage();
+    trRenderConfidenceOverlay();
     trScrollToPage(trCurrentPage);
   }
 }
