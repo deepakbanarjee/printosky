@@ -156,7 +156,9 @@ consoles hide every Konica panel.
 When the installer finishes you have:
 
 - `C:\Printosky\Data\jobs.db` — local SQLite, 12 tables
-- `<repo>\store_config.json` — per-store identity
+- `<repo>\store_config.json` — per-store identity. Ready-made templates for
+  every existing machine live in `config/stores/` (OSP, PRINTK, PRIOFF) — copy
+  the right one rather than hand-writing it; see `config/stores/README.md`
 - `<repo>\.env` — populated with HQ secrets + per-store values
 - `<repo>\.staff_pins_first_login.txt` — one-time PINs for staff
 - `<repo>\SumatraPDF.exe`

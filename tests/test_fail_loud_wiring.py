@@ -151,3 +151,38 @@ def test_health_snapshot_names_what_is_broken(alerts, monkeypatch):
     assert h["healthy"] is False
     assert h["failing"] == ["printer.epson"]
     assert "192.168.1.201" in h["checks"]["printer.epson"]["detail"]
+
+
+# ── A shared printer is polled by exactly one machine ─────────────────────────
+
+def test_a_non_polling_box_does_not_poll_or_alert(alerts, monkeypatch, tmp_path):
+    """The Nattika office box shares the counter's Epson. It must stay silent:
+    not polling is a configuration choice, not a failure."""
+    monkeypatch.setattr(pp, "POLL_PRINTERS", False)
+    probed = []
+    monkeypatch.setattr(pp, "_printer_reachable", lambda ip, **k: probed.append(ip) or False)
+
+    pp.poll_once(str(tmp_path / "jobs.db"))
+
+    assert probed == [], "a box that does not own the printers must not probe them"
+    assert alerts == []
+    assert pp.start_poller(str(tmp_path / "jobs.db")) is None
+
+
+def test_a_non_polling_box_does_not_import_the_epson_job_log(monkeypatch, tmp_path):
+    """This is what stored all 388 Nattika printer jobs twice."""
+    import epson_jobs_fetcher as ejf
+    monkeypatch.setattr(ejf, "POLL_PRINTERS", False)
+    assert ejf.start_fetcher(str(tmp_path / "jobs.db")) is None
+
+
+def test_the_polling_box_still_polls(alerts, monkeypatch, tmp_path):
+    monkeypatch.setattr(pp, "POLL_PRINTERS", True)
+    monkeypatch.setattr(pp, "KONICA_IP", "")
+    monkeypatch.setattr(pp, "EPSON_IP", "192.168.1.250")
+    monkeypatch.setattr(pp, "_printer_reachable", lambda ip, **k: False)
+    monkeypatch.setattr(pp, "is_store_open", lambda *a, **k: False)
+
+    pp.poll_once(str(tmp_path / "jobs.db"))      # closed + unreachable: skips the poll
+
+    assert any("printer.epson" in a for a in alerts), "the owner of the printer must still alert"

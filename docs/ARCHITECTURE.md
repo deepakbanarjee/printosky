@@ -38,6 +38,22 @@ Storage bucket: `academic-outputs` (public)
 
 ---
 
+## Per-location config
+
+Each PC carries its own `store_config.json`; templates for every machine we run
+are in [`config/stores/`](../config/stores/README.md).
+
+| Machine | store_id | Konica | Epson | Polls printers |
+|---|---|---|---|---|
+| Oxygen counter, Thriprayar | `OSP` | `192.168.55.110` | `192.168.55.214` | yes |
+| Printosky counter, Nattika | `PRINTK` | none | `192.168.1.250` | yes |
+| Printosky office, Nattika | `PRIOFF` | none | `192.168.1.250` | no |
+
+**Exactly one machine per physical printer sets `poll_printers: true`.** Both
+Nattika boxes polled the same Epson for weeks, so every printer job was imported
+twice (once per store_id) and its counters were double-counted. The counter PC
+owns polling; the office box skips the poller and the Epson job fetcher entirely.
+
 ## Monitoring — fail loud
 
 Every pipeline reports to `ops_watchdog`; a failure alerts the ops WhatsApp

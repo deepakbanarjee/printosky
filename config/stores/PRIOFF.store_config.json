@@ -1,0 +1,14 @@
+{
+  "_readme": "Printosky Office, Nattika — back-office / transcription box on the same 192.168.1.x LAN as the counter. store_id MUST be declared here: it is LAN-exempt, otherwise the subnet rule would sweep this machine into PRINTK. It shares the counter's Epson, so poll_printers is false — two boxes polling one printer double-counts the counters and imports every printer job twice.",
+  "store_id": "PRIOFF",
+  "store_name": "Printosky Office, Nattika",
+  "printers": {
+    "konica_ip": null,
+    "epson_ip": "192.168.1.250"
+  },
+  "poll_printers": false,
+  "hot_folder": "C:\\Printosky\\Jobs\\Incoming",
+  "db_path": "C:\\Printosky\\Data\\jobs.db",
+  "agent_secret": null,
+  "platform_url": null
+}

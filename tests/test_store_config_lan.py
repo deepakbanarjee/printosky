@@ -116,3 +116,77 @@ class TestGetStoreConfigIntegration:
             assert sc.get_store_config().store_id == "PRINTK"
         finally:
             sc.get_store_config.cache_clear()
+
+
+class TestPollPrinters:
+    """One machine per physical printer owns polling.
+
+    Nattika ran two boxes against one Epson for weeks: identical job rows stored
+    under both PRINTK and PRIOFF, and two sets of counters for one printer.
+    """
+
+    def test_defaults_to_true_so_a_single_store_pc_is_unaffected(self):
+        cfg = sc._build(dict(sc._LEGACY_OXYGEN_DEFAULTS), source=None)
+        assert cfg.poll_printers is True
+
+    def test_absent_key_defaults_to_true(self):
+        raw = sc._merge_with_defaults({"store_id": "OSP", "store_name": "x"})
+        raw.pop("poll_printers", None)
+        assert sc._build(raw, source=None).poll_printers is True
+
+    def test_false_is_honoured(self):
+        raw = sc._merge_with_defaults({
+            "store_id": "PRIOFF", "store_name": "Printosky Office, Nattika",
+            "poll_printers": False,
+        })
+        assert sc._build(raw, source=None).poll_printers is False
+
+
+class TestShippedStoreConfigs:
+    """The per-location templates in config/stores are the source of truth for
+    what each machine should be set to; keep them honest."""
+
+    import json as _json
+    import pathlib as _pathlib
+
+    STORES = _pathlib.Path(__file__).resolve().parent.parent / "config" / "stores"
+
+    def _load(self, name):
+        return self._json.loads((self.STORES / name).read_text(encoding="utf-8"))
+
+    def test_osp_has_both_printers_and_polls(self):
+        cfg = self._load("OSP.store_config.json")
+        assert cfg["store_id"] == "OSP"
+        assert cfg["printers"]["konica_ip"] == "192.168.55.110"
+        assert cfg["printers"]["epson_ip"] == "192.168.55.214"
+        assert cfg["poll_printers"] is True
+
+    def test_nattika_counter_has_no_konica_and_the_current_epson_ip(self):
+        cfg = self._load("PRINTK.store_config.json")
+        assert cfg["store_id"] == "PRINTK"
+        assert cfg["printers"]["konica_ip"] is None
+        assert cfg["printers"]["epson_ip"] == "192.168.1.250"
+        assert cfg["poll_printers"] is True
+
+    def test_nattika_office_shares_the_printer_and_must_not_poll(self):
+        cfg = self._load("PRIOFF.store_config.json")
+        assert cfg["store_id"] == "PRIOFF"
+        assert cfg["printers"]["konica_ip"] is None
+        assert cfg["poll_printers"] is False
+
+    def test_only_one_machine_polls_each_epson(self):
+        pollers = {}
+        for f in self.STORES.glob("*.json"):
+            cfg = self._json.loads(f.read_text(encoding="utf-8"))
+            if cfg.get("poll_printers", True):
+                ip = cfg["printers"]["epson_ip"]
+                assert ip not in pollers, (
+                    f"{f.name} and {pollers[ip]} both poll the Epson at {ip} — "
+                    "that double-counts its page counters and imports every job twice")
+                pollers[ip] = f.name
+
+    def test_every_template_parses_as_a_store_config(self):
+        for f in self.STORES.glob("*.json"):
+            raw = sc._merge_with_defaults(self._json.loads(f.read_text(encoding="utf-8")))
+            cfg = sc._build(raw, source=str(f))
+            assert cfg.store_id and cfg.store_name and cfg.db_path

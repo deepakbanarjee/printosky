@@ -48,6 +48,9 @@ logger = logging.getLogger("epson_fetcher")
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 EPSON_IP           = get_store_config().printers.epson_ip
+# See store_config.poll_printers. Two boxes scraping one printer's job history
+# store every job twice, once per store_id — Nattika did this for weeks.
+POLL_PRINTERS      = getattr(get_store_config(), "poll_printers", True)
 EPSON_BASE         = f"https://{EPSON_IP}"
 EPSON_USER         = os.environ.get("EPSON_USER", "Oxygen")
 EPSON_PASS         = os.environ.get("EPSON_PASS", "Oxygen@1234")
@@ -584,6 +587,11 @@ def start_fetcher(db_path, interval=FETCH_INTERVAL):
     Start the Epson job fetcher as a daemon background thread.
     Called from watcher.py after startup.
     """
+    if not POLL_PRINTERS:
+        logger.info("Epson job fetcher NOT started — poll_printers=false in "
+                    "store_config.json (another PC at this location owns the printer)")
+        return None
+
     def loop():
         logger.info(f"Epson job fetcher started — polling every {interval}s")
         logger.info(f"  Epson IP: {EPSON_IP}")

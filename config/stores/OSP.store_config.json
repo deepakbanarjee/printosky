@@ -1,0 +1,14 @@
+{
+  "_readme": "Oxygen Students Paradise, Thriprayar — the main counter PC. Copy to the repo root as store_config.json (gitignored) and restart the watcher. See config/stores/README.md.",
+  "store_id": "OSP",
+  "store_name": "Oxygen Students Paradise, Thrissur",
+  "printers": {
+    "konica_ip": "192.168.55.110",
+    "epson_ip": "192.168.55.214"
+  },
+  "poll_printers": true,
+  "hot_folder": "C:\\Printosky\\Jobs\\Incoming",
+  "db_path": "C:\\Printosky\\Data\\jobs.db",
+  "agent_secret": null,
+  "platform_url": null
+}
