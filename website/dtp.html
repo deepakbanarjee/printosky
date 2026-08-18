@@ -767,7 +767,10 @@ async function trView(filename) {
   
   if (fileObj) {
     area.value = fileObj.content || "";
-    setTimeout(() => trScrollToPage(0), 100);
+    setTimeout(() => {
+      trScrollToPage(0);
+      trRenderConfidenceOverlay();
+    }, 100);
   } else {
     area.value = "No transcript content found.";
   }
