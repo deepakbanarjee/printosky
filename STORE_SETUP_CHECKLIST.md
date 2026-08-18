@@ -50,7 +50,8 @@ Check each item off as it's completed.
 - [ ] Redeploy with `vercel --prod` and re-verify the webhook in Meta dashboard
 
 ### B3. Epson printer — change default password
-- [ ] Open browser on store PC: http://192.168.55.202
+- [ ] Open browser on store PC: https://192.168.55.214 (OSP EM-C8100; the
+      WF-C21000 at .202 was retired 2026-06-29 — Nattika has its own unit)
   - Log in with current: admin / admin
   - Settings → Security → Change Password → set a strong password
 - [ ] Update the new password in `epson_jobs_fetcher.py` (currently hardcoded as `admin`)
@@ -67,8 +68,10 @@ Check each item off as it's completed.
 > to the print queue. This needs to be tested end-to-end.
 
 - [ ] **Confirm `printer_poller.py` is running** and reaching the Konica at 192.168.55.110
+  - At a store with no Konica (Nattika), `konica_ip` is blank and the poller skips it — expected
   - Run: `python printer_poller.py` — should show ink/toner levels without error
-- [ ] **Confirm `epson_jobs_fetcher.py`** can reach http://192.168.55.202
+- [ ] **Confirm `epson_jobs_fetcher.py`** can reach the Epson at the `epson_ip`
+      in `store_config.json` (OSP: 192.168.55.214)
 - [ ] **Test Supabase file download** — send a PDF via WhatsApp, confirm it appears
   in `C:\Printosky\Jobs\Incoming\` on the store PC within ~60 seconds
 - [ ] **Run database migration** — if `jobs.db` exists, run:

@@ -129,13 +129,19 @@ The installer asks **only physical-location questions**:
 | Store name | `Printosky Trivandrum` | shown in admin UI |
 | `store_id` | (auto-suggested `PT` from name) | unique short code |
 | City / location | `Thrissur` | appended to store_name |
-| Konica IP | `192.168.55.110` | LAN IP |
-| Epson IP | `192.168.55.202` | LAN IP |
+| Konica IP | `192.168.55.110` | LAN IP — leave blank at a store with no Konica (see below) |
+| Epson IP | `192.168.55.214` | LAN IP (OSP EM-C8100) |
 | Konica Windows queue | `KONICA MINOLTA 1100 PS` | from Devices & Printers |
-| Epson Windows queue | `WF-C21000 Series(Network)` | from Devices & Printers |
+| Epson Windows queue | `EM-C8100 Series(Network)` | from Devices & Printers |
 | WhatsApp # (no `+`) | `919495706405` | inbound webhook routing |
 | Epson admin user | `Oxygen` | LAN-only printer login |
 | Epson admin password | (your value) | LAN-only printer login |
+
+**Stores with no Konica** (finishing/collection stores such as Nattika): leave
+the Konica IP blank. The store PC then routes B&W to the Epson
+(`print_server._effective_printer_key`), stops polling a printer that isn't
+there, and reports `has_konica: false` on `/status` so the admin and jobs
+consoles hide every Konica panel.
 
 **Everything else is auto-generated**:
 

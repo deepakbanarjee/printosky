@@ -54,6 +54,31 @@ HTTP_TIMEOUT       = 15        # seconds
 FETCH_INTERVAL     = 300       # seconds (5 minutes — matches SNMP poll)
 _WEBLOG_FAIL_LIMIT = 3         # give up Tier 1 after this many consecutive failures
 
+# jobs.printer holds the Windows *queue* name print_server dispatched to, not a
+# brand — "EM-C8100 Series(Network)" contains neither "epson" nor an IP. Match on
+# the model families we have ever printed through, plus this store's configured
+# Epson IP, so a printer swap cannot silently stop delta attribution again. The
+# WF-C21000 (retired 2026-06-29, 192.168.55.202) stays in the list for old rows.
+_EPSON_PRINTER_LIKE = (
+    "%epson%",
+    "%em-c%",          # EM-C8100 Series(Network) — current unit, both stores
+    "%emc%",
+    "%wf-c%",          # WF-C21000 — retired 2026-06-29
+    "%wf%",
+    "%192.168.55.202%",
+)
+
+
+def _epson_printer_patterns() -> tuple[str, ...]:
+    """LIKE patterns that mean 'this job went to the Epson'. Lower-cased; the
+    configured IP is added at call time so a re-IP needs no code change."""
+    pats = list(_EPSON_PRINTER_LIKE)
+    ip = (get_epson_ip() or "").strip()
+    if ip:
+        pats.append(f"%{ip.lower()}%")
+    return tuple(dict.fromkeys(pats))
+
+
 LOGIN_URL   = f"{EPSON_BASE}/PRESENTATION/ADVANCED/PASSWORD/SET"
 HISTORY_URL = f"{EPSON_BASE}/PRESENTATION/ADVANCED/INFO_JOBHISTORY/TOP"
 EXPORT_URL  = f"{EPSON_BASE}/PRESENTATION/ADVANCED/INFO_JOBHISTORY/OUTPUT.CSV"
@@ -408,13 +433,14 @@ def _delta_attribution(conn):
                 colour_delta = None
 
         # Find Printosky jobs printed on Epson in this window
-        jobs = conn.execute("""
+        patterns = _epson_printer_patterns()
+        printer_clause = " OR ".join(["LOWER(printer) LIKE ?"] * len(patterns))
+        jobs = conn.execute(f"""
             SELECT job_id, page_count, copies
             FROM jobs
             WHERE printed_at BETWEEN ? AND ?
-              AND (LOWER(printer) LIKE '%epson%' OR LOWER(printer) LIKE '%wf%'
-                   OR LOWER(printer) LIKE '%192.168.55.202%')
-        """, (ts_before, ts_after)).fetchall()
+              AND ({printer_clause})
+        """, (ts_before, ts_after, *patterns)).fetchall()
 
         if jobs:
             # Distribute delta proportionally by expected page count

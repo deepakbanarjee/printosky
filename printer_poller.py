@@ -1,7 +1,7 @@
 """
 PRINTOSKY PRINTER POLLER — Phase 3
 ====================================
-Polls Konica Bizhub Pro 1100 and Epson WF-C21000 for page counters.
+Polls Konica Bizhub Pro 1100 and Epson EM-C8100 for page counters.
 Stores readings in SQLite. Dashboard picks them up automatically.
 
 Konica: Uses /wcd/system_device.xml (HTTP, counters) + /wcd/system_consumable.xml (supplies) with SNMP fallback
@@ -17,11 +17,17 @@ KONICA SNMP OIDs (bizhub, enterprise 18334):
   Print Colour: 1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.2  (returns None — Pro 1100 is B&W only)
   Copy Colour:  1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.1  (returns None — Pro 1100 is B&W only)
 
-EPSON counters (confirmed 2026-04-30):
+EPSON counters (figures confirmed 2026-04-30 on the retired WF-C21000):
   Method:       Web scrape of INFO_MENTINFO/TOP (Usage Status page) — real colour/BW
   Fallback:     SNMP 1.3.6.1.2.1.43.10.2.1.4.1.1 (total only — colour not in SNMP)
-  Real totals:  total=915,078  bw=843,605  colour=71,473  (SNMP derived was wrong: 12,924)
   Supplies:     1.3.6.1.2.1.43.11.1.1.8.1.{idx} (max) / .9.1.{idx} (level)
+
+The Epson is now an EM-C8100 (installed 2026-06-29, IP from store_config). Both
+the endpoints and the OIDs below were confirmed on the WF-C21000 it replaced and
+are inherited unverified — Epson keeps the same web UI and vendor tree across
+these lines, so they are expected to hold, but a None reading on a reachable
+printer means re-running epson_snmp_discover.py against the EM-C8100, not a
+network fault.
 """
 
 import time
@@ -82,7 +88,8 @@ OID_KONICA_COPY_COL  = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.1"
 OID_KONICA_TONER_PCT = "1.3.6.1.4.1.18334.1.1.1.5.7.2.3.1.1.1"   # toner remaining %
 OID_KONICA_TONER_STS = "1.3.6.1.4.1.18334.1.1.1.5.7.2.3.1.2.1"   # toner status code
 OID_EPSON_TOTAL      = "1.3.6.1.2.1.43.10.2.1.4.1.1"
-# Epson WF-C21000 vendor OIDs — confirmed via epson_snmp_discover.py 2026-03-15
+# Epson vendor OIDs — confirmed via epson_snmp_discover.py 2026-03-15 on the
+# WF-C21000; carried over to the EM-C8100 unverified (see module docstring)
 # 6.1.1.4.1.X = print pages by media type; .4.1.2 = A4 (all sizes sum = total)
 # Colour/mono split not exposed directly; colour derived as total − A4_print
 OID_EPSON_PRINT_MONO = "1.3.6.1.4.1.1248.1.2.2.6.1.1.4.1.2"   # A4 prints ≈ B&W
@@ -467,10 +474,12 @@ def poll_konica_supplies_vendor_snmp():
 
 def poll_epson_snmp():
     """
-    Poll Epson WF-C21000 via SNMP.
-    - total_pages : standard prtMarkerLifeCount (confirmed 910,112)
-    - print_bw    : A4 print pages via vendor OID (897,489 — majority are B&W)
-    - print_colour: derived as total − print_bw (~12,623 colour/non-A4 pages)
+    Poll the Epson (EM-C8100) via SNMP.
+    - total_pages : standard prtMarkerLifeCount
+    - print_bw    : A4 print pages via vendor OID (majority are B&W)
+    - print_colour: derived as total − print_bw (colour/non-A4 pages)
+
+    Sample figures from the retired WF-C21000: total 910,112, A4 print 897,489.
     """
     total      = snmp_get(EPSON_IP, OID_EPSON_TOTAL)
     print_mono = snmp_get(EPSON_IP, OID_EPSON_PRINT_MONO)
@@ -526,7 +535,9 @@ def save_reading(conn, printer, data):
 # ── Supply level polling (standard printer MIB 1.3.6.1.2.1.43.11) ─────────────
 
 # Hardcoded supply names per printer (index → label)
-# WF-C21000 confirmed layout (SNMP walk 2026-03-16, colorant indices 43.11.1.1.3):
+# Cartridge layout confirmed on the WF-C21000 (SNMP walk 2026-03-16, colorant
+# indices 43.11.1.1.3) and carried over to the EM-C8100 unverified — if a
+# cartridge reads under the wrong name, re-walk 43.11.1.1.3 and fix the map:
 #   colorant indices: 1,1,2,3,4 → supplies 1&2 both Black; 3=Cyan, 4=Magenta, 5=Yellow
 #   idx 1: Black 1 (K)   80%
 #   idx 2: Black 2 (K)    0%  — EMPTY, needs replacement
@@ -746,8 +757,8 @@ def _send_ink_alerts(printer: str, supplies: list, conn) -> None:
 
 def poll_epson_web():
     """
-    Scrape Epson WF-C21000 Usage Status page (INFO_MENTINFO/TOP) for accurate
-    colour/BW totals. SNMP cannot provide real colour counts on this model.
+    Scrape the Epson's Usage Status page (INFO_MENTINFO/TOP) for accurate
+    colour/BW totals. SNMP cannot provide real colour counts on these models.
     Returns counter dict or None on failure.
     """
     try:
@@ -834,9 +845,19 @@ def _printer_reachable(ip, port=80, timeout=2.0):
         return False
 
 
+def has_konica() -> bool:
+    """True iff this store has a Konica at all.
+
+    Finishing/collection stores (Nattika) set konica_ip to null/"" in
+    store_config.json — everything there prints on the Epson. Mirrors
+    print_server.has_konica(); keep the two in step.
+    """
+    return bool(KONICA_IP) and KONICA_IP != "None"
+
+
 def _any_printer_reachable():
     """True if either printer answers — i.e. someone may be working late."""
-    return _printer_reachable(KONICA_IP) or _printer_reachable(EPSON_IP)
+    return (has_konica() and _printer_reachable(KONICA_IP)) or _printer_reachable(EPSON_IP)
 
 
 def poll_once(db_path):
@@ -852,18 +873,21 @@ def poll_once(db_path):
     conn = sqlite3.connect(db_path)
     init_printer_tables(conn)
 
-    # Konica: try XML first, fall back to SNMP
-    konica_data = poll_konica_xml()
-    if not konica_data or konica_data.get("total_pages") is None:
-        logger.info("Konica XML gave no counters — trying SNMP fallback")
-        konica_data = poll_konica_snmp()
-    save_reading(conn, "konica", konica_data)
-    # Try XML first (requires admin auth — usually falls through), then vendor SNMP
-    konica_supplies = poll_konica_supplies_xml()
-    if not konica_supplies:
-        konica_supplies = poll_konica_supplies_vendor_snmp()
-    save_supplies(conn, "konica", konica_supplies)
-    _send_ink_alerts("konica", konica_supplies, conn)
+    # Konica: try XML first, fall back to SNMP. Skipped entirely where there is
+    # no Konica (Nattika) — otherwise every cycle burns two timeouts against an
+    # empty IP and files blank 'konica' rows the consoles would then render.
+    if has_konica():
+        konica_data = poll_konica_xml()
+        if not konica_data or konica_data.get("total_pages") is None:
+            logger.info("Konica XML gave no counters — trying SNMP fallback")
+            konica_data = poll_konica_snmp()
+        save_reading(conn, "konica", konica_data)
+        # Try XML first (requires admin auth — usually falls through), then vendor SNMP
+        konica_supplies = poll_konica_supplies_xml()
+        if not konica_supplies:
+            konica_supplies = poll_konica_supplies_vendor_snmp()
+        save_supplies(conn, "konica", konica_supplies)
+        _send_ink_alerts("konica", konica_supplies, conn)
 
     # Epson: web scrape for real colour/BW, SNMP fallback for total only
     epson_data = poll_epson_web()
@@ -885,7 +909,10 @@ def start_poller(db_path, interval=POLL_INTERVAL):
     """
     def loop():
         logger.info(f"Printer poller started — polling every {interval}s")
-        logger.info(f"  Konica: http://{KONICA_IP}/wcd/system_device.xml + system_consumable.xml")
+        if has_konica():
+            logger.info(f"  Konica: http://{KONICA_IP}/wcd/system_device.xml + system_consumable.xml")
+        else:
+            logger.info("  Konica: none at this store — not polled")
         logger.info(f"  Epson:  SNMP {EPSON_IP}")
         while True:
             try:

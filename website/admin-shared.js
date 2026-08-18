@@ -129,3 +129,115 @@ function getStoreId() {
   } catch (e) { /* unset/invalid storePcUrl — fall through */ }
   return stored;
 }
+
+// ── Printer fleet per store (shared) ────────────────────────────────────────
+// What is actually installed where, so a console never shows — or offers to
+// print to — a machine the counter does not have:
+//
+//   OSP    (Thriprayar) : Konica Bizhub Pro 1100 (B&W) + Epson EM-C8100 (colour)
+//   PRINTK (Nattika)    : Epson EM-C8100 only. A finishing/collection store with
+//                         no Konica, so B&W prints on the Epson too — the store
+//                         PC applies the same redirect server-side, see
+//                         print_server._effective_printer_key().
+//   PRIOFF (office)     : back-office box, no Konica.
+//
+// The Epson is an EM-C8100 everywhere: it replaced the WF-C21000 at OSP on
+// 2026-06-29, and Nattika runs its own EM-C8100 (SPRINT_BACKLOG S11-4).
+const EPSON_EM_C8100 = { key: "epson",  label: "Epson",  model: "EM-C8100" };
+const KONICA_PRO_1100 = { key: "konica", label: "Konica", model: "Bizhub Pro 1100" };
+
+const STORE_FLEETS = {
+  OSP:    { konica: KONICA_PRO_1100, epson: EPSON_EM_C8100 },
+  PRINTK: { konica: null,            epson: EPSON_EM_C8100 },
+  PRIOFF: { konica: null,            epson: EPSON_EM_C8100 },
+};
+
+// Shop counters. PRIOFF is back-office, not a counter, so its consoles follow
+// the location filter rather than being pinned to that box's own printers.
+const COUNTER_STORE_IDS = ["OSP", "PRINTK"];
+
+// Every printer any store has — the "All locations" union, and the safe default
+// for a store code this page does not know about.
+const FULL_FLEET = { konica: KONICA_PRO_1100, epson: EPSON_EM_C8100 };
+
+function storeFleet(storeId) {
+  if (!storeId || storeId === "all") return FULL_FLEET;
+  return STORE_FLEETS[storeId] || FULL_FLEET;
+}
+
+// Which store's *hardware* the console is looking at. A shop counter only ever
+// has its own printers, whichever location's jobs are on screen, so it stays
+// pinned to its own store; the office/owner box follows the location filter.
+function printerViewStore(locationFilter) {
+  const machine = getStoreId();
+  if (COUNTER_STORE_IDS.includes(machine)) return machine;
+  return locationFilter || "all";
+}
+
+function storeHasKonica(storeId) {
+  // For this machine's own store, its print server is the ground truth: any
+  // store can drop its Konica in store_config.json, not just the ones mapped
+  // above. /status reports has_konica; older store PCs omit it, so fall back.
+  if (storeId && storeId !== "all" && storeId === getStoreId()) {
+    const live = localStorage.getItem("machineHasKonica");
+    if (live === "1") return true;
+    if (live === "0") return false;
+  }
+  return !!storeFleet(storeId).konica;
+}
+
+// Printer keys to render, in display order, for a store.
+function fleetPrinterKeys(storeId) {
+  return storeHasKonica(storeId) ? ["konica", "epson"] : ["epson"];
+}
+
+// Full name for the UI, e.g. "Epson EM-C8100".
+function printerLabel(key, storeId) {
+  const p = storeFleet(storeId)[key];
+  if (p) return `${p.label} ${p.model}`;
+  return key === "epson" ? "Epson" : "Konica";
+}
+
+// Short name for tags and buttons, e.g. "Epson".
+function printerShortLabel(key, storeId) {
+  const p = storeFleet(storeId)[key];
+  return p ? p.label : (key === "epson" ? "Epson" : "Konica");
+}
+
+// jobs.printer holds the Windows *queue* name the store PC dispatched to
+// ("EM-C8100 Series(Network)", "KONICA MINOLTA 1100 PS") — a model, not a
+// brand. Match on model families, or every EM-C8100 job reads as a Konica.
+const EPSON_QUEUE_RE  = /epson|em-?c|wf-?c/i;
+const KONICA_QUEUE_RE = /konica|minolta|bizhub/i;
+
+function printerKeyFromName(name) {
+  const s = String(name || "");
+  if (EPSON_QUEUE_RE.test(s))  return "epson";
+  if (KONICA_QUEUE_RE.test(s)) return "konica";
+  return "";
+}
+
+// Mirror of print_server._effective_printer_key(): a B&W item at a store with
+// no Konica actually prints on the Epson, so the console must say Epson.
+function effectivePrinterKey(key, storeId) {
+  return (key === "konica" && !storeHasKonica(storeId)) ? "epson" : key;
+}
+
+// ── Store identity in the header (shared) ───────────────────────────────────
+// The console header is authored with the Oxygen name; a Nattika PC must not
+// claim to be Oxygen. Unknown/blank store ids keep whatever the page ships with.
+const STORE_NAMES = {
+  OSP:    "Oxygen Students Paradise · Thriprayar",
+  PRINTK: "Printosky · Nattika",
+  PRIOFF: "Printosky Office · Nattika",
+};
+
+function storeName(storeId) {
+  return STORE_NAMES[storeId] || "";
+}
+
+function renderStoreHeader() {
+  const el = document.getElementById("hdr-store");
+  const name = storeName(getStoreId());
+  if (el && name) el.textContent = name;
+}

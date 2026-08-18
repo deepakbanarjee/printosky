@@ -557,6 +557,19 @@ def _sumatra_paper(size: str | None) -> str | None:
             "STATEMENT": "statement"}.get(u)
 
 
+def has_konica() -> bool:
+    """True iff this store actually has a Konica.
+
+    PRINTERS always carries a Konica queue name (the OSP default is inherited by
+    every store), so presence is decided by the configured IP instead: a
+    finishing/collection store like Nattika sets `konica_ip` to null or "" in
+    store_config.json. The string "None" is accepted as empty too — that is what
+    a JSON null becomes once it has been through str().
+    """
+    ip = PRINTER_IPS.get("konica")
+    return bool(ip) and ip != "None"
+
+
 def _effective_printer_key(printer_key: str, job_id: str = "") -> str:
     """Resolve the printer to actually use, applying the no-Konica redirect.
 
@@ -567,7 +580,7 @@ def _effective_printer_key(printer_key: str, job_id: str = "") -> str:
     every print path so they cannot drift. No-op for any other key, or when a
     real Konica IP is configured.
     """
-    if printer_key == "konica" and (not PRINTER_IPS.get("konica") or PRINTER_IPS.get("konica") == "None"):
+    if printer_key == "konica" and not has_konica():
         logging.info("no Konica on this store — routing job %s to epson", job_id or "?")
         return "epson"
     return printer_key
@@ -2016,6 +2029,13 @@ class PrintHandler(BaseHTTPRequestHandler):
                 "store_id": get_store_config().store_id,
                 "sumatra": sumatra or "not found (will use shell fallback)",
                 "printers": PRINTERS,
+                # Which printers this store physically has. A console cannot
+                # infer it from `printers` above — that map always names a
+                # Konica queue, even at a store with no Konica (see
+                # _effective_printer_key) — so report presence explicitly and
+                # let the admin/jobs pages hide what is not there.
+                "printer_ips": PRINTER_IPS,
+                "has_konica": has_konica(),
                 "db": os.path.exists(DB_PATH),
             })
         elif path == "/printers":
@@ -2348,7 +2368,10 @@ def start_print_server():
     init_staff_tables(DB_PATH)
     server = HTTPServer(("0.0.0.0", PORT), PrintHandler)
     logging.info("🖨️  Print server running on port %d", PORT)
-    logging.info("   Konica : %s", PRINTERS["konica"])
+    if has_konica():
+        logging.info("   Konica : %s", PRINTERS["konica"])
+    else:
+        logging.info("   Konica : none at this store — B&W routes to the Epson")
     logging.info("   Epson  : %s", PRINTERS["epson"])
     sumatra = find_sumatra()
     if sumatra:
