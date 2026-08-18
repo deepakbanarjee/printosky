@@ -49,10 +49,11 @@ are in [`config/stores/`](../config/stores/README.md).
 | Printosky counter, Nattika | `PRINTK` | none | `192.168.1.250` | yes |
 | Printosky office, Nattika | `PRIOFF` | none | `192.168.1.250` | no |
 
-**Exactly one machine per physical printer sets `poll_printers: true`.** Both
-Nattika boxes polled the same Epson for weeks, so every printer job was imported
-twice (once per store_id) and its counters were double-counted. The counter PC
-owns polling; the office box skips the poller and the Epson job fetcher entirely.
+Which box does the shared work is decided at runtime by a **lease**, not by
+per-machine config: see [MULTI_BOX.md](MULTI_BOX.md). `poll_printers: false` is
+an explicit veto for a machine that must never touch the printers. Printing is
+made exactly-once by an atomic claim on `jobs.print_claimed_at`, and a counter
+job printed on the counter PC never goes to the cloud at all.
 
 ## Monitoring — fail loud
 

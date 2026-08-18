@@ -48,9 +48,22 @@ logger = logging.getLogger("epson_fetcher")
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 EPSON_IP           = get_store_config().printers.epson_ip
-# See store_config.poll_printers. Two boxes scraping one printer's job history
-# store every job twice, once per store_id — Nattika did this for weeks.
+# See store_config.poll_printers — an explicit local veto. Which box actually
+# imports the log is decided per cycle by a store-wide lease, so two boxes can
+# never both scrape one printer's history (Nattika did, for weeks: 388 jobs
+# stored twice).
 POLL_PRINTERS      = getattr(get_store_config(), "poll_printers", True)
+
+
+def _may_fetch() -> bool:
+    if not POLL_PRINTERS:
+        return False
+    try:
+        from device_lease import hold, ROLE_FETCH_EPSON
+        return hold(ROLE_FETCH_EPSON)
+    except Exception as exc:
+        logger.warning("epson fetcher: lease check failed (%s) — fetching anyway", exc)
+        return True
 EPSON_BASE         = f"https://{EPSON_IP}"
 EPSON_USER         = os.environ.get("EPSON_USER", "Oxygen")
 EPSON_PASS         = os.environ.get("EPSON_PASS", "Oxygen@1234")
@@ -523,6 +536,11 @@ def fetch_and_import(db_path):
     """
     global _weblog_fail_count, _weblog_available, _weblog_retry_at
 
+    if not _may_fetch():
+        logger.debug("not this box's turn to import the Epson job log — another "
+                     "PC at this store holds the lease")
+        return
+
     conn = sqlite3.connect(db_path)
     init_epson_jobs_table(conn)
 
@@ -589,7 +607,7 @@ def start_fetcher(db_path, interval=FETCH_INTERVAL):
     """
     if not POLL_PRINTERS:
         logger.info("Epson job fetcher NOT started — poll_printers=false in "
-                    "store_config.json (another PC at this location owns the printer)")
+                    "store_config.json (an explicit veto on this box)")
         return None
 
     def loop():

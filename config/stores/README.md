@@ -23,13 +23,18 @@ keys are ignored.
 
 ## Two rules that are easy to get wrong
 
-**1. Only one machine per physical printer sets `poll_printers: true`.**
+**1. `poll_printers` is a veto, not the mechanism.**
 
-Both Nattika boxes were polling the same Epson. The result: every printer job
-imported twice (all 388 of PRINTK's Epson job rows are also PRIOFF's) and two
-sets of page counters for one printer. The counter PC owns polling; the office
-box sets `poll_printers: false` and simply doesn't run the poller or the Epson
-job fetcher.
+Which box polls is decided at runtime by a lease, so every PC in a store can run
+identical software and exactly one of them polls — see
+[docs/MULTI_BOX.md](../../docs/MULTI_BOX.md). Leave `poll_printers: true`
+(the default) unless a specific machine must *never* touch the printers; PRIOFF
+ships with `false` because it shares the counter's Epson and there is no reason
+for the office box to compete for that work.
+
+Before leases, both Nattika boxes polled the same Epson: every printer job
+imported twice (all 388 of PRINTK's Epson job rows were also PRIOFF's) and two
+sets of page counters for one printer.
 
 **2. The office box must declare `store_id: PRIOFF` itself.**
 

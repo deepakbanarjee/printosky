@@ -58,9 +58,28 @@ _STORE_CFG           = get_store_config()
 _PRINTERS            = _STORE_CFG.printers
 KONICA_IP            = _PRINTERS.konica_ip
 EPSON_IP             = _PRINTERS.epson_ip
-# False on a second PC that shares another machine's printers — it must not
-# poll, or the same counters and job log are imported twice under two store ids.
+# An explicit "never poll from this box" switch. Normally left true: which box
+# polls is decided at runtime by a lease (device_lease.ROLE_POLL_PRINTERS), so
+# every PC in a store can run identical software and exactly one of them polls.
 POLL_PRINTERS        = getattr(_STORE_CFG, "poll_printers", True)
+
+
+def _may_poll() -> bool:
+    """True if this box should poll the printers on this cycle.
+
+    Two gates: the config switch (a hard local veto) and the store-wide lease
+    (who is on duty right now). The lease is what makes multiple boxes per store
+    safe without configuring each one — and it is re-evaluated every cycle, so
+    if the box holding it is switched off another takes over within a TTL.
+    """
+    if not POLL_PRINTERS:
+        return False
+    try:
+        from device_lease import hold, ROLE_POLL_PRINTERS
+        return hold(ROLE_POLL_PRINTERS)
+    except Exception as exc:      # never let coordination stop a single-box store
+        logger.warning("printer_poller: lease check failed (%s) — polling anyway", exc)
+        return True
 POLL_INTERVAL        = 300          # seconds (5 minutes)
 SNMP_COMMUNITY       = "public"
 SNMP_TIMEOUT         = 3            # seconds
@@ -897,11 +916,12 @@ def _probe_and_report():
 
 def poll_once(db_path):
     """Run one poll cycle for both printers."""
-    if not POLL_PRINTERS:
-        # Another machine owns these printers. Not a failure, so nothing is
-        # reported: the box that does poll them raises the alarm if they break.
-        logger.debug("poll_printers=false for this PC — printer polling is owned "
-                     "by another machine at this location")
+    if not _may_poll():
+        # Another machine is on duty for these printers. Not a failure, so
+        # nothing is reported: the box that holds the lease raises the alarm if
+        # the printers break.
+        logger.debug("not this box's turn to poll — another PC at this store "
+                     "holds the printer lease")
         return
     # Probe first, every cycle, and always report the result (see
     # _any_printer_reachable). Out of hours the printers are genuinely powered
@@ -960,7 +980,7 @@ def start_poller(db_path, interval=POLL_INTERVAL):
     """
     if not POLL_PRINTERS:
         logger.info("Printer poller NOT started — poll_printers=false in "
-                    "store_config.json (another PC at this location owns the printers)")
+                    "store_config.json (an explicit veto on this box)")
         return None
 
     def loop():

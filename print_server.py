@@ -10,6 +10,7 @@ Endpoints:
   GET  /active-staff   — ?pc_id=PC1 → { staff_id, name, session_id }
   GET  /status         — health check
   GET  /printers       — list configured printers
+  POST /local-print    — save + print a file on THIS PC (no cloud round trip)
   GET  /health         — full system health
   POST /create-job     — { customer_name, phone, source, colour, sides, copies, pages, paper_size, finishing, amount_collected|amount_partial, payment_mode, override_reason }
   POST /upload-file    — { filename, file_data (base64) } → saves to hot folder
@@ -335,6 +336,8 @@ def check_printer_reachable(ip: str | None, timeout=2) -> bool:
         return True
     except Exception:
         return False
+
+from ops_watchdog import report as _report_health
 
 _PRINTERS_CFG = get_store_config().printers
 PRINTER_IPS = {
@@ -1350,6 +1353,104 @@ def handle_create_job(body: dict) -> dict:
     return {"ok": True, "job_id": job_id, "status": status, "amount_quoted": amount_quoted}
 
 
+# ── Local-first printing (no cloud round trip) ────────────────────────────────
+
+# Files printed here stay here. NOT the hot folder: dropping a file there
+# triggers watcher intake, which creates a second job and WhatsApps the customer
+# a quote for something they are standing at the counter paying for.
+LOCAL_JOBS_DIR = r"C:\Printosky\Jobs\Local"
+
+
+def handle_local_print(body: dict) -> dict:
+    """
+    POST /local-print
+    Body: { filename, file_data (base64), print_spec?, plus the /create-job
+            fields (customer_name, phone, colour, copies, …) }
+
+    Take the bytes, keep them on this PC, print them on this PC.
+
+    A walk-in used to travel: browser -> Supabase Storage -> a jobs row with a
+    file_url -> store_puller notices it -> downloads it back to this same PC ->
+    prints. A round trip through the internet for a file that never leaves the
+    room, which also made counter printing fail whenever the line did.
+
+    The job record still syncs to the cloud the normal way (metadata only), so
+    the admin console sees it. Because no file_url is ever set, store_puller
+    skips the job — it cannot be pulled and printed a second time.
+    """
+    import base64 as _b64
+
+    filename  = (body.get("filename") or "").strip()
+    file_data = body.get("file_data") or ""
+    if not filename or not file_data:
+        return {"ok": False, "error": "filename and file_data required"}
+
+    safe_name = Path(filename).name
+    if not safe_name:
+        return {"ok": False, "error": "Invalid filename"}
+
+    try:
+        raw = _b64.b64decode(file_data)
+    except Exception as exc:
+        return {"ok": False, "error": f"base64 decode failed: {exc}"}
+    if not raw:
+        return {"ok": False, "error": "empty file"}
+
+    dest_dir = Path(LOCAL_JOBS_DIR)
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return {"ok": False, "error": f"cannot write to {dest_dir}: {exc}"}
+
+    stamp = datetime.now().strftime("%H%M%S")
+    dest = dest_dir / f"{stamp}_{safe_name}"
+    i = 1
+    while dest.exists():
+        dest = dest_dir / f"{stamp}_{i}_{safe_name}"
+        i += 1
+    dest.write_bytes(raw)
+
+    # Reuse the walk-in path so quoting, print_items and the audit trail are
+    # identical to a job created through the console.
+    created = handle_create_job({**body,
+                                "filename": safe_name,
+                                "filepath": str(dest),
+                                "source": body.get("source") or "Walk-in"})
+    if not created.get("ok"):
+        return created
+    job_id = created["job_id"]
+
+    result = {"ok": True, "job_id": job_id, "filepath": str(dest),
+              "status": created.get("status"),
+              "amount_quoted": created.get("amount_quoted"), "local": True}
+
+    if not body.get("print", True):
+        return result
+
+    try:
+        from store_puller import auto_print
+        printed = auto_print(
+            job_id, str(dest),
+            body.get("colour"), body.get("copies") or 1,
+            paper_size=body.get("paper_size"),
+            orientation=body.get("orientation"),
+            print_spec=body.get("print_spec"),
+        )
+    except Exception as exc:
+        logging.error("local-print: %s failed to print: %s", job_id, exc)
+        _report_health("print.local", False, f"{type(exc).__name__}: {exc}")
+        result.update(printed=False, error=str(exc))
+        return result
+
+    _report_health("print.local", bool(printed),
+                   "local printing OK" if printed else
+                   f"{job_id} saved to {dest} but did not print — print it manually")
+    result["printed"] = bool(printed)
+    if not printed:
+        result["error"] = "saved but not printed — print manually from the console"
+    return result
+
+
 # ── A6: Send to vendor ────────────────────────────────────────────────────────
 
 def handle_vendor_send(body: dict) -> dict:
@@ -2273,6 +2374,12 @@ class PrintHandler(BaseHTTPRequestHandler):
         if path == "/create-job":
             body = self._read_body()
             result = handle_create_job(body)
+            self._json(200 if result.get("ok") else 400, result)
+            return
+
+        if path == "/local-print":
+            body = self._read_body()
+            result = handle_local_print(body)
             self._json(200 if result.get("ok") else 400, result)
             return
 
