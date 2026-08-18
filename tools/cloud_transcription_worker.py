@@ -198,19 +198,22 @@ def process_transcription_job(job):
             
             while not success and retries > 0:
                 try:
-                    # Pass config with logprobs enabled
-                    config_args = {}
                     try:
                         from google.genai import types
-                        config_args["config"] = types.GenerateContentConfig(response_logprobs=True)
-                    except Exception:
-                        config_args["config"] = {"response_logprobs": True}
-
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=[img_target, PROMPT_TEMPLATE],
-                        **config_args
-                    )
+                        config_args = {"config": types.GenerateContentConfig(response_logprobs=True)}
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=[img_target, PROMPT_TEMPLATE],
+                            **config_args
+                        )
+                    except Exception as gen_err:
+                        if "Logprobs is not enabled" in str(gen_err) or "400" in str(gen_err):
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=[img_target, PROMPT_TEMPLATE]
+                            )
+                        else:
+                            raise gen_err
                     text = response.text or ""
                     
                     # Extract logprobs token confidence if present
