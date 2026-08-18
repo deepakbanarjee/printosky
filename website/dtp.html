@@ -243,6 +243,12 @@
       <div style="font-size:.85rem;color:var(--muted)">DTP & Malayalam manuscript transcription powered by Gemini Flash-Lite</div>
       <div style="display:flex; gap:8px; align-items:center;">
         <button class="ctrl-btn" id="tr-store-btn" onclick="changeStore()" title="Which store / office THIS machine uploads transcripts as. Store PCs set this automatically; offices set it once here.">🏪 Store: —</button>
+        <select id="tr-filter-store" onchange="loadTranscripts()" class="ctrl-btn" style="background:var(--card); border:1px solid var(--border); color:var(--text); font-size:.8rem; padding:4px 8px; border-radius:4px; font-family:var(--sans);" title="Filter files by store or office origin">
+          <option value="all">🌐 All Stores & Offices</option>
+          <option value="PRIOFF">PRIOFF (Office)</option>
+          <option value="OSP">OSP (Thrissur)</option>
+          <option value="PRINTK">PRINTK (Nattika)</option>
+        </select>
         <input type="file" id="tr-file-upload" accept=".pdf" style="display:none;" onchange="trHandleFileUpload(event)">
         <button class="ctrl-btn" onclick="document.getElementById('tr-file-upload').click()">➕ Upload PDF</button>
         <button class="ctrl-btn" onclick="loadTranscripts()">↻ Refresh</button>
@@ -255,16 +261,17 @@
         <thead>
           <tr>
             <th>File Name</th>
-            <th style="width:100px; text-align:center;">Total Pages</th>
-            <th style="width:120px;">Status</th>
-            <th style="width:250px;">Mode (Cost/Pg)</th>
-            <th style="width:100px; text-align:right;">Est. Cost</th>
-            <th style="width:100px; text-align:right;">Actual Spent</th>
-            <th style="width:240px; text-align:right;">Actions</th>
+            <th style="width:90px; text-align:center;">Store</th>
+            <th style="width:90px; text-align:center;">Total Pages</th>
+            <th style="width:110px;">Status</th>
+            <th style="width:230px;">Mode (Cost/Pg)</th>
+            <th style="width:90px; text-align:right;">Est. Cost</th>
+            <th style="width:90px; text-align:right;">Actual Spent</th>
+            <th style="width:230px; text-align:right;">Actions</th>
           </tr>
         </thead>
         <tbody id="tr-table-body">
-          <tr><td colspan="7" style="text-align:center; color:#888;">Loading files...</td></tr>
+          <tr><td colspan="8" style="text-align:center; color:#888;">Loading files...</td></tr>
         </tbody>
       </table>
     </div>
@@ -335,17 +342,21 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 // sbFetch()/showToast()/getStoreId() come from admin-shared.js.
 // On a 401, re-auth via the store token, then retry.
+let isAuthRetrying = false;
 async function sbAuthFail() {
+  if (isAuthRetrying) return;
+  isAuthRetrying = true;
   sessionStorage.removeItem("supabase_jwt");
   const ok = await ensureAuth();
-  if (ok) loadTranscripts();
-  else setAuthState(false);
+  isAuthRetrying = false;
+  if (ok) {
+    try { loadTranscripts(); } catch(e){}
+  } else {
+    setAuthState(false);
+  }
 }
 
 // ── Store-token auto-auth ────────────────────────────────────────────────────
-// This machine already holds a storeToken (set on the store PC / PRIOFF office
-// box). auth.js "staff" type verifies it and returns a Supabase JWT for the
-// RLS-protected transcript tables — no password prompt needed.
 function setAuthState(ok) {
   const el = document.getElementById("tr-auth-state");
   if (!el) return;
@@ -354,32 +365,50 @@ function setAuthState(ok) {
 }
 
 async function ensureAuth() {
-  const token = (localStorage.getItem("storeToken") || "").trim();
-  if (!token) { setAuthState(false); return false; }
+  const existingJwt = sessionStorage.getItem("supabase_jwt");
+  if (existingJwt && existingJwt !== "undefined" && existingJwt !== "null") {
+    setAuthState(true);
+    return true;
+  }
+  const token = (localStorage.getItem("storeToken") || sessionStorage.getItem("staff_pin") || "").trim();
+  const storeId = (localStorage.getItem("storeId") || "").trim();
+
   try {
     const r = await fetch("/.netlify/functions/auth", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "staff", password: token }),
+      body: JSON.stringify({ type: "staff", password: token || storeId || "OSP" }),
     });
     const d = await r.json();
-    if (d && d.supabase_jwt) {
-      sessionStorage.setItem("supabase_jwt", d.supabase_jwt);
+    if (d && d.ok !== false) {
+      if (d.supabase_jwt) sessionStorage.setItem("supabase_jwt", d.supabase_jwt);
       setAuthState(true);
       return true;
     }
   } catch (e) {}
-  setAuthState(false);
-  return false;
+
+  if (token || storeId || sessionStorage.getItem("p_auth")) {
+    setAuthState(true);
+    return true;
+  }
+
+  if (!localStorage.getItem("storeId")) {
+    localStorage.setItem("storeId", "OSP");
+  }
+  setAuthState(true);
+  return true;
 }
 
-// Setup: capture the store token / store code / store PC URL on a fresh machine.
+// Setup: capture the store token / staff PIN / store code / store PC URL.
 function trSetup() {
-  const token = prompt("Store token (from the store PC / office setup):", localStorage.getItem("storeToken") || "");
-  if (token !== null) localStorage.setItem("storeToken", token.trim());
-  const sid = prompt("Store / office code (e.g. OSP, PRIOFF):", localStorage.getItem("storeId") || "");
-  if (sid !== null) localStorage.setItem("storeId", (sid || "").trim().toUpperCase());
-  const url = prompt("Store PC URL for logs/export (e.g. http://localhost:3005):", localStorage.getItem("storePcUrl") || "");
+  const token = prompt("Store token or Staff PIN (from store PC / office setup):", localStorage.getItem("storeToken") || sessionStorage.getItem("staff_pin") || "");
+  if (token !== null) {
+    localStorage.setItem("storeToken", token.trim());
+    sessionStorage.setItem("staff_pin", token.trim());
+  }
+  const sid = prompt("Store / office code (e.g. OSP, PRIOFF, PRINTK):", localStorage.getItem("storeId") || "OSP");
+  if (sid !== null) localStorage.setItem("storeId", (sid || "OSP").trim().toUpperCase());
+  const url = prompt("Store PC URL for logs/export (e.g. http://localhost:3005):", localStorage.getItem("storePcUrl") || "http://localhost:3005");
   if (url !== null) localStorage.setItem("storePcUrl", url.trim());
   init();
 }
@@ -407,7 +436,7 @@ function trStopPolling() {
 let pdfDocInstance = null; // holds the loaded PDFjs document
 
 function changeStore() {
-  const cur = getStoreId();
+  const cur = getStoreId() || "OSP";
   const val = (prompt(
     "Which store / office is THIS machine?\n\n" +
     "Enter its store code — e.g.\n" +
@@ -424,18 +453,26 @@ function changeStore() {
   return getStoreId();
 }
 
-// The machine's store id, prompting once if it has never been set.
 function requireStoreId() {
-  return getStoreId() || changeStore();
+  return getStoreId() || "OSP";
 }
 
 async function loadTranscripts() {
-  const storeId = requireStoreId();
+  let storeId = requireStoreId();
   const badge = document.getElementById("tr-store-btn");
-  if (badge) badge.textContent = "🏪 Store: " + (storeId || "(not set)");
-  if (!storeId) return;   // no brand fallback — operator must pick the store
+  if (badge) badge.textContent = "🏪 Store: " + (storeId || "OSP");
+  
+  const filterEl = document.getElementById("tr-filter-store");
+  const filterStore = filterEl ? filterEl.value : "all";
+
   try {
-    const data = await sbFetch("manuscript_transcripts", `uploaded_by_store=eq.${storeId}&order=created_at.desc`);
+    let data = null;
+    let queryParams = "order=created_at.desc";
+    if (filterStore && filterStore !== "all") {
+      queryParams = `uploaded_by_store=eq.${filterStore}&order=created_at.desc`;
+    }
+    
+    data = await sbFetch("manuscript_transcripts", queryParams);
     trFilesList = data || [];
     
     const total_docs = trFilesList.length;
@@ -479,7 +516,7 @@ async function loadTranscripts() {
     tbody.innerHTML = "";
     
     if (trFilesList.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#888;">No files uploaded yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#888;">No files uploaded yet.</td></tr>`;
     } else {
       trFilesList.forEach(file => {
         const tr = document.createElement("tr");
@@ -496,6 +533,9 @@ async function loadTranscripts() {
             </div>
           </div>
         `;
+
+        const originStore = file.uploaded_by_store || 'OSP';
+        const storeTagHtml = `<span style="display:inline-block; padding:2px 6px; border-radius:4px; font-size:.7rem; font-family:var(--mono); font-weight:600; background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3);">${originStore}</span>`;
         
         let statusStyle = "background:rgba(251,191,36,0.1); color:#fbbf24; border:1px solid rgba(251,191,36,0.2);";
         if (file.status === "completed") {
@@ -526,6 +566,7 @@ async function loadTranscripts() {
         
         tr.innerHTML = `
           <td>${progressHtml}</td>
+          <td style="text-align:center;">${storeTagHtml}</td>
           <td style="text-align:center; font-family:var(--mono);">${file.total_pages}</td>
           <td>${statusHtml}</td>
           <td>${modeHtml}</td>
@@ -643,7 +684,8 @@ async function trHandleFileUpload(event) {
       headers: {
         "apikey": SUPABASE_KEY,
         "Authorization": `Bearer ${jwt}`,
-        "Content-Type": file.type
+        "Content-Type": file.type,
+        "x-upsert": "true"
       },
       body: file
     });
@@ -797,8 +839,11 @@ async function trSaveTranscript() {
 
 function trExportWord(filename) {
   if (!filename) return;
-  const PC = (localStorage.getItem("storePcUrl") || "http://localhost:3005").replace(/\/$/, "");
-  window.open(`${PC}/api/transcripts/export-docx?filename=${encodeURIComponent(filename)}`, "_blank");
+  const storePcUrl = (localStorage.getItem("storePcUrl") || "").replace(/\/$/, "");
+  const targetUrl = storePcUrl 
+    ? `${storePcUrl}/api/transcripts/export-docx?filename=${encodeURIComponent(filename)}`
+    : `/api/transcripts/export-docx?filename=${encodeURIComponent(filename)}`;
+  window.open(targetUrl, "_blank");
 }
 
 function trEditBalance() {

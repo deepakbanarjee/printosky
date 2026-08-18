@@ -36,10 +36,12 @@
     { "src": "/project-builder/process",              "dest": "/api/index.py" },
     { "src": "/order/(.*)",                           "dest": "/api/index.py" },
     { "src": "/referrals/(.*)",                       "dest": "/api/index.py" },
+    { "src": "/.netlify/functions/auth",              "dest": "/api/index.py" },
     { "src": "/auth/(.*)",                             "dest": "/api/index.py" },
     { "src": "/notes/(.*)",                            "dest": "/api/index.py" },
     { "src": "/account/(.*)",                          "dest": "/api/index.py" },
     { "src": "/cron/(.*)",                             "dest": "/api/index.py" },
+    { "src": "/api/transcripts/(.*)",                 "dest": "/api/index.py" },
     { "src": "/api/health",                            "dest": "/api/index.py" },
     { "src": "/health",                                "dest": "/api/index.py" },
     { "src": "/",                                     "dest": "/api/index.py" }
