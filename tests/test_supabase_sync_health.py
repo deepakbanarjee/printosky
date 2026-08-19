@@ -81,3 +81,37 @@ class TestStartSyncLoudWhenDisabled:
         # Must be loud (ERROR), not a silent INFO line.
         assert any(r.levelno >= logging.ERROR and "DISABLED" in r.message.upper()
                    for r in caplog.records), "disabled sync must log at ERROR"
+
+
+class TestPresenceReporting:
+    """`store_devices` sat empty because device_lease.heartbeat() was written
+    but never called — so docs/MULTI_BOX.md's "it registers in store_devices"
+    was not true, and nobody could tell which commit a store PC was running
+    without standing in front of it. sync_once now reports presence + version.
+    """
+
+    def test_sync_reports_presence_with_the_running_version(self, monkeypatch):
+        seen = {}
+
+        def fake_heartbeat(app_version=None):
+            seen["version"] = app_version
+            return True
+
+        monkeypatch.setitem(sys.modules, "device_lease",
+                            type(sys)("device_lease"))
+        sys.modules["device_lease"].heartbeat = fake_heartbeat
+
+        ss._report_presence()
+        assert "version" in seen, "sync did not register this box in store_devices"
+        assert seen["version"], "registered without naming the running commit"
+
+    def test_presence_failure_does_not_break_the_data_sync(self, monkeypatch):
+        """A box that cannot announce itself must still push its jobs."""
+        def boom(app_version=None):
+            raise RuntimeError("supabase unreachable")
+
+        monkeypatch.setitem(sys.modules, "device_lease",
+                            type(sys)("device_lease"))
+        sys.modules["device_lease"].heartbeat = boom
+
+        ss._report_presence()   # must not raise

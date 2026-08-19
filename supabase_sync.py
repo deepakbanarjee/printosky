@@ -344,10 +344,34 @@ def get_sync_status() -> dict:
 
 
 # ── Main sync cycle ───────────────────────────────────────────────────────────
+def _report_presence():
+    """Register this box in `store_devices` with the commit it is running.
+
+    A store PC runs whatever it last pulled, so without this the only way to
+    answer "is that box on the latest code?" is to stand in front of it. Runs
+    on every sync cycle, from every box (not just the lease holder) — the
+    point is a roll-call of machines, so a box that never wins a lease still
+    has to appear.
+
+    Best-effort: a failed presence write must not fail the data sync that
+    follows it. device_lease.heartbeat logs its own warning, and a Supabase
+    that is unreachable altogether is already alerted by the sync's own
+    watchdog reporting.
+    """
+    try:
+        from app_version import get_version
+        from device_lease import heartbeat
+        heartbeat(app_version=get_version())
+    except Exception as exc:
+        logger.warning("presence/version report failed (sync continues): %s", exc)
+
+
 def sync_once(db_path):
     if not SUPABASE_URL or not SUPABASE_KEY:
         logger.debug("Supabase not configured — skipping sync")
         return
+
+    _report_presence()
 
     # Konica attribution retired 2026-05-12 (0/4507 attribution rate).
     # See retired/2026-05-12-graveyard/konica_attribution.py for the dropped
