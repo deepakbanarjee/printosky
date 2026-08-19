@@ -1185,7 +1185,28 @@ def start_bot_relay_server(db_path):
         def log_message(self, format, *args):
             pass  # silence default HTTP logs
 
+        def _handle_poll_now(self):
+            """print_server.py POSTs here right after dispatching a print, so
+            the printer poller thread re-checks counters immediately instead
+            of waiting for its next scheduled sweep. Local-only (127.0.0.1),
+            same trust boundary as /bot on this port. Never touches Supabase —
+            printer_poller writes to the local SQLite DB only."""
+            ok = False
+            try:
+                import printer_poller
+                printer_poller.trigger_now()
+                ok = True
+            except Exception as e:
+                logging.warning(f"poll-now trigger failed: {e}")
+            self.send_response(200 if ok else 500)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(_json.dumps({"triggered": ok}).encode())
+
         def do_POST(self):
+            if self.path == "/printers/poll-now":
+                self._handle_poll_now()
+                return
             if self.path != "/bot":
                 self.send_response(404); self.end_headers(); return
             try:
