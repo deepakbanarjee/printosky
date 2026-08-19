@@ -192,6 +192,37 @@ def start_realtime(client, store_id: str) -> None:
     _report_health("store_puller.realtime", True, "subscribed", store_id=store_id)
 
 
+def _check_realtime_delivery(pulled: list[str], woken_by_realtime: bool, store_id: str) -> None:
+    """Secondary signal: is the subscription actually delivering, not just
+    connected? ``start_realtime`` can report "subscribed" successfully even
+    when Realtime is not enabled on the `jobs` table in Supabase — the
+    channel opens fine, it just never gets a postgres_changes event.
+
+    The fallback poll should only ever be the one to find a job when realtime
+    failed to wake the loop first. So: if this cycle pulled jobs AND the wait
+    that preceded it timed out rather than being woken, the subscription is
+    silently not delivering.
+
+    Deliberately not gated on store hours (docs/FAIL_LOUD.md rejects an hours
+    gate — that is what hid the Nattika outage). It does not need one: this
+    only ever fires when a job was actually pulled, so it is silent by
+    construction outside business activity.
+    """
+    if not pulled:
+        return
+    if woken_by_realtime:
+        _report_health("store_puller.realtime_delivery", True,
+                        f"pulled {len(pulled)} job(s) via realtime wake", store_id=store_id)
+        return
+    _report_health(
+        "store_puller.realtime_delivery", False,
+        f"pulled {len(pulled)} job(s) via the {POLL_SECONDS}s fallback poll with no prior "
+        "realtime wake — subscription is connected but not delivering events "
+        "(check Realtime is enabled on the `jobs` table in Supabase)",
+        store_id=store_id,
+    )
+
+
 def download_url(url: str, dest_path: str) -> int:
     """Download ``url`` to ``dest_path``. Returns bytes written."""
     import requests
@@ -565,14 +596,20 @@ def main(argv: list[str] | None = None) -> int:
     if not once and REALTIME_ENABLED:
         start_realtime(client, store_id)
 
+    # None on the first cycle: there is no preceding wait to judge yet, so the
+    # delivery check (which needs to know whether realtime or the timeout woke
+    # the loop) stays quiet until the second cycle.
+    woken_by_realtime = None
     while True:
         purge_old_files(dest_dir, KEEP_DAYS)
-        pull_once(client, store_id, dest_dir, conn, on_pulled=on_pulled)
+        pulled = pull_once(client, store_id, dest_dir, conn, on_pulled=on_pulled)
+        if REALTIME_ENABLED and woken_by_realtime is not None:
+            _check_realtime_delivery(pulled, woken_by_realtime, store_id)
         if once:
             return 0
         # Woken immediately by the realtime callback on a matching row change;
         # otherwise falls through to the next scheduled cycle after POLL_SECONDS.
-        _wake_event.wait(POLL_SECONDS)
+        woken_by_realtime = _wake_event.wait(POLL_SECONDS)
         _wake_event.clear()
 
 
