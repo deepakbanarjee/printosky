@@ -16,7 +16,9 @@ Manual start commands + full port map → [docs/ARCHITECTURE.md](docs/ARCHITECTU
 - **Supabase**: cloud DB mirror + academic orders + storage
 
 Everything deploys from `main` on push — **except the store PCs**, which keep
-running whatever they last pulled (`PULL_UPDATE.bat` + restart the watcher).
+running whatever they last pulled — either by hand (`PULL_UPDATE.bat` + restart
+the watcher) or automatically at each morning's boot, silently, if
+`SETUP_AUTOSTART.bat` has been run there → [docs/AUTO_UPDATE.md](docs/AUTO_UPDATE.md)
 
 Full detail → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 Schema reference (28 tables, owners, columns) → [docs/SCHEMA.md](docs/SCHEMA.md)
