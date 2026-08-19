@@ -152,9 +152,10 @@ def get_epson_ip() -> str:
 
     There used to be a silent remap here — a configured 192.168.1.204 was
     rewritten to 192.168.1.201 — so the fetcher could be talking to a different
-    printer than the config named, with nothing in the logs saying so. Both
-    addresses are now stale anyway (Nattika's Epson is 192.168.1.250 as of
-    2026-08-18). A missing IP is reported, not papered over.
+    printer than the config named, with nothing in the logs saying so. Those
+    addresses are now stale anyway (Nattika's Epson is 192.168.1.240 as of
+    2026-08-19, previously 192.168.1.250). A missing IP is reported, not papered
+    over.
     """
     cfg_ip = (get_store_config().printers.epson_ip or "").strip()
     if not cfg_ip:
