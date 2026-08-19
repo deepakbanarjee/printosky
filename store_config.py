@@ -32,6 +32,12 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+try:
+    from ops_watchdog import report
+except ImportError:
+    def report(check: str, ok: bool, detail: str = "", **kw) -> bool:
+        return False
+
 # Each shop runs several PCs, and every machine on a shop's LAN is that shop's
 # store PC. So when this process runs on a known shop subnet its store_id is
 # fixed accordingly, whatever the local store_config.json says — this guarantees
@@ -184,8 +190,9 @@ def _apply_lan_override(cfg: StoreConfig) -> StoreConfig:
         return cfg
     lan_store = _resolve_lan_store()
     if lan_store and cfg.store_id != lan_store:
-        log.info("store_config: on shop LAN — forcing store_id %s -> %s",
-                 cfg.store_id, lan_store)
+        detail = f"LAN rule forcing {cfg.store_id} -> {lan_store}"
+        log.info("store_config: on shop LAN — %s", detail)
+        report("store_config.lan_override", False, detail=detail)
         return replace(cfg, store_id=lan_store)
     return cfg
 
@@ -257,11 +264,12 @@ def get_store_config() -> StoreConfig:
         log.info("store_config: loaded store_id=%s from %s", cfg.store_id, path)
         return cfg
 
-    log.info(
-        "store_config: no config file found; falling back to legacy Oxygen "
-        "defaults (store_id=%s)",
-        _LEGACY_OXYGEN_DEFAULTS["store_id"],
+    detail = (
+        f"no config file found in any candidate path; falling back to "
+        f"legacy Oxygen defaults (store_id={_LEGACY_OXYGEN_DEFAULTS['store_id']})"
     )
+    log.info("store_config: %s", detail)
+    report("store_config.missing_file", False, detail=detail)
     return _apply_lan_override(_build(_LEGACY_OXYGEN_DEFAULTS, source=None))
 
 
