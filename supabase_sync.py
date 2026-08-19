@@ -19,7 +19,7 @@ import sqlite3
 import logging
 import threading
 import requests
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 
 from store_config import get_store_config
@@ -270,30 +270,64 @@ def collect_staff_sessions(db_path):
 
 
 def collect_daily_summary(db_path):
-    """Push today's summary stats."""
+    """Push today's summary stats.
+
+    Reads from Supabase, not local SQLite. Most of a store's daily jobs
+    (source='web' — staff web-create, WhatsApp bot, Razorpay webhook) are
+    written straight to Supabase and never touch this PC's local DB, so a
+    SQLite-only count silently reports zero on a day with real business —
+    confirmed: OSP read 0 jobs / Rs.0 revenue here for 38 straight days
+    while the printers ran ~2,900 pages/day. Supabase's jobs table is the
+    merged source of truth (local-synced rows + cloud-native rows), so read
+    it back instead of the local DB.
+
+    "completed" is amount_collected > 0, not status='Completed' — that
+    status is a distinct workflow step staff rarely reach (3 of ~320 OSP
+    jobs, ever); the real signal a job is done-and-paid is amount_collected.
+    """
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        c = conn.cursor()
-        today = date.today().isoformat()
-        c.execute("""
-            SELECT
-                COUNT(*) total_jobs,
-                COUNT(CASE WHEN status='Completed' THEN 1 END) completed,
-                COUNT(CASE WHEN status IN ('Received','In Progress','Printed') THEN 1 END) pending,
-                COALESCE(SUM(amount_collected), 0) revenue,
-                -- payment_mode is stored inconsistently (cash/Cash/CASH), so
-                -- match case-insensitively or cash/upi read 0 while revenue > 0.
-                COALESCE(SUM(CASE WHEN UPPER(payment_mode)='CASH' THEN amount_collected END), 0) cash,
-                COALESCE(SUM(CASE WHEN UPPER(payment_mode)='UPI'  THEN amount_collected END), 0) upi
-            FROM jobs WHERE DATE(received_at)=?
-        """, (today,))
-        row = dict(c.fetchone() or {})
-        conn.close()
-        row["store_id"] = STORE_ID
-        row["date"]     = today
-        row["synced_at"] = datetime.now().isoformat(sep=" ", timespec="seconds")
-        return [row]
+        today    = date.today()
+        tomorrow = today + timedelta(days=1)
+        resp = requests.get(
+            _url("jobs"),
+            headers=_headers(),
+            params=[
+                ("store_id",    f"eq.{STORE_ID}"),
+                ("received_at", f"gte.{today.isoformat()} 00:00:00"),
+                ("received_at", f"lt.{tomorrow.isoformat()} 00:00:00"),
+                ("select",      "status,amount_collected,payment_mode"),
+            ],
+            timeout=15,
+        )
+        resp.raise_for_status()
+        job_rows = resp.json()
+
+        total_jobs = len(job_rows)
+        completed  = sum(1 for j in job_rows if (j.get("amount_collected") or 0) > 0)
+        pending    = sum(1 for j in job_rows
+                          if (j.get("amount_collected") or 0) == 0
+                          and j.get("status") != "Cancelled")
+        revenue    = sum(j.get("amount_collected") or 0 for j in job_rows)
+        # payment_mode is stored inconsistently (cash/Cash/CASH), so match
+        # case-insensitively or cash/upi read 0 while revenue > 0.
+        cash = sum(j.get("amount_collected") or 0 for j in job_rows
+                   if (j.get("payment_mode") or "").upper() == "CASH")
+        upi  = sum(j.get("amount_collected") or 0 for j in job_rows
+                   if (j.get("payment_mode") or "").upper() == "UPI")
+
+        return [{
+            "store_id":   STORE_ID,
+            "date":       today.isoformat(),
+            "total_jobs": total_jobs,
+            "completed":  completed,
+            "pending":    pending,
+            "revenue":    revenue,
+            "cash":       cash,
+            "upi":        upi,
+            "synced_at":  datetime.now().isoformat(sep=" ", timespec="seconds"),
+        }]
     except Exception as e:
         logger.warning(f"collect_daily_summary: {e}")
         return []
