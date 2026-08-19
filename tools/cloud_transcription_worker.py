@@ -1,5 +1,6 @@
 import os
 import re
+import threading
 import time
 import logging
 import fitz  # PyMuPDF
@@ -32,6 +33,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 load_dotenv(r"d:\PY\printosky\.env")
 from store_config import get_store_config
+from ops_watchdog import report as _report_health
 
 try:
     from supabase import create_client
@@ -76,12 +78,21 @@ def download_pdf_from_storage(filename):
     return sb.storage.from_("manuscripts").download(filename)
 MY_STORE_ID = cfg.store_id
 
-# Seconds between poll cycles. The transcription queue is low-volume (tens of
-# jobs), so a 10s loop bought no responsiveness and cost ~8.6k round trips a day
-# against the Supabase egress quota. 60s is still well inside the turnaround a
-# manuscript job needs. Override with TRANSCRIBE_POLL_SECONDS if a store wants
-# it tighter.
-POLL_SECONDS = int(os.environ.get("TRANSCRIBE_POLL_SECONDS", "60"))
+# Pickup is event-driven: a Supabase Realtime subscription on
+# manuscript_transcripts wakes the loop the instant a job goes pending,
+# rather than waiting for the next scheduled cycle. POLL_SECONDS is now a
+# fallback safety net only, in case the realtime connection drops — it used
+# to be the primary pickup path at 60s, costing ~8.6k round trips a day
+# against the Supabase egress quota for a low-volume (tens of jobs) queue.
+# Override with TRANSCRIBE_POLL_SECONDS for a tighter fallback. Set
+# TRANSCRIBE_REALTIME=0 to fall back to poll-only.
+POLL_SECONDS = int(os.environ.get("TRANSCRIBE_POLL_SECONDS", "900"))
+REALTIME_ENABLED = os.environ.get("TRANSCRIBE_REALTIME", "1").lower() not in ("0", "false", "no")
+
+# Set by the realtime callback (a different thread); the main loop waits on
+# it instead of a flat sleep so a change wakes it immediately.
+_wake_event = threading.Event()
+
 WATCH_DIR = r"D:\Divya teacher\Preeksha sahayi"
 TEMP_DIR = r"d:\PY\printosky\_tmp_watcher"
 
@@ -480,10 +491,72 @@ def sync_completed_jobs():
     except Exception as e:
         log.error(f"Error syncing completed jobs: {e}")
 
+def start_realtime():
+    """Subscribe to Supabase Realtime on manuscript_transcripts so a new
+    pending job wakes the poll loop immediately instead of waiting for the
+    next scheduled cycle.
+
+    Best-effort: this is a latency optimisation, not the source of truth. If
+    the subscription cannot be established, the fallback poll loop keeps
+    working on its own — just slower. Reported to ops_watchdog so a stuck
+    subscription is a visible alert rather than a silent slowdown back to
+    poll-only.
+    """
+    def _on_change(_payload):
+        _wake_event.set()
+
+    try:
+        channel = sb.channel("manuscript-transcripts")
+        channel.on_postgres_changes(
+            "*", schema="public", table="manuscript_transcripts",
+            callback=_on_change,
+        )
+        channel.subscribe()
+    except Exception as exc:
+        log.warning(f"realtime subscription failed ({exc}) — falling back to "
+                    f"polling every {POLL_SECONDS}s")
+        _report_health("transcription_worker.realtime", False, f"{type(exc).__name__}: {exc}")
+        return
+    log.info("realtime subscription active for manuscript_transcripts")
+    _report_health("transcription_worker.realtime", True, "subscribed")
+
+
+def _check_realtime_delivery(claimed_new_job: bool, woken_by_realtime: bool) -> None:
+    """Secondary signal: is the subscription actually delivering, not just
+    connected? See store_puller._check_realtime_delivery for the full
+    rationale — mirrored here rather than shared, matching the rest of this
+    codebase where each poller stays self-contained.
+
+    Only ``claimed_new_job`` (a fresh pending job picked up) counts — the
+    crash-recovery "transcribing" resume below is unrelated to realtime
+    timing and would otherwise show as a false positive on every restart.
+
+    Deliberately not gated on store hours (docs/FAIL_LOUD.md rejects an hours
+    gate). It only ever fires when a job was actually claimed, so it is
+    silent by construction outside business activity.
+    """
+    if not claimed_new_job:
+        return
+    if woken_by_realtime:
+        _report_health("transcription_worker.realtime_delivery", True, "claimed job via realtime wake")
+        return
+    _report_health(
+        "transcription_worker.realtime_delivery", False,
+        f"claimed a job via the {POLL_SECONDS}s fallback poll with no prior realtime wake — "
+        "subscription is connected but not delivering events (check Realtime is enabled on "
+        "the `manuscript_transcripts` table in Supabase)",
+    )
+
+
 def main_loop():
     log.info(f"Starting Printosky Cloud Worker for Store ID: {MY_STORE_ID}")
-    
+    if REALTIME_ENABLED:
+        start_realtime()
+
+    # None on the first cycle: there is no preceding wait to judge yet.
+    woken_by_realtime = None
     while True:
+        claimed_new_job = False
         try:
             # 1. Check for pending jobs to execute.
             # Only the three fields process_transcription_job reads are selected;
@@ -495,8 +568,9 @@ def main_loop():
                 # Claim the job to avoid race conditions
                 claim = sb.table("manuscript_transcripts").update({"status": "transcribing"}).eq("id", job["id"]).eq("status", "pending").execute()
                 if claim.data:
+                    claimed_new_job = True
                     process_transcription_job(job)
-                    
+
             # 2. Check for transcribing jobs that might have crashed/interrupted
             res = sb.table("manuscript_transcripts").select("id,filename,mode").eq("status", "transcribing").limit(1).execute()
             if res.data:
@@ -505,14 +579,20 @@ def main_loop():
                 # For simplicity, we can resume any job that is currently transcribing
                 # Let's claim it by updating the timestamp or just continue processing it
                 process_transcription_job(job)
-                
+
             # 3. Synchronize completed jobs to this store's folder
             sync_completed_jobs()
-            
+
         except Exception as e:
             log.error(f"Error in main worker loop: {e}")
 
-        time.sleep(POLL_SECONDS)
+        if REALTIME_ENABLED and woken_by_realtime is not None:
+            _check_realtime_delivery(claimed_new_job, woken_by_realtime)
+
+        # Woken immediately by the realtime callback on a matching row change;
+        # otherwise falls through to the next scheduled cycle after POLL_SECONDS.
+        woken_by_realtime = _wake_event.wait(POLL_SECONDS)
+        _wake_event.clear()
 
 if __name__ == "__main__":
     if sb and client:

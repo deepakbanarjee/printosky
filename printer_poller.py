@@ -8,7 +8,15 @@ Konica: Uses /wcd/system_device.xml (HTTP, counters) + /wcd/system_consumable.xm
 Epson:  Uses SNMP (standard RFC 3805 printer MIB)
 
 Runs automatically — imported and started by watcher.py.
-Polls every POLL_INTERVAL_SECONDS (default: 5 minutes).
+Polls every POLL_INTERVAL_SECONDS (default: 5 minutes) as a fallback sweep.
+
+Printers can't push to us the way Supabase can (no realtime subscription for
+SNMP), so pickup here stays interval-based for anything Printosky doesn't
+cause itself — supply drain, printer errors, walk-up jobs run directly from
+a printer's own panel. But a job Printosky prints IS a moment we already
+know about: print_server.send_to_printer POSTs to watcher's local
+:3003/printers/poll-now after a successful print, which calls trigger_now()
+here to wake this loop immediately instead of waiting for the next sweep.
 
 KONICA SNMP OIDs (bizhub, enterprise 18334):
   Total pages:  1.3.6.1.4.1.18334.1.1.1.5.7.2.1.1.0
@@ -80,10 +88,24 @@ def _may_poll() -> bool:
     except Exception as exc:      # never let coordination stop a single-box store
         logger.warning("printer_poller: lease check failed (%s) — polling anyway", exc)
         return True
-POLL_INTERVAL        = 300          # seconds (5 minutes)
+POLL_INTERVAL        = 300          # seconds (5 minutes) — fallback sweep interval
 SNMP_COMMUNITY       = "public"
 SNMP_TIMEOUT         = 3            # seconds
 HTTP_TIMEOUT         = 10           # seconds
+
+# Set by trigger_now() (called from watcher's :3003/printers/poll-now, which
+# print_server.py hits right after dispatching a print) so the poll loop
+# wakes immediately instead of waiting out POLL_INTERVAL. A few seconds'
+# settle time after waking lets the printer's own counter catch up before we
+# read it — polling the instant a job is sent can race the counter update.
+_wake_event = threading.Event()
+POLL_NOW_SETTLE_SECONDS = 3
+
+
+def trigger_now() -> None:
+    """Wake the printer poller thread immediately. Safe to call from another
+    thread (this is exactly how watcher's HTTP handler calls it)."""
+    _wake_event.set()
 
 EPSON_BASE      = f"https://{EPSON_IP}"
 EPSON_USER      = os.environ.get("EPSON_USER", "Oxygen")
@@ -997,7 +1019,13 @@ def start_poller(db_path, interval=POLL_INTERVAL):
             except Exception as e:
                 logger.error(f"Poller error: {e}")
                 _report_health("poller.cycle", False, f"{type(e).__name__}: {e}")
-            time.sleep(interval)
+            # Woken immediately by trigger_now() after a Printosky-dispatched
+            # print; otherwise falls through to the next scheduled sweep.
+            woken = _wake_event.wait(interval)
+            _wake_event.clear()
+            if woken:
+                logger.info("Printer poller: woken early by a print-dispatch trigger")
+                time.sleep(POLL_NOW_SETTLE_SECONDS)
 
     t = threading.Thread(target=loop, daemon=True, name="PrinterPoller")
     t.start()

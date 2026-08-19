@@ -18,6 +18,14 @@ Idempotency: every downloaded job_id is recorded in a local ``pulled_jobs``
 table, so a job is never downloaded twice even if it stays in the same
 status across poll cycles.
 
+Pickup is event-driven: a Supabase Realtime subscription on the ``jobs``
+table wakes the loop the instant a row for this store changes (a job routed
+here, or paid), so a job is normally pulled within a second or two rather
+than waiting for the next scheduled cycle. POLL_SECONDS is now a fallback
+safety net only — it still runs every cycle in case the realtime connection
+drops, so nothing is lost, just slower. Set STORE_PULLER_REALTIME=0 to fall
+back to poll-only.
+
 Run:  python store_puller.py            # loop, poll every POLL_SECONDS
       python store_puller.py --once     # single pass then exit
 """
@@ -30,16 +38,30 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 
+from ops_watchdog import report as _report_health
+
 logger = logging.getLogger("store_puller")
 
-# A paid job is picked up within this many seconds. 15s meant ~5.8k requests/day
-# against the Supabase egress quota for a queue that is empty most of the time;
-# 45s still collects a job well before staff walk to the printer. Lower it via
-# STORE_PULLER_POLL_SECONDS if a store wants faster pickup.
-POLL_SECONDS = int(os.environ.get("STORE_PULLER_POLL_SECONDS", "45"))
+# Fallback poll interval - only matters when realtime is down or disabled, since
+# a live subscription wakes the loop immediately on every change. 15 minutes is
+# plenty for a safety net (it used to be the primary pickup path at 45s, costing
+# ~1.9k requests/day against the Supabase egress quota for a queue that is empty
+# most of the time). Lower it via STORE_PULLER_POLL_SECONDS if a store wants a
+# tighter fallback.
+POLL_SECONDS = int(os.environ.get("STORE_PULLER_POLL_SECONDS", "900"))
+
+# Realtime is on by default; STORE_PULLER_REALTIME=0 disables the subscription
+# and falls back to polling only (e.g. an older supabase-py on a store PC that
+# has not been updated, or Realtime not enabled on the `jobs` table yet).
+REALTIME_ENABLED = os.environ.get("STORE_PULLER_REALTIME", "1").lower() not in ("0", "false", "no")
+
+# Set by the realtime callback (a different thread); the main loop waits on it
+# instead of a flat sleep so a change wakes it immediately.
+_wake_event = threading.Event()
 
 # Housekeeping: a printed download is deleted immediately; anything left behind
 # (a job whose auto-print failed and was kept for manual printing) is purged
@@ -129,6 +151,76 @@ def fetch_assigned_paid(client, store_id: str) -> list[dict]:
         .execute()
     )
     return getattr(res, "data", None) or []
+
+
+def start_realtime(client, store_id: str) -> None:
+    """Subscribe to Supabase Realtime on ``jobs`` so a row change for this
+    store wakes the poll loop immediately instead of waiting for the next
+    scheduled cycle.
+
+    Best-effort by design: this is a latency optimisation, not the source of
+    truth. If the subscription cannot be established (network issue, an
+    older supabase-py, or Realtime not yet enabled on the `jobs` table), the
+    fallback poll loop keeps working on its own — just slower — so a failure
+    here must never stop the process. It IS reported to ops_watchdog so a
+    stuck subscription is a visible alert rather than a silent slowdown back
+    to poll-only.
+
+    We do not inspect the payload: any change on our store's rows might mean
+    a job just went Paid, and pull_once's own status/file_url filter is the
+    single source of truth for what actually gets pulled.
+    """
+    def _on_change(_payload):
+        _wake_event.set()
+
+    try:
+        channel = client.channel(f"store-{store_id}-jobs")
+        channel.on_postgres_changes(
+            "*", schema="public", table="jobs",
+            filter=f"assigned_store_id=eq.{store_id}",
+            callback=_on_change,
+        )
+        channel.subscribe()
+    except Exception as exc:
+        logger.warning(
+            "store_puller: realtime subscription failed (%s) — falling back to "
+            "polling every %ss", exc, POLL_SECONDS,
+        )
+        _report_health("store_puller.realtime", False, f"{type(exc).__name__}: {exc}", store_id=store_id)
+        return
+    logger.info("store_puller: realtime subscription active for store %s", store_id)
+    _report_health("store_puller.realtime", True, "subscribed", store_id=store_id)
+
+
+def _check_realtime_delivery(pulled: list[str], woken_by_realtime: bool, store_id: str) -> None:
+    """Secondary signal: is the subscription actually delivering, not just
+    connected? ``start_realtime`` can report "subscribed" successfully even
+    when Realtime is not enabled on the `jobs` table in Supabase — the
+    channel opens fine, it just never gets a postgres_changes event.
+
+    The fallback poll should only ever be the one to find a job when realtime
+    failed to wake the loop first. So: if this cycle pulled jobs AND the wait
+    that preceded it timed out rather than being woken, the subscription is
+    silently not delivering.
+
+    Deliberately not gated on store hours (docs/FAIL_LOUD.md rejects an hours
+    gate — that is what hid the Nattika outage). It does not need one: this
+    only ever fires when a job was actually pulled, so it is silent by
+    construction outside business activity.
+    """
+    if not pulled:
+        return
+    if woken_by_realtime:
+        _report_health("store_puller.realtime_delivery", True,
+                        f"pulled {len(pulled)} job(s) via realtime wake", store_id=store_id)
+        return
+    _report_health(
+        "store_puller.realtime_delivery", False,
+        f"pulled {len(pulled)} job(s) via the {POLL_SECONDS}s fallback poll with no prior "
+        "realtime wake — subscription is connected but not delivering events "
+        "(check Realtime is enabled on the `jobs` table in Supabase)",
+        store_id=store_id,
+    )
 
 
 def download_url(url: str, dest_path: str) -> int:
@@ -495,18 +587,30 @@ def main(argv: list[str] | None = None) -> int:
             return printed
 
     logger.info(
-        "store_puller: store=%s dest=%s poll=%ss mode=%s autoprint=%s",
-        store_id, dest_dir, POLL_SECONDS, "once" if once else "loop", autoprint,
+        "store_puller: store=%s dest=%s fallback_poll=%ss realtime=%s mode=%s autoprint=%s",
+        store_id, dest_dir, POLL_SECONDS, REALTIME_ENABLED, "once" if once else "loop", autoprint,
     )
     # Recover any jobs stranded at Paid by an earlier failed print (pre-fix).
     reconcile_stranded(client, store_id, conn)
 
+    if not once and REALTIME_ENABLED:
+        start_realtime(client, store_id)
+
+    # None on the first cycle: there is no preceding wait to judge yet, so the
+    # delivery check (which needs to know whether realtime or the timeout woke
+    # the loop) stays quiet until the second cycle.
+    woken_by_realtime = None
     while True:
         purge_old_files(dest_dir, KEEP_DAYS)
-        pull_once(client, store_id, dest_dir, conn, on_pulled=on_pulled)
+        pulled = pull_once(client, store_id, dest_dir, conn, on_pulled=on_pulled)
+        if REALTIME_ENABLED and woken_by_realtime is not None:
+            _check_realtime_delivery(pulled, woken_by_realtime, store_id)
         if once:
             return 0
-        time.sleep(POLL_SECONDS)
+        # Woken immediately by the realtime callback on a matching row change;
+        # otherwise falls through to the next scheduled cycle after POLL_SECONDS.
+        woken_by_realtime = _wake_event.wait(POLL_SECONDS)
+        _wake_event.clear()
 
 
 if __name__ == "__main__":

@@ -654,7 +654,7 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
     if not sumatra:
         # Fallback: use Windows print verb (less control but always available)
         logging.warning("SumatraPDF not found — using Windows shell print")
-        return windows_shell_print(filepath, printer_name, copies)
+        return windows_shell_print(filepath, printer_name, copies, printer_key)
 
     # Build SumatraPDF command
     # -print-to <printer>  : print to named printer silently
@@ -719,6 +719,7 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
             # ALL sub-jobs succeed) so a later-section failure isn't masked.
             if update_status:
                 update_job_status(job_id, "Printed", printer_name, staff_id)
+            _trigger_printer_poll_now(printer_key)
             return True, f"Sent to {printer_name} ({copies} cop{'y' if copies==1 else 'ies'})"
         else:
             err = result.stderr or result.stdout or "Unknown error"
@@ -735,7 +736,38 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
             pass
 
 
-def windows_shell_print(filepath: str, printer_name: str, copies: int):
+def _trigger_printer_poll_now(printer_key: str) -> None:
+    """Tell the printer poller (a thread inside watcher.py) to re-check
+    counters right now instead of waiting for its next scheduled sweep — we
+    just caused a page count to change, no point waiting up to 5 minutes to
+    notice.
+
+    Fired in a background thread so a slow/unreachable watcher process never
+    adds latency to the print response, and never raises: this is a latency
+    optimisation on top of the always-running sweep, not the source of
+    truth, so a failed trigger just means counters catch up on the next
+    sweep instead of instantly — same as before this existed. Still reported
+    to ops_watchdog so a persistently broken trigger is a visible alert
+    rather than a silent slowdown. Local call only (127.0.0.1:3003) — never
+    touches Supabase.
+    """
+    def _fire():
+        try:
+            req = urllib.request.Request(
+                "http://127.0.0.1:3003/printers/poll-now",
+                data=json.dumps({"printer": printer_key}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=2)
+            _report_health("printer_poll_now.trigger", True, "watcher acknowledged")
+        except Exception as exc:
+            _report_health("printer_poll_now.trigger", False, f"{type(exc).__name__}: {exc}")
+
+    threading.Thread(target=_fire, daemon=True, name="PollNowTrigger").start()
+
+
+def windows_shell_print(filepath: str, printer_name: str, copies: int, printer_key: str = None):
     """Fallback: use Windows shell to print (no copies control)."""
     try:
         # Set default printer temporarily and print
@@ -744,6 +776,8 @@ def windows_shell_print(filepath: str, printer_name: str, copies: int):
             check=True, timeout=10
         )
         os.startfile(filepath, "print")
+        if printer_key:
+            _trigger_printer_poll_now(printer_key)
         return True, f"Sent via Windows shell to {printer_name}"
     except Exception as e:
         return False, f"Shell print failed: {e}"
