@@ -1,56 +1,67 @@
 # Store-PC auto-update
 
-Lets a store PC pick up new Printosky code on its own, on a timer, so an
-update doesn't need someone physically at the till or remoted in.
+A store PC picks up new Printosky code by itself, once a day, when it boots —
+so an update doesn't need anyone at the till or remoted in.
 
 ## How it works
 
-- `SETUP_AUTO_UPDATE.bat` (run once, per PC) registers a Windows Task
-  Scheduler task, `PrintoskyAutoUpdate`, that runs `AUTO_UPDATE.bat` every
-  15 minutes.
-- Each run: `git fetch origin`, compare the local commit to
-  `origin/<branch this PC has checked out>`. Identical → exit immediately,
-  nothing disrupted, nothing logged. Different → stop all Printosky
-  processes (`taskkill python.exe`, `taskkill node.exe`, same as
-  `STOP_PRINTOSKY.bat`), `git reset --hard origin/<branch>` (same as
-  `PULL_UPDATE.bat`), then relaunch everything hidden via `START_SILENT.bat`.
-- Every check (or at least every update) is appended to
-  `logs\auto_update.log` with a timestamp and the before/after commit.
+The boot chain, registered once per PC by `SETUP_AUTOSTART.bat`:
 
-## Why this design
+```
+Windows login
+  → boot_delay.vbs      (15s, waits for the network)
+  → BOOT_PRINTOSKY.bat
+      → AUTO_UPDATE.bat   git fetch + hard reset to origin/<branch>
+      → START_SILENT.bat  every service, hidden, each to its own log
+```
 
-- **No new network exposure.** It only ever reaches *out* to GitHub over
-  the connection the PC already uses for every other `git fetch` — nothing
-  listens for an inbound trigger, so there is no new attack surface on a
-  machine `docs/SECURITY.md` already flags a live risk on (SEC-OPEN-6,
-  Supabase service_role key on the store PC).
-- **The tradeoff:** not instant. A push to `main` can take up to 15 minutes
-  to reach this PC (tune `/mo` in `SETUP_AUTO_UPDATE.bat` if you want it
-  tighter — each check itself is cheap, just a `git fetch`). And a restart
-  that lands mid-print interrupts it for the few seconds the processes take
-  to come back up — there is no "wait for the current job to finish" check.
-  Pick the interval/timing with that in mind (a quiet overnight window, or
-  accept the occasional mid-shift blip).
+**Update before start, not stop-update-restart.** At boot nothing is running
+yet, so there is nothing to kill and no restart to perform — the freshly
+pulled code is simply what gets launched. That means this can never interrupt
+a print, which a mid-day timer-based update could.
+
+`AUTO_UPDATE.bat` therefore never touches processes. Run it by hand mid-day
+and the new code lands on disk but does **not** go live — Python has already
+loaded the old modules into memory. Reboot, or `STOP_PRINTOSKY.bat` +
+`START_SILENT.bat`, to make it take effect.
+
+## Where the detail goes
+
+Everything runs silently, so the logs are the record:
+
+| Log | What's in it |
+|---|---|
+| `logs\boot.log` | The boot sequence — when it ran, each step, exit codes |
+| `logs\auto_update.log` | Every check: branch, before/after commit, or "already up to date" |
+| `logs\watcher.log`, `print_server.log`, `store_puller.log`, … | One per service, as before |
+
+**But a log is not an alert.** Per [FAIL_LOUD.md](FAIL_LOUD.md), the update
+also reports to `ops_watchdog` as `store_pc.boot_update` — so a failed fetch
+or reset (a store PC quietly running stale code) raises an alert instead of
+waiting for someone to remember to open a log file. A successful boot is not
+news and stays quiet.
+
+## Latency
+
+Up to one business day: a change pushed to `main` at noon reaches the store
+PC the next morning when it boots. Fine for ordinary changes. For anything
+urgent, the PC still needs a manual `PULL_UPDATE.bat` + restart, or a reboot.
 
 ## Setup
 
 On the store PC, once:
 ```batch
-SETUP_AUTO_UPDATE.bat
+SETUP_AUTOSTART.bat
 ```
-Right-click → Run as Administrator if it fails (Task Scheduler at `/rl
-highest` needs elevation on some accounts).
+Right-click → Run as Administrator if the registry write fails. This is the
+same script that already set up auto-start; re-running it is safe and simply
+repoints the boot chain at `BOOT_PRINTOSKY.bat`.
 
-## Undo
-
-```batch
-REMOVE_AUTO_UPDATE.bat
-```
-Goes back to needing `PULL_UPDATE.bat` run by hand.
-
-## Check it's working
+## Check it worked
 
 ```cmd
-schtasks /query /tn "PrintoskyAutoUpdate" /v /fo list
+type logs\boot.log
 type logs\auto_update.log
+git log --oneline -3
+STATUS_PRINTOSKY.bat
 ```
