@@ -143,14 +143,45 @@ function getStoreId() {
 //
 // The Epson is an EM-C8100 everywhere: it replaced the WF-C21000 at OSP on
 // 2026-06-29, and Nattika runs its own EM-C8100 (SPRINT_BACKLOG S11-4).
-const EPSON_EM_C8100 = { key: "epson",  label: "Epson",  model: "EM-C8100" };
+//
+// `since` is when THAT unit started printing at THAT store, and it matters:
+// records older than it belong to the machine before, and labelling them with
+// the current model is how OSP came to "still show 21000 details". Every one of
+// OSP's 1,574 Epson job records predates 2026-06-29 — they are all the retired
+// WF-C21000's, and the panel above them said EM-C8100.
+const EPSON_EM_C8100  = { key: "epson",  label: "Epson",  model: "EM-C8100" };
+const EPSON_WF_C21000 = { key: "epson",  label: "Epson",  model: "WF-C21000" };
 const KONICA_PRO_1100 = { key: "konica", label: "Konica", model: "Bizhub Pro 1100" };
 
 const STORE_FLEETS = {
-  OSP:    { konica: KONICA_PRO_1100, epson: EPSON_EM_C8100 },
-  PRINTK: { konica: null,            epson: EPSON_EM_C8100 },
-  PRIOFF: { konica: null,            epson: EPSON_EM_C8100 },
+  OSP:    { konica: KONICA_PRO_1100,
+            epson: { ...EPSON_EM_C8100, since: "2026-06-29", replaced: EPSON_WF_C21000 } },
+  PRINTK: { konica: null, epson: EPSON_EM_C8100 },
+  PRIOFF: { konica: null, epson: EPSON_EM_C8100 },
 };
+
+// Which physical unit a dated record came from at a store. Returns the fleet
+// entry, so callers get the model name that was actually on the machine.
+function printerUnitAt(key, storeId, dateStr) {
+  const unit = storeFleet(storeId)[key];
+  if (!unit || !unit.since || !dateStr) return unit;
+  // job_date arrives as "2026-05-01 17:30" or "2026.05.01 17:30" — both compare
+  // correctly once the separators are normalised to the ISO form.
+  const d = String(dateStr).slice(0, 10).replace(/\./g, "-");
+  return d < unit.since ? (unit.replaced || unit) : unit;
+}
+
+// True when everything in `rows` predates the unit currently installed — i.e.
+// the table is entirely the old machine's history and nothing has arrived from
+// the new one. Worth saying out loud rather than leaving the reader to infer it.
+function allRecordsPredateCurrentUnit(rows, key, storeId, dateField) {
+  const unit = storeFleet(storeId)[key];
+  if (!unit || !unit.since || !rows || !rows.length) return false;
+  return rows.every(r => {
+    const d = String(r[dateField] || "").slice(0, 10).replace(/\./g, "-");
+    return d && d < unit.since;
+  });
+}
 
 // Shop counters. PRIOFF is back-office, not a counter, so its consoles follow
 // the location filter rather than being pinned to that box's own printers.

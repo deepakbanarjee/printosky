@@ -2191,6 +2191,16 @@ async function loadPrinterJobs() {
   const eTitle = document.getElementById("pjl-epson-title");
   if (eTitle) eTitle.textContent = `${printerLabel("epson", store)} — ${wantK ? "Colour" : "All Jobs"}`;
 
+  // Records older than the installed unit are the machine BEFORE it. Saying
+  // "Epson EM-C8100" over a table of WF-C21000 history is how OSP came to look
+  // like it was still reporting the retired printer.
+  const epsonUnit = storeFleet(store).epson;
+  const eNote = document.getElementById("pjl-epson-note");
+  if (eNote) {
+    eNote.style.display = "none";
+    eNote.textContent = "";
+  }
+
   const [konicaRows, epsonRows] = await Promise.all([
     wantK ? sbFetch("konica_jobs", `order=job_date.desc&limit=200${dateParam}${storeParam}`).catch(() => []) : [],
     sbFetch("epson_jobs",  `source=eq.weblog&order=job_date.desc&limit=200${dateParam}${storeParam}`).catch(() => []),
@@ -2218,6 +2228,15 @@ async function loadPrinterJobs() {
   }
 
   // Epson table
+  if (eNote && epsonUnit && epsonUnit.since
+      && allRecordsPredateCurrentUnit(epsonRows, "epson", store, "job_date")) {
+    eNote.style.display = "";
+    eNote.textContent =
+      `⚠ Every record below predates the ${epsonUnit.model}, installed `
+      + `${epsonUnit.since}. They are the ${(epsonUnit.replaced || {}).model || "previous unit"}'s, `
+      + `and nothing has been imported from the ${epsonUnit.model} since. Check the Epson job-log importer on that store PC.`;
+  }
+
   const et = document.getElementById("epson-jobs-tbody");
   if (et) {
     if (!epsonRows || !epsonRows.length) {
@@ -2226,7 +2245,7 @@ async function loadPrinterJobs() {
       et.innerHTML = epsonRows.map(r => `
         <tr>
           <td style="color:var(--muted)">${shortTime(r.job_date)}</td>
-          <td style="color:var(--muted);font-family:monospace;font-size:.65rem">${esc(r.source || "delta")}</td>
+          <td style="color:var(--muted);font-family:monospace;font-size:.65rem">${esc(r.source || "delta")}<br><span style="font-size:.58rem;opacity:.75">${esc((printerUnitAt("epson", r.store_id || store, r.job_date) || {}).model || "")}</span></td>
           <td style="color:var(--muted);font-size:.7rem">${esc(r.attributed_job_id || r.job_number || "—")}</td>
           <td class="amount">${r.pages_printed ?? r.delta_pages ?? "—"}</td>
           <td style="color:var(--muted)">${r.mono_pages ?? "—"}</td>
