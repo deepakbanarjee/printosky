@@ -21,6 +21,16 @@ keys are ignored.
 | `PRINTK.store_config.json` | Printosky counter, Nattika | none | `192.168.1.250` | yes |
 | `PRIOFF.store_config.json` | Printosky office, Nattika | none | `192.168.1.250` | **no** |
 
+## PRIOFF's own address vs. its printer's
+
+The Epson IP in the table above (`192.168.1.250`) is the *printer's* address,
+shared with PRINTK. The PRIOFF **box itself** is a separate machine and has its
+own address on the same LAN — as of 2026-08-19 it's a static
+`192.168.1.240:3005`. That's what the admin/jobs consoles' `storePcUrl`
+(⚙ PC Setup) must point at for that machine, and it isn't tracked by
+`store_config.py` (the LAN-exempt rule matches on declared `store_id`, not on
+this box's own IP) — so if it changes again, update it here.
+
 ## Two rules that are easy to get wrong
 
 **1. `poll_printers` is a veto, not the mechanism.**
