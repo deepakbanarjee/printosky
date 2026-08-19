@@ -87,3 +87,34 @@ class TestDegradedEnvironments:
             raise OSError("git exploded")
         monkeypatch.setattr(app_version.subprocess, "run", boom)
         assert app_version._git("rev-parse", "HEAD") is None
+
+
+class TestGeneratedFilesDoNotFakeDirtiness:
+    """A store PC generates files at setup time. If one of those is not
+    gitignored it shows as untracked, `+dirty` fires on every correctly
+    configured box, and the flag stops meaning "someone hand-patched this".
+
+    That is exactly what happened on first rollout: SETUP_AUTOSTART.bat writes
+    boot_delay.vbs, which was untracked, so Nattika reported
+    `main@db14849+dirty` on a tree whose `git diff` was empty.
+    """
+
+    def test_setup_generated_files_are_gitignored(self):
+        import subprocess
+
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        # Files written by the setup/boot scripts onto each store PC.
+        generated = ["boot_delay.vbs"]
+
+        not_ignored = []
+        for name in generated:
+            r = subprocess.run(["git", "check-ignore", "-q", name],
+                               cwd=root, capture_output=True)
+            if r.returncode != 0:
+                not_ignored.append(name)
+
+        assert not not_ignored, (
+            f"{not_ignored} is generated on every store PC but is not gitignored, "
+            "so app_version will report every properly-configured box as +dirty "
+            "and the flag becomes meaningless. Add it to .gitignore."
+        )
