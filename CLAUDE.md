@@ -12,7 +12,11 @@ Manual start commands + full port map → [docs/ARCHITECTURE.md](docs/ARCHITECTU
 ## Architecture (at a glance)
 - **Store PC**: `watcher.py` (file watch + threads), `print_server.py :3005` (staff auth + print), `whatsapp_capture/index.js :3001` (WhatsApp Web)
 - **Vercel** (`api/index.py`, branch `main`): WhatsApp webhook, Razorpay webhook, staff PIN API, academic orders API
+- **Netlify** (`website/`, branch `main`): admin + jobs consoles, order-v2, marketing site
 - **Supabase**: cloud DB mirror + academic orders + storage
+
+Everything deploys from `main` on push — **except the store PCs**, which keep
+running whatever they last pulled (`PULL_UPDATE.bat` + restart the watcher).
 
 Full detail → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 Schema reference (28 tables, owners, columns) → [docs/SCHEMA.md](docs/SCHEMA.md)

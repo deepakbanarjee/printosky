@@ -141,18 +141,36 @@ Academic orders:
 
 ## Deploy Pipeline
 
-| Branch | Platform | Trigger |
-|--------|----------|---------|
-| `main` | Vercel | auto on push |
-| `sprint/session-9` | Netlify | auto on push |
+Everything ships from `main`. Both platforms build on push.
 
-**Rule:** Cherry-pick every API change to `main` after committing to sprint branch.
+| What | Platform | Source | Trigger |
+|------|----------|--------|---------|
+| API (`api/index.py`, `api/inngest.py`) | Vercel | `main` | auto on push |
+| Website + consoles (`website/`) | Netlify | `main` | auto on push |
+| Store PCs (`watcher.py`, `print_server.py`, …) | — | `main` | **manual**: `PULL_UPDATE.bat`, then restart the watcher |
+
+**Rule:** merge to `main`; there is no cherry-pick step and no sprint branch to
+commit to first.
+
+> This table used to name `sprint/session-9` as Netlify's source. That branch no
+> longer exists — it was deleted after the sprint — and the entry was wrong for
+> long enough to cost real debugging time: it makes a stale console look like a
+> branch problem rather than a build or cache one. Established 2026-08-19 by
+> elimination: `store-diag`, `jobs.html` and `dtp.html` are all live on the site
+> and exist **only** on `main` (no sprint branch has any of them, and
+> `sprint/session-10` has been untouched since April).
+
+**The store PCs are the part people forget.** Vercel and Netlify update
+themselves within a minute of a merge; a store PC keeps running whatever it last
+pulled. A change to `print_server.py`, `printer_poller.py`, `watcher.py`,
+`store_puller.py`, `ops_watchdog.py` or `device_lease.py` is not live anywhere
+until someone pulls it on each machine.
 
 ---
 
 ## Admin UI
 
-`website/admin.html` — static HTML on Netlify (`sprint/session-9`).
+`website/admin.html` — static HTML on Netlify, built from `main`.
 Reads Supabase via anon key. Staff PIN + admin password checked client-side (SHA-256).
 Includes academic orders tab (added session 9).
 
