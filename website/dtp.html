@@ -737,11 +737,64 @@ async function trHandleFileUpload(event) {
   }
 }
 
+let trPageTextMap = {};
+let trGlobalFlaggedIndex = -1;
+
+function trParsePageTexts(fullContent) {
+  trPageTextMap = {};
+  if (!fullContent) return;
+  
+  const pageRegex = /=== PAGE (\d+) ===\s*([\s\S]*?)(?=(?:=== PAGE \d+ ===)|$)/gi;
+  let match;
+  let found = false;
+  while ((match = pageRegex.exec(fullContent)) !== null) {
+    found = true;
+    const pNum = parseInt(match[1], 10);
+    trPageTextMap[pNum] = match[2].trim();
+  }
+  if (!found) {
+    trPageTextMap[1] = fullContent.trim();
+  }
+}
+
+function trGetFullContentFromPages() {
+  const area = document.getElementById("tr-modal-textarea");
+  if (area && trActiveFile) {
+    trPageTextMap[trCurrentPage + 1] = area.value;
+  }
+  let parts = [];
+  for (let p = 1; p <= trTotalPages; p++) {
+    const text = (trPageTextMap[p] !== undefined) ? trPageTextMap[p] : "";
+    parts.push(`=== PAGE ${p} ===\n\n${text}`);
+  }
+  return parts.join("\n\n");
+}
+
+function trGoToPage(targetPage) {
+  if (targetPage < 0 || targetPage >= trTotalPages) return;
+  
+  const area = document.getElementById("tr-modal-textarea");
+  if (area) {
+    trPageTextMap[trCurrentPage + 1] = area.value;
+  }
+  
+  trCurrentPage = targetPage;
+  trUpdatePageIndicator();
+  
+  if (area) {
+    area.value = trPageTextMap[trCurrentPage + 1] || "";
+  }
+  
+  trLoadPageImage();
+  trRenderConfidenceOverlay();
+}
+
 async function trView(filename) {
   trActiveFile = filename;
   const fileObj = trFilesList.find(f => f.filename === filename);
-  trTotalPages = fileObj ? fileObj.total_pages : 1;
+  trTotalPages = fileObj ? (fileObj.total_pages || 1) : 1;
   trCurrentPage = 0;
+  trGlobalFlaggedIndex = -1;
   pdfDocInstance = null;
   trZoomReset();
   
@@ -749,6 +802,18 @@ async function trView(filename) {
   const area = document.getElementById("tr-modal-textarea");
   area.value = "Loading transcript...";
   document.getElementById("tr-edit-modal").style.display = "flex";
+  
+  if (fileObj) {
+    trParsePageTexts(fileObj.content || "");
+    area.value = trPageTextMap[1] || "";
+  } else {
+    area.value = "No transcript content found.";
+  }
+
+  // Handle live edits in single-page mode
+  area.oninput = () => {
+    trPageTextMap[trCurrentPage + 1] = area.value;
+  };
   
   trUpdatePageIndicator();
   
@@ -765,15 +830,9 @@ async function trView(filename) {
     alert("Failed to render PDF preview: " + e.message);
   }
   
-  if (fileObj) {
-    area.value = fileObj.content || "";
-    setTimeout(() => {
-      trScrollToPage(0);
-      trRenderConfidenceOverlay();
-    }, 100);
-  } else {
-    area.value = "No transcript content found.";
-  }
+  setTimeout(() => {
+    trRenderConfidenceOverlay();
+  }, 100);
 }
 
 function trUpdatePageIndicator() {
@@ -801,7 +860,6 @@ async function trLoadPageImage() {
 }
 
 let trConfidenceModeActive = true;
-let trCurrentFlaggedIndex = 0;
 
 function trToggleConfidenceMode() {
   trConfidenceModeActive = !trConfidenceModeActive;
@@ -813,6 +871,36 @@ function trToggleConfidenceMode() {
   trRenderConfidenceOverlay();
 }
 
+function trGetAllLowConfWords() {
+  const fileObj = trFilesList.find(f => f.filename === trActiveFile);
+  const confData = fileObj ? (fileObj.confidence_data || []) : [];
+  let allItems = [];
+
+  if (confData.length > 0) {
+    allItems = confData.filter(item => item.flagged || (item.confidence && item.confidence < 75.0));
+  }
+
+  // Parse inline [low:XX%] tags from all pages in trPageTextMap if confData is empty
+  if (allItems.length === 0) {
+    const tagRegex = /\[low:(\d+)%\](.*?)\[\/low\]/g;
+    for (let p = 1; p <= trTotalPages; p++) {
+      const pageText = trPageTextMap[p] || "";
+      let match;
+      let idx = 0;
+      while ((match = tagRegex.exec(pageText)) !== null) {
+        allItems.push({
+          word: match[2].trim(),
+          confidence: parseInt(match[1], 10),
+          flagged: true,
+          page: p,
+          indexInPage: idx++
+        });
+      }
+    }
+  }
+  return allItems;
+}
+
 function trRenderConfidenceOverlay() {
   const overlay = document.getElementById("tr-bbox-overlay");
   const bar = document.getElementById("tr-confidence-bar");
@@ -822,46 +910,25 @@ function trRenderConfidenceOverlay() {
   if (!overlay || !img) return;
   overlay.innerHTML = "";
   
-  const fileObj = trFilesList.find(f => f.filename === trActiveFile);
-  const confData = fileObj ? (fileObj.confidence_data || []) : [];
-  
-  // Filter for current page
   const curPageNum = trCurrentPage + 1;
-  let pageItems = confData.filter(item => (item.page || 1) === curPageNum);
-  let lowConfItems = pageItems.filter(item => item.flagged || (item.confidence && item.confidence < 75.0));
+  const allItems = trGetAllLowConfWords();
+  const pageItems = allItems.filter(item => item.page === curPageNum);
 
-  // Fallback: parse inline [low:54%]word[/low] tags from current page text
-  if (lowConfItems.length === 0) {
-    const textVal = document.getElementById("tr-modal-textarea") ? document.getElementById("tr-modal-textarea").value : "";
-    const pageRegex = new RegExp(`=== PAGE ${curPageNum} ===([\\s\\S]*?)(?:=== PAGE \\d+ ===|$)`, "i");
-    const pageMatch = textVal.match(pageRegex);
-    const pageText = pageMatch ? pageMatch[1] : textVal;
-    
-    const tagRegex = /\[low:(\d+)%\](.*?)\[\/low\]/g;
-    let match;
-    while ((match = tagRegex.exec(pageText)) !== null) {
-      lowConfItems.push({
-        word: match[2].strip ? match[2].strip() : match[2].trim(),
-        confidence: parseInt(match[1], 10),
-        flagged: true,
-        page: curPageNum
-      });
-    }
-  }
-
-  if (!trConfidenceModeActive || lowConfItems.length === 0) {
-    if (bar) bar.style.display = "none";
-    return;
+  if (!trConfidenceModeActive || pageItems.length === 0) {
+    if (bar && allItems.length === 0) bar.style.display = "none";
   }
   
-  if (bar) bar.style.display = "block";
-  document.getElementById("tr-low-conf-count").innerText = lowConfItems.length;
+  if (bar && allItems.length > 0) {
+    bar.style.display = "block";
+    const curIdxStr = trGlobalFlaggedIndex >= 0 ? `${trGlobalFlaggedIndex + 1} of ${allItems.length}` : `${pageItems.length} on Page ${curPageNum}`;
+    document.getElementById("tr-low-conf-count").innerText = `${curIdxStr} (<75%)`;
+  }
   
   if (wordsList) {
     wordsList.innerHTML = "";
-    lowConfItems.forEach((item, i) => {
+    pageItems.forEach((item, i) => {
       const tag = document.createElement("span");
-      tag.style.cssText = "cursor:pointer; background:rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); padding:2px 6px; border-radius:4px; font-size:.75rem; font-family:var(--mono);";
+      tag.style.cssText = "cursor:pointer; background:rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); padding:2px 6px; border-radius:4px; font-size:.75rem; font-family:var(--mono); margin-right:4px;";
       tag.innerText = `${item.word} (${item.confidence}%)`;
       tag.onclick = () => trFocusWord(item.word, i);
       wordsList.appendChild(tag);
@@ -873,7 +940,7 @@ function trRenderConfidenceOverlay() {
   const imgH = img.clientHeight || img.height;
   if (imgW <= 0 || imgH <= 0) return;
 
-  lowConfItems.forEach((item, i) => {
+  pageItems.forEach((item, i) => {
     if (!item.box_2d || item.box_2d.length < 4) return;
     const [ymin, xmin, ymax, xmax] = item.box_2d;
     
@@ -918,7 +985,56 @@ function trFocusWord(wordText, idx) {
     textarea.setSelectionRange(wordPos, wordPos + wordText.length);
   }
 
-  // Highlight target PDF bounding box if present
+  // Highlight corresponding region on the PDF scan image
+  const overlay = document.getElementById("tr-bbox-overlay");
+  const img = document.getElementById("tr-modal-img");
+  
+  if (overlay && img) {
+    let activeHighlight = document.getElementById("tr-pdf-active-highlight");
+    if (!activeHighlight) {
+      activeHighlight = document.createElement("div");
+      activeHighlight.id = "tr-pdf-active-highlight";
+      overlay.appendChild(activeHighlight);
+    }
+
+    const lines = content.split("\n");
+    let lineIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(wordText)) {
+        lineIdx = i;
+        break;
+      }
+    }
+
+    const imgW = img.clientWidth || img.width || 600;
+    const imgH = img.clientHeight || img.height || 800;
+    const totalLines = Math.max(lines.length, 1);
+    const topPx = lineIdx >= 0 ? (lineIdx / totalLines) * imgH : 0.2 * imgH;
+    const heightPx = Math.max(32, (1.2 / totalLines) * imgH);
+
+    activeHighlight.style.cssText = `
+      position: absolute;
+      top: ${topPx}px;
+      left: 4%;
+      width: 92%;
+      height: ${heightPx}px;
+      background: rgba(245, 158, 11, 0.35);
+      border: 2px solid #ef4444;
+      border-radius: 4px;
+      box-shadow: 0 0 16px rgba(245, 158, 11, 0.85);
+      pointer-events: none;
+      transition: all 0.3s ease;
+      z-index: 10;
+    `;
+    
+    // Center scroll on PDF container
+    const pdfContainer = document.getElementById("tr-pdf-container");
+    if (pdfContainer) {
+      pdfContainer.scrollTo({ top: topPx - 100, behavior: "smooth" });
+    }
+  }
+
+  // Highlight target PDF bounding box if specific box index is present
   document.querySelectorAll(".tr-bbox-box").forEach(b => {
     b.style.background = "rgba(245, 158, 11, 0.25)";
     b.style.border = "2px dashed #f59e0b";
@@ -934,35 +1050,37 @@ function trFocusWord(wordText, idx) {
 }
 
 function trNextLowConfWord() {
-  const fileObj = trFilesList.find(f => f.filename === trActiveFile);
-  const confData = fileObj ? (fileObj.confidence_data || []) : [];
-  const curPageNum = trCurrentPage + 1;
-  const lowConfItems = confData.filter(item => (item.page || 1) === curPageNum && (item.flagged || (item.confidence && item.confidence < 75.0)));
+  const allItems = trGetAllLowConfWords();
+  if (allItems.length === 0) {
+    alert("No low-confidence words (<75%) found in this document.");
+    return;
+  }
   
-  if (lowConfItems.length === 0) return;
+  trGlobalFlaggedIndex = (trGlobalFlaggedIndex + 1) % allItems.length;
+  const target = allItems[trGlobalFlaggedIndex];
   
-  trCurrentFlaggedIndex = (trCurrentFlaggedIndex + 1) % lowConfItems.length;
-  const item = lowConfItems[trCurrentFlaggedIndex];
-  trFocusWord(item.word, trCurrentFlaggedIndex);
+  // If target word is on a different page, jump to that page first!
+  if (target.page - 1 !== trCurrentPage) {
+    trGoToPage(target.page - 1);
+  }
+  
+  trFocusWord(target.word, target.indexInPage);
+  
+  const countElem = document.getElementById("tr-low-conf-count");
+  if (countElem) {
+    countElem.innerText = `${trGlobalFlaggedIndex + 1} of ${allItems.length} (Page ${target.page})`;
+  }
 }
 
 function trPrevPage() {
   if (trCurrentPage > 0) {
-    trCurrentPage--;
-    trUpdatePageIndicator();
-    trLoadPageImage();
-    trRenderConfidenceOverlay();
-    trScrollToPage(trCurrentPage);
+    trGoToPage(trCurrentPage - 1);
   }
 }
 
 function trNextPage() {
   if (trCurrentPage < trTotalPages - 1) {
-    trCurrentPage++;
-    trUpdatePageIndicator();
-    trLoadPageImage();
-    trRenderConfidenceOverlay();
-    trScrollToPage(trCurrentPage);
+    trGoToPage(trCurrentPage + 1);
   }
 }
 
@@ -975,11 +1093,12 @@ function trOpenPDFInNewTab() {
 async function trSaveTranscript() {
   if (!trActiveFile) return;
   const saveBtn = document.getElementById("tr-save-btn");
-  const text = document.getElementById("tr-modal-textarea").value;
   const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
   const fileObj = trFilesList.find(f => f.filename === trActiveFile);
   
   if (!fileObj) return;
+
+  const fullTextToSave = trGetFullContentFromPages();
 
   const originalText = saveBtn ? saveBtn.innerText : "Save Changes";
   if (saveBtn) {
@@ -995,11 +1114,11 @@ async function trSaveTranscript() {
         "Authorization": `Bearer ${jwt}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ content: text })
+      body: JSON.stringify({ content: fullTextToSave })
     });
     
     if (res.ok) {
-      fileObj.content = text;
+      fileObj.content = fullTextToSave;
       if (saveBtn) {
         saveBtn.innerText = "✓ Saved!";
         saveBtn.style.background = "#059669";
