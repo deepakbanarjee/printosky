@@ -1,11 +1,16 @@
 """Store-PC polling worker for academic project generation.
 
 Replaces the _trigger_generation thread from academic_api.py.
-Polls Supabase every ACAD_POLL_INTERVAL seconds for orders in
-'chapters_generating' or 'final_generating' status, runs the
-osp-academics pipeline locally, uploads the output DOCX to
-Supabase Storage, then advances the order to 'chapters_qc' or
-'final_qc' and sends a WhatsApp notification.
+Polls Supabase for orders in 'chapters_generating' or 'final_generating'
+status, runs the osp-academics pipeline locally, uploads the output DOCX to
+Supabase Storage, then advances the order to 'chapters_qc' or 'final_qc' and
+sends a WhatsApp notification.
+
+Pickup is event-driven: a Supabase Realtime subscription on academic_orders
+wakes the loop the instant a human approves a chapter/final generation step,
+rather than waiting for the next scheduled cycle. ACAD_POLL_INTERVAL is now a
+fallback safety net only, in case the realtime connection drops. Set
+ACAD_REALTIME=0 to fall back to poll-only.
 
 Run via START_PRINTOSKY.bat on the store PC.
 """
@@ -14,7 +19,7 @@ import datetime
 import logging
 import os
 import sys
-import time
+import threading
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("academic_pipeline_worker")
@@ -24,12 +29,23 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-# Seconds between polls. Academic generation is a minutes-long job kicked off by
-# a human-approved status change, so a 30s loop bought no useful latency and cost
-# ~2.9k requests/day against the Supabase egress quota. 90s keeps pickup well
-# inside the customer-visible turnaround.
-POLL_INTERVAL  = int(os.environ.get("ACAD_POLL_INTERVAL", "90"))  # seconds
+from ops_watchdog import report as _report_health
+
+# Fallback poll interval — only matters when realtime is down or disabled,
+# since a live subscription wakes the loop immediately on every change. 15
+# minutes is plenty for a safety net (it used to be the primary pickup path
+# at 90s, costing ~2.9k requests/day against the Supabase egress quota for a
+# queue that is a human-approved status change, not a tight deadline).
+POLL_INTERVAL  = int(os.environ.get("ACAD_POLL_INTERVAL", "900"))  # seconds
 STORAGE_BUCKET = "academic-outputs"
+
+# Realtime is on by default; ACAD_REALTIME=0 disables the subscription and
+# falls back to polling only.
+REALTIME_ENABLED = os.environ.get("ACAD_REALTIME", "1").lower() not in ("0", "false", "no")
+
+# Set by the realtime callback (a different thread); the main loop waits on
+# it instead of a flat sleep so a change wakes it immediately.
+_wake_event = threading.Event()
 
 _sb = None
 
@@ -140,7 +156,12 @@ def _process(order: dict) -> None:
         _revert_on_failure(project_id, phase)
 
 
-def poll_once() -> None:
+def poll_once() -> int:
+    """Run one poll cycle. Returns the number of orders found this pass (not
+    necessarily all successfully processed — a poison row is logged and
+    skipped, but still counts as "found", since that's what the realtime
+    delivery check cares about: did the fallback poll have to go find this,
+    or should a subscription have woken us for it already)."""
     try:
         result = (
             _client()
@@ -165,15 +186,84 @@ def poll_once() -> None:
             except Exception as e:
                 oid = order.get("project_id", "<unknown>") if isinstance(order, dict) else "<unknown>"
                 logger.error(f"{oid}: _process crashed, skipping (batch continues): {e}")
+        return len(orders)
     except Exception as e:
         logger.error(f"poll error: {e}")
+        return 0
+
+
+def start_realtime() -> None:
+    """Subscribe to Supabase Realtime on academic_orders so an approval-driven
+    status change wakes the poll loop immediately instead of waiting for the
+    next scheduled cycle.
+
+    Best-effort: this is a latency optimisation, not the source of truth. If
+    the subscription cannot be established, the fallback poll loop keeps
+    working on its own — just slower. Reported to ops_watchdog so a stuck
+    subscription is a visible alert rather than a silent slowdown back to
+    poll-only.
+    """
+    def _on_change(_payload):
+        _wake_event.set()
+
+    try:
+        channel = _client().channel("academic-orders")
+        channel.on_postgres_changes(
+            "*", schema="public", table="academic_orders",
+            callback=_on_change,
+        )
+        channel.subscribe()
+    except Exception as exc:
+        logger.warning(
+            f"realtime subscription failed ({exc}) — falling back to polling "
+            f"every {POLL_INTERVAL}s"
+        )
+        _report_health("academic_worker.realtime", False, f"{type(exc).__name__}: {exc}")
+        return
+    logger.info("realtime subscription active for academic_orders")
+    _report_health("academic_worker.realtime", True, "subscribed")
+
+
+def _check_realtime_delivery(found: int, woken_by_realtime: bool) -> None:
+    """Secondary signal: is the subscription actually delivering, not just
+    connected? See store_puller._check_realtime_delivery for the full
+    rationale — mirrored here rather than shared, matching the rest of this
+    codebase where each poller stays self-contained.
+
+    Deliberately not gated on store hours (docs/FAIL_LOUD.md rejects an hours
+    gate). It only ever fires when an order was actually found, so it is
+    silent by construction outside business activity.
+    """
+    if not found:
+        return
+    if woken_by_realtime:
+        _report_health("academic_worker.realtime_delivery", True,
+                        f"found {found} order(s) via realtime wake")
+        return
+    _report_health(
+        "academic_worker.realtime_delivery", False,
+        f"found {found} order(s) via the {POLL_INTERVAL}s fallback poll with no prior "
+        "realtime wake — subscription is connected but not delivering events "
+        "(check Realtime is enabled on the `academic_orders` table in Supabase)",
+    )
 
 
 def main() -> None:
-    logger.info(f"Academic pipeline worker started — polling every {POLL_INTERVAL}s")
+    logger.info(f"Academic pipeline worker started — fallback poll every {POLL_INTERVAL}s, "
+                f"realtime={REALTIME_ENABLED}")
+    if REALTIME_ENABLED:
+        start_realtime()
+
+    # None on the first cycle: there is no preceding wait to judge yet.
+    woken_by_realtime = None
     while True:
-        poll_once()
-        time.sleep(POLL_INTERVAL)
+        found = poll_once()
+        if REALTIME_ENABLED and woken_by_realtime is not None:
+            _check_realtime_delivery(found, woken_by_realtime)
+        # Woken immediately by the realtime callback on a matching row change;
+        # otherwise falls through to the next scheduled cycle after POLL_INTERVAL.
+        woken_by_realtime = _wake_event.wait(POLL_INTERVAL)
+        _wake_event.clear()
 
 
 if __name__ == "__main__":
