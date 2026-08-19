@@ -59,9 +59,26 @@ repoints the boot chain at `BOOT_PRINTOSKY.bat`.
 
 ## Check it worked
 
+On the PC itself:
+
 ```cmd
 type logs\boot.log
 type logs\auto_update.log
 git log --oneline -3
 STATUS_PRINTOSKY.bat
 ```
+
+**Or from anywhere** — every box reports the commit it is running to
+`store_devices.app_version` on each sync cycle (~5 min), so "is OSP on the
+latest code?" no longer requires being in front of OSP:
+
+```sql
+select store_id, device_id, hostname, app_version, last_seen
+from store_devices
+order by last_seen desc;
+```
+
+`app_version` reads `main@a1b2c3d`, or `…+dirty` if that box has uncommitted
+local edits — worth seeing before you debug why one machine behaves
+differently. `unknown` means the version could not be read at all (not a git
+checkout, or `.git` unreadable). See `app_version.py`.

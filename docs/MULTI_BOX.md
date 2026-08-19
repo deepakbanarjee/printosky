@@ -85,6 +85,17 @@ Install the agent, drop in the store's `store_config.json` from
 competes for leases, and either picks up work or stands by. Pull the plug on any
 box and its work moves within a TTL.
 
+Registration is a `device_lease.heartbeat()` on each sync cycle (~5 min), so
+`store_devices` is the roll-call of machines — including boxes that never win a
+lease, which is the point. Each row carries `app_version`, the commit that box
+is actually running (`main@a1b2c3d`, or `…+dirty` if hand-edited), so a store PC
+left behind on old code is visible from a query rather than from a site visit:
+
+```sql
+select store_id, device_id, hostname, app_version, last_seen
+from store_devices order by last_seen desc;
+```
+
 Each machine keeps a stable `device_id` in `device_id.txt` next to its SQLite DB
 (override with `PRINTOSKY_DEVICE_ID`), so leases survive restarts and the console
 can say *which* box is doing what.
