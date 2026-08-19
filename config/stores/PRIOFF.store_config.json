@@ -4,7 +4,7 @@
   "store_name": "Printosky Office, Nattika",
   "printers": {
     "konica_ip": null,
-    "epson_ip": "192.168.1.240"
+    "epson_ip": "192.168.1.250"
   },
   "poll_printers": false,
   "hot_folder": "C:\\Printosky\\Jobs\\Incoming",

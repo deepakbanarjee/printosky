@@ -18,8 +18,8 @@ keys are ignored.
 | File | Machine | Konica | Epson | Polls printers |
 |---|---|---|---|---|
 | `OSP.store_config.json` | Oxygen counter, Thriprayar | `192.168.55.110` | `192.168.55.214` | yes |
-| `PRINTK.store_config.json` | Printosky counter, Nattika | none | `192.168.1.240` | yes |
-| `PRIOFF.store_config.json` | Printosky office, Nattika | none | `192.168.1.240` | **no** |
+| `PRINTK.store_config.json` | Printosky counter, Nattika | none | `192.168.1.250` | yes |
+| `PRIOFF.store_config.json` | Printosky office, Nattika | none | `192.168.1.250` | **no** |
 
 ## Two rules that are easy to get wrong
 

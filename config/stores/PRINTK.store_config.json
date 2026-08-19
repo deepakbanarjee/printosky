@@ -1,10 +1,10 @@
 {
-  "_readme": "Printosky, Nattika — the counter PC. Finishing/collection store: NO Konica, so konica_ip stays null and B&W prints on the Epson. This box owns printer polling for Nattika (poll_printers true); the office box must leave it false. Epson moved to 192.168.1.240 on 2026-08-19 (previously 192.168.1.250 as of 2026-08-18).",
+  "_readme": "Printosky, Nattika — the counter PC. Finishing/collection store: NO Konica, so konica_ip stays null and B&W prints on the Epson. This box owns printer polling for Nattika (poll_printers true); the office box must leave it false. Epson moved to 192.168.1.250 on 2026-08-18.",
   "store_id": "PRINTK",
   "store_name": "Printosky, Nattika",
   "printers": {
     "konica_ip": null,
-    "epson_ip": "192.168.1.240"
+    "epson_ip": "192.168.1.250"
   },
   "poll_printers": true,
   "hot_folder": "C:\\Printosky\\Jobs\\Incoming",

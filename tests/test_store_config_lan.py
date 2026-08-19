@@ -165,7 +165,7 @@ class TestShippedStoreConfigs:
         cfg = self._load("PRINTK.store_config.json")
         assert cfg["store_id"] == "PRINTK"
         assert cfg["printers"]["konica_ip"] is None
-        assert cfg["printers"]["epson_ip"] == "192.168.1.240"
+        assert cfg["printers"]["epson_ip"] == "192.168.1.250"
         assert cfg["poll_printers"] is True
 
     def test_nattika_office_shares_the_printer_and_must_not_poll(self):

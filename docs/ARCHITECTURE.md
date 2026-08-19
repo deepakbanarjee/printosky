@@ -46,8 +46,8 @@ are in [`config/stores/`](../config/stores/README.md).
 | Machine | store_id | Konica | Epson | Polls printers |
 |---|---|---|---|---|
 | Oxygen counter, Thriprayar | `OSP` | `192.168.55.110` | `192.168.55.214` | yes |
-| Printosky counter, Nattika | `PRINTK` | none | `192.168.1.240` | yes |
-| Printosky office, Nattika | `PRIOFF` | none | `192.168.1.240` | no |
+| Printosky counter, Nattika | `PRINTK` | none | `192.168.1.250` | yes |
+| Printosky office, Nattika | `PRIOFF` | none | `192.168.1.250` | no |
 
 Which box does the shared work is decided at runtime by a **lease**, not by
 per-machine config: see [MULTI_BOX.md](MULTI_BOX.md). `poll_printers: false` is
