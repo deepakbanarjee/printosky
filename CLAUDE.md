@@ -65,6 +65,18 @@ python tools/nup_matrix.py            # every combination, as sheets
 python tools/proof_run.py FILE.pdf    # impose all 12; --send to print
 ```
 
+## TTF foiling
+Foil bonds to toner mass, so foil jobs print on the **Konica** — the Epson is
+inkjet and foil will not stick to it at all. Artwork must be pure 1-bit at
+600 dpi with nothing thinner than 0.3 mm; grey becomes halftone dots and foils
+as speckle.
+
+```bash
+python tools/foil_prep.py cover.pdf --variants   # fine/balanced/heavy + risk report
+```
+
+Rules, laminator settings and the calibration sheet → [docs/FOILING.md](docs/FOILING.md)
+
 ## Key REPL Commands (`watcher.py`)
 ```
 pending                              → list pending jobs
