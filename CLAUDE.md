@@ -73,6 +73,7 @@ as speckle.
 
 ```bash
 python tools/foil_prep.py cover.pdf --variants   # fine/balanced/heavy + risk report
+python tools/foil_calibration.py                 # the sheet those limits come from
 ```
 
 Rules, laminator settings and the calibration sheet → [docs/FOILING.md](docs/FOILING.md)

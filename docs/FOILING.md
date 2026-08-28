@@ -80,14 +80,40 @@ WhatsApp message before a hardbound cover.
 
 ## Calibrate once
 
-`MIN_STROKE_MM` in `tools/foil_prep.py` is a starting point, not gospel. Print
-one sheet on the Konica and foil it:
+`MIN_STROKE_MM` in `tools/foil_prep.py` is a starting point borrowed from other
+people's machines. Replace it with yours:
 
-- lines at 0.15 / 0.2 / 0.3 / 0.5 / 0.75 / 1.0 mm
-- text at 6 / 8 / 10 / 12 / 16 / 24 pt, one serif and one sans
-- solid squares at 10 / 25 / 50 mm
-- halftone patches at 35 / 45 / 55 / 85 lpi
-- reversed (knockout) text at the same sizes
+```bash
+python tools/foil_calibration.py       # -> foil_calibration.pdf
+```
+
+Print that on the Konica — heavy stock, slowest speed, density max, toner save
+off, simplex, **100% size, no "fit to page"** — then foil it exactly the way you
+foil real work, and fill in the boxes at the top (date, foil, paper, temperature,
+speed, passes).
+
+Eight blocks, each settling one number:
+
+| | Block | What it tells you |
+|---|---|---|
+| A | Positive lines, 0.10–1.00 mm, horizontal / vertical / 45° | Minimum stroke. Vertical usually fails first — take the worst direction |
+| B | The same widths knocked out of a solid | Minimum reversed stroke; always worse than positive |
+| C | Type 6–16 pt, serif and sans | Minimum point size |
+| D | The same type reversed | Minimum reversed point size — quote from this one |
+| E | 46 / 25 / 10 mm solids | Where flats go mottled |
+| F | Gaps 0.10–0.50 mm between bars and between solids | Minimum clearance before foil bridges strokes shut |
+| G | Dots 0.20–1.50 mm, positive and knocked out | What limits counters in small type |
+| H | 35 / 45 / 55 / 85 lpi at 25 / 50 / 75% | Finest screen ruling that foils without speckle |
 
 Whatever survives *is* the spec for your Konica, your foil and your laminator.
-Update the constant to match and stop guessing.
+Write the numbers into this file and into `MIN_STROKE_MM`, and stop guessing.
+
+Re-run it per foil type, and again whenever the laminator is serviced or
+replaced.
+
+The strokes and type on the sheet are vector so their widths are exact — a
+0.15 mm line rasterised at 600 dpi is 15% off, which is the difference between a
+pass and a fail on the row that decides your minimum. Only the halftone patches
+are raster, at 600 dpi, so that the screen ruling is ours and not whatever the
+RIP would have picked. Each patch is cut at its tone's quantile, so a patch
+labelled 50% carries 50% ink.
