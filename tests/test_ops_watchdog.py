@@ -276,8 +276,8 @@ def test_an_unreadable_config_keeps_the_last_known_store(wd, monkeypatch):
 
 
 def test_the_live_store_id_is_resolved_once(monkeypatch):
-    """report() runs every poll cycle and store_config's missing-file path calls
-    report() itself — resolving live on each call would recurse."""
+    """report() runs on every poll cycle of every poller and get_store_config()
+    re-reads the JSON each call, so the resolved id is held for the process."""
     ow.reset()
     calls = []
 
