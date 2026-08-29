@@ -41,6 +41,21 @@ or reset (a store PC quietly running stale code) raises an alert instead of
 waiting for someone to remember to open a log file. A successful boot is not
 news and stays quiet.
 
+## A PC that never runs this at all
+
+`AUTO_UPDATE.bat` only runs from `BOOT_PRINTOSKY.bat` — the chain that
+`SETUP_AUTOSTART.bat` registers. `START_PRINTOSKY.bat`, the manual start,
+contains no git and never updates anything. So a PC where `SETUP_AUTOSTART.bat`
+was never run re-launches the same old code every morning, and because
+`AUTO_UPDATE.bat` never executes, its `store_pc.boot_update` alert never fires
+either. That is how OSP ran 21 August code for eight days unnoticed.
+
+The cloud now catches it independently: `/cron/store-pc-check` compares each
+box's reported `store_devices.app_version` against the commit the API was
+deployed from and alerts when a box has been behind for `STORE_BUILD_STALE_HOURS`.
+See [FAIL_LOUD.md](FAIL_LOUD.md). The fix on the box is still the same — run
+`SETUP_AUTOSTART.bat` once, as Administrator.
+
 ## Latency
 
 Up to one business day: a change pushed to `main` at noon reaches the store
