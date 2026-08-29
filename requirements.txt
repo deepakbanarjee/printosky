@@ -1,5 +1,8 @@
 requests==2.33.1
 supabase==2.15.0
+# Realtime is wired into supabase-py's ASYNC client only — the sync client's
+# .channel() raises. Each poller subscribes with create_async_client on its own
+# asyncio thread; see store_puller._realtime_thread.
 python-dotenv==1.2.2
 Pillow>=10.0.0
 python-docx==1.1.2

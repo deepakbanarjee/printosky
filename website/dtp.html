@@ -740,6 +740,19 @@ async function trHandleFileUpload(event) {
 let trPageTextMap = {};
 let trGlobalFlaggedIndex = -1;
 
+// Split "=== PAGE n ===" content into {page: text}. Pure, so the correction
+// diff can parse the pre-edit text without disturbing the live page map.
+function trPagesFromContent(fullContent) {
+  const map = {};
+  if (!fullContent) return map;
+  const pageRegex = /=== PAGE (\d+) ===\s*([\s\S]*?)(?=(?:=== PAGE \d+ ===)|$)/gi;
+  let match;
+  while ((match = pageRegex.exec(fullContent)) !== null) {
+    map[parseInt(match[1], 10)] = match[2].trim();
+  }
+  return map;
+}
+
 function trParsePageTexts(fullContent) {
   trPageTextMap = {};
   if (!fullContent) return;
@@ -1090,6 +1103,51 @@ function trOpenPDFInNewTab() {
   window.open(url, "_blank");
 }
 
+// Record what the human changed, page by page, so the model's mistakes stop
+// being thrown away on save. One row per changed page holding the full before
+// and after text — raw and uninterpreted, because pulling word-level pairs out
+// of it needs Malayalam chillu normalisation (ൺ vs ണ്‍ are visually identical,
+// different codepoints) and that belongs in Python where it can be tested.
+//
+// Never allowed to break the save: the transcript is what the user came to do,
+// and this is bookkeeping on top of it. But a silent drop would leave us
+// believing we are collecting data when we are not, so a failure is surfaced
+// on the button (docs/FAIL_LOUD.md).
+async function trRecordCorrections(fileObj, beforeContent, afterContent) {
+  const before = trPagesFromContent(beforeContent);
+  const after = trPagesFromContent(afterContent);
+
+  const rows = [];
+  for (const page of Object.keys(after)) {
+    const was = (before[page] || "").trim();
+    const now = (after[page] || "").trim();
+    if (was === now || !was) continue;      // unchanged, or a page with no original
+    rows.push({
+      transcript_id: fileObj.id,
+      filename: fileObj.filename,
+      page: parseInt(page, 10),
+      before_text: was,
+      after_text: now,
+      corrected_by: (localStorage.getItem("storeId") || "").trim() || null,
+      store_id: (localStorage.getItem("storeId") || "").trim() || null
+    });
+  }
+  if (!rows.length) return true;
+
+  const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/transcript_corrections`, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${jwt}`,
+      "Content-Type": "application/json",
+      "Prefer": "return=minimal"
+    },
+    body: JSON.stringify(rows)
+  });
+  return res.ok;
+}
+
 async function trSaveTranscript() {
   if (!trActiveFile) return;
   const saveBtn = document.getElementById("tr-save-btn");
@@ -1118,15 +1176,24 @@ async function trSaveTranscript() {
     });
     
     if (res.ok) {
+      // Only after the transcript itself is safely stored: a correction row
+      // for an edit that never landed would be a lie in the training data.
+      let logged = true;
+      try {
+        logged = await trRecordCorrections(fileObj, fileObj.content, fullTextToSave);
+      } catch (logErr) {
+        logged = false;
+        console.warn("correction log failed:", logErr);
+      }
       fileObj.content = fullTextToSave;
       if (saveBtn) {
-        saveBtn.innerText = "✓ Saved!";
-        saveBtn.style.background = "#059669";
+        saveBtn.innerText = logged ? "✓ Saved!" : "✓ Saved (correction log failed)";
+        saveBtn.style.background = logged ? "#059669" : "#b45309";
         setTimeout(() => {
           saveBtn.innerText = originalText;
           saveBtn.style.background = "#16a34a";
           saveBtn.disabled = false;
-        }, 1500);
+        }, logged ? 1500 : 4000);
       }
     } else {
       alert("Failed to save to database");

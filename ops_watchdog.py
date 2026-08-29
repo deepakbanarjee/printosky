@@ -147,12 +147,34 @@ def _configured_db_path() -> str | None:
         return None
 
 
+# This machine's store id, resolved once and reused. See _store_id().
+_live_store_id: str | None = None
+
+
 def _store_id() -> str:
-    try:
-        from store_config import get_store_config
-        return get_store_config().store_id
-    except Exception:
-        return "?"
+    """This machine's store id, resolved once per process.
+
+    Cached because report() runs on every poll cycle of every poller, while
+    get_store_config() re-reads the JSON from disk and re-applies the LAN rule
+    on each call — and the store id it returns changes only when someone edits
+    store_config.json and restarts the box, which is when this refreshes.
+
+    (An earlier version of this comment claimed live resolution would recurse,
+    because store_config's missing-config path calls report() itself. Measured:
+    it does not — that nested report never re-enters _store_id, so the nesting
+    depth stays at 1. The caching is a cost decision, not a safety one.)
+
+    A failed resolution is never cached — "?" now must not become "?" forever
+    once the config file comes back.
+    """
+    global _live_store_id
+    if _live_store_id is None:
+        try:
+            from store_config import get_store_config
+            _live_store_id = get_store_config().store_id
+        except Exception:
+            return "?"
+    return _live_store_id
 
 
 @contextmanager
@@ -267,6 +289,28 @@ def _notify(message: str) -> bool:
 
 # ── The API ───────────────────────────────────────────────────────────────────
 
+def _resolve_store_id(explicit: str | None, prev: dict[str, Any] | None) -> str:
+    """Which store does this alert belong to?
+
+    Live identity wins over what the health row happens to remember. The row
+    used to win, which froze whatever the box resolved to the first time a
+    check was ever recorded: PRIOFF (the Nattika back-office box) sat on the
+    192.168.1.* LAN, resolved to PRINTK before it declared store_id in its
+    store_config.json, and every alert from it named the shop for the next
+    nine days. Alerts that name the wrong store send someone to look at a
+    machine that is fine.
+
+    The recorded value is the fallback for when live resolution fails, so a
+    momentarily unreadable config does not turn a named store into "?".
+    Nothing to migrate: each stale row is corrected by the next report() call
+    on that machine.
+    """
+    live = explicit or _store_id()
+    if live and live != "?":
+        return live
+    return (prev or {}).get("store_id") or "?"
+
+
 def report(check: str, ok: bool, detail: str = "", *, store_id: str | None = None) -> bool:
     """Record the state of a named check and alert on the interesting edges.
 
@@ -286,7 +330,7 @@ def report(check: str, ok: bool, detail: str = "", *, store_id: str | None = Non
 
             state = {
                 "check": check,
-                "store_id": store_id or (prev or {}).get("store_id") or _store_id(),
+                "store_id": _resolve_store_id(store_id, prev),
                 "ok": bool(ok),
                 "detail": detail,
                 "since": now if (first_seen or was_ok != bool(ok)) else prev.get("since"),
@@ -411,7 +455,9 @@ def health(include_ok: bool = True) -> dict[str, Any]:
 
 def reset() -> None:
     """Forget all state. Tests only."""
+    global _live_store_id
     with _lock:
+        _live_store_id = None
         _memory.clear()
         with _conn() as c:
             if c is not None:
