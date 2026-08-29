@@ -342,3 +342,71 @@ def test_realtime_without_credentials_alerts(monkeypatch):
 
     assert reports == [("transcription_worker.realtime", False,
                         "SUPABASE_URL / key not set")]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The day-stamped sync folder must not re-download the whole archive
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _counting_fetchers(monkeypatch):
+    calls = {"content": 0, "pdf": 0}
+
+    def _content(_job_id):
+        calls["content"] += 1
+        return "transcribed text"
+
+    def _pdf(_filename):
+        calls["pdf"] += 1
+        return b"%PDF-"
+
+    monkeypatch.setattr(worker, "_fetch_transcript_content", _content)
+    monkeypatch.setattr(worker, "download_pdf_from_storage", _pdf)
+    return calls
+
+
+def test_a_job_synced_on_an_earlier_day_is_not_downloaded_again(monkeypatch, tmp_path):
+    """The sync folder is day-stamped (C:\\DTP\\DDMMYY), so on the first cycle
+    after midnight every completed job in the store's history looked missing
+    and the worker re-fetched the transcript, rebuilt the .docx and
+    re-downloaded the PDF for all of them — every day, growing with the
+    archive. Realtime made it obvious: adding one manuscript woke the loop and
+    re-downloaded the lot."""
+    old_day = tmp_path / "180826"
+    old_day.mkdir(parents=True)
+    (old_day / "notes_transcript.txt").write_text("x", encoding="utf-8")
+    (old_day / "notes_transcript.docx").write_text("x", encoding="utf-8")
+    (old_day / "notes.pdf").write_bytes(b"%PDF-")
+
+    _install(monkeypatch, tmp_path, rows=[{"id": "job-1", "filename": "notes.pdf"}])
+    calls = _counting_fetchers(monkeypatch)
+
+    worker.sync_completed_jobs()
+
+    assert calls == {"content": 0, "pdf": 0}, (
+        "a job already on disk under any day folder must not be fetched again"
+    )
+
+
+def test_a_job_never_synced_anywhere_still_lands_in_todays_folder(monkeypatch, tmp_path):
+    """The flip side: a genuinely new job — or one that completed while this PC
+    was off — is absent everywhere and must still sync, exactly once."""
+    from datetime import datetime
+
+    (tmp_path / "180826").mkdir(parents=True)      # an unrelated earlier day
+
+    _install(monkeypatch, tmp_path, rows=[{"id": "job-1", "filename": "notes.pdf"}])
+    calls = _counting_fetchers(monkeypatch)
+
+    worker.sync_completed_jobs()
+
+    assert calls == {"content": 1, "pdf": 1}
+    today = tmp_path / datetime.now().strftime("%d%m%y")
+    assert (today / "notes_transcript.txt").exists()
+    assert (today / "notes.pdf").exists()
+
+
+def test_the_scan_survives_a_missing_dtp_root(monkeypatch, tmp_path):
+    """First run on a fresh box: C:\\DTP does not exist yet. That is not an
+    error, and it must not stop the sync."""
+    root = tmp_path / "nothing-here"
+    assert worker._synced_filenames(str(root)) == set()

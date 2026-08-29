@@ -363,6 +363,40 @@ def _fetch_transcript_content(job_id):
     return (rows[0].get("content") or "") if rows else ""
 
 
+def _synced_filenames(dtp_root):
+    r"""Every filename already sitting in any day folder under ``dtp_root``.
+
+    The sync destination is day-stamped (``C:\DTP\DDMMYY``), so "is this job
+    already on disk?" cannot be answered by looking in today's folder alone.
+    On the first cycle after midnight every completed job in the store's
+    history is missing from the new folder, so the worker re-fetched the
+    transcript, rebuilt the .docx and re-downloaded the PDF for all of them —
+    every day, growing with the archive. Realtime made it plainly visible: the
+    loop now wakes the moment a job is added, so adding one manuscript
+    re-downloaded the lot.
+
+    A file that exists in any day's folder has been synced. It does not need to
+    be materialised into today's folder as well. Anything genuinely new — or a
+    job that completed while this PC was off — is still absent everywhere and
+    syncs into today's folder as before.
+    """
+    found = set()
+    try:
+        entries = list(os.scandir(dtp_root))
+    except FileNotFoundError:
+        return found                      # first run on this box
+    except OSError as exc:
+        log.warning(f"could not scan {dtp_root} for already-synced files: {exc}")
+        return found
+    for entry in entries:
+        try:
+            if entry.is_dir():
+                found.update(os.listdir(entry.path))
+        except OSError as exc:
+            log.warning(f"could not list {entry.path}: {exc}")
+    return found
+
+
 def sync_completed_jobs():
     # Sync files that were completed and belong to this store.
     #
@@ -387,6 +421,11 @@ def sync_completed_jobs():
         today_str = datetime.now().strftime("%d%m%y")
         local_sync_dir = os.path.join(r"C:\DTP", today_str)
 
+        # What is already on disk anywhere under C:\DTP, not just in today's
+        # folder — see _synced_filenames. dirname() rather than the literal
+        # root so the day folder and the scan root always agree.
+        synced = _synced_filenames(os.path.dirname(local_sync_dir))
+
         for job in jobs:
             filename = job["filename"]
             base_name = os.path.splitext(filename)[0]
@@ -394,18 +433,20 @@ def sync_completed_jobs():
             local_docx_path = os.path.join(local_sync_dir, f"{base_name}_transcript.docx")
             local_pdf_path = os.path.join(local_sync_dir, filename)
 
+            have_txt = f"{base_name}_transcript.txt" in synced
+            have_docx = f"{base_name}_transcript.docx" in synced
+            have_pdf = filename in synced
+
             # Nothing missing for this job → skip without fetching the
-            # transcript at all. This is the common case once a day's files
-            # have synced, and it is what keeps the loop cheap.
-            if (os.path.exists(local_txt_path)
-                    and os.path.exists(local_docx_path)
-                    and os.path.exists(local_pdf_path)):
+            # transcript at all. This is the common case once a job has synced,
+            # on that day and on every day after it.
+            if have_txt and have_docx and have_pdf:
                 continue
 
             # Something has to be written, so pull the transcript text once and
             # reuse it for both the .txt and the .docx below.
             content = None
-            if not (os.path.exists(local_txt_path) and os.path.exists(local_docx_path)):
+            if not (have_txt and have_docx):
                 try:
                     content = _fetch_transcript_content(job["id"])
                 except Exception as e:
@@ -420,13 +461,13 @@ def sync_completed_jobs():
                 os.makedirs(local_sync_dir, exist_ok=True)
 
             # 1. Download/Write the completed transcript locally
-            if not os.path.exists(local_txt_path):
+            if not have_txt:
                 log.info(f"Downloading finished transcript locally: {local_txt_path}")
                 with open(local_txt_path, "w", encoding="utf-8") as f:
                     f.write(content)
                     
             # 2. Generate and write the Word Docx locally
-            if not os.path.exists(local_docx_path):
+            if not have_docx:
                 log.info(f"Generating Word document locally: {local_docx_path}")
                 try:
                     import docx
@@ -497,7 +538,7 @@ def sync_completed_jobs():
                     log.error(f"Failed to generate Word document during sync: {ex}")
                     
             # 3. Download the original PDF locally if missing
-            if not os.path.exists(local_pdf_path):
+            if not have_pdf:
                 log.info(f"Downloading completed PDF locally: {local_pdf_path}")
                 try:
                     pdf_bytes = download_pdf_from_storage(filename)

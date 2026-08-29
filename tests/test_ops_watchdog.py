@@ -237,3 +237,86 @@ def test_a_real_directory_is_used(tmp_path, monkeypatch):
     ow.set_db_path(None)
     monkeypatch.setattr(ow, "_configured_db_path", lambda: str(tmp_path / "jobs.db"))
     assert ow._db_path() == str(tmp_path / "jobs.db")
+
+
+# ── Which store does the alert name? ─────────────────────────────────────────
+
+def test_a_renamed_box_alerts_under_its_current_store_id(wd, monkeypatch):
+    """PRIOFF (the Nattika back-office box) sits on the 192.168.1.* LAN and
+    resolved to PRINTK until it declared store_id in its store_config.json.
+    The health row froze that first value, so for nine days every alert from it
+    named the shop — sending anyone who acted on it to a machine that was fine.
+    Live identity wins; the row is only a fallback."""
+    ow.report("transcription_worker.realtime", False, "subscription failed")
+    assert "PRINTK" in wd[0]
+
+    monkeypatch.setattr(ow, "_store_id", lambda: "PRIOFF")   # box now declares itself
+    ow.report("transcription_worker.realtime", True, "subscribed")
+
+    assert "PRIOFF" in wd[-1], "the recovery must name the box as it is now"
+    assert ow.health()["checks"]["transcription_worker.realtime"]["store_id"] == "PRIOFF"
+
+
+def test_an_explicit_store_id_still_wins(wd, monkeypatch):
+    """store_puller reports on behalf of a named store; that beats the box."""
+    ow.report("store_puller.realtime", False, "down", store_id="OSP")
+    assert "OSP" in wd[0]
+
+
+def test_an_unreadable_config_keeps_the_last_known_store(wd, monkeypatch):
+    """A momentarily unreadable store_config must not turn a named store into
+    '?' — the recorded value is exactly what the fallback is for."""
+    ow.report("printer.epson", False, "unreachable")
+    assert "PRINTK" in wd[0]
+
+    monkeypatch.setattr(ow, "_store_id", lambda: "?")
+    ow.report("printer.epson", True, "back")
+
+    assert "PRINTK" in wd[-1]
+
+
+def test_the_live_store_id_is_resolved_once(monkeypatch):
+    """report() runs every poll cycle and store_config's missing-file path calls
+    report() itself — resolving live on each call would recurse."""
+    ow.reset()
+    calls = []
+
+    class _Cfg:
+        store_id = "OSP"
+
+    module = type(sys)("store_config")
+    module.get_store_config = lambda: (calls.append(1), _Cfg())[1]
+    monkeypatch.setitem(sys.modules, "store_config", module)
+
+    assert ow._store_id() == "OSP"
+    assert ow._store_id() == "OSP"
+    assert len(calls) == 1
+
+    ow.reset()          # a restart / test reset re-resolves
+    # reset() reads the config itself (for the DB path), so measure the delta
+    # across the _store_id() call rather than the absolute count.
+    before = len(calls)
+    assert ow._store_id() == "OSP"
+    assert len(calls) == before + 1
+
+
+def test_a_failed_resolution_is_not_cached(monkeypatch):
+    """'?' now must not become '?' forever once the config file comes back."""
+    ow.reset()
+    state = {"broken": True}
+
+    class _Cfg:
+        store_id = "PRIOFF"
+
+    def _get():
+        if state["broken"]:
+            raise OSError("config not readable")
+        return _Cfg()
+
+    module = type(sys)("store_config")
+    module.get_store_config = _get
+    monkeypatch.setitem(sys.modules, "store_config", module)
+
+    assert ow._store_id() == "?"
+    state["broken"] = False
+    assert ow._store_id() == "PRIOFF"
