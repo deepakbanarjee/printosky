@@ -54,6 +54,7 @@ stop
 type
 epson_snmp_results.txt
 .vercel
+nup_final_test/
 
 # Browser test artifacts
 tests/browser_gap_report.txt
