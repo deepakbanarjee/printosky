@@ -364,7 +364,10 @@ class TestAutoPrintThreading:
 
         monkeypatch.setattr(print_server, "send_to_printer", fake_send)
         assert auto_print("J1", "f.pdf", "col", 2,
-                          paper_size="A3", orientation="landscape") is True
+                          paper_size="A3", orientation="landscape",
+                          print_spec={"sides": "duplex", "colour_mode": "col",
+                                      "copies": 2, "paper_size": "A3",
+                                      "orientation": "landscape"}) is True
         assert captured["printer_key"] == "epson"
         assert captured["copies"] == 2
         assert captured["colour_mode"] == "colour"
@@ -378,9 +381,9 @@ class TestAutoPrintThreading:
         captured = {}
         monkeypatch.setattr(print_server, "send_to_printer",
                             lambda *a, **k: (captured.update(k), (True, "ok"))[1])
-        auto_print("J2", "f.pdf", "bw", 1)
+        auto_print("J2", "f.pdf", "bw", 1, print_spec={"sides": "simplex"})
         assert captured["paper_size"] is None
-        assert captured["orientation"] is None
+        assert captured["orientation"] == "auto"  # default orientation from planner
 
 
 class TestSumatraPaper:
