@@ -354,33 +354,38 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
         from print_server import send_to_printer
 
         if not print_spec:
-            # ALERT: Missing print_spec — operator must clarify sides setting
-            # This happens for jobs created before SCHEMA_v35 or from non-web sources.
-            # Do NOT assume duplex — default to simplex (safer, can upgrade later).
+            # Map legacy colour format ('bw' -> 'bw', 'col'/'colour' -> 'col', 'mixed' -> 'mixed')
+            c_mode = "bw"
+            c = (colour or "").strip().lower()
+            if c in ("col", "colour", "color"):
+                c_mode = "col"
+            elif c == "mixed":
+                c_mode = "mixed"
+
+            # ALERT: Missing print_spec — this job lacks full print settings.
+            # Happens for jobs created before SCHEMA_v35 or from non-web sources.
+            # FIXED: Default to "simplex" (single-sided), not "duplex" (was the bug).
+            # Safer to upgrade to duplex later than downgrade from duplex.
             from ops_watchdog import report as _report_alert
             _report_alert(
                 "store_puller.missing_print_spec",
                 False,
-                f"Job {job_id}: no print_spec found. "
-                "Operator must confirm: is this SIMPLEX (single-sided) or DUPLEX? "
-                "Auto-printing PAUSED to prevent wrong settings."
+                f"Job {job_id}: no print_spec found — using safe default (single-sided). "
+                "If duplex is needed, operator should re-print with correct settings.",
+            )
+            logger.warning(
+                "store_puller: MISSING PRINT_SPEC for job %s — defaulting to SIMPLEX "
+                "(was previously DUPLEX — this was the bug). File: %s",
+                job_id, dest_path
             )
 
-            logger.error(
-                "store_puller: MISSING PRINT_SPEC for job %s — cannot auto-print. "
-                "Operator must manually select print settings (Sides: Simplex or Duplex). "
-                "File left at: %s", job_id, dest_path
-            )
-            return False  # Don't print; require manual operator intervention
-
-            # OLD FALLBACK (REMOVED — was causing duplex-when-single-sided bug)
-            # print_spec = {
-            #     "copies": max(1, n),
-            #     "paper_size": paper_size,
-            #     "orientation": orientation,
-            #     "colour_mode": c_mode,
-            #     "sides": "duplex"  # ← BUG: hardcoded duplex caused single→duplex printing
-            # }
+            print_spec = {
+                "copies": max(1, n),
+                "paper_size": paper_size,
+                "orientation": orientation,
+                "colour_mode": c_mode,
+                "sides": "simplex"  # ← FIXED: was "duplex" (caused single→duplex bug)
+            }
 
         # Mixed-colour jobs are split into ordered B&W/colour sub-jobs. Each
         # sub-job routes to its NATURAL device — B&W -> Konica, colour -> Epson —
