@@ -16,9 +16,12 @@ class TestVersionString:
     def test_reports_branch_and_sha_for_this_checkout(self):
         v = app_version.get_version()
         assert v and v != app_version.UNKNOWN, "could not read a version from a git checkout"
-        # branch@sha, with the sha being a short hex hash.
-        assert "@" in v, f"expected branch@sha, got {v!r}"
-        sha = v.split("@", 1)[1].removesuffix("+dirty")
+        # Either branch@sha (named branch) or bare sha (detached HEAD, e.g. in CI).
+        sha_part = v.removesuffix("+dirty")
+        if "@" in sha_part:
+            sha = sha_part.split("@", 1)[1]
+        else:
+            sha = sha_part
         assert 7 <= len(sha) <= 12, f"unexpected sha length in {v!r}"
         int(sha, 16)   # raises if it is not hex
 
