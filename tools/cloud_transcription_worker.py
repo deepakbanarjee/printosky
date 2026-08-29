@@ -148,6 +148,24 @@ def replace_chillus(text):
         text = text.replace(chillu, replacement)
     return text
 
+def _fail_job(job_id, filename, reason):
+    """Mark a transcription job failed AND tell a human.
+
+    A job that dies in here is invisible otherwise: nothing retries it (the
+    poll loop claims `pending` and resumes `transcribing`, never `failed`), and
+    the dtp console shows the row as failed only to whoever happens to look.
+    That is how two manuscripts sat dead for ten days after the OCR-confidence
+    change started writing a `confidence_data` column that did not exist in
+    Supabase. docs/FAIL_LOUD.md: an empty table is not an alert.
+    """
+    log.error(f"Job {job_id} ({filename}) failed: {reason}")
+    try:
+        sb.table("manuscript_transcripts").update({"status": "failed"}).eq("id", job_id).execute()
+    except Exception as exc:
+        log.error(f"could not mark job {job_id} as failed: {exc}")
+    _report_health("transcription_worker.job", False, f"{filename}: {reason}")
+
+
 def process_transcription_job(job):
     job_id = job["id"]
     filename = job["filename"]
@@ -164,8 +182,7 @@ def process_transcription_job(job):
             f.write(res)
         log.info("Download completed.")
     except Exception as e:
-        log.error(f"Failed to download PDF: {e}")
-        sb.table("manuscript_transcripts").update({"status": "failed"}).eq("id", job_id).execute()
+        _fail_job(job_id, filename, f"download from storage failed: {e}")
         return
 
     # 2. Open PDF
@@ -173,8 +190,7 @@ def process_transcription_job(job):
         doc = fitz.open(pdf_temp_path)
         total_pages = len(doc)
     except Exception as e:
-        log.error(f"Failed to open PDF: {e}")
-        sb.table("manuscript_transcripts").update({"status": "failed"}).eq("id", job_id).execute()
+        _fail_job(job_id, filename, f"PDF could not be opened: {e}")
         return
 
     # 3. Transcribe page by page
@@ -280,8 +296,8 @@ def process_transcription_job(job):
             try:
                 curr_rec = sb.table("manuscript_transcripts").select("confidence_data").eq("id", job_id).execute().data[0]
                 existing_confidence = curr_rec.get("confidence_data") or []
-            except Exception:
-                pass
+            except Exception as conf_err:
+                log.warning(f"could not read existing confidence_data: {conf_err}")
             if page_word_confidence:
                 existing_confidence.extend(page_word_confidence)
 
@@ -304,10 +320,11 @@ def process_transcription_job(job):
         # Complete job
         sb.table("manuscript_transcripts").update({"status": "completed"}).eq("id", job_id).execute()
         log.info(f"Job {job_id} successfully completed.")
-        
+        _report_health("transcription_worker.job", True,
+                       f"{filename}: {total_pages} page(s) transcribed")
+
     except Exception as e:
-        log.error(f"Error during transcription loop: {e}")
-        sb.table("manuscript_transcripts").update({"status": "failed"}).eq("id", job_id).execute()
+        _fail_job(job_id, filename, f"transcription loop aborted: {e}")
     finally:
         doc.close()
         try:
@@ -346,6 +363,40 @@ def _fetch_transcript_content(job_id):
     return (rows[0].get("content") or "") if rows else ""
 
 
+def _synced_filenames(dtp_root):
+    r"""Every filename already sitting in any day folder under ``dtp_root``.
+
+    The sync destination is day-stamped (``C:\DTP\DDMMYY``), so "is this job
+    already on disk?" cannot be answered by looking in today's folder alone.
+    On the first cycle after midnight every completed job in the store's
+    history is missing from the new folder, so the worker re-fetched the
+    transcript, rebuilt the .docx and re-downloaded the PDF for all of them —
+    every day, growing with the archive. Realtime made it plainly visible: the
+    loop now wakes the moment a job is added, so adding one manuscript
+    re-downloaded the lot.
+
+    A file that exists in any day's folder has been synced. It does not need to
+    be materialised into today's folder as well. Anything genuinely new — or a
+    job that completed while this PC was off — is still absent everywhere and
+    syncs into today's folder as before.
+    """
+    found = set()
+    try:
+        entries = list(os.scandir(dtp_root))
+    except FileNotFoundError:
+        return found                      # first run on this box
+    except OSError as exc:
+        log.warning(f"could not scan {dtp_root} for already-synced files: {exc}")
+        return found
+    for entry in entries:
+        try:
+            if entry.is_dir():
+                found.update(os.listdir(entry.path))
+        except OSError as exc:
+            log.warning(f"could not list {entry.path}: {exc}")
+    return found
+
+
 def sync_completed_jobs():
     # Sync files that were completed and belong to this store.
     #
@@ -370,6 +421,11 @@ def sync_completed_jobs():
         today_str = datetime.now().strftime("%d%m%y")
         local_sync_dir = os.path.join(r"C:\DTP", today_str)
 
+        # What is already on disk anywhere under C:\DTP, not just in today's
+        # folder — see _synced_filenames. dirname() rather than the literal
+        # root so the day folder and the scan root always agree.
+        synced = _synced_filenames(os.path.dirname(local_sync_dir))
+
         for job in jobs:
             filename = job["filename"]
             base_name = os.path.splitext(filename)[0]
@@ -377,18 +433,20 @@ def sync_completed_jobs():
             local_docx_path = os.path.join(local_sync_dir, f"{base_name}_transcript.docx")
             local_pdf_path = os.path.join(local_sync_dir, filename)
 
+            have_txt = f"{base_name}_transcript.txt" in synced
+            have_docx = f"{base_name}_transcript.docx" in synced
+            have_pdf = filename in synced
+
             # Nothing missing for this job → skip without fetching the
-            # transcript at all. This is the common case once a day's files
-            # have synced, and it is what keeps the loop cheap.
-            if (os.path.exists(local_txt_path)
-                    and os.path.exists(local_docx_path)
-                    and os.path.exists(local_pdf_path)):
+            # transcript at all. This is the common case once a job has synced,
+            # on that day and on every day after it.
+            if have_txt and have_docx and have_pdf:
                 continue
 
             # Something has to be written, so pull the transcript text once and
             # reuse it for both the .txt and the .docx below.
             content = None
-            if not (os.path.exists(local_txt_path) and os.path.exists(local_docx_path)):
+            if not (have_txt and have_docx):
                 try:
                     content = _fetch_transcript_content(job["id"])
                 except Exception as e:
@@ -403,13 +461,13 @@ def sync_completed_jobs():
                 os.makedirs(local_sync_dir, exist_ok=True)
 
             # 1. Download/Write the completed transcript locally
-            if not os.path.exists(local_txt_path):
+            if not have_txt:
                 log.info(f"Downloading finished transcript locally: {local_txt_path}")
                 with open(local_txt_path, "w", encoding="utf-8") as f:
                     f.write(content)
                     
             # 2. Generate and write the Word Docx locally
-            if not os.path.exists(local_docx_path):
+            if not have_docx:
                 log.info(f"Generating Word document locally: {local_docx_path}")
                 try:
                     import docx
@@ -480,7 +538,7 @@ def sync_completed_jobs():
                     log.error(f"Failed to generate Word document during sync: {ex}")
                     
             # 3. Download the original PDF locally if missing
-            if not os.path.exists(local_pdf_path):
+            if not have_pdf:
                 log.info(f"Downloading completed PDF locally: {local_pdf_path}")
                 try:
                     pdf_bytes = download_pdf_from_storage(filename)
@@ -491,34 +549,79 @@ def sync_completed_jobs():
     except Exception as e:
         log.error(f"Error syncing completed jobs: {e}")
 
-def start_realtime():
-    """Subscribe to Supabase Realtime on manuscript_transcripts so a new
-    pending job wakes the poll loop immediately instead of waiting for the
-    next scheduled cycle.
+def _realtime_thread(stop: threading.Event) -> None:
+    """Run the Supabase Realtime subscription on its own asyncio loop.
 
-    Best-effort: this is a latency optimisation, not the source of truth. If
-    the subscription cannot be established, the fallback poll loop keeps
-    working on its own — just slower. Reported to ops_watchdog so a stuck
-    subscription is a visible alert rather than a silent slowdown back to
-    poll-only.
+    supabase-py 2.15 exposes Realtime through the **async** client only — the
+    sync client's ``channel.subscribe()`` raises ``NotImplementedError`` ("use
+    the realtime feature in the async client only"), which is what produced the
+    "realtime subscription failed" line at every startup here and left
+    transcription_worker.realtime red for nine days while the worker ran on its
+    15-minute fallback poll. So the subscription lives on an asyncio event loop
+    in a dedicated daemon thread; the main loop stays a plain blocking poll and
+    this thread's only job is to set ``_wake_event`` when a
+    manuscript_transcripts row changes.
+
+    Mirrors store_puller._realtime_thread and the academic worker's copy rather
+    than sharing them, matching the rest of this codebase where each poller
+    stays self-contained.
+
+    Best-effort: any failure reports to ops_watchdog and returns, leaving the
+    fallback poll as the safety net. The realtime client's own auto-reconnect
+    handles a dropped socket.
     """
+    import asyncio
+
+    if not (url and key):
+        log.warning("realtime disabled — SUPABASE_URL / key not set")
+        _report_health("transcription_worker.realtime", False, "SUPABASE_URL / key not set")
+        return
+
     def _on_change(_payload):
+        # Runs on the asyncio thread; threading.Event.set is thread-safe.
         _wake_event.set()
 
-    try:
-        channel = sb.channel("manuscript-transcripts")
+    async def _run() -> None:
+        from supabase import create_async_client
+
+        # create_async_client passes `key` to the realtime socket as its token,
+        # so the connection authorises as service_role and RLS lets changes
+        # through — no separate set_auth needed.
+        client_async = await create_async_client(url, key)
+        channel = client_async.channel("manuscript-transcripts")
         channel.on_postgres_changes(
-            "*", schema="public", table="manuscript_transcripts",
-            callback=_on_change,
+            "*", callback=_on_change, table="manuscript_transcripts", schema="public",
         )
-        channel.subscribe()
+        await client_async.realtime.connect()
+        await channel.subscribe()
+        log.info("realtime subscription active for manuscript_transcripts")
+        _report_health("transcription_worker.realtime", True, "subscribed")
+        # connect() spins up the client's background listen + heartbeat tasks;
+        # keep this loop alive so they keep pumping. On return, asyncio.run
+        # cancels those background tasks and closes the socket.
+        while not stop.is_set():
+            await asyncio.sleep(1.0)
+
+    try:
+        asyncio.run(_run())
     except Exception as exc:
         log.warning(f"realtime subscription failed ({exc}) — falling back to "
                     f"polling every {POLL_SECONDS}s")
         _report_health("transcription_worker.realtime", False, f"{type(exc).__name__}: {exc}")
-        return
-    log.info("realtime subscription active for manuscript_transcripts")
-    _report_health("transcription_worker.realtime", True, "subscribed")
+
+
+def start_realtime() -> threading.Event:
+    """Start the Realtime subscription in a background daemon thread. Returns a
+    stop Event (callers that run forever can ignore it). Non-blocking — the
+    subscription is a latency optimisation over the fallback poll, never the
+    source of truth, so it must never delay or block startup.
+    """
+    stop = threading.Event()
+    threading.Thread(
+        target=_realtime_thread, args=(stop,),
+        name="transcription-worker-realtime", daemon=True,
+    ).start()
+    return stop
 
 
 def _check_realtime_delivery(claimed_new_job: bool, woken_by_realtime: bool) -> None:
