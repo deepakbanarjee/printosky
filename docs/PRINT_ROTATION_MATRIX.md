@@ -214,10 +214,12 @@ That result settles the two open questions this model was carrying:
 * **A3 and A5.** Only A4 has been run. Slot arithmetic is paper-size independent,
   but the Konica's duplex unit is not guaranteed to be.
 * **9-up.** Never printed at any size.
-* **The Epson EM-C8100.** Nattika (PRINTK) is a finishing/collection store with
-  no Konica, so everything there routes to the Epson — a different duplex unit,
-  and the A4 pass above says nothing about it. See
-  `print_server._effective_printer_key`.
+* **The Epson EM-C8100 — now verified on A4 (2026-08-28).** T1 (landscape 2-up
+  duplex, the case that decides the back turn) was printed on both OSP printers
+  and came out correct on each. So the imposition model holds on the Epson's
+  duplex unit too, not just the Konica. A3/A5/9-up on the Epson are still
+  untested. See `print_server._effective_printer_key` for how a no-Konica store
+  routes everything here.
 * **Mixed colour + duplex**, which splits across both printers — the one case
   where a single global rule could bite.
 
@@ -250,3 +252,22 @@ The symptom names the owner:
 `python tools/proof_run.py <pdf>` imposes all twelve without printing, so the
 geometry can be read before any paper is committed; `--send --printer konica`
 then prints them.
+
+**First, decide: code or driver.** The table above blames code — but code is
+identical on every box, so if a sheet is wrong on **one** printer and right on
+another (run the same `proof_run … --send` on both to check), it is **not** the
+imposition. It is that printer's Windows driver. The one that has actually bitten
+us:
+
+> **Back upside-down on the Epson EM-C8100, one store only (Nattika, 2026-08-28).**
+> Cause: the Epson queue's driver default was `DuplexingMode = TwoSidedLongEdge`
+> (duplex switched on *in the driver* during the Konica→Epson setup), which
+> overrode SumatraPDF's per-job `duplexlong` and flipped the back 180°. OSP's
+> Epson defaults to `OneSided` and prints correctly. Fix — match OSP, letting
+> SumatraPDF drive duplex per job:
+> ```powershell
+> Set-PrintConfiguration -PrinterName "EPSON EM-C8100 Series" -DuplexingMode OneSided
+> ```
+> Keep the Epson default at **`OneSided`** on every box. A driver reinstall or
+> re-image can silently reintroduce `TwoSidedLongEdge`; re-verify with
+> `proof_run.py --only T1 --send --printer epson` after any driver change.

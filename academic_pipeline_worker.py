@@ -50,14 +50,24 @@ _wake_event = threading.Event()
 _sb = None
 
 
+def _load_env() -> None:
+    """Load .env if python-dotenv is present. Some store PCs install from the
+    CLAUDE.md pip line (no dotenv) rather than requirements.txt, so the import
+    is genuinely optional — a missing dotenv just means env vars come from the
+    process environment instead. Shared by _client and the realtime thread so
+    there is a single optional-import handler in this file, not one per caller.
+    """
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(_ROOT, ".env"))
+    except ImportError:
+        pass
+
+
 def _client():
     global _sb
     if _sb is None:
-        try:
-            from dotenv import load_dotenv
-            load_dotenv(os.path.join(_ROOT, ".env"))
-        except ImportError:
-            pass
+        _load_env()
         from supabase import create_client
         url = os.environ["SUPABASE_URL"]
         key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ["SUPABASE_KEY"]
@@ -192,41 +202,77 @@ def poll_once() -> int:
         return 0
 
 
-def start_realtime() -> None:
-    """Subscribe to Supabase Realtime on academic_orders so an approval-driven
-    status change wakes the poll loop immediately instead of waiting for the
-    next scheduled cycle.
+def _realtime_thread(stop: threading.Event) -> None:
+    """Run the Supabase Realtime subscription on its own asyncio loop.
 
-    Runs through ``realtime_wake``: supabase-py wires realtime into the *async*
-    client only, so ``_client().channel(...)`` on our sync client raised
-    NotImplementedError every time and this worker had been silently back on
-    its 15-minute poll ever since realtime was added here.
+    supabase-py 2.15 exposes Realtime through the **async** client only — the
+    sync client's ``channel.subscribe()`` raises ``NotImplementedError``, which
+    is what silently dropped this worker back to the slow fallback poll. So the
+    subscription lives on an asyncio event loop in a dedicated daemon thread;
+    the main loop stays a plain blocking poll and this thread's only job is to
+    set ``_wake_event`` when an academic_orders row changes.
 
-    Best-effort: this is a latency optimisation, not the source of truth. If
-    the subscription cannot be established, the fallback poll loop keeps
-    working on its own — just slower. Reported to ops_watchdog so a stuck
-    subscription is a visible alert rather than a silent slowdown back to
-    poll-only; the supervisor inside ``realtime_wake`` reports later drops and
-    reconnects the same way.
+    Best-effort: any failure reports to ops_watchdog and returns, leaving the
+    fallback poll as the safety net. The realtime client's own auto-reconnect
+    handles a dropped socket.
     """
-    import realtime_wake
+    import asyncio
+
+    _load_env()
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_KEY")
+    if not (url and key):
+        logger.warning("realtime disabled — SUPABASE_URL / key not set")
+        _report_health("academic_worker.realtime", False, "SUPABASE_URL / key not set")
+        return
+
+    def _on_change(_payload):
+        # Runs on the asyncio thread; threading.Event.set is thread-safe.
+        _wake_event.set()
+
+    async def _run() -> None:
+        from supabase import create_async_client
+
+        # create_async_client passes `key` to the realtime socket as its token,
+        # so the connection authorises as service_role and RLS lets changes
+        # through — no separate set_auth needed.
+        client = await create_async_client(url, key)
+        channel = client.channel("academic-orders")
+        channel.on_postgres_changes(
+            "*", callback=_on_change, table="academic_orders", schema="public",
+        )
+        await client.realtime.connect()
+        await channel.subscribe()
+        logger.info("realtime subscription active for academic_orders")
+        _report_health("academic_worker.realtime", True, "subscribed")
+        # connect() spins up the client's background listen + heartbeat tasks;
+        # keep this loop alive so they keep pumping. On return, asyncio.run
+        # cancels those background tasks and closes the socket.
+        while not stop.is_set():
+            await asyncio.sleep(1.0)
 
     try:
-        realtime_wake.subscribe(
-            topic="academic-orders",
-            table="academic_orders",
-            on_wake=_wake_event.set,
-            on_status=lambda ok, detail: _report_health("academic_worker.realtime", ok, detail),
-        )
+        asyncio.run(_run())
     except Exception as exc:
         logger.warning(
             f"realtime subscription failed ({exc}) — falling back to polling "
             f"every {POLL_INTERVAL}s"
         )
         _report_health("academic_worker.realtime", False, f"{type(exc).__name__}: {exc}")
-        return
-    logger.info("realtime subscription active for academic_orders")
-    _report_health("academic_worker.realtime", True, "subscribed")
+
+
+def start_realtime() -> threading.Event:
+    """Start the Realtime subscription in a background daemon thread. Returns a
+    stop Event (callers that run forever can ignore it). Non-blocking — the
+    subscription is a latency optimisation over the fallback poll, never the
+    source of truth, so it must never delay or block startup.
+    """
+    stop = threading.Event()
+    threading.Thread(
+        target=_realtime_thread, args=(stop,),
+        name="academic-worker-realtime", daemon=True,
+    ).start()
+    return stop
 
 
 def _check_realtime_delivery(found: int, woken_by_realtime: bool) -> None:

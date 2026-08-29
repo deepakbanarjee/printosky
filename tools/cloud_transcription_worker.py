@@ -508,41 +508,79 @@ def sync_completed_jobs():
     except Exception as e:
         log.error(f"Error syncing completed jobs: {e}")
 
-def start_realtime():
-    """Subscribe to Supabase Realtime on manuscript_transcripts so a new
-    pending job wakes the poll loop immediately instead of waiting for the
-    next scheduled cycle.
+def _realtime_thread(stop: threading.Event) -> None:
+    """Run the Supabase Realtime subscription on its own asyncio loop.
 
-    Runs through ``realtime_wake``: supabase-py wires realtime into the *async*
-    client only, so ``sb.channel(...)`` on our sync client raised
-    NotImplementedError every time — the "realtime subscription failed
-    (This feature isn't available in the sync client...)" line at every
-    startup, and the transcription_worker.realtime alert that had been red for
-    nine days.
+    supabase-py 2.15 exposes Realtime through the **async** client only — the
+    sync client's ``channel.subscribe()`` raises ``NotImplementedError`` ("use
+    the realtime feature in the async client only"), which is what produced the
+    "realtime subscription failed" line at every startup here and left
+    transcription_worker.realtime red for nine days while the worker ran on its
+    15-minute fallback poll. So the subscription lives on an asyncio event loop
+    in a dedicated daemon thread; the main loop stays a plain blocking poll and
+    this thread's only job is to set ``_wake_event`` when a
+    manuscript_transcripts row changes.
 
-    Best-effort: this is a latency optimisation, not the source of truth. If
-    the subscription cannot be established, the fallback poll loop keeps
-    working on its own — just slower. Reported to ops_watchdog so a stuck
-    subscription is a visible alert rather than a silent slowdown back to
-    poll-only; the supervisor inside ``realtime_wake`` reports later drops and
-    reconnects the same way.
+    Mirrors store_puller._realtime_thread and the academic worker's copy rather
+    than sharing them, matching the rest of this codebase where each poller
+    stays self-contained.
+
+    Best-effort: any failure reports to ops_watchdog and returns, leaving the
+    fallback poll as the safety net. The realtime client's own auto-reconnect
+    handles a dropped socket.
     """
-    import realtime_wake
+    import asyncio
+
+    if not (url and key):
+        log.warning("realtime disabled — SUPABASE_URL / key not set")
+        _report_health("transcription_worker.realtime", False, "SUPABASE_URL / key not set")
+        return
+
+    def _on_change(_payload):
+        # Runs on the asyncio thread; threading.Event.set is thread-safe.
+        _wake_event.set()
+
+    async def _run() -> None:
+        from supabase import create_async_client
+
+        # create_async_client passes `key` to the realtime socket as its token,
+        # so the connection authorises as service_role and RLS lets changes
+        # through — no separate set_auth needed.
+        client_async = await create_async_client(url, key)
+        channel = client_async.channel("manuscript-transcripts")
+        channel.on_postgres_changes(
+            "*", callback=_on_change, table="manuscript_transcripts", schema="public",
+        )
+        await client_async.realtime.connect()
+        await channel.subscribe()
+        log.info("realtime subscription active for manuscript_transcripts")
+        _report_health("transcription_worker.realtime", True, "subscribed")
+        # connect() spins up the client's background listen + heartbeat tasks;
+        # keep this loop alive so they keep pumping. On return, asyncio.run
+        # cancels those background tasks and closes the socket.
+        while not stop.is_set():
+            await asyncio.sleep(1.0)
 
     try:
-        realtime_wake.subscribe(
-            topic="manuscript-transcripts",
-            table="manuscript_transcripts",
-            on_wake=_wake_event.set,
-            on_status=lambda ok, detail: _report_health("transcription_worker.realtime", ok, detail),
-        )
+        asyncio.run(_run())
     except Exception as exc:
         log.warning(f"realtime subscription failed ({exc}) — falling back to "
                     f"polling every {POLL_SECONDS}s")
         _report_health("transcription_worker.realtime", False, f"{type(exc).__name__}: {exc}")
-        return
-    log.info("realtime subscription active for manuscript_transcripts")
-    _report_health("transcription_worker.realtime", True, "subscribed")
+
+
+def start_realtime() -> threading.Event:
+    """Start the Realtime subscription in a background daemon thread. Returns a
+    stop Event (callers that run forever can ignore it). Non-blocking — the
+    subscription is a latency optimisation over the fallback poll, never the
+    source of truth, so it must never delay or block startup.
+    """
+    stop = threading.Event()
+    threading.Thread(
+        target=_realtime_thread, args=(stop,),
+        name="transcription-worker-realtime", daemon=True,
+    ).start()
+    return stop
 
 
 def _check_realtime_delivery(claimed_new_job: bool, woken_by_realtime: bool) -> None:

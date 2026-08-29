@@ -153,52 +153,94 @@ def fetch_assigned_paid(client, store_id: str) -> list[dict]:
     return getattr(res, "data", None) or []
 
 
-def start_realtime(store_id: str) -> None:
-    """Subscribe to Supabase Realtime on ``jobs`` so a row change for this
-    store wakes the poll loop immediately instead of waiting for the next
-    scheduled cycle.
+def _realtime_thread(store_id: str, stop: threading.Event) -> None:
+    """Run the Supabase Realtime subscription on its own asyncio loop.
 
-    Runs through ``realtime_wake`` rather than ``client.channel(...)``:
-    supabase-py wires realtime into the *async* client only, so the sync
-    client we use for every query raises NotImplementedError on ``.channel``
-    — which is exactly what this poller had been doing (and alerting about,
-    and quietly polling through) since realtime was added.
+    supabase-py 2.15 exposes Realtime through the **async** client only — the
+    sync client's ``channel.subscribe()`` raises ``NotImplementedError`` ("use
+    the realtime feature in the async client only"), which is exactly what
+    silently dropped every store back to the slow fallback poll. So the
+    subscription has to live on an asyncio event loop; we give it a dedicated
+    daemon thread rather than making the whole puller async — the main loop
+    stays a plain blocking poll, and this thread's only job is to set
+    ``_wake_event`` the instant a matching ``jobs`` row changes.
 
     Best-effort by design: this is a latency optimisation, not the source of
-    truth. If the subscription cannot be established (network issue, an
-    older supabase-py, or Realtime not yet enabled on the `jobs` table), the
-    fallback poll loop keeps working on its own — just slower — so a failure
-    here must never stop the process. It IS reported to ops_watchdog so a
-    stuck subscription is a visible alert rather than a silent slowdown back
-    to poll-only, and so is a later drop: the supervisor inside
-    ``realtime_wake`` reports every reconnect and every failure to reconnect.
+    truth. Any failure reports to ops_watchdog and returns, leaving the
+    fallback poll to keep the store running — just slower. The realtime
+    client's own auto-reconnect handles a dropped socket; if it gives up, this
+    returns and the poll takes over.
 
-    We do not inspect the payload: any change on our store's rows might mean
-    a job just went Paid, and pull_once's own status/file_url filter is the
+    We do not inspect the payload: any change on our store's rows might mean a
+    job just went Paid, and pull_once's own status/file_url filter is the
     single source of truth for what actually gets pulled.
     """
-    import realtime_wake
+    import asyncio
 
-    def _on_status(ok: bool, detail: str) -> None:
-        _report_health("store_puller.realtime", ok, detail, store_id=store_id)
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_KEY")
+    if not (url and key):
+        logger.warning("store_puller: realtime disabled — SUPABASE_URL / key not set")
+        _report_health("store_puller.realtime", False,
+                       "SUPABASE_URL / key not set", store_id=store_id)
+        return
+
+    def _on_change(_payload):
+        # Runs on the asyncio thread; threading.Event.set is thread-safe.
+        _wake_event.set()
+
+    async def _run() -> None:
+        from supabase import create_async_client
+
+        # create_async_client passes `key` to the realtime socket as its token,
+        # so the connection authorises as service_role and RLS lets every change
+        # on our store's rows through — no separate set_auth needed.
+        client = await create_async_client(url, key)
+
+        channel = client.channel(f"store-{store_id}-jobs")
+        # on_postgres_changes(event, callback, table=, schema=, filter=) is
+        # synchronous and chainable; subscribe() is the coroutine.
+        channel.on_postgres_changes(
+            "*", callback=_on_change, table="jobs", schema="public",
+            filter=f"assigned_store_id=eq.{store_id}",
+        )
+        await client.realtime.connect()
+        await channel.subscribe()
+        logger.info("store_puller: realtime subscription active for store %s", store_id)
+        _report_health("store_puller.realtime", True, "subscribed", store_id=store_id)
+
+        # connect() spins up the client's background listen + heartbeat tasks;
+        # keep this loop alive so they keep pumping. Wake once a second only to
+        # notice a stop signal (used by tests / clean shutdown). On return,
+        # asyncio.run cancels those background tasks and closes the socket.
+        while not stop.is_set():
+            await asyncio.sleep(1.0)
 
     try:
-        realtime_wake.subscribe(
-            topic=f"store-{store_id}-jobs",
-            table="jobs",
-            filter=f"assigned_store_id=eq.{store_id}",
-            on_wake=_wake_event.set,
-            on_status=_on_status,
-        )
+        asyncio.run(_run())
     except Exception as exc:
         logger.warning(
             "store_puller: realtime subscription failed (%s) — falling back to "
             "polling every %ss", exc, POLL_SECONDS,
         )
-        _report_health("store_puller.realtime", False, f"{type(exc).__name__}: {exc}", store_id=store_id)
-        return
-    logger.info("store_puller: realtime subscription active for store %s", store_id)
-    _report_health("store_puller.realtime", True, "subscribed", store_id=store_id)
+        _report_health("store_puller.realtime", False,
+                       f"{type(exc).__name__}: {exc}", store_id=store_id)
+
+
+def start_realtime(store_id: str) -> threading.Event:
+    """Start the Realtime subscription in a background daemon thread.
+
+    Returns a stop Event; set it to tear the subscription down. Callers that
+    run forever can ignore the return value. Non-blocking — the subscription
+    is a latency optimisation over the fallback poll, never the source of
+    truth, so it must never delay or block startup.
+    """
+    stop = threading.Event()
+    threading.Thread(
+        target=_realtime_thread, args=(store_id, stop),
+        name="store-puller-realtime", daemon=True,
+    ).start()
+    return stop
 
 
 def _check_realtime_delivery(pulled: list[str], woken_by_realtime: bool, store_id: str) -> None:

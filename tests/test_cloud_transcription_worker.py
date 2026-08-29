@@ -236,3 +236,109 @@ def test_worker_only_touches_columns_that_exist(monkeypatch):
         f"the worker reads/writes {sorted(unknown)} on manuscript_transcripts, which the "
         "schema manifest does not have. Ship the migration in the same PR as the code."
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Realtime: the subscription #76 did not reach
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _FakeChannel:
+    def __init__(self, captured):
+        self._captured = captured
+
+    def on_postgres_changes(self, event, callback=None, table=None, schema=None, filter=None):
+        self._captured.update(event=event, table=table, schema=schema,
+                              filter=filter, callback=callback)
+        return self
+
+    async def subscribe(self):
+        self._captured["subscribed"] = True
+        return self
+
+
+class _FakeAsyncClient:
+    def __init__(self, captured):
+        self._captured = captured
+        self.realtime = self
+
+    async def connect(self):
+        self._captured["connected"] = True
+
+    def channel(self, topic):
+        self._captured["topic"] = topic
+        return _FakeChannel(self._captured)
+
+
+def _install_async_supabase(monkeypatch, captured, fail=None):
+    async def _create_async_client(url, key):
+        captured.update(url=url, key=key)
+        if fail is not None:
+            raise fail
+        return _FakeAsyncClient(captured)
+
+    module = types.ModuleType("supabase")
+    module.create_async_client = _create_async_client
+    # The worker imports create_async_client inside _run, so this fake is what
+    # it picks up; the module-level `from supabase import create_client` at
+    # import time has already happened.
+    monkeypatch.setitem(sys.modules, "supabase", module)
+    monkeypatch.setattr(worker, "url", "https://x.supabase.co", raising=False)
+    monkeypatch.setattr(worker, "key", "svc", raising=False)
+
+
+def test_realtime_subscribes_and_wakes_the_poll_loop(monkeypatch):
+    """The whole point: a pending row wakes the loop instead of waiting out
+    the 900s fallback poll."""
+    import threading
+
+    captured = {}
+    _install_async_supabase(monkeypatch, captured)
+    reports = []
+    monkeypatch.setattr(worker, "_report_health",
+                        lambda name, ok, detail="": reports.append((name, ok)))
+    worker._wake_event.clear()
+
+    stop = threading.Event()
+    stop.set()                      # subscribe, report, then return immediately
+    worker._realtime_thread(stop)
+
+    assert captured["topic"] == "manuscript-transcripts"
+    assert captured["table"] == "manuscript_transcripts"
+    assert captured["schema"] == "public"
+    assert captured.get("connected") and captured.get("subscribed")
+    assert reports == [("transcription_worker.realtime", True)]
+
+    captured["callback"]({"eventType": "INSERT"})
+    assert worker._wake_event.is_set(), "a row change must wake the poll loop"
+    worker._wake_event.clear()
+
+
+def test_realtime_failure_alerts_and_leaves_polling_running(monkeypatch):
+    """Best-effort by design — a realtime failure must alert, not raise."""
+    import threading
+
+    captured = {}
+    _install_async_supabase(monkeypatch, captured, fail=OSError("connection refused"))
+    reports = []
+    monkeypatch.setattr(worker, "_report_health",
+                        lambda name, ok, detail="": reports.append((name, ok, detail)))
+
+    worker._realtime_thread(threading.Event())      # must not raise
+
+    assert reports == [("transcription_worker.realtime", False,
+                        "OSError: connection refused")]
+
+
+def test_realtime_without_credentials_alerts(monkeypatch):
+    import threading
+
+    reports = []
+    monkeypatch.setattr(worker, "_report_health",
+                        lambda name, ok, detail="": reports.append((name, ok, detail)))
+    monkeypatch.setattr(worker, "url", "", raising=False)
+    monkeypatch.setattr(worker, "key", "", raising=False)
+
+    worker._realtime_thread(threading.Event())
+
+    assert reports == [("transcription_worker.realtime", False,
+                        "SUPABASE_URL / key not set")]
