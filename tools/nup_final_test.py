@@ -96,25 +96,25 @@ def build_source(title, pages, path):
     doc.close()
 
 
-def build(combo, src_dir, out_dir, paper_size, copies):
+def build(combo, src_dir, out_dir, paper_size, copies, sides="duplex"):
     """Build one combination's labelled source, impose it, return a summary."""
     combo_id, nup, orientation, direction = combo
     title = title_of(*combo)
-    # One duplex sheet exactly: nup on the front, nup on the back.
-    pages = nup * 2
-    src = os.path.join(src_dir, f"src_{combo_id}.pdf")
+    # Duplex: nup on front, nup on back (2 pages). Simplex: front only (1 page).
+    pages = nup * 2 if sides == "duplex" else nup
+    src = os.path.join(src_dir, f"src_{combo_id}_{sides}.pdf")
     build_source(title, pages, src)
 
     spec = {
         "nup": nup, "orientation": orientation, "nup_direction": direction,
-        "sides": "duplex", "paper_size": paper_size, "colour_mode": "bw",
+        "sides": sides, "paper_size": paper_size, "colour_mode": "bw",
         "copies": copies,
     }
     actions, temp_dir = print_planner.plan_print_job(
         f"NUPTEST-{title}", src, spec, out_dir)
     try:
         action = actions[0]
-        dest = os.path.join(out_dir, f"{combo_id}.pdf")
+        dest = os.path.join(out_dir, f"{combo_id}_{sides}.pdf")
         shutil.copy(action["pdf_path"], dest)
         doc = fitz.open(dest)
         rect, sheet_sides = doc[0].rect, len(doc)
@@ -145,7 +145,10 @@ def main():
                     help="actually print each combination. Without this, nothing prints.")
     ap.add_argument("--printer", default="epson", choices=["epson", "konica"],
                     help="printer key (default: epson — Nattika has no Konica)")
+    ap.add_argument("--simplex", action="store_true",
+                    help="test simplex (single-sided) instead of duplex")
     args = ap.parse_args()
+    sides = "simplex" if args.simplex else "duplex"
 
     src_dir = os.path.join(args.out, "_src")
     os.makedirs(src_dir, exist_ok=True)
@@ -158,13 +161,14 @@ def main():
     print("Printosky N-up final test")
     print(f"  output : {args.out}")
     print(f"  paper  : {args.paper}   copies: {args.copies}")
+    print(f"  sides  : {sides.upper()}")
     print(f"  combos : {', '.join(c[0] for c in combos)}")
-    print("  Every sheet must leave as PORTRAIT with sides='ds'.\n")
+    print(f"  Every sheet must leave as PORTRAIT with sides='{sides[0]}{sides[-1]}'.\n")
 
     results = []
     for combo in combos:
         try:
-            r = build(combo, src_dir, args.out, args.paper, args.copies)
+            r = build(combo, src_dir, args.out, args.paper, args.copies, sides)
         except Exception as exc:                       # noqa: BLE001 — report, carry on
             print(f"  {combo[0]:<16} FAILED to impose: {exc}")
             continue
