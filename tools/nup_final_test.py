@@ -100,8 +100,12 @@ def build(combo, src_dir, out_dir, paper_size, copies, sides="duplex"):
     """Build one combination's labelled source, impose it, return a summary."""
     combo_id, nup, orientation, direction = combo
     title = title_of(*combo)
-    # Duplex: nup on front, nup on back (2 pages). Simplex: front only (1 page).
-    pages = nup * 2 if sides == "duplex" else nup
+    # Always nup*2 logical pages, so simplex is a real test and not a no-op:
+    # duplex should combine them onto nup*2/2 = one sheet's front+back; true
+    # simplex must print them as two SEPARATE single-sided sheets. A 1-page
+    # simplex job can't tell the two apart — there is nothing for a
+    # wrongly-duplexing printer to put on the back.
+    pages = nup * 2
     src = os.path.join(src_dir, f"src_{combo_id}_{sides}.pdf")
     build_source(title, pages, src)
 
