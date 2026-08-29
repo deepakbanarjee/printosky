@@ -155,8 +155,12 @@ def main():
 
     wanted = {t.lower() for t in args.only} if args.only else None
     combos = [c for c in COMBINATIONS if wanted is None or c[0] in wanted]
+    # Simplex tests only 1-up layouts (single-sided is simpler, covers the essentials).
+    if sides == "simplex":
+        combos = [c for c in combos if c[1] == 1]
     if not combos:
-        sys.exit(f"no combination ids matched {args.only}")
+        sys.exit(f"no combination ids matched {args.only}" +
+                 (" (simplex mode only runs 1-up)" if sides == "simplex" else ""))
 
     print("Printosky N-up final test")
     print(f"  output : {args.out}")
