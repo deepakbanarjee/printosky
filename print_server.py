@@ -652,9 +652,20 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
 
     sumatra = find_sumatra()
     if not sumatra:
-        # Fallback: use Windows print verb (less control but always available)
-        logging.warning("SumatraPDF not found — using Windows shell print")
+        # Fallback: use Windows print verb. This path has NO control over
+        # sides/colour/paper_size/orientation — it just triggers os.startfile,
+        # which prints with whatever the queue's last-used settings were. A
+        # job that asked for simplex or a specific paper size can silently
+        # come out wrong, so this must alert, not just log.
+        logging.warning("SumatraPDF not found — using Windows shell print (no sides/colour/paper control)")
+        _report_health(
+            "print_server.sumatra_missing", False,
+            f"SumatraPDF.exe not found in any SUMATRA_PATHS — job {job_id} sent via Windows "
+            "shell print, which cannot control sides/colour/paper_size/orientation. "
+            "Re-install SumatraPDF or fix SUMATRA_PATHS.",
+        )
         return windows_shell_print(filepath, printer_name, copies, printer_key)
+    _report_health("print_server.sumatra_missing", True, "SumatraPDF found")
 
     # Build SumatraPDF command
     # -print-to <printer>  : print to named printer silently
