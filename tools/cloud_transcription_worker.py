@@ -131,7 +131,8 @@ Follow these rules:
 2. Transcribe any English text in English.
 3. Do NOT create a new line for every physical line of text written on the page. Instead, flow the sentences continuously. Only create a new line/paragraph when there is a clear paragraph break (separated by a blank line) or a change in question section. Use full stops (.), question marks (?), exclamation marks (!), and other common elements to determine sentence completion and continue writing on the same line.
 4. If a word or character is completely illegible, write '[illegible]' instead of guessing.
-5. Output ONLY the transcribed text of the image. Do not include any intro, outro, explanations, or meta-comments.
+5. If you CAN read a word but are not confident you read it correctly, wrap it as [low:NN%%]word[/low], where NN is your confidence from 0 to 99 (e.g. [low:60%%]ഖണ്ഡിക[/low]). Tag only genuinely doubtful words — a page where everything is clear should carry no tags at all. Do not tag a word you are confident about, and never wrap a whole sentence.
+6. Output ONLY the transcribed text of the image. Do not include any intro, outro, explanations, or meta-comments.
 ''' % GLOSSARY
 
 CHILLU_MAP = {
@@ -142,6 +143,58 @@ CHILLU_MAP = {
     "\u0d7f": "\u0d32\u0d4d\u200d", # ൽ
     "\u0d7a": "\u0d23\u0d4d\u200d", # ൺ
 }
+
+# A word the model was unsure of, e.g. [low:60%]ഖണ്ഡിക[/low]. Non-greedy and
+# without DOTALL on purpose: an unclosed tag then swallows at most the rest of
+# its own line instead of the remainder of the page.
+_LOW_CONF_TAG = re.compile(r"\[low:(\d{1,3})%\](.*?)\[/low\]")
+
+# Any tag fragment that survived the pass above — an unclosed opener, a stray
+# closer. These must never reach the .txt or the Word document.
+_LOW_CONF_ORPHAN = re.compile(r"\[low:\d{1,3}%\]|\[/low\]")
+
+
+def extract_low_confidence(text, page):
+    """Split ``text`` into (clean text, per-word confidence rows).
+
+    Gemini reports its own uncertainty inline, because logprobs are not an
+    option here: response_logprobs was removed in 529341a after every request
+    came back "Logprobs is not supported for this model", and neither model
+    this worker uses (gemini-3.5-flash, gemini-3.1-flash-lite) supports it —
+    the feature was withdrawn across the 3.x generation, and it is Vertex-only
+    besides, while we call the AI Studio endpoint.
+
+    So the prompt asks for [low:NN%]word[/low] instead and we pull the tags out
+    here. Self-reported confidence is softer evidence than a token probability;
+    it is a flag for a human to look again, not a measurement.
+
+    The tags must not survive into ``content``: that string becomes the
+    transcript .txt and the Word document the teacher actually works from.
+    """
+    rows = []
+
+    def _capture(match):
+        try:
+            confidence = float(match.group(1))
+        except ValueError:                      # pragma: no cover - regex is \d+
+            return match.group(2)
+        confidence = max(0.0, min(confidence, 100.0))
+        word = match.group(2).strip()
+        if word:
+            rows.append({
+                "word": word,
+                "confidence": round(confidence, 1),
+                "flagged": confidence < 75.0,
+                "page": page,
+            })
+        return match.group(2)
+
+    clean = _LOW_CONF_TAG.sub(_capture, text)
+    clean, orphans = _LOW_CONF_ORPHAN.subn("", clean)
+    if orphans:
+        log.warning(f"page {page}: dropped {orphans} malformed [low:] tag fragment(s)")
+    return clean, rows
+
 
 def replace_chillus(text):
     for chillu, replacement in CHILLU_MAP.items():
@@ -230,44 +283,6 @@ def process_transcription_job(job):
                         contents=[img_target, PROMPT_TEMPLATE]
                     )
                     text = response.text or ""
-                    
-                    # Extract logprobs token confidence if present
-                    page_word_confidence = []
-                    try:
-                        cand = response.candidates[0]
-                        logprob_result = getattr(cand, "logprobs_result", None)
-                        if logprob_result and hasattr(logprob_result, "chosen_candidates"):
-                            curr_word = ""
-                            curr_probs = []
-                            for token_info in logprob_result.chosen_candidates:
-                                tok = getattr(token_info, "token", "")
-                                lp = getattr(token_info, "logprob", 0.0)
-                                p = math.exp(lp) * 100.0 if lp <= 0 else 99.0
-                                if tok.startswith(" ") or tok.startswith("\n") or not curr_word:
-                                    if curr_word.strip():
-                                        avg_p = sum(curr_probs) / len(curr_probs) if curr_probs else 95.0
-                                        page_word_confidence.append({
-                                            "word": curr_word.strip(),
-                                            "confidence": round(avg_p, 1),
-                                            "flagged": avg_p < 75.0,
-                                            "page": idx + 1
-                                        })
-                                    curr_word = tok
-                                    curr_probs = [p]
-                                else:
-                                    curr_word += tok
-                                    curr_probs.append(p)
-                            if curr_word.strip():
-                                avg_p = sum(curr_probs) / len(curr_probs) if curr_probs else 95.0
-                                page_word_confidence.append({
-                                    "word": curr_word.strip(),
-                                    "confidence": round(avg_p, 1),
-                                    "flagged": avg_p < 75.0,
-                                    "page": idx + 1
-                                })
-                    except Exception as lp_err:
-                        log.warning(f"Logprob extraction fallback: {lp_err}")
-
                     success = True
                 except APIError as e:
                     if e.code == 429:
@@ -286,6 +301,10 @@ def process_transcription_job(job):
                 log.error(f"Failed to transcribe page {idx + 1} after retries. Saving placeholder.")
                 text = "[safety blocked / illegible]"
             
+            # Pull the model's [low:NN%] tags out into confidence_data and keep
+            # the text clean — it becomes the transcript .txt and the .docx.
+            text, page_word_confidence = extract_low_confidence(text, idx + 1)
+
             # Format and save updates back to DB
             text = text.strip()
             page_header = f"\n\n=== PAGE {idx + 1} ===\n\n"

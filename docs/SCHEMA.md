@@ -513,7 +513,7 @@ The handwritten-manuscript OCR queue behind `website/dtp.html`. A staff upload i
 | `status` | text | NO | `'pending'` | `pending` → `transcribing` → `completed` \| `failed` |
 | `mode` | text | NO | `'standard'` | `urgent` picks the bigger Gemini model |
 | `content` | text | YES | — | the transcript, appended per page |
-| `confidence_data` | jsonb | NO | `'[]'` | per-word OCR confidence `[{word, confidence, flagged, page}]` — read by the low-confidence reviewer in `website/dtp.html` |
+| `confidence_data` | jsonb | NO | `'[]'` | per-word OCR confidence `[{word, confidence, flagged, page}]`, from the model's own `[low:NN%]` tags (not logprobs — no Gemini 3.x model supports those) — read by the low-confidence reviewer in `website/dtp.html` |
 | `uploaded_by_store` | text | NO | — | store/PC that uploaded it |
 | `created_at` / `updated_at` | timestamptz | NO | `now()` | `updated_at` maintained by trigger |
 

@@ -154,12 +154,15 @@ _live_store_id: str | None = None
 def _store_id() -> str:
     """This machine's store id, resolved once per process.
 
-    Cached deliberately, for two reasons. report() runs on every poll cycle and
-    get_store_config() re-reads the JSON and re-applies the LAN rule on each
-    call. More importantly the missing-config path in store_config calls
-    report() itself, so resolving live on every report would recurse until
-    RecursionError. A box that changes identity gets restarted; that is when
-    this refreshes.
+    Cached because report() runs on every poll cycle of every poller, while
+    get_store_config() re-reads the JSON from disk and re-applies the LAN rule
+    on each call — and the store id it returns changes only when someone edits
+    store_config.json and restarts the box, which is when this refreshes.
+
+    (An earlier version of this comment claimed live resolution would recurse,
+    because store_config's missing-config path calls report() itself. Measured:
+    it does not — that nested report never re-enters _store_id, so the nesting
+    depth stays at 1. The caching is a cost decision, not a safety one.)
 
     A failed resolution is never cached — "?" now must not become "?" forever
     once the config file comes back.
