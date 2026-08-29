@@ -621,6 +621,34 @@ def _effective_printer_key(printer_key: str, job_id: str = "") -> str:
     return printer_key
 
 
+def _konica_queue_for_sides(sides: str | None) -> str | None:
+    """Pick a duplex/simplex-specific Konica queue key, or None to keep using
+    the plain 'konica' queue unchanged.
+
+    Why this exists: the KONICA MINOLTA 1100 PS driver silently ignores
+    SumatraPDF's per-job duplex/simplex override in *both* directions — the
+    printer just follows whatever its Windows Printing Preferences default
+    currently is, regardless of what the job asked for (confirmed by log,
+    see docs/PRINT_ROTATION_MATRIX.md, 2026-08-29). The standard fix for a
+    driver that won't take a per-job override is to stop asking it to: install
+    the same physical printer twice as two separate Windows queues, each with
+    its own persisted default, and pick the QUEUE instead of the setting.
+
+    Inert until a store configures both queues via
+    store_config.json's printer_queue_names (keys 'konica_duplex' and
+    'konica_simplex') — with neither set, this returns None for every sides
+    value and print_server behaves exactly as before.
+    """
+    s = (sides or "").strip().lower()
+    if s in ("ds", "duplex", "double", "duplexlong", "duplexshort"):
+        variant = "konica_duplex"
+    elif s in ("ss", "simplex", "single"):
+        variant = "konica_simplex"
+    else:
+        return None
+    return variant if PRINTERS.get(variant) else None
+
+
 def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 1,
                     colour_mode: str = "auto", staff_id: str = None,
                     sides: str = None, paper_size: str = None,
@@ -636,6 +664,16 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
     """
     # No-Konica stores: redirect a 'konica' dispatch to the Epson (shared helper).
     printer_key = _effective_printer_key(printer_key, job_id)
+
+    # Konica's driver won't honour a per-job duplex/simplex override (see
+    # _konica_queue_for_sides docstring) — route to a sides-specific queue if
+    # the store has one configured. No-op otherwise.
+    if printer_key == "konica":
+        konica_variant = _konica_queue_for_sides(sides)
+        if konica_variant:
+            logging.info("job %s: routing to %s queue for sides=%r",
+                         job_id, konica_variant, sides)
+            printer_key = konica_variant
 
     printer_name = PRINTERS.get(printer_key)
     if not printer_name:
@@ -1968,15 +2006,26 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
     # No-Konica stores (e.g. Nattika): a B&W item defaults to 'konica', which does
     # not exist here — redirect to the Epson (same helper the auto-print path uses).
     printer_key = _effective_printer_key(printer_key, job_id)
-    printer_name = PRINTERS.get(printer_key)
-    if not printer_name:
-        return {"ok": False, "error": f"Unknown printer: {printer_key}"}
 
     copies    = int(item["copies"] or 1)
     colour    = item["colour"] or "bw"      # 'bw' | 'col'
     sides     = item["sides"] or "ss"       # 'ss' | 'ds'
     layout    = item["layout"] or "1-up"
     page_list = item["page_list"] or "all"
+
+    # Konica's driver won't honour a per-job duplex/simplex override — route to
+    # a sides-specific queue if the store has one configured (see
+    # _konica_queue_for_sides docstring). No-op otherwise.
+    if printer_key == "konica":
+        konica_variant = _konica_queue_for_sides(sides)
+        if konica_variant:
+            logging.info("print %s item %s: routing to %s queue for sides=%r",
+                         job_id, item_number, konica_variant, sides)
+            printer_key = konica_variant
+
+    printer_name = PRINTERS.get(printer_key)
+    if not printer_name:
+        return {"ok": False, "error": f"Unknown printer: {printer_key}"}
 
     # Build -print-settings string
     settings_parts = [f"{copies}x"]

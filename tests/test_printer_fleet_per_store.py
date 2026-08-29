@@ -135,3 +135,65 @@ def test_konica_dispatch_redirects_to_epson_where_there_is_no_konica(monkeypatch
 def test_konica_dispatch_is_left_alone_where_there_is_a_konica(monkeypatch):
     monkeypatch.setitem(print_server.PRINTER_IPS, "konica", "192.168.55.110")
     assert print_server._effective_printer_key("konica", "OSP-1") == "konica"
+
+
+# ── 3. The Konica dual-queue duplex/simplex workaround ────────────────────────
+#
+# KONICA MINOLTA 1100 PS silently ignores SumatraPDF's per-job duplex/simplex
+# override in both directions (docs/PRINT_ROTATION_MATRIX.md, 2026-08-29) — it
+# just follows whatever its Windows Printing Preferences default currently is.
+# The fix is to install the same physical printer twice as two named Windows
+# queues, each with its own persisted default, and pick the QUEUE instead of
+# asking the driver to override. _konica_queue_for_sides is inert (returns
+# None, meaning "use the plain 'konica' queue, unchanged") until a store
+# configures both queue names.
+
+@pytest.mark.parametrize("sides,variant_key", [
+    ("ds", "konica_duplex"), ("duplex", "konica_duplex"),
+    ("duplexlong", "konica_duplex"), ("duplexshort", "konica_duplex"),
+    ("ss", "konica_simplex"), ("simplex", "konica_simplex"),
+])
+def test_konica_queue_for_sides_picks_the_configured_variant(monkeypatch, sides, variant_key):
+    monkeypatch.setitem(print_server.PRINTERS, "konica_duplex", "KONICA MINOLTA 1100 PS (Duplex)")
+    monkeypatch.setitem(print_server.PRINTERS, "konica_simplex", "KONICA MINOLTA 1100 PS (Simplex)")
+    assert print_server._konica_queue_for_sides(sides) == variant_key
+
+
+@pytest.mark.parametrize("sides", ["ds", "ss", "duplex", "simplex", None, "", "auto"])
+def test_konica_queue_for_sides_is_a_no_op_until_both_queues_are_configured(monkeypatch, sides):
+    monkeypatch.delitem(print_server.PRINTERS, "konica_duplex", raising=False)
+    monkeypatch.delitem(print_server.PRINTERS, "konica_simplex", raising=False)
+    assert print_server._konica_queue_for_sides(sides) is None
+
+
+def test_konica_queue_for_sides_ignores_an_unrecognised_sides_value(monkeypatch):
+    monkeypatch.setitem(print_server.PRINTERS, "konica_duplex", "KONICA MINOLTA 1100 PS (Duplex)")
+    monkeypatch.setitem(print_server.PRINTERS, "konica_simplex", "KONICA MINOLTA 1100 PS (Simplex)")
+    assert print_server._konica_queue_for_sides("auto") is None
+    assert print_server._konica_queue_for_sides(None) is None
+
+
+def test_send_to_printer_routes_to_the_duplex_queue_when_configured(monkeypatch, tmp_path):
+    monkeypatch.setitem(print_server.PRINTER_IPS, "konica", "192.168.55.110")
+    monkeypatch.setitem(print_server.PRINTERS, "konica_duplex", "KONICA MINOLTA 1100 PS (Duplex)")
+    monkeypatch.setitem(print_server.PRINTERS, "konica_simplex", "KONICA MINOLTA 1100 PS (Simplex)")
+    monkeypatch.setattr(print_server, "find_sumatra", lambda: "C:/fake/SumatraPDF.exe")
+    monkeypatch.setattr(print_server, "update_job_status", lambda *a, **k: None)
+    monkeypatch.setattr(print_server, "_trigger_printer_poll_now", lambda *a, **k: None)
+
+    seen_cmd = {}
+    class _Result:
+        returncode = 0
+    def _fake_run(cmd, **kwargs):
+        seen_cmd["cmd"] = cmd
+        return _Result()
+    monkeypatch.setattr(print_server.subprocess, "run", _fake_run)
+
+    f = tmp_path / "job.pdf"
+    f.write_bytes(b"%PDF-1.4 fake")
+    ok, _msg = print_server.send_to_printer(
+        job_id="OSP-1", filepath=str(f), printer_key="konica",
+        sides="duplex", update_status=False,
+    )
+    assert ok
+    assert "KONICA MINOLTA 1100 PS (Duplex)" in seen_cmd["cmd"]
