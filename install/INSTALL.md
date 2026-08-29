@@ -240,6 +240,37 @@ name (including capitalisation), and edit `store_config.json`:
 ```
 Restart `print_server.py`.
 
+### Konica prints the wrong side mode (duplex when simplex was requested, or vice versa)
+The `KONICA MINOLTA 1100 PS` driver silently ignores SumatraPDF's
+per-job duplex/simplex override — the printer always follows whatever
+its Printing Preferences default currently is, regardless of what the
+job asked for. See `docs/PRINT_ROTATION_MATRIX.md` for the full
+writeup. Fix: install the same physical Konica twice as two Windows
+printer queues, each with its own persisted default, then point
+`printer_queue_names` at both:
+```json
+"printer_queue_names": {
+  "konica_duplex":  "KONICA MINOLTA 1100 PS (Duplex)",
+  "konica_simplex": "KONICA MINOLTA 1100 PS (Simplex)"
+}
+```
+1. Devices & Printers → Add a printer, pointing at the same Konica
+   IP/port, named e.g. `KONICA MINOLTA 1100 PS (Duplex)`. Right-click →
+   Printing preferences → set the duplex/2-sided option ON → Apply,
+   save as the default.
+2. Repeat for a second queue `KONICA MINOLTA 1100 PS (Simplex)`, this
+   time with the duplex/2-sided option OFF.
+3. Add both queue names to `printer_queue_names` as shown above.
+   Restart `print_server.py`.
+
+`print_server._konica_queue_for_sides()` then routes each job to
+whichever queue matches its `sides` value instead of relying on a
+per-job override. Until both keys are configured, this is a no-op and
+Printosky behaves exactly as before (single `konica` queue). Re-verify
+with `python tools/nup_final_test.py --simplex --send --printer konica`
+and a duplex combo — check `logs/print_server.log` for `routing to
+konica_duplex/konica_simplex queue` lines.
+
 ### "Konica/Epson printer NOT reachable"
 The printer's LAN IP doesn't match `store_config.json`. Check the
 printer's network status page and update the IP. If correct,
