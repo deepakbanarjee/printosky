@@ -103,6 +103,10 @@
   .ov2-preview-count b { color: var(--blue); }
   .ov2-mini-btn { font-size: 11px; font-weight: 600; color: var(--blue); background: #eef2fb; border: 1px solid #d3ddf2; border-radius: 6px; padding: 4px 10px; cursor: pointer; transition: all 0.15s; }
   .ov2-mini-btn:hover { background: #dde6f8; }
+  .ov2-mini-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+  .ov2-scale-label { font-size: 11px; font-weight: 600; color: #6b7280; }
+  .ov2-scale-input { width: 50px; padding: 4px 8px; border: 1px solid #d3ddf2; border-radius: 6px; font-size: 11px; transition: all 0.15s; }
+  .ov2-scale-input:focus { outline: none; border-color: var(--blue); background: #f0f3ff; }
 
   .ov2-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 0 20px; max-height: 360px; overflow-y: auto; }
   @media (max-width: 380px) { .ov2-strip { grid-template-columns: repeat(3, 1fr); } }
@@ -316,6 +320,13 @@
           <span class="ov2-preview-count">Printing <b id="ov2-incCount">0</b> of <span id="ov2-totalCount">0</span> pages</span>
           <span class="ov2-mini-btn" id="ov2-selAll">Select all</span>
           <span class="ov2-mini-btn" id="ov2-skipAll">Skip all</span>
+          <span style="margin-left: auto; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <span class="ov2-scale-label">Scale:</span>
+            <span class="ov2-mini-btn active" id="ov2-scale-fit" data-scale="fit">📦 Fit</span>
+            <span class="ov2-mini-btn" id="ov2-scale-actual" data-scale="actual">100%</span>
+            <span class="ov2-mini-btn" id="ov2-scale-custom" data-scale="custom">Custom</span>
+            <input type="number" id="ov2-scale-input" class="ov2-scale-input" min="25" max="200" value="100" style="display: none;" />
+          </span>
         </div>
         <div class="ov2-strip" id="ov2-strip"></div>
         <div class="ov2-hint" id="ov2-hint">Tap any page to skip it. The page won't be printed.</div>

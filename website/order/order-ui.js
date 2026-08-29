@@ -55,6 +55,8 @@ const runtime = {
   delivery: 0,
   pickup_store: 'thriprayar',  // which location fulfils — 'thriprayar' | 'nattika'
   lastTotal: null,      // last successful quote total (kept on network error)
+  previewScale: 'fit',  // 'fit' | 'actual' | 'custom' (preview thumbnail scale mode)
+  customScalePercent: 100, // custom scale percentage (25-200)
 };
 
 const EAGER_THUMBS = 12;
@@ -224,24 +226,7 @@ function buildPreview() {
   }
 
   if (runtime.pdf) {
-    // Eager-render the first batch, lazy-render the rest on scroll.
-    for (let i = 1; i <= Math.min(EAGER_THUMBS, state.totalPages); i++) {
-      renderPdfThumb(i);
-    }
-    if (state.totalPages > EAGER_THUMBS) {
-      runtime.observer = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            const pg = parseInt(entry.target.dataset.pg, 10);
-            renderPdfThumb(pg);
-            runtime.observer.unobserve(entry.target);
-          }
-        }
-      }, { root: $('ov2-strip'), rootMargin: '200px' });
-      for (let i = EAGER_THUMBS + 1; i <= state.totalPages; i++) {
-        runtime.observer.observe(thumbEl(i));
-      }
-    }
+    setupThumbObserver();
   } else {
     // Non-PDF: numbered placeholder showing the page number large.
     for (let i = 1; i <= state.totalPages; i++) {
@@ -256,14 +241,52 @@ function buildPreview() {
   }
 }
 
+function setupThumbObserver() {
+  if (!runtime.pdf) return;
+
+  // Eager-render the first batch, lazy-render the rest on scroll.
+  for (let i = 1; i <= Math.min(EAGER_THUMBS, state.totalPages); i++) {
+    renderPdfThumb(i);
+  }
+  if (state.totalPages > EAGER_THUMBS) {
+    if (runtime.observer) { runtime.observer.disconnect(); }
+    runtime.observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          const pg = parseInt(entry.target.dataset.pg, 10);
+          renderPdfThumb(pg);
+          runtime.observer.unobserve(entry.target);
+        }
+      }
+    }, { root: $('ov2-strip'), rootMargin: '200px' });
+    for (let i = EAGER_THUMBS + 1; i <= state.totalPages; i++) {
+      runtime.observer.observe(thumbEl(i));
+    }
+  }
+}
+
 async function renderPdfThumb(pg) {
   if (runtime.rendered[pg] || !runtime.pdf) return;
   runtime.rendered[pg] = true;
   try {
     const page = await runtime.pdf.getPage(pg);
     const baseViewport = page.getViewport({ scale: 1 });
-    const targetW = 150; // device px; crisp on the ~110px tile
-    const scale = targetW / baseViewport.width;
+
+    // Calculate scale based on preview mode
+    let scale;
+    if (runtime.previewScale === 'fit') {
+      const targetW = 150; // device px; crisp on the ~110px tile
+      scale = targetW / baseViewport.width;
+    } else if (runtime.previewScale === 'actual') {
+      // 100% scale = 1 device pixel per PDF point (~96 DPI)
+      scale = 1;
+    } else if (runtime.previewScale === 'custom') {
+      // Custom scale: convert percentage to scale factor
+      scale = runtime.customScalePercent / 100;
+    } else {
+      scale = 150 / baseViewport.width; // fallback to fit
+    }
+
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement('canvas');
     canvas.width = Math.ceil(viewport.width);
@@ -445,6 +468,51 @@ function setBinding(mode) {
   });
   updateSummary();
   requestQuote();
+}
+
+// ── Preview scale controls ────────────────────────────────────────────────────
+function setPreviewScale(mode) {
+  runtime.previewScale = mode;
+
+  // Update button states
+  document.querySelectorAll('[data-scale]').forEach((el) => {
+    el.classList.toggle('active', el.dataset.scale === mode);
+  });
+
+  // Show/hide custom scale input
+  const customInput = $('ov2-scale-input');
+  if (mode === 'custom') {
+    customInput.style.display = 'inline-block';
+    customInput.focus();
+  } else {
+    customInput.style.display = 'none';
+  }
+
+  // Clear rendered thumbnails and re-render with new scale
+  runtime.rendered = {};
+  renderThumbs();
+
+  // Lazy-load thumbnails with new scale
+  if (runtime.observer) {
+    runtime.observer.disconnect();
+  }
+  setupThumbObserver();
+}
+
+function updateCustomScale(percent) {
+  percent = Math.max(25, Math.min(200, parseInt(percent, 10)));
+  runtime.customScalePercent = percent;
+  $('ov2-scale-input').value = percent;
+
+  // Only re-render if in custom mode
+  if (runtime.previewScale === 'custom') {
+    runtime.rendered = {};
+    renderThumbs();
+    if (runtime.observer) {
+      runtime.observer.disconnect();
+    }
+    setupThumbObserver();
+  }
 }
 
 // ── Live summary ──────────────────────────────────────────────────────────────
@@ -1270,6 +1338,12 @@ function wire() {
 
   $('ov2-selAll').addEventListener('click', () => selectAll(true));
   $('ov2-skipAll').addEventListener('click', () => selectAll(false));
+
+  // Preview scale controls
+  document.querySelectorAll('[data-scale]').forEach((el) =>
+    el.addEventListener('click', () => setPreviewScale(el.dataset.scale)));
+  $('ov2-scale-input').addEventListener('change', (e) => updateCustomScale(e.target.value));
+  $('ov2-scale-input').addEventListener('input', (e) => updateCustomScale(e.target.value));
 
   document.querySelectorAll('[data-colour]').forEach((el) =>
     el.addEventListener('click', () => setColourMode(el.dataset.colour)));
