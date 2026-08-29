@@ -366,6 +366,8 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
             # Happens for jobs created before SCHEMA_v35 or from non-web sources.
             # FIXED: Default to "simplex" (single-sided), not "duplex" (was the bug).
             # Safer to upgrade to duplex later than downgrade from duplex.
+            # This fix applies to BOTH Konica and Epson printers (printer routing
+            # happens later, after print_spec is processed).
             from ops_watchdog import report as _report_alert
             _report_alert(
                 "store_puller.missing_print_spec",
