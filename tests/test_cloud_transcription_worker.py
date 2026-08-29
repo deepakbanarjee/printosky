@@ -62,6 +62,10 @@ class _Query:
     def limit(self, *_a, **_k):
         return self
 
+    def update(self, payload):
+        self._log.append((self._table, payload))
+        return self
+
     def execute(self):
         return types.SimpleNamespace(data=self._rows)
 
@@ -75,7 +79,10 @@ class _FakeClient:
         return _Query(self.queries, name, self._rows.get(name, []))
 
     def selected_columns(self):
-        return [cols for _t, cols in self.queries]
+        return [cols for _t, cols in self.queries if isinstance(cols, str)]
+
+    def updates(self):
+        return [payload for _t, payload in self.queries if isinstance(payload, dict)]
 
 
 def _install(monkeypatch, tmp_path, rows, store_id="STORE1"):
@@ -156,4 +163,76 @@ def test_poll_interval_is_not_hot(monkeypatch):
     """Guard against regressing to the 10s hot loop."""
     assert worker.POLL_SECONDS >= 30, (
         f"poll interval {worker.POLL_SECONDS}s is too aggressive for the egress quota"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fail-loud: a dead transcription job must reach a human
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_a_failed_job_alerts(monkeypatch, tmp_path):
+    """Nothing retries a row that reaches `failed` — the loop claims `pending`
+    and resumes `transcribing`, never `failed` — and the dtp console shows it
+    only to whoever opens it. So the failure itself has to alert
+    (docs/FAIL_LOUD.md). Two manuscripts died unnoticed for ten days when the
+    worker started writing a `confidence_data` column that did not exist."""
+    fake = _install(monkeypatch, tmp_path, rows=[])
+    reports = []
+    monkeypatch.setattr(worker, "_report_health",
+                        lambda name, ok, detail="": reports.append((name, ok, detail)))
+
+    def _boom(_filename):
+        raise OSError("404 from storage")
+
+    monkeypatch.setattr(worker, "download_pdf_from_storage", _boom)
+
+    worker.process_transcription_job({"id": "job-1", "filename": "notes.pdf", "mode": "standard"})
+
+    assert {"status": "failed"} in fake.updates(), "the row must still be marked failed"
+    assert reports, "a failed transcription job must report to ops_watchdog"
+    name, ok, detail = reports[0]
+    assert name == "transcription_worker.job"
+    assert ok is False
+    assert "notes.pdf" in detail
+
+
+def test_worker_only_touches_columns_that_exist(monkeypatch):
+    """The confidence_data outage, as a test.
+
+    tools/cloud_transcription_worker.py started writing `confidence_data` in
+    1ee8f25 with no migration behind it. Every page-1 write came back
+    "Could not find the 'confidence_data' column ... in the schema cache", the
+    worker caught it and set status='failed', and transcription was dead from
+    2026-08-18 until someone looked. Any column the worker reads or writes must
+    be in the schema manifest — which scripts/check_schema.py then diffs
+    against live Supabase.
+    """
+    import ast
+    import pathlib
+
+    import yaml
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    manifest = yaml.safe_load((root / "config" / "schema_manifest.yaml").read_text(encoding="utf-8"))
+    known = set(manifest["tables"]["manuscript_transcripts"]["columns"])
+
+    src = (root / "tools" / "cloud_transcription_worker.py").read_text(encoding="utf-8-sig")
+    touched: set[str] = set()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr == "update":
+            for arg in node.args:
+                if isinstance(arg, ast.Dict):
+                    touched |= {k.value for k in arg.keys
+                                if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        elif node.func.attr == "select":
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    touched |= {c.strip() for c in arg.value.split(",") if c.strip() != "*"}
+
+    unknown = touched - known
+    assert not unknown, (
+        f"the worker reads/writes {sorted(unknown)} on manuscript_transcripts, which the "
+        "schema manifest does not have. Ship the migration in the same PR as the code."
     )

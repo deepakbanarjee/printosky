@@ -153,10 +153,16 @@ def fetch_assigned_paid(client, store_id: str) -> list[dict]:
     return getattr(res, "data", None) or []
 
 
-def start_realtime(client, store_id: str) -> None:
+def start_realtime(store_id: str) -> None:
     """Subscribe to Supabase Realtime on ``jobs`` so a row change for this
     store wakes the poll loop immediately instead of waiting for the next
     scheduled cycle.
+
+    Runs through ``realtime_wake`` rather than ``client.channel(...)``:
+    supabase-py wires realtime into the *async* client only, so the sync
+    client we use for every query raises NotImplementedError on ``.channel``
+    — which is exactly what this poller had been doing (and alerting about,
+    and quietly polling through) since realtime was added.
 
     Best-effort by design: this is a latency optimisation, not the source of
     truth. If the subscription cannot be established (network issue, an
@@ -164,23 +170,26 @@ def start_realtime(client, store_id: str) -> None:
     fallback poll loop keeps working on its own — just slower — so a failure
     here must never stop the process. It IS reported to ops_watchdog so a
     stuck subscription is a visible alert rather than a silent slowdown back
-    to poll-only.
+    to poll-only, and so is a later drop: the supervisor inside
+    ``realtime_wake`` reports every reconnect and every failure to reconnect.
 
     We do not inspect the payload: any change on our store's rows might mean
     a job just went Paid, and pull_once's own status/file_url filter is the
     single source of truth for what actually gets pulled.
     """
-    def _on_change(_payload):
-        _wake_event.set()
+    import realtime_wake
+
+    def _on_status(ok: bool, detail: str) -> None:
+        _report_health("store_puller.realtime", ok, detail, store_id=store_id)
 
     try:
-        channel = client.channel(f"store-{store_id}-jobs")
-        channel.on_postgres_changes(
-            "*", schema="public", table="jobs",
+        realtime_wake.subscribe(
+            topic=f"store-{store_id}-jobs",
+            table="jobs",
             filter=f"assigned_store_id=eq.{store_id}",
-            callback=_on_change,
+            on_wake=_wake_event.set,
+            on_status=_on_status,
         )
-        channel.subscribe()
     except Exception as exc:
         logger.warning(
             "store_puller: realtime subscription failed (%s) — falling back to "
@@ -594,7 +603,7 @@ def main(argv: list[str] | None = None) -> int:
     reconcile_stranded(client, store_id, conn)
 
     if not once and REALTIME_ENABLED:
-        start_realtime(client, store_id)
+        start_realtime(store_id)
 
     # None on the first cycle: there is no preceding wait to judge yet, so the
     # delivery check (which needs to know whether realtime or the timeout woke

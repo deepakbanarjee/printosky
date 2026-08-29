@@ -1,5 +1,8 @@
 requests==2.33.1
 supabase==2.15.0
+# `realtime` ships as a dependency of supabase, but realtime_wake.py imports it
+# directly (AsyncRealtimeClient): supabase-py wires realtime into the async
+# client only, so the sync client every poller uses has no .channel().
 python-dotenv==1.2.2
 Pillow>=10.0.0
 python-docx==1.1.2

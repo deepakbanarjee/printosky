@@ -197,22 +197,27 @@ def start_realtime() -> None:
     status change wakes the poll loop immediately instead of waiting for the
     next scheduled cycle.
 
+    Runs through ``realtime_wake``: supabase-py wires realtime into the *async*
+    client only, so ``_client().channel(...)`` on our sync client raised
+    NotImplementedError every time and this worker had been silently back on
+    its 15-minute poll ever since realtime was added here.
+
     Best-effort: this is a latency optimisation, not the source of truth. If
     the subscription cannot be established, the fallback poll loop keeps
     working on its own — just slower. Reported to ops_watchdog so a stuck
     subscription is a visible alert rather than a silent slowdown back to
-    poll-only.
+    poll-only; the supervisor inside ``realtime_wake`` reports later drops and
+    reconnects the same way.
     """
-    def _on_change(_payload):
-        _wake_event.set()
+    import realtime_wake
 
     try:
-        channel = _client().channel("academic-orders")
-        channel.on_postgres_changes(
-            "*", schema="public", table="academic_orders",
-            callback=_on_change,
+        realtime_wake.subscribe(
+            topic="academic-orders",
+            table="academic_orders",
+            on_wake=_wake_event.set,
+            on_status=lambda ok, detail: _report_health("academic_worker.realtime", ok, detail),
         )
-        channel.subscribe()
     except Exception as exc:
         logger.warning(
             f"realtime subscription failed ({exc}) — falling back to polling "

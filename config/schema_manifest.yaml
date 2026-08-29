@@ -16,7 +16,8 @@
 # not the manifest.
 
 version: 29
-description: Live schema after SCHEMA_v29 (processed_webhooks RLS). 41 tables, all RLS-enabled.
+description: Live schema after SCHEMA_v29 (processed_webhooks RLS) plus the DTP
+  transcription table. 42 tables, all RLS-enabled.
 
 # Tables with RLS DISABLED -- flagged for security review. As of 2026-06-08
 # every public table has RLS enabled (TASK-023 + TASK-024 closed the last gaps),
@@ -1096,6 +1097,57 @@ tables:
       user_name:
         default: null
         nullable: true
+        type: text
+    rls: true
+  manuscript_transcripts:
+    columns:
+      confidence_data:
+        default: '''[]''::jsonb'
+        nullable: false
+        type: jsonb
+      content:
+        default: null
+        nullable: true
+        type: text
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      filename:
+        default: null
+        nullable: false
+        type: text
+      id:
+        default: gen_random_uuid()
+        nullable: false
+        type: uuid
+      mode:
+        default: '''standard''::text'
+        nullable: false
+        type: text
+      pdf_url:
+        default: null
+        nullable: true
+        type: text
+      status:
+        default: '''pending''::text'
+        nullable: false
+        type: text
+      total_pages:
+        default: '0'
+        nullable: false
+        type: integer
+      transcribed_pages:
+        default: '0'
+        nullable: false
+        type: integer
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      uploaded_by_store:
+        default: null
+        nullable: false
         type: text
     rls: true
   note_credits:

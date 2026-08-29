@@ -20,11 +20,11 @@ This document is the canonical schema reference for the shared Supabase database
 
 | | |
 |---|---|
-| Tables | 28 |
+| Tables | 29 |
 | Views | 2 (`epson_daily`, `konica_daily`) |
 | Foreign keys | **1** (`referral_credits.referrer_code → referrers.code`) |
 | Tables without RLS | **3** (`project_builder_orders`, `referral_credits`, `referrers`) — see [Security gaps](#security-gaps) |
-| Owning products | printosky (24), osp-academics (1), shared (3) |
+| Owning products | printosky (25), osp-academics (1), shared (3) |
 
 The schema is heavily denormalized — only one FK exists in the whole database. Cross-table integrity is enforced at the application layer (or not at all). Worth documenting per-table; not worth a mass FK-introduction project.
 
@@ -496,6 +496,28 @@ Self-serve Project Builder orders. Written by `printosky/api/index.py` (Razorpay
 | `storage_path` / `download_url` | text | YES | — | Supabase Storage |
 | `status` | text | YES | `'paid'` | |
 | `expires_at` | timestamptz | YES | — | download link expiry |
+
+---
+
+### DTP / manuscript transcription 🟦
+
+#### `manuscript_transcripts` 🟦
+The handwritten-manuscript OCR queue behind `website/dtp.html`. A staff upload inserts a row at `status='pending'` with the PDF in the `manuscripts` storage bucket; `tools/cloud_transcription_worker.py` on the DTP PC claims it (`pending` → `transcribing`), transcribes page by page with Gemini, and writes `content` + `confidence_data` back after every page so the console can follow along live and a crashed run resumes where it stopped.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | uuid | NO | `gen_random_uuid()` | **PK** |
+| `filename` | text | NO | — | UNIQUE; also the storage object name |
+| `pdf_url` | text | YES | — | public URL in the `manuscripts` bucket |
+| `total_pages` / `transcribed_pages` | integer | NO | `0` | resume point for a crashed run |
+| `status` | text | NO | `'pending'` | `pending` → `transcribing` → `completed` \| `failed` |
+| `mode` | text | NO | `'standard'` | `urgent` picks the bigger Gemini model |
+| `content` | text | YES | — | the transcript, appended per page |
+| `confidence_data` | jsonb | NO | `'[]'` | per-word OCR confidence `[{word, confidence, flagged, page}]` — read by the low-confidence reviewer in `website/dtp.html` |
+| `uploaded_by_store` | text | NO | — | store/PC that uploaded it |
+| `created_at` / `updated_at` | timestamptz | NO | `now()` | `updated_at` maintained by trigger |
+
+Nothing retries a row that reaches `failed` — the worker only ever claims `pending` and resumes `transcribing` — so a failure here alerts through `ops_watchdog` (`transcription_worker.job`) and is re-queued by hand from the console. `confidence_data` was written by the worker for ten days before the column existed: every write 400'd and the job was marked failed. Add the column **in the same PR as the code that writes it**.
 
 ---
 

@@ -148,6 +148,24 @@ def replace_chillus(text):
         text = text.replace(chillu, replacement)
     return text
 
+def _fail_job(job_id, filename, reason):
+    """Mark a transcription job failed AND tell a human.
+
+    A job that dies in here is invisible otherwise: nothing retries it (the
+    poll loop claims `pending` and resumes `transcribing`, never `failed`), and
+    the dtp console shows the row as failed only to whoever happens to look.
+    That is how two manuscripts sat dead for ten days after the OCR-confidence
+    change started writing a `confidence_data` column that did not exist in
+    Supabase. docs/FAIL_LOUD.md: an empty table is not an alert.
+    """
+    log.error(f"Job {job_id} ({filename}) failed: {reason}")
+    try:
+        sb.table("manuscript_transcripts").update({"status": "failed"}).eq("id", job_id).execute()
+    except Exception as exc:
+        log.error(f"could not mark job {job_id} as failed: {exc}")
+    _report_health("transcription_worker.job", False, f"{filename}: {reason}")
+
+
 def process_transcription_job(job):
     job_id = job["id"]
     filename = job["filename"]
@@ -164,8 +182,7 @@ def process_transcription_job(job):
             f.write(res)
         log.info("Download completed.")
     except Exception as e:
-        log.error(f"Failed to download PDF: {e}")
-        sb.table("manuscript_transcripts").update({"status": "failed"}).eq("id", job_id).execute()
+        _fail_job(job_id, filename, f"download from storage failed: {e}")
         return
 
     # 2. Open PDF
@@ -173,8 +190,7 @@ def process_transcription_job(job):
         doc = fitz.open(pdf_temp_path)
         total_pages = len(doc)
     except Exception as e:
-        log.error(f"Failed to open PDF: {e}")
-        sb.table("manuscript_transcripts").update({"status": "failed"}).eq("id", job_id).execute()
+        _fail_job(job_id, filename, f"PDF could not be opened: {e}")
         return
 
     # 3. Transcribe page by page
@@ -280,8 +296,8 @@ def process_transcription_job(job):
             try:
                 curr_rec = sb.table("manuscript_transcripts").select("confidence_data").eq("id", job_id).execute().data[0]
                 existing_confidence = curr_rec.get("confidence_data") or []
-            except Exception:
-                pass
+            except Exception as conf_err:
+                log.warning(f"could not read existing confidence_data: {conf_err}")
             if page_word_confidence:
                 existing_confidence.extend(page_word_confidence)
 
@@ -304,10 +320,11 @@ def process_transcription_job(job):
         # Complete job
         sb.table("manuscript_transcripts").update({"status": "completed"}).eq("id", job_id).execute()
         log.info(f"Job {job_id} successfully completed.")
-        
+        _report_health("transcription_worker.job", True,
+                       f"{filename}: {total_pages} page(s) transcribed")
+
     except Exception as e:
-        log.error(f"Error during transcription loop: {e}")
-        sb.table("manuscript_transcripts").update({"status": "failed"}).eq("id", job_id).execute()
+        _fail_job(job_id, filename, f"transcription loop aborted: {e}")
     finally:
         doc.close()
         try:
@@ -496,22 +513,29 @@ def start_realtime():
     pending job wakes the poll loop immediately instead of waiting for the
     next scheduled cycle.
 
+    Runs through ``realtime_wake``: supabase-py wires realtime into the *async*
+    client only, so ``sb.channel(...)`` on our sync client raised
+    NotImplementedError every time — the "realtime subscription failed
+    (This feature isn't available in the sync client...)" line at every
+    startup, and the transcription_worker.realtime alert that had been red for
+    nine days.
+
     Best-effort: this is a latency optimisation, not the source of truth. If
     the subscription cannot be established, the fallback poll loop keeps
     working on its own — just slower. Reported to ops_watchdog so a stuck
     subscription is a visible alert rather than a silent slowdown back to
-    poll-only.
+    poll-only; the supervisor inside ``realtime_wake`` reports later drops and
+    reconnects the same way.
     """
-    def _on_change(_payload):
-        _wake_event.set()
+    import realtime_wake
 
     try:
-        channel = sb.channel("manuscript-transcripts")
-        channel.on_postgres_changes(
-            "*", schema="public", table="manuscript_transcripts",
-            callback=_on_change,
+        realtime_wake.subscribe(
+            topic="manuscript-transcripts",
+            table="manuscript_transcripts",
+            on_wake=_wake_event.set,
+            on_status=lambda ok, detail: _report_health("transcription_worker.realtime", ok, detail),
         )
-        channel.subscribe()
     except Exception as exc:
         log.warning(f"realtime subscription failed ({exc}) — falling back to "
                     f"polling every {POLL_SECONDS}s")
