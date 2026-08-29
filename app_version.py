@@ -82,5 +82,88 @@ def get_version() -> str:
     return VERSION
 
 
+# ── Is a box running the current build? ──────────────────────────────────────
+#
+# OSP ran code from 21 August for eight days without a single alert. The boot
+# chain reports a failed update to ops_watchdog as `store_pc.boot_update` — but
+# only if AUTO_UPDATE.bat runs at all, and on OSP it never did: the box is
+# started with START_PRINTOSKY.bat, which has no git in it. Nothing reports, so
+# nothing alerts. Silence by construction, which is the Nattika shape again.
+#
+# The cloud can see it, because every box reports its running build to
+# `store_devices.app_version`. These helpers are the pure half of that check;
+# api/index.py's store-pc-check cron supplies the live data.
+
+
+def short_sha(version: str | None) -> str | None:
+    """The bare commit sha out of a reported version string.
+
+    ``main@a1b2c3d+dirty`` -> ``a1b2c3d``. Returns None for unknown/missing, so
+    a box that cannot report its version is never mistaken for a current one.
+    """
+    if not version:
+        return None
+    text = str(version).strip()
+    if not text or text == UNKNOWN:
+        return None
+    text = text.split("@", 1)[1] if "@" in text else text
+    text = text.split("+", 1)[0].strip()          # drop the +dirty marker
+    return text or None
+
+
+def same_build(reported: str | None, current: str | None) -> bool:
+    """Do these two refer to the same commit?
+
+    Compared on the shorter of the two prefixes: a box reports 7 characters
+    while a deployment env var carries the full 40.
+    """
+    a, b = short_sha(reported), short_sha(current)
+    if not a or not b:
+        return False
+    width = min(len(a), len(b))
+    return a[:width].lower() == b[:width].lower()
+
+
+def decide_build_staleness(*, reported, current, version_since_hours,
+                           stale_after_hours, already_alerted):
+    """Should we alert that this box is running old code?
+
+    Pure, so the rule is testable without Vercel or Supabase.
+
+    ``version_since_hours`` is how long the box has been on ``reported``;
+    ``already_alerted`` is the version string we last alerted about for it
+    (None if we have not). A box gets a full update cycle plus margin before it
+    counts as stale — it only updates at boot, so a few hours behind is normal,
+    not news.
+    """
+    if not short_sha(current):
+        # We cannot tell what current is. Saying nothing would recreate the very
+        # silence this check exists to break, so it is reported as its own fault.
+        return {"stale": False, "alert": already_alerted != "unknown-current",
+                "recovered": False, "key": "unknown-current",
+                "reason": "cannot determine the deployed commit "
+                          "(VERCEL_GIT_COMMIT_SHA missing) — build staleness is unchecked"}
+
+    if same_build(reported, current):
+        return {"stale": False, "alert": False,
+                "recovered": bool(already_alerted), "key": None,
+                "reason": "running the current build"}
+
+    if not short_sha(reported):
+        reason = f"is not reporting a build version ({reported or 'none'})"
+    else:
+        reason = (f"is running {short_sha(reported)}, the deployed build is "
+                  f"{short_sha(current)}")
+
+    if version_since_hours is not None and version_since_hours < stale_after_hours:
+        # Behind, but not yet long enough — it has not missed its boot window.
+        return {"stale": False, "alert": False, "recovered": False,
+                "key": None, "reason": reason}
+
+    key = short_sha(reported) or "no-version"
+    return {"stale": True, "alert": already_alerted != key, "recovered": False,
+            "key": key, "reason": reason}
+
+
 if __name__ == "__main__":
     print(VERSION)

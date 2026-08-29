@@ -86,6 +86,8 @@ Alerts go to the ops WhatsApp number via `whatsapp_notify.send_staff_alert`.
 | `OPS_ALERTS_ENABLED` | `1` | `0` on a dev box: keeps the bookkeeping, sends nothing |
 | `STORE_PC_MONITOR_IDS` | `OSP,PRINTK,PRIOFF` | Stores the cloud cron watches |
 | `STORE_COUNTER_STALE_MIN` | `180` | Minutes of frozen printer counters before the cloud calls a live store PC's pipeline dead |
+| `STORE_BUILD_STALE_HOURS` | `36` | How long a box may run a build that is not the deployed one before it counts as an outage. A box only updates at boot, so a few hours behind is normal; 36h means it has missed a cycle |
+| `STORE_BUILD_DEVICE_MAX_AGE_H` | `24` | Only devices seen this recently are judged. A device that stopped reporting is retired, not stale — the PRINTK row for the box that became PRIOFF must never alert |
 | `STORE_PC_NO_PRINTER_IDS` | `PRIOFF` | Boxes with no printers of their own — liveness only, never a frozen-counter alert. Never list a store that HAS printers: silence about a real printer is the failure this all exists to prevent |
 
 ## Where the checks live
@@ -113,6 +115,15 @@ this is the layer that still works when the store PC is the thing that died:
 - PC offline / back online (heartbeat = latest `daily_summary.synced_at`).
 - **PC up but printer counters frozen.** The Nattika case: heartbeat green,
   pipeline dead. Liveness alone would have reported "fine" all week.
+- **PC up but running old code.** The OSP case: online, syncing, reporting —
+  and launching 21 August code every morning for eight days. `AUTO_UPDATE.bat`
+  reports a failed pull as `store_pc.boot_update`, but only when it runs, and
+  OSP is started with `START_PRINTOSKY.bat`, which has no git in it. A box
+  without the boot chain reports nothing at all, so nothing alerted. The cloud
+  compares each box's `store_devices.app_version` against the commit the API
+  itself was deployed from (`VERCEL_GIT_COMMIT_SHA` — Vercel builds from `main`,
+  so the running API *is* HEAD) and alerts once a box has been behind for
+  `STORE_BUILD_STALE_HOURS` (36h, i.e. it has missed a boot cycle).
 
 **In the consoles** (`admin.html`, `jobs.html` via `admin-shared.js`), on every
 load and on every location switch — a banner at the top of the page for:

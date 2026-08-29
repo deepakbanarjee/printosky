@@ -17,7 +17,7 @@
 
 version: 29
 description: Live schema after SCHEMA_v29 (processed_webhooks RLS) plus the DTP
-  transcription tables. 43 tables, all RLS-enabled.
+  transcription tables. 44 tables, all RLS-enabled.
 
 # Tables with RLS DISABLED -- flagged for security review. As of 2026-06-08
 # every public table has RLS enabled (TASK-023 + TASK-024 closed the last gaps),
@@ -1996,6 +1996,37 @@ tables:
         nullable: true
         type: text
     rls: true
+  store_devices:
+    columns:
+      app_version:
+        default: null
+        nullable: true
+        type: text
+      app_version_since:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      device_id:
+        default: null
+        nullable: false
+        type: text
+      first_seen:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      hostname:
+        default: null
+        nullable: true
+        type: text
+      last_seen:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      store_id:
+        default: null
+        nullable: false
+        type: text
+    rls: true
   store_pc_status:
     columns:
       clean_shutdown:
@@ -2019,6 +2050,10 @@ tables:
         nullable: true
         type: timestamp with time zone
       opening_sent_date:
+        default: null
+        nullable: true
+        type: text
+      stale_build_alerted:
         default: null
         nullable: true
         type: text

@@ -2542,6 +2542,17 @@ STORE_PC_MONITOR_IDS = [s.strip() for s in os.environ.get(
 # liveness is not enough: the cloud also checks that the data is moving.
 STORE_COUNTER_STALE_MIN = int(os.environ.get("STORE_COUNTER_STALE_MIN", "180"))
 
+# A store PC only updates at boot, so being a few hours behind main is normal,
+# not news. This is how long a box may keep running a build that is not the
+# deployed one before that counts as an outage: one full overnight cycle plus
+# most of a day.
+STORE_BUILD_STALE_HOURS = float(os.environ.get("STORE_BUILD_STALE_HOURS", "36"))
+
+# A device that stopped reporting is not a stale box, it is a retired one — the
+# PRINTK row for the machine that became PRIOFF has not been seen since 19 Aug
+# and must never alert. Only devices seen inside this window are judged.
+STORE_BUILD_DEVICE_MAX_AGE_H = float(os.environ.get("STORE_BUILD_DEVICE_MAX_AGE_H", "24"))
+
 # Stores that are not expected to write printer counters at all. PRIOFF is a
 # back-office box sharing the Nattika counter's Epson with poll_printers=false,
 # so it will never write a counter row — alerting that its "printer pipeline is
@@ -2629,6 +2640,113 @@ def _fmt_age(minutes):
     if minutes < 2880:
         return f"{minutes / 60:.1f} h"
     return f"{int(minutes // 1440)} days"
+
+
+def _deployed_sha() -> str | None:
+    """The commit this API is running, i.e. what every box should be on.
+
+    Vercel builds from `main` on every push and sets VERCEL_GIT_COMMIT_SHA, so
+    the deployed API *is* main's HEAD — no GitHub token, no extra call. See
+    docs/ARCHITECTURE.md for the deploy pipeline.
+    """
+    return (os.environ.get("VERCEL_GIT_COMMIT_SHA")
+            or os.environ.get("GITHUB_SHA")           # the cron workflows, in CI
+            or None)
+
+
+def _live_devices(c, store_id, now_iso):
+    """Devices for this store that are actually reporting right now."""
+    from datetime import datetime, timedelta, timezone
+
+    rows = (c.table("store_devices").select("device_id,hostname,app_version,app_version_since,last_seen")
+             .eq("store_id", store_id).execute()).data or []
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=STORE_BUILD_DEVICE_MAX_AGE_H)
+    live = []
+    for row in rows:
+        seen = _parse_ts(row.get("last_seen"))
+        if seen is not None and seen >= cutoff:
+            live.append(row)
+    return live
+
+
+def _parse_ts(value):
+    """Parse a Supabase timestamptz into an aware datetime, or None."""
+    from datetime import datetime, timezone
+
+    if not value:
+        return None
+    text = str(value).strip().replace(" ", "T")
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _check_build_freshness(c, store_id, row, now_iso, sent):
+    """Is this store running the code we think it is?
+
+    OSP ran 21 August code for eight days without an alert: AUTO_UPDATE.bat
+    reports a failed pull as `store_pc.boot_update`, but it only runs from the
+    boot chain, and OSP is started with START_PRINTOSKY.bat, which has no git in
+    it. A box without the boot chain reports nothing at all, so nothing alerts.
+    This closes that from the cloud side, where the evidence already sits.
+
+    Returns the value to persist in store_pc_status.stale_build_alerted.
+    """
+    from datetime import datetime, timezone
+    import app_version as av
+
+    current = _deployed_sha()
+    already = row.get("stale_build_alerted")
+    devices = _live_devices(c, store_id, now_iso)
+    if not devices and current:
+        return already                       # store is dark; the offline alert owns that
+
+    now = datetime.now(timezone.utc)
+    stale_bits, keys, recovered = [], [], False
+
+    for dev in devices:
+        since = _parse_ts(dev.get("app_version_since"))
+        hours = ((now - since).total_seconds() / 3600.0) if since else None
+        verdict = av.decide_build_staleness(
+            reported=dev.get("app_version"), current=current,
+            version_since_hours=hours, stale_after_hours=STORE_BUILD_STALE_HOURS,
+            already_alerted=already,
+        )
+        if verdict["stale"]:
+            host = dev.get("hostname") or dev.get("device_id")
+            age = f" for {hours / 24:.0f}d" if hours else ""
+            stale_bits.append(f"• {host} {verdict['reason']}{age}")
+            keys.append(verdict["key"])
+        elif verdict["recovered"]:
+            recovered = True
+        if verdict["key"] == "unknown-current" and verdict["alert"]:
+            if _alert_ops("Build staleness cannot be checked", verdict["reason"]):
+                sent.append("build_uncheckable")
+            return "unknown-current"
+
+    if stale_bits:
+        key = ",".join(sorted(keys))
+        if key != already:
+            if _alert_ops(f"{store_id} is running old code",
+                          f"🔴 *{store_id} store PC has not taken updates*\n\n"
+                          + "\n".join(stale_bits)
+                          + "\n\nA box only updates at boot, via SETUP_AUTOSTART.bat. "
+                            "If it is started by hand with START_PRINTOSKY.bat there is "
+                            "no update step at all — run PULL_UPDATE.bat, restart, then "
+                            "SETUP_AUTOSTART.bat once as Administrator."):
+                sent.append("build_stale")
+        return key
+
+    if recovered and already:
+        if _alert_ops(f"{store_id} is up to date",
+                      f"🟢 *{store_id} store PC is on the current build* "
+                      f"({av.short_sha(current)})."):
+            sent.append("build_ok")
+    return None
 
 
 def _store_pc_check_one(c, sd, store_id, now_ist, now_iso, digest: bool) -> dict:
@@ -2726,6 +2844,14 @@ def _store_pc_check_one(c, sd, store_id, now_ist, now_iso, digest: bool) -> dict
                       f"(last write {_fmt_age(counters_age)} ago)."):
             sent.append("counters_ok")
 
+    # Is the box running the code we think it is? Independent of liveness: OSP
+    # was up, syncing and reporting all week while running eight-day-old code.
+    try:
+        stale_build = _check_build_freshness(c, store_id, row, now_iso, sent)
+    except Exception as exc:
+        logger.error("build freshness check failed for %s: %s", store_id, exc)
+        stale_build = row.get("stale_build_alerted")
+
     new_state = decision["new_state"]
     if new_state == "up" and stale:
         new_state = "up_stale"
@@ -2733,6 +2859,7 @@ def _store_pc_check_one(c, sd, store_id, now_ist, now_iso, digest: bool) -> dict
     update = {
         "store_id": store_id,
         "state": new_state,
+        "stale_build_alerted": stale_build,
         "last_heartbeat_at": last_hb_str,
         "opening_sent_date": decision["opening_sent_date"],
         "closing_sent_date": decision["closing_sent_date"],
@@ -2750,7 +2877,7 @@ def _store_pc_check_one(c, sd, store_id, now_ist, now_iso, digest: bool) -> dict
         "age_min": round(age_min, 1) if age_min is not None else None,
         "counters_age_min": round(counters_age, 1) if counters_age is not None else None,
         "counters_stale": stale, "counters_expected": expects_counters,
-        "state": new_state, "sent": sent,
+        "build_stale": stale_build, "state": new_state, "sent": sent,
     }
 
 
