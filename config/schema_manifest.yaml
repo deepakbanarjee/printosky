@@ -17,7 +17,7 @@
 
 version: 29
 description: Live schema after SCHEMA_v29 (processed_webhooks RLS) plus the DTP
-  transcription table. 42 tables, all RLS-enabled.
+  transcription tables. 43 tables, all RLS-enabled.
 
 # Tables with RLS DISABLED -- flagged for security review. As of 2026-06-08
 # every public table has RLS enabled (TASK-023 + TASK-024 closed the last gaps),
@@ -2077,6 +2077,45 @@ tables:
         default: null
         nullable: false
         type: integer
+    rls: true
+  transcript_corrections:
+    columns:
+      after_text:
+        default: null
+        nullable: false
+        type: text
+      before_text:
+        default: null
+        nullable: false
+        type: text
+      corrected_by:
+        default: null
+        nullable: true
+        type: text
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      filename:
+        default: null
+        nullable: false
+        type: text
+      id:
+        default: gen_random_uuid()
+        nullable: false
+        type: uuid
+      page:
+        default: null
+        nullable: false
+        type: integer
+      store_id:
+        default: null
+        nullable: true
+        type: text
+      transcript_id:
+        default: null
+        nullable: false
+        type: uuid
     rls: true
   wa_message_costs:
     columns:

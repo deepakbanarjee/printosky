@@ -20,11 +20,11 @@ This document is the canonical schema reference for the shared Supabase database
 
 | | |
 |---|---|
-| Tables | 29 |
+| Tables | 30 |
 | Views | 2 (`epson_daily`, `konica_daily`) |
 | Foreign keys | **1** (`referral_credits.referrer_code → referrers.code`) |
 | Tables without RLS | **3** (`project_builder_orders`, `referral_credits`, `referrers`) — see [Security gaps](#security-gaps) |
-| Owning products | printosky (25), osp-academics (1), shared (3) |
+| Owning products | printosky (26), osp-academics (1), shared (3) |
 
 The schema is heavily denormalized — only one FK exists in the whole database. Cross-table integrity is enforced at the application layer (or not at all). Worth documenting per-table; not worth a mass FK-introduction project.
 
@@ -518,6 +518,23 @@ The handwritten-manuscript OCR queue behind `website/dtp.html`. A staff upload i
 | `created_at` / `updated_at` | timestamptz | NO | `now()` | `updated_at` maintained by trigger |
 
 Nothing retries a row that reaches `failed` — the worker only ever claims `pending` and resumes `transcribing` — so a failure here alerts through `ops_watchdog` (`transcription_worker.job`) and is re-queued by hand from the console. `confidence_data` was written by the worker for ten days before the column existed: every write 400'd and the job was marked failed. Add the column **in the same PR as the code that writes it**.
+
+---
+
+#### `transcript_corrections` 🟦
+What staff actually fixed. `website/dtp.html` has always let them edit a transcript and save, but the save PATCHes `content` in place — the model's original text was overwritten and lost, so there was no record of how much rework the OCR creates or which words it gets wrong repeatedly. One row per corrected **page**, written by the console after the transcript save lands.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | uuid | NO | `gen_random_uuid()` | **PK** |
+| `transcript_id` | uuid | NO | — | `manuscript_transcripts.id` |
+| `filename` | text | NO | — | denormalised for reading without a join |
+| `page` | integer | NO | — | 1-based, matches the `=== PAGE n ===` markers |
+| `before_text` / `after_text` | text | NO | — | full page text, model's version and human's |
+| `corrected_by` / `store_id` | text | YES | — | store identity; the console has no per-staff login |
+| `created_at` | timestamptz | NO | `now()` | |
+
+Stored raw and uninterpreted on purpose. Pulling word-level `before → after` pairs out of these needs Malayalam chillu normalisation (`ൺ` and `ണ്‍` are visually identical, different codepoints — a naive diff reads every one as a correction), and that belongs in Python where it is testable, next to the rule deciding which corrections recur often enough to teach the model. Both are Stage 2, deliberately left undesigned until there are real corrections to design against.
 
 ---
 
