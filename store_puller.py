@@ -350,10 +350,9 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
         except (TypeError, ValueError):
             n = 1
 
-        import print_planner
-        from print_server import send_to_printer
-
-        if not print_spec:
+        # Check for missing or incomplete print_spec FIRST, before any imports.
+        # This ensures the alert is sent even if imports fail.
+        if not print_spec or not print_spec.get("sides"):
             # Map legacy colour format ('bw' -> 'bw', 'col'/'colour' -> 'col', 'mixed' -> 'mixed')
             c_mode = "bw"
             c = (colour or "").strip().lower()
@@ -362,13 +361,35 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
             elif c == "mixed":
                 c_mode = "mixed"
 
+            # ALERT: Missing/incomplete print_spec — this job lacks full print settings.
+            # Happens for jobs created before SCHEMA_v35 or from non-web sources.
+            # FIXED: Default to "simplex" (single-sided), not "duplex" (was the bug).
+            # Safer to upgrade to duplex later than downgrade from duplex.
+            # This fix applies to BOTH Konica and Epson printers (printer routing
+            # happens later, after print_spec is processed).
+            from ops_watchdog import report as _report_alert
+            _report_alert(
+                "store_puller.missing_print_spec",
+                False,
+                f"Job {job_id}: no print_spec or missing sides value — using safe default (single-sided). "
+                "If duplex is needed, operator should re-print with correct settings.",
+            )
+            logger.warning(
+                "store_puller: MISSING/INCOMPLETE PRINT_SPEC for job %s — defaulting to SIMPLEX "
+                "(was previously DUPLEX — this was the bug). File: %s",
+                job_id, dest_path
+            )
+
             print_spec = {
                 "copies": max(1, n),
                 "paper_size": paper_size,
                 "orientation": orientation,
                 "colour_mode": c_mode,
-                "sides": "duplex"
+                "sides": "simplex"  # ← FIXED: was "duplex" (caused single→duplex bug)
             }
+
+        import print_planner
+        from print_server import send_to_printer
 
         # Mixed-colour jobs are split into ordered B&W/colour sub-jobs. Each
         # sub-job routes to its NATURAL device — B&W -> Konica, colour -> Epson —
