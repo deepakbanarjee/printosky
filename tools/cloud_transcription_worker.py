@@ -567,10 +567,14 @@ def _realtime_thread(stop: threading.Event) -> None:
     stays self-contained.
 
     Best-effort: any failure reports to ops_watchdog and returns, leaving the
-    fallback poll as the safety net. The realtime client's own auto-reconnect
-    handles a dropped socket.
+    fallback poll as the safety net. A socket that dies later is rebuilt by
+    realtime_liveness.hold, which also reports both edges — the client's own
+    auto-reconnect does not cover every way a connection can go, and a dead
+    socket used to leave this check green.
     """
     import asyncio
+
+    import realtime_liveness
 
     if not (url and key):
         log.warning("realtime disabled — SUPABASE_URL / key not set")
@@ -588,19 +592,30 @@ def _realtime_thread(stop: threading.Event) -> None:
         # so the connection authorises as service_role and RLS lets changes
         # through — no separate set_auth needed.
         client_async = await create_async_client(url, key)
-        channel = client_async.channel("manuscript-transcripts")
-        channel.on_postgres_changes(
-            "*", callback=_on_change, table="manuscript_transcripts", schema="public",
-        )
-        await client_async.realtime.connect()
-        await channel.subscribe()
+
+        async def _subscribe() -> None:
+            channel = client_async.channel("manuscript-transcripts")
+            channel.on_postgres_changes(
+                "*", callback=_on_change, table="manuscript_transcripts", schema="public",
+            )
+            await client_async.realtime.connect()
+            await channel.subscribe()
+
+        await _subscribe()
         log.info("realtime subscription active for manuscript_transcripts")
         _report_health("transcription_worker.realtime", True, "subscribed")
-        # connect() spins up the client's background listen + heartbeat tasks;
-        # keep this loop alive so they keep pumping. On return, asyncio.run
-        # cancels those background tasks and closes the socket.
-        while not stop.is_set():
-            await asyncio.sleep(1.0)
+
+        # Hold the loop open so the client's background listen + heartbeat
+        # tasks keep pumping, and rebuild the socket if it dies — the client's
+        # own auto-reconnect does not cover every way it can go (see
+        # realtime_liveness). On return, asyncio.run cancels those tasks and
+        # closes the socket.
+        await realtime_liveness.hold(
+            client_async.realtime, stop,
+            resubscribe=_subscribe,
+            on_status=lambda ok, detail: _report_health("transcription_worker.realtime", ok, detail),
+            label="transcription_worker",
+        )
 
     try:
         asyncio.run(_run())

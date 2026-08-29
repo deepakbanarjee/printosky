@@ -103,7 +103,7 @@ Alerts go to the ops WhatsApp number via `whatsapp_notify.send_staff_alert`.
 | `fetcher.epson` | The fetch loop itself threw |
 | `sync.supabase` | A sync cycle failed, or Supabase is not configured — i.e. the console is now stale |
 | `config.epson_ip` | `epson_ip` missing from `store_config.json` |
-| `store_puller.realtime` / `academic_worker.realtime` / `transcription_worker.realtime` | The Supabase Realtime subscription could not be established — pickup is back on the 15-minute fallback poll |
+| `store_puller.realtime` / `academic_worker.realtime` / `transcription_worker.realtime` | The Supabase Realtime subscription could not be established, or a live one died — pickup is back on the 15-minute fallback poll until `realtime_liveness.hold` rebuilds it (recovery is announced) |
 | `store_puller.realtime_delivery` / `academic_worker.realtime_delivery` / `transcription_worker.realtime_delivery` | The subscription is connected but a job was still found by the fallback poll — events are not being delivered (Realtime not enabled on the table) |
 | `transcription_worker.job` | A manuscript transcription failed. Nothing retries a `failed` row, so this is the only signal before someone opens the DTP console |
 

@@ -167,15 +167,18 @@ def _realtime_thread(store_id: str, stop: threading.Event) -> None:
 
     Best-effort by design: this is a latency optimisation, not the source of
     truth. Any failure reports to ops_watchdog and returns, leaving the
-    fallback poll to keep the store running — just slower. The realtime
-    client's own auto-reconnect handles a dropped socket; if it gives up, this
-    returns and the poll takes over.
+    fallback poll to keep the store running — just slower. A socket that dies
+    later is rebuilt by realtime_liveness.hold, which also reports both edges,
+    because the client's own auto-reconnect does not cover every way a
+    connection can go and a dead socket used to leave this check green.
 
     We do not inspect the payload: any change on our store's rows might mean a
     job just went Paid, and pull_once's own status/file_url filter is the
     single source of truth for what actually gets pulled.
     """
     import asyncio
+
+    import realtime_liveness
 
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_KEY")
@@ -197,24 +200,33 @@ def _realtime_thread(store_id: str, stop: threading.Event) -> None:
         # on our store's rows through — no separate set_auth needed.
         client = await create_async_client(url, key)
 
-        channel = client.channel(f"store-{store_id}-jobs")
-        # on_postgres_changes(event, callback, table=, schema=, filter=) is
-        # synchronous and chainable; subscribe() is the coroutine.
-        channel.on_postgres_changes(
-            "*", callback=_on_change, table="jobs", schema="public",
-            filter=f"assigned_store_id=eq.{store_id}",
-        )
-        await client.realtime.connect()
-        await channel.subscribe()
+        async def _subscribe() -> None:
+            channel = client.channel(f"store-{store_id}-jobs")
+            # on_postgres_changes(event, callback, table=, schema=, filter=) is
+            # synchronous and chainable; subscribe() is the coroutine.
+            channel.on_postgres_changes(
+                "*", callback=_on_change, table="jobs", schema="public",
+                filter=f"assigned_store_id=eq.{store_id}",
+            )
+            await client.realtime.connect()
+            await channel.subscribe()
+
+        await _subscribe()
         logger.info("store_puller: realtime subscription active for store %s", store_id)
         _report_health("store_puller.realtime", True, "subscribed", store_id=store_id)
 
-        # connect() spins up the client's background listen + heartbeat tasks;
-        # keep this loop alive so they keep pumping. Wake once a second only to
-        # notice a stop signal (used by tests / clean shutdown). On return,
-        # asyncio.run cancels those background tasks and closes the socket.
-        while not stop.is_set():
-            await asyncio.sleep(1.0)
+        # Hold the loop open so the client's background listen + heartbeat
+        # tasks keep pumping, and rebuild the socket if it dies — the client's
+        # own auto-reconnect does not cover every way it can go (see
+        # realtime_liveness). On return, asyncio.run cancels those tasks and
+        # closes the socket.
+        await realtime_liveness.hold(
+            client.realtime, stop,
+            resubscribe=_subscribe,
+            on_status=lambda ok, detail: _report_health(
+                "store_puller.realtime", ok, detail, store_id=store_id),
+            label=f"store_puller[{store_id}]",
+        )
 
     try:
         asyncio.run(_run())
