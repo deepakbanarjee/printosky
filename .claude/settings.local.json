@@ -144,7 +144,9 @@
       "Bash(unzip -p '/c/Program Files \\(x86\\)/KONICA MINOLTA/Job Centro 2.0/JobCentro.jar' jp/konicaminolta/bskk/clrc/Core/service/connection/xml/relaxer_reqauth/reqOpeUserAuth.rlx)",
       "Bash(unzip -p '/c/Program Files \\(x86\\)/KONICA MINOLTA/Job Centro 2.0/JobCentro.jar' jp/konicaminolta/bskk/clrc/JobManager/model/historyjob/xml/relaxer/recipe.txt)",
       "Bash(python3 *)",
-      "Bash(sort -u echo \"---\" curl -s --max-time 10 \"http://192.168.55.110:30081/clrc/services/CLRC?wsdl\")"
+      "Bash(sort -u echo \"---\" curl -s --max-time 10 \"http://192.168.55.110:30081/clrc/services/CLRC?wsdl\")",
+      "mcp__Claude_Code_Remote__subscribe_pr_activity",
+      "mcp__Claude_Code_Remote__send_later"
     ]
   },
   "model": "claude-sonnet-4-6",
