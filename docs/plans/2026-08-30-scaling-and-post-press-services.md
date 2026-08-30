@@ -326,7 +326,7 @@ temp file, appends `noscale`, cleans up in a `finally`. NULL ⇒ today's path.
 | B2 | `service_kind` NULL ⇒ print job ⇒ everything behaves exactly as today | Same absent-means-unchanged rule as Feature A |
 | B3 | A service job **never** creates a `print_items` row, never enters a printer queue, never auto-prints | The one behaviour that makes "post-press without printing" true |
 | B4 | v1 kinds: `copy`, `scan`, `laminate`, `foil`, `bind` (+ `other` as escape hatch) | Covers the owner's list; `other` stops staff forcing a wrong kind |
-| B5 | **Foiling rates are being supplied by the owner** (§6 Q1). Until they land, a foil job is staff-priced and flagged `needs_manual_price`; a foil job completed at ₹0 raises an alert | No invented prices; no silent ₹0 |
+| B5 | **Foiling and roll-lamination rates are set** (§4.3.1, owner 2026-08-30): per sheet, A4/A3, minimum 10 sheets then piece rate. `other` stays staff-priced and flagged `needs_manual_price` | Real rates, no invented ones; a ₹0 service job still alerts |
 | B6 | `/new-photocopy` and its two console buttons stay exactly as they are | Already in daily use. Copy-as-a-service is the richer path; the old one keeps working until the owner retires it |
 | B7 | Staff-console first. Customer-facing (order-v2 / WhatsApp) is a later decision | Post-press needs the physical item in hand |
 | B8 | Copy is priced off the **existing print rate card** unless the owner says otherwise | No new numbers invented |
@@ -351,8 +351,8 @@ plus the DDL in `install/bootstrap_db.py`. `docs/SCHEMA.md` gains the two rows.
 |---|---|
 | `copy` | `{sheets, copies, colour, sides, paper_size}` |
 | `scan` | `{sheets, colour, dpi, delivery: "whatsapp"\|"email"\|"usb", destination}` |
-| `laminate` | `{sheets, lam_type: "normal"\|"with_col"\|"a4"\|"a3_bw"\|"a3_col"\|"id"}` |
-| `foil` | `{sheets, foil_type, notes, manual_price?}` |
+| `laminate` | `{sheets, paper_size, lam_type: "pouch"\|"roll"\|"cover"\|"id"}` — pouch reads `LAMINATION_RATES`, roll reads `ROLL_LAM_RATES` (§4.3.1) |
+| `foil` | `{sheets, paper_size, foil_type: "gold"\|"silver", notes}` — `foil_type` is for the work order; both cost the same |
 | `bind` | `{sheets, binding, paper_size, project_cover?}` — reuses `calculate_finishing_cost(..., with_print=False)` |
 | `other` | `{description, manual_price}` |
 
@@ -360,15 +360,48 @@ plus the DDL in `install/bootstrap_db.py`. `docs/SCHEMA.md` gains the two rows.
 
 ```python
 SERVICE_KINDS = {...}      # labels, whether a manual price is required
-FOILING_RATES = {}         # ← owner's rates go here (Q1); empty = staff-priced + flagged
 def calculate_service_quote(kind: str, meta: dict) -> dict:
     """{ total, breakdown[], needs_manual_price, label } — additive; no existing
     function's signature or behaviour changes."""
 ```
 
 It composes what is already there: `get_print_rate`/`calc_sheets` for `copy`,
-`SCANNING_RATES` tiers for `scan`, `LAMINATION_RATES` for `laminate`,
-`calculate_finishing_cost(..., with_print=False)` for `bind`.
+`SCANNING_RATES` tiers for `scan`, `LAMINATION_RATES` for pouch lamination,
+`calculate_finishing_cost(..., with_print=False)` for `bind` — plus the two new
+tables below.
+
+#### 4.3.1 Foiling and roll lamination *(owner rates, 2026-08-30)*
+
+```python
+FOILING_RATES  = {"A4": 30, "A3": 50}   # per sheet; gold and silver identical
+ROLL_LAM_RATES = {"A4": 15, "A3": 30}   # per sheet
+MIN_SHEETS     = {"foil": 10, "lam_roll": 10}
+
+def _min_qty_price(kind, sheets, paper_size) -> dict:
+    billable = max(sheets, MIN_SHEETS[kind])      # under the minimum bills as the minimum
+    return {"total": billable * RATE[kind][paper_size], "billable": billable}
+```
+
+**Minimum 10 sheets, then straight piece rate** — 3 A4 sheets of foil bill as
+10 × ₹30 = ₹300; 14 bill as 14 × ₹30 = ₹420. The quote breakdown must name it:
+
+```
+Foiling A4: minimum 10 sheets applied (3 brought) — 10 × ₹30 = ₹300
+```
+
+so the operator can explain the number before the customer is surprised by it.
+The console shows the same line live in the modal, and a "below minimum" hint
+appears the moment sheets < 10.
+
+| | A4 | A3 | Minimum | Notes |
+|---|---|---|---|---|
+| **Foiling** | ₹30/sheet | ₹50/sheet | 10 sheets | Gold and silver priced the same |
+| **Roll lamination** | ₹15/sheet | ₹30/sheet | 10 sheets *(assumed — "same principle")* | Outsourced (`FINISHING_OUTSOURCED`) |
+
+> **Do not conflate roll with pouch.** `LAMINATION_RATES` (A4 ₹60, A3 B&W ₹100,
+> A3 colour ₹120) is **sheet/pouch** lamination and is unchanged. Roll lamination
+> is a different process at a different price — hence its own table. Wiring roll
+> lamination to `LAMINATION_RATES` would overcharge by 4×.
 
 ### 4.4 Endpoints (`print_server.py`, new handlers beside the existing ones)
 
@@ -441,13 +474,44 @@ budgets stay as they are.
 
 | PR | Contents | Risk |
 |---|---|---|
-| B-1 | `rate_card` Section 11 + tests. Nothing calls it | none |
+| B-0 | **`lam_roll` / `lam_cover` ₹0 fix** (§4.12) — its own PR, before or after the rest | medium — touches live print-job billing |
+| B-1 | `rate_card` Section 11 (incl. foiling + roll-lam tables) + tests. Nothing calls it | none |
 | B-2 | Migrations (cloud + SQLite + `docs/SCHEMA.md`) | none — additive columns |
 | B-3 | `/service-quote` + `/new-service` + `handle_create_job` guard + isolation tests | low |
 | B-4 | jobs.html console UI (modal + pills + service panel) | low |
 | B-5 | admin.html mirror + MIS `service_kind` filters | low |
 | B-6 | Konica copy/scan reconciliation panel | medium (new analysis, no print path) |
 | B-7 | Customer-facing post-press ordering — decide after B-4 is live | — |
+
+### 4.12 Known bug this work uncovers — `lam_roll` / `lam_cover` bill ₹0
+
+`calculate_finishing_cost` (`rate_card.py:327–360`) has branches for `none`,
+`staple`, `spiral`, `wiro`, `soft`, `project`, `record`, `lam_sheet` and
+`thermal` — and **none for `lam_roll`, `lam_cover` or `id_card`**. `cost` stays
+at its `0` initialiser, so:
+
+> **Every print job finished with roll lamination or cover lamination has been
+> quoted the print cost only, with ₹0 for the lamination.**
+
+Both are offered in the finishing dropdown of both consoles
+(`website/jobs.html:1386`, `admin.html:2001`) and both are in
+`FINISHING_OUTSOURCED`, so the store pays a vendor for work it did not bill.
+`BINDING_RATES` even carries `lam_cover: 50` — the number exists and is simply
+never read. `lam_roll` carries `price: None`; the new `ROLL_LAM_RATES` fills it.
+
+**Decision (owner, 2026-08-30): fix it, in its own PR (B-0).** It changes live
+print-job quote maths — the one thing the rest of this plan promises not to touch
+— so it ships separately and reverts cleanly:
+
+- `lam_roll` → `ROLL_LAM_RATES[paper_size] × max(sheets, 10)` (§4.3.1).
+- `lam_cover` → flat ₹50 from `BINDING_RATES` (per book cover, not per sheet).
+- `id_card` → still has no rate; stays ₹0 but is flagged `needs_manual_price`
+  rather than quietly free.
+- Tests pin every other finishing key's price as unchanged, so the blast radius
+  is provably the three keys above.
+
+Worth a look at past jobs with `finishing IN ('lam_roll','lam_cover')` before the
+PR lands, to size what was under-billed.
 
 ---
 
@@ -470,7 +534,8 @@ through additive, default-off parameters.
 
 | # | Question | Blocks | Status |
 |---|---|---|---|
-| Q1 | **Foiling rates** — per sheet? per A4 / A3? a setup charge? do gold and silver differ? tiered by quantity like spiral? | `FOILING_RATES` in B-1 | **owner is supplying** |
+| Q1 | ~~Foiling rates~~ | — | **answered** — per sheet, A4 ₹30 / A3 ₹50, gold = silver, minimum 10 sheets then piece rate (§4.3.1) |
+| Q1b | **Roll lamination minimum** — A4 ₹15 / A3 ₹30 per sheet is set; "same principle" is read as *minimum 10 sheets too*. Confirm or correct | `ROLL_LAM_RATES` in B-1 | assumed |
 | Q2 | **Custom scale bounds** — is 25–400 % right, and should customers get Custom % at all, or staff only? | A-6 | open |
 | Q3 | **Scan** — priced per sheet off `SCANNING_RATES` as-is? Default delivery (WhatsApp / email / USB)? Colour and DPI choices? | B-1 `scan` | open |
 | Q4 | **Copy** — should a walk-in copy become a tracked `Queued` job, or keep the current instant-Completed photocopy entry? | B-3/B-4 (both can coexist) | open |
@@ -479,7 +544,9 @@ through additive, default-off parameters.
 | Q7 | Should customers be able to order post-press online (drop-off first), or is this counter-only? | B-7 | open |
 
 **Answered 2026-08-30:** preview renders the baked PDF, one page, switchable
-(§3.6) · scaling is 1-up only, everything else fits to the printable area (A4).
+(§3.6) · scaling is 1-up only, everything else fits to the printable area (A4) ·
+foiling and roll-lamination rates set, minimum 10 sheets billed as 10 (§4.3.1) ·
+the `lam_roll`/`lam_cover` ₹0 bug is fixed in its own PR (§4.12).
 
 ---
 
@@ -492,3 +559,6 @@ through additive, default-off parameters.
 - No new printer, tray or media handling.
 - No retirement of `/new-photocopy` or its buttons.
 - No pricing invented where the owner has not given a rate.
+- No change to pouch/sheet lamination pricing (`LAMINATION_RATES` is untouched).
+- The `lam_roll`/`lam_cover` ₹0 fix is deliberately **outside** this work's
+  no-change guarantee — it is a separate, separately revertible PR (§4.12).

@@ -123,12 +123,15 @@ is never asked to scale, only told `noscale` as a guard.
 | S13-4 | **Preview endpoints** | `GET /scale-preview` on the store PC returns a PNG of the **baked** page (same `apply_scale` the printer gets), one page, switchable; `GET /order/scale-rect` on Vercel returns the same geometry for the customer canvas. Offline → say so, never show an approximation (A-4) |
 | S13-5 | **Staff scaling UI + paper proof** | Fit / Actual / Custom in the print panel and New Job modal, preview beside it; then prove Fit/Actual/75%/150% on the OSP Konica and append the result to `docs/PRINT_ROTATION_MATRIX.md` (A-5) |
 | S13-6 | **Customer scaling UI + preview** | order-v2 card (1-up only) + sheet canvas with hatched crop region and "N pages will be cropped"; `buildPrintSpec` emits `scale` only when non-default (A-6) |
-| S13-7 | **Service rate engine** | `rate_card.py` new Section 11: `calculate_service_quote()` over the existing lamination/scanning/binding tables. `FOILING_RATES` awaiting owner's numbers (B-1, Q1) |
+| S13-7 | **Service rate engine** | `rate_card.py` new Section 11: `calculate_service_quote()` over the existing scanning/pouch-lamination/binding tables, plus `FOILING_RATES` (A4 ₹30 / A3 ₹50) and `ROLL_LAM_RATES` (A4 ₹15 / A3 ₹30) — **per sheet, minimum 10 sheets billed as 10, piece rate after** (owner 2026-08-30). Breakdown must name the minimum when it applies (B-1) |
 | S13-8 | **`jobs.service_kind` + `service_meta`** | `SCHEMA_v29_service_jobs.sql` (cloud) + SQLite ALTERs + `docs/SCHEMA.md` rows. NULL = print job (B-2) |
 | S13-9 | **`/service-quote` + `/new-service`** | Service jobs never create `print_items`, never enter a printer queue, never auto-print. Isolation tests pin it (B-3) |
 | S13-10 | **Service console UI** | `+ Service` modal + kind pills + service panel in jobs.html, mirrored in admin.html; MIS print counts filtered to `service_kind IS NULL` (B-4/B-5) |
 | S13-11 | **Copy/scan reconciliation** | Compare counter-recorded copy/scan service jobs against `konica_jobs.job_type IN ('Copy','Scan')` — first visibility into unbilled walk-in copying (B-6) |
 | S13-12 | **Customer post-press ordering** ❓ | order-v2 / WhatsApp entry for finishing-only work. Decide after S13-10 is live (B-7, Q7) |
+| S13-13 | **`lam_roll` / `lam_cover` bill ₹0** 🐞 | `calculate_finishing_cost` (`rate_card.py:327`) has no branch for either, so every print job finished with roll or cover lamination has been quoted **₹0 for the lamination** — while both are outsourced, i.e. paid for. Fix in its own PR: `lam_roll` → `ROLL_LAM_RATES × max(sheets,10)`, `lam_cover` → the ₹50 already sitting unused in `BINDING_RATES`, `id_card` → flagged not-priced. Touches live billing, so it ships separately from S13-7 and reverts cleanly (B-0) |
+
+**Rates locked by owner 2026-08-30:** foiling per sheet A4 ₹30 / A3 ₹50 (gold = silver), roll lamination A4 ₹15 / A3 ₹30, both **minimum 10 sheets** then piece rate. Pouch lamination (`LAMINATION_RATES`, A4 ₹60) is a different process and is unchanged.
 
 **Locked by owner 2026-08-30:** scaling is offered on **1-up only** — every other
 layout always fits to the printable area (N-up *is* a fit; "Actual size" on 4-up
