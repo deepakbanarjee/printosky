@@ -124,6 +124,10 @@ the source document; imposition, page skipping and (soon) scaling are invisible.
 | A3 | When a scale mode is set, also emit `noscale` — as a **guard**, not the mechanism | Stops a driver re-scaling a baked file. Never emitted for jobs without `scale`, so existing command lines are unchanged |
 | A4 | **Scaling is offered on 1-up only. Every other layout (2/4/6/9-up) always fits to the printable area.** Not a phase — the rule. *(owner, 2026-08-30)* | See §3.2 |
 | A5 | `custom` accepts **25–400 %**, clamped, with a live crop warning above 100 % | A silent crop is exactly the failure mode CLAUDE.md forbids |
+| A9 | **Percent is of the original page**, not of the sheet *(owner, 2026-08-30)* | 100 % means "the document's own size" wherever it lands. An A5 PDF at 100 % prints A5-sized content centred on an A4 sheet; at 200 % it roughly fills it. This is what Acrobat means by scale — and it makes **Custom 100 % ≡ Actual size**, one fewer thing to explain |
+| A10 | **Custom % is staff-only.** Customers get Fit and Actual *(owner, 2026-08-30)* | Two clear choices on the order page, and nobody orders 40 % text they cannot read and blames the print. Staff keep the full range for the odd job |
+| A11 | Over 100 % is **allowed, warned, and shown** — never silently clamped | "Enlarge this map to fill the page" is a real request. The preview hatches what falls off and counts the pages affected; the operator proceeds knowingly |
+| A12 | Input is **presets + free entry**: 50 · 75 · 90 · 125 · 150 · 200, plus a number box | Fastest at a counter, still exact when it matters |
 | A6 | **Price does not change with scale.** Billing stays per sheet, and the UI says so | Owner rule; otherwise 50 % reads as half the bill |
 | A7 | `fit` = fill the printable area, aspect kept, centred. `actual` = 100 %, centred, cropped if oversize | Matches what the words mean to a customer, and what Acrobat calls Fit / Actual size |
 | A8 | **The preview renders the baked PDF**, on both surfaces, from the same `pdf_scaler` code | A preview drawn by different code than the printer gets is a preview that can lie |
@@ -250,23 +254,27 @@ not change it."**
 ### 3.7 UI
 
 **Customer — `website/order-v2.html` + `website/order/order-logic.js`**
-A new `.ov2-card` next to Paper size, hidden while `nup !== 1`:
+A new `.ov2-card` next to Paper size, hidden while `nup !== 1`. **Two choices —
+no Custom % for customers (A10):**
 
 ```
 Page size on paper
-[ Fit to page (default) ] [ Actual size ] [ Custom % ]
-   custom -> number input, 25–400, live preview + crop warning
+[ Fit to page (default) ] [ Actual size ]
 Price is per sheet — scaling does not change it.
 ```
-`buildPrintSpec()` (`order-logic.js:37`) adds `scale` **only when the customer
-picked something other than Fit**, so the default order body is unchanged.
+The preview still earns its place here: for an A5 or Letter file on an A4 sheet,
+Fit and Actual are visibly different, and that is exactly the case a customer
+gets wrong. `buildPrintSpec()` (`order-logic.js:37`) adds `scale` **only when the
+customer picked Actual**, so the default order body is unchanged.
 `buildOperatorNote()` gains "Actual size" / "Scaled 75 %". No API change:
 `api/handlers_order.py:284` already persists the whole `print_spec` verbatim.
 
 **Staff — print panel in `website/jobs.html` (`#jp-*`, ~:2349) and `admin.html`**
-A select (Fit / Actual / Custom) + percent input above the preview pane, saved
-through the existing `/update-job` body into the new `print_items` columns, with
-the §3.6.1 preview beside it.
+A select (Fit / Actual / Custom) above the preview pane; choosing Custom reveals
+the preset row (50 · 75 · 90 · 125 · 150 · 200) and a free number box clamped to
+25–400 %. Saved through the existing `/update-job` body into the new
+`print_items` columns, with the §3.6.1 baked preview beside it. **This is the
+only place Custom % exists** (A10).
 
 **Staff — New Job modal step 3** (`website/jobs.html:1346`): the same select, so a
 walk-in gets the same control.
@@ -286,11 +294,11 @@ temp file, appends `noscale`, cleans up in a `finally`. NULL ⇒ today's path.
 
 ### 3.9 Tests (new files, no existing test edited)
 
-- `tests/test_pdf_scaler.py` — `scale_rect` geometry per mode, crop detection, percent clamping; `apply_scale` page sizes; `None` for every no-op case.
+- `tests/test_pdf_scaler.py` — `scale_rect` geometry per mode, crop detection, percent clamping; `apply_scale` page sizes; `None` for every no-op case; **`custom` at 100 % equals `actual`** (A9), and an A5 page at 100 % on an A4 sheet stays A5-sized.
 - `tests/test_print_planner_scale.py` — **the guard test**: a spec *without* `scale` yields an action list identical to today's; the 12 matrix specs plan unchanged; **`nup >= 2` ignores `scale` entirely** (A4).
 - `tests/test_print_server_scale_settings.py` — `scale_applied=False` builds the exact current settings string; `True` appends `noscale`.
 - `tests/test_scale_preview.py` — `/scale-preview` returns a PNG whose page box equals `scale_rect()`; bad params → 400, not a stack trace; store-PC failure surfaces as an error, never a stale image.
-- `tests/order/order-logic.test.mjs` (existing node harness) — `buildPrintSpec` omits `scale` at default, includes it otherwise.
+- `tests/order/order-logic.test.mjs` (existing node harness) — `buildPrintSpec` omits `scale` at default, includes it for Actual, and **never emits `custom` from the customer UI** (A10).
 - `tests/test_nup_rotation_matrix.py` — untouched, must still pass.
 - Paper proof before release: `python tools/proof_run.py FILE.pdf --send` for Fit / Actual / 75 % / 150 % on the OSP Konica; append the result to `docs/PRINT_ROTATION_MATRIX.md`.
 
@@ -312,7 +320,7 @@ temp file, appends `noscale`, cleans up in a `finally`. NULL ⇒ today's path.
 | A-3 | `print_items` columns + `handle_print_item` | low |
 | A-4 | `/scale-preview` + `/order/scale-rect` + tests | low — read-only endpoints |
 | A-5 | Staff UI + preview pane — **paper proof here** | low |
-| A-6 | order-v2 customer UI + preview canvas | low |
+| A-6 | order-v2 customer UI (Fit / Actual only) + preview canvas | low |
 
 ---
 

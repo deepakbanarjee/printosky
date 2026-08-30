@@ -121,7 +121,7 @@ printer** (the driver is never asked to scale, only told `noscale` as a guard).
 | S13-2 | **Planner + print server wiring** | `print_spec.scale` → planner bakes → `noscale` guard token. Guard test: no `scale` plans exactly as today, and `nup ≥ 2` ignores `scale` entirely |
 | S13-3 | **`print_items.scale_mode/scale_percent`** | Additive SQLite columns + `handle_print_item` bakes before printing |
 | S13-4 | **Preview endpoints** | `GET /scale-preview` returns a PNG of the **baked** page (same `apply_scale` the printer gets), one page, switchable; `GET /order/scale-rect` gives the customer canvas the same geometry. Offline → say so, never approximate |
-| S13-5 | **Staff scaling UI + paper proof** | Fit / Actual / Custom in the print panel and New Job modal; prove Fit/Actual/75%/150% on the OSP Konica, append to `docs/PRINT_ROTATION_MATRIX.md` |
+| S13-5 | **Staff scaling UI + paper proof** | Fit / Actual / Custom in the print panel and New Job modal — **Custom % is staff-only**, presets 50/75/90/125/150/200 plus free entry, clamped 25–400%, percent **of the original page** (so Custom 100% ≡ Actual). Over 100% is allowed, warned and shown cropped, never silently clamped. Then prove Fit/Actual/75%/150% on the OSP Konica and append to `docs/PRINT_ROTATION_MATRIX.md` |
 | S13-6 | **Customer scaling UI + preview** | order-v2 card (1-up only) + sheet canvas with hatched crop region and "N pages will be cropped" |
 | S13-7 | **Service rate engine** | `rate_card.py` Section 11: `calculate_service_quote()` over the rates below. Every minimum names itself in the breakdown |
 | S13-8 | **`jobs.service_kind` + `service_meta`** + transfer/booking columns | `SCHEMA_v29_service_jobs.sql` + SQLite ALTERs + `docs/SCHEMA.md`. NULL = print job |
@@ -164,7 +164,9 @@ OSP→Nattika internal rates (100%).
 **Locked by owner 2026-08-30:** scaling is offered on **1-up only** — every other
 layout always fits to the printable area (N-up *is* a fit; "Actual size" on 4-up
 would crop three-quarters of every page, and it keeps the verified slot geometry
-untouched). Previews render the baked PDF, one page at a time.
+untouched). Previews render the baked PDF, one page at a time. **Custom % is staff-only and
+measured against the original page** — 100% is the document's own size wherever it
+lands, so Custom 100% and Actual size are the same thing.
 
 ---
 
