@@ -44,7 +44,8 @@ BUDGET = {
     "ops_watchdog.py": 1,          # closing a SQLite handle; nothing to report
     "pdf_scanner.py": 5,
     "print_planner.py": 2,
-    "print_server.py": 5,
+    "print_server.py": 3,   # 5 -> 3: /file's two silent filepath reads went
+                            # when resolution moved into _resolve_job_file (2026-08-30)
     "printer_poller.py": 6,
     "rate_card.py": 3,
     "session_timeout.py": 1,

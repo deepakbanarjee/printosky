@@ -22,6 +22,7 @@ import logging
 import re as _re
 import uuid as _uuid
 from datetime import datetime
+from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger("api.webhook")
 
@@ -196,6 +197,53 @@ def _resolve_store_id(pickup_store) -> str:
     return _PICKUP_STORE_MAP.get(
         str(pickup_store or "").strip().lower(), _DEFAULT_STORE_ID
     )
+
+
+def _handle_order_scale_rect(h, path: str) -> None:
+    """GET /order/scale-rect?page_w=&page_h=&sheet=A4&mode=fit&percent=
+
+    Hands the customer's browser the printer's own geometry, so the preview on
+    order-v2 draws the page exactly where it will land instead of guessing at
+    it. Pure numbers — no file is uploaded, nothing is stored, and the same
+    pdf_scaler.scale_rect() the print path bakes with produces the answer.
+
+    A preview drawn by different code than the printer gets is a preview that
+    can lie, so there is no second implementation of this in JavaScript.
+
+    Responds 200 with {"scale": null} when the settings are a no-op (an absent
+    mode, or Actual on a page already the sheet size) — the caller then knows to
+    draw the page unchanged, which is what would print.
+    """
+    qs = parse_qs(urlparse(path).query)
+
+    def _num(key):
+        try:
+            return float(qs.get(key, [""])[0])
+        except (TypeError, ValueError):
+            return None
+
+    page_w, page_h = _num("page_w"), _num("page_h")
+    if not page_w or not page_h or page_w <= 0 or page_h <= 0:
+        _json_response(h, 400, {"error": "page_w and page_h required, in points"})
+        return
+
+    sheet = (qs.get("sheet", ["A4"])[0] or "A4").strip()
+    if sheet not in _VALID_SIZE:
+        _json_response(h, 400, {"error": f"unknown sheet {sheet!r}"})
+        return
+
+    mode = (qs.get("mode", [""])[0] or "").strip().lower()
+    percent = qs.get("percent", [None])[0]
+
+    try:
+        import pdf_scaler
+        rect = pdf_scaler.scale_rect(page_w, page_h, sheet, mode, percent)
+    except Exception as exc:
+        logger.error("scale-rect failed %s: %r", type(exc).__name__, str(exc))
+        _json_response(h, 500, {"error": "could not compute scale"})
+        return
+
+    _json_response(h, 200, {"scale": rect})
 
 
 def _handle_order_create(h, body: bytes) -> None:
