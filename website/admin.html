@@ -524,6 +524,33 @@
     margin-top: .4rem; text-align: center;
   }
   .jp-options-pane { overflow-y: auto; max-height: 520px; padding-right: .3rem; }
+  /* Scale preview — replaces the file iframe while a scale mode is active, so
+     what the operator sees is the sheet that will come out. */
+  .jp-scale-preview { flex: 1; display: none; flex-direction: column; align-items: center;
+    justify-content: center; min-height: 460px; border: 1px solid var(--border);
+    background: #fff; position: relative; }
+  .jp-scale-preview img { max-width: 100%; max-height: 440px; box-shadow: 0 0 0 1px var(--border); }
+  .jp-scale-msg { font-family: var(--mono); font-size: .68rem; color: var(--muted);
+    text-align: center; padding: 1.4rem; line-height: 1.6; }
+  .jp-scale-msg.err { color: var(--amber); }
+  .jp-pager { display: flex; gap: .5rem; align-items: center; justify-content: center;
+    margin-top: .4rem; font-family: var(--mono); font-size: .62rem; color: var(--muted); }
+  .jp-pager button { background: none; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 4px; padding: .1rem .45rem; cursor: pointer; font-family: var(--mono); }
+  .jp-pager button:disabled { opacity: .35; cursor: default; }
+  .jp-crop-warn { font-family: var(--mono); font-size: .62rem; color: var(--amber);
+    text-align: center; margin-top: .3rem; }
+  .jp-scale-note { font-family: var(--mono); font-size: .58rem; color: var(--muted);
+    margin-top: .25rem; line-height: 1.5; }
+  .jp-scale-custom { display: none; gap: .3rem; align-items: center; margin-top: .4rem; flex-wrap: wrap; }
+  .jp-scale-custom.show { display: flex; }
+  .jp-preset { background: none; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 4px; padding: .12rem .4rem; cursor: pointer;
+    font-family: var(--mono); font-size: .6rem; }
+  .jp-preset:hover, .jp-preset.on { border-color: var(--accent); color: var(--accent); }
+  .jp-scale-custom input { width: 62px; background: transparent; border: 1px solid var(--border);
+    color: var(--fg, inherit); border-radius: 4px; padding: .12rem .3rem;
+    font-family: var(--mono); font-size: .62rem; }
   @media (max-width: 900px) {
     .jp-split { grid-template-columns: 1fr; }
     .jp-preview-pane { border-right: none; padding-right: 0; margin-right: 0; border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1rem; }
@@ -2897,6 +2924,8 @@ let editFinishing = "none";
 let editIsStudent = false;
 let editUrgent    = false;
 let editPaperSize = "A4";
+let editScaleMode = "";     // "" | fit | actual | custom — "" is no scaling
+let editScalePercent = null;
 let quoteTimer    = null;
 let payJobId      = null;    // job being paid
 
@@ -2915,6 +2944,19 @@ function panelHTML() {
       <!-- LEFT: file preview -->
       <div class="jp-preview-pane">
         <iframe id="jp-preview-iframe" src="about:blank" frameborder="0"></iframe>
+        <!-- Shown instead of the iframe while a scale mode is active. The image
+             is a render of the BAKED page — the same file the printer gets —
+             not a drawing of where the page ought to go. -->
+        <div class="jp-scale-preview" id="jp-scale-preview">
+          <div class="jp-scale-msg" id="jp-scale-msg">Rendering…</div>
+          <img id="jp-scale-img" alt="" style="display:none">
+        </div>
+        <div class="jp-pager" id="jp-pager" style="display:none">
+          <button type="button" onclick="stepPreviewPage(-1)" id="jp-page-prev">◀</button>
+          <span id="jp-page-label">1 / 1</span>
+          <button type="button" onclick="stepPreviewPage(1)" id="jp-page-next">▶</button>
+        </div>
+        <div class="jp-crop-warn" id="jp-crop-warn" style="display:none"></div>
         <div class="jp-preview-footer" id="jp-preview-footer">—</div>
       </div>
       <!-- RIGHT: print options -->
@@ -2948,6 +2990,28 @@ function panelHTML() {
               <option value="A3">A3</option>
               <option value="Legal">Legal</option>
             </select>
+          </div>
+          <div class="pp-field">
+            <label>Page size on paper</label>
+            <select class="pp-sel" id="jp-scale-mode" style="width:100%" onchange="setScaleMode(this.value)">
+              <option value="">Printer default (no scaling)</option>
+              <option value="fit">Fit to page</option>
+              <option value="actual">Actual size</option>
+              <option value="custom">Custom %</option>
+            </select>
+            <div class="jp-scale-custom" id="jp-scale-custom">
+              <button type="button" class="jp-preset" onclick="setScalePercent(50)">50</button>
+              <button type="button" class="jp-preset" onclick="setScalePercent(75)">75</button>
+              <button type="button" class="jp-preset" onclick="setScalePercent(90)">90</button>
+              <button type="button" class="jp-preset" onclick="setScalePercent(125)">125</button>
+              <button type="button" class="jp-preset" onclick="setScalePercent(150)">150</button>
+              <button type="button" class="jp-preset" onclick="setScalePercent(200)">200</button>
+              <input type="number" id="jp-scale-percent" min="25" max="400" step="5" value="100"
+                     oninput="setScalePercent(this.value)"> %
+            </div>
+            <div class="jp-scale-note" id="jp-scale-note">
+              Price is per sheet — scaling does not change it.
+            </div>
           </div>
           <div class="pp-check-row">
             <label><input type="checkbox" id="jp-student" onchange="editIsStudent=this.checked; scheduleQuote()"> Student rate</label>
@@ -3042,6 +3106,8 @@ function selectJob(jobId) {
     .then(data => {
       if (data.items && data.items.length > 0) {
         editItems = data.items.map(it => ({
+          scale_mode:    it.scale_mode || "",
+          scale_percent: it.scale_percent || null,
           item_number: it.item_number,
           page_list:   it.page_list || "all",
           colour:      it.colour    || "bw",
@@ -3491,6 +3557,22 @@ function renderJobPanel() {
 
   document.getElementById("jp-finishing").value   = editFinishing;
   document.getElementById("jp-paper-size").value  = editPaperSize;
+
+  // Scaling is stored per print item; the panel treats it as a job-level
+  // choice and reads it off the first item. Absent -> "" -> no scaling, which
+  // is what every row written before 2026-08-30 means.
+  const firstItem = editItems[0] || {};
+  editScaleMode    = firstItem.scale_mode || "";
+  editScalePercent = firstItem.scale_percent || null;
+  const scaleSel = document.getElementById("jp-scale-mode");
+  if (scaleSel) {
+    scaleSel.disabled = false;
+    scaleSel.value = editScaleMode;
+    document.getElementById("jp-scale-custom").classList.toggle("show", editScaleMode === "custom");
+    if (editScalePercent) document.getElementById("jp-scale-percent").value = editScalePercent;
+    previewPage = 1;
+    refreshScalePreview();
+  }
   document.getElementById("jp-student").checked   = editIsStudent;
   document.getElementById("jp-urgent").checked    = editUrgent;
 
@@ -3646,6 +3728,123 @@ async function fetchAndShowQuote() {
   }
 }
 
+// ── Page scaling (staff only) ─────────────────────────────────────────────────
+// The preview is a render of the file the printer will actually receive, from
+// GET /scale-preview. There is deliberately no JavaScript copy of the geometry:
+// a preview drawn by different code than the printer gets is one that can lie.
+let previewPage    = 1;
+let scalePreviewT  = null;
+let scalePreviewAC = null;
+
+function setScaleMode(mode) {
+  editScaleMode = mode || "";
+  if (editScaleMode !== "custom") editScalePercent = null;
+  else if (!editScalePercent) editScalePercent = 100;
+  document.getElementById("jp-scale-custom").classList.toggle("show", editScaleMode === "custom");
+  previewPage = 1;
+  refreshScalePreview();
+}
+
+function setScalePercent(pct) {
+  const n = parseInt(pct, 10);
+  editScalePercent = isNaN(n) ? null : Math.max(25, Math.min(400, n));
+  const box = document.getElementById("jp-scale-percent");
+  if (box && editScalePercent && String(editScalePercent) !== box.value) box.value = editScalePercent;
+  document.querySelectorAll("#jp-scale-custom .jp-preset").forEach(b =>
+    b.classList.toggle("on", parseInt(b.textContent, 10) === editScalePercent));
+  refreshScalePreview();
+}
+
+function stepPreviewPage(delta) {
+  previewPage = Math.max(1, previewPage + delta);
+  refreshScalePreview();
+}
+
+function scaleMsg(text, isError) {
+  const msg = document.getElementById("jp-scale-msg");
+  const img = document.getElementById("jp-scale-img");
+  if (!msg) return;
+  msg.textContent = text;
+  msg.className = "jp-scale-msg" + (isError ? " err" : "");
+  msg.style.display = "";
+  img.style.display = "none";
+  document.getElementById("jp-pager").style.display = "none";
+  document.getElementById("jp-crop-warn").style.display = "none";
+}
+
+function refreshScalePreview() {
+  const pane   = document.getElementById("jp-scale-preview");
+  const iframe = document.getElementById("jp-preview-iframe");
+  if (!pane || !iframe) return;
+
+  // No scaling: the panel keeps the ordinary file view it has always had.
+  if (!editScaleMode) {
+    pane.style.display = "none";
+    iframe.style.display = "";
+    document.getElementById("jp-pager").style.display = "none";
+    document.getElementById("jp-crop-warn").style.display = "none";
+    return;
+  }
+  pane.style.display = "flex";
+  iframe.style.display = "none";
+
+  clearTimeout(scalePreviewT);
+  scalePreviewT = setTimeout(async () => {
+    if (!selectedJob || !STORE_PC_URL) { scaleMsg("Store PC not configured", true); return; }
+    if (scalePreviewAC) scalePreviewAC.abort();
+    scalePreviewAC = new AbortController();
+    scaleMsg("Rendering…", false);
+
+    const p = new URLSearchParams({
+      job_id: selectedJob.job_id, page: previewPage, mode: editScaleMode,
+      paper_size: editPaperSize,
+    });
+    if (editScaleMode === "custom") p.set("percent", editScalePercent || 100);
+
+    try {
+      const r = await fetch(`${STORE_PC_URL}/scale-preview?${p}`, { signal: scalePreviewAC.signal });
+      if (!r.ok) {
+        let why = `Preview unavailable (${r.status})`;
+        try { const j = await r.json(); if (j.error) why = j.error; } catch {}
+        scaleMsg(why, true);
+        // Scaling cannot work on this job at all — do not leave a control that
+        // would silently do nothing.
+        if (r.status === 404 || r.status === 415) {
+          document.getElementById("jp-scale-mode").value = "";
+          document.getElementById("jp-scale-mode").disabled = true;
+          editScaleMode = "";
+        }
+        return;
+      }
+      const total   = parseInt(r.headers.get("X-Total-Pages") || "1", 10);
+      const page    = parseInt(r.headers.get("X-Page") || "1", 10);
+      const cropped = parseInt(r.headers.get("X-Cropped-Pages") || "0", 10);
+      previewPage = page;
+
+      const img = document.getElementById("jp-scale-img");
+      const old = img.dataset.url;
+      img.dataset.url = URL.createObjectURL(await r.blob());
+      img.src = img.dataset.url;
+      if (old) URL.revokeObjectURL(old);
+      img.style.display = "";
+      document.getElementById("jp-scale-msg").style.display = "none";
+
+      document.getElementById("jp-pager").style.display = total > 1 ? "flex" : "none";
+      document.getElementById("jp-page-label").textContent = `${page} / ${total}`;
+      document.getElementById("jp-page-prev").disabled = page <= 1;
+      document.getElementById("jp-page-next").disabled = page >= total;
+
+      const warn = document.getElementById("jp-crop-warn");
+      warn.style.display = cropped > 0 ? "" : "none";
+      warn.textContent = cropped === 1
+        ? "⚠ 1 page will be cropped"
+        : `⚠ ${cropped} pages will be cropped`;
+    } catch (e) {
+      if (e.name !== "AbortError") scaleMsg("Store PC unreachable — preview unavailable", true);
+    }
+  }, 250);
+}
+
 // ── Save specs → POST /update-job ─────────────────────────────────────────────
 async function saveJobSpecs() {
   if (!STORE_PC_URL) { alert("Print server not configured — click PC Setup"); return; }
@@ -3670,6 +3869,8 @@ async function saveJobSpecs() {
         paper_gsm:   it.paper_gsm || 70,
         printer:     it.printer || (it.colour === "col" ? "epson" : "konica"),
         pages:       it.pages || selectedJob.page_count || 1,
+        scale_mode:    editScaleMode || null,
+        scale_percent: editScaleMode === "custom" ? editScalePercent : null,
       })),
     };
     const r    = await fetch(`${STORE_PC_URL}/update-job`, {
