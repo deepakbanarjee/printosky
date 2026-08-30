@@ -95,8 +95,16 @@ def diff_schemas(expected: dict[str, Any], actual: dict[str, Any]) -> list[Drift
                     }
                 }
             },
-            "views": [str, ...]   # optional; entries excluded from table diff
+            "views": [str, ...],          # optional; excluded from table diff
+            "ignored_tables": [str, ...]  # optional; excluded from both sides
         }
+
+    ``ignored_tables`` is for tables that exist but are deliberately not part of
+    the schema contract — a one-off backup taken during an incident, say. They
+    are neither expected nor flagged as extra. Declaring one is a visible
+    decision, which is the point: the alternative is documenting a temporary
+    table as if it were permanent, or leaving the check red until someone stops
+    reading it.
 
     Returns a list of Drift records (empty if schemas match).
     """
@@ -104,9 +112,10 @@ def diff_schemas(expected: dict[str, Any], actual: dict[str, Any]) -> list[Drift
     exp_tables: dict = expected.get("tables", {}) or {}
     act_tables: dict = actual.get("tables", {}) or {}
     views: set[str] = set(expected.get("views", []) or [])
+    ignored: set[str] = set(expected.get("ignored_tables", []) or [])
 
-    exp_names = set(exp_tables.keys())
-    act_names = set(act_tables.keys()) - views  # ignore declared views
+    exp_names = set(exp_tables.keys()) - ignored
+    act_names = set(act_tables.keys()) - views - ignored  # declared views/ignores
 
     for t in sorted(exp_names - act_names):
         drifts.append(Drift("missing_table", table=t))

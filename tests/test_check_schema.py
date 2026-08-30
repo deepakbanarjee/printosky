@@ -216,3 +216,56 @@ class TestManifestParses:
             "views": m.get("views", []),
         }
         assert check_schema.diff_schemas(m, synthetic_actual) == []
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Tables deliberately outside the contract
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestIgnoredTables:
+    """A one-off backup taken during an incident is not schema drift. Without a
+    way to say so the choice is documenting a temporary table as permanent, or
+    leaving the check red until people stop reading it — and a check nobody
+    reads is how this one sat inert while a whole table went undocumented."""
+
+    def test_an_ignored_table_in_the_db_is_not_extra(self) -> None:
+        exp = _schema({"jobs": {"rls": True, "columns": {}}})
+        exp["ignored_tables"] = ["backup_20260818_nattika_counters"]
+        act = _schema({
+            "jobs": {"rls": True, "columns": {}},
+            "backup_20260818_nattika_counters": {"rls": False, "columns": {}},
+        })
+        assert check_schema.diff_schemas(exp, act) == []
+
+    def test_an_ignored_table_is_not_missing_when_absent(self) -> None:
+        """Dropping the backup must not turn the exception into a new failure."""
+        exp = _schema({"jobs": {"rls": True, "columns": {}},
+                       "backup_20260818_nattika_counters": {"rls": False, "columns": {}}})
+        exp["ignored_tables"] = ["backup_20260818_nattika_counters"]
+        act = _schema({"jobs": {"rls": True, "columns": {}}})
+        assert check_schema.diff_schemas(exp, act) == []
+
+    def test_an_ignored_table_is_not_rls_checked(self) -> None:
+        """The backups have RLS off; that is recorded in docs/SCHEMA.md as a
+        known gap, not re-reported on every run."""
+        exp = _schema({"backup_20260818_nattika_counters": {"rls": True, "columns": {}}})
+        exp["ignored_tables"] = ["backup_20260818_nattika_counters"]
+        act = _schema({"backup_20260818_nattika_counters": {"rls": False, "columns": {}}})
+        assert check_schema.diff_schemas(exp, act) == []
+
+    def test_a_table_not_ignored_still_drifts(self) -> None:
+        exp = _schema({"jobs": {"rls": True, "columns": {}}})
+        exp["ignored_tables"] = ["something_else"]
+        act = _schema({"jobs": {"rls": True, "columns": {}},
+                       "surprise_table": {"rls": True, "columns": {}}})
+        drifts = check_schema.diff_schemas(exp, act)
+        assert [d.kind for d in drifts] == ["extra_table"]
+
+    def test_the_real_manifest_only_ignores_the_incident_backups(self) -> None:
+        """Every entry here is a decision someone has to justify. Keep the list
+        short and temporary."""
+        ignored = check_schema.load_manifest().get("ignored_tables") or []
+        assert sorted(ignored) == [
+            "backup_20260818_nattika_counters",
+            "backup_20260818_nattika_epson_jobs",
+        ]

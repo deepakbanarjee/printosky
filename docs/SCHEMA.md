@@ -20,11 +20,11 @@ This document is the canonical schema reference for the shared Supabase database
 
 | | |
 |---|---|
-| Tables | 30 |
+| Tables | 34 |
 | Views | 2 (`epson_daily`, `konica_daily`) |
 | Foreign keys | **1** (`referral_credits.referrer_code → referrers.code`) |
-| Tables without RLS | **3** (`project_builder_orders`, `referral_credits`, `referrers`) — see [Security gaps](#security-gaps) |
-| Owning products | printosky (26), osp-academics (1), shared (3) |
+| Tables without RLS | **2** (both 18 Aug incident backups) — see [Security gaps](#security-gaps) |
+| Owning products | printosky (30), osp-academics (1), shared (3) |
 
 The schema is heavily denormalized — only one FK exists in the whole database. Cross-table integrity is enforced at the application layer (or not at all). Worth documenting per-table; not worth a mass FK-introduction project.
 
@@ -538,6 +538,67 @@ Stored raw and uninterpreted on purpose. Pulling word-level `before → after` p
 
 ---
 
+#### `book_feedback` 🟦
+Star rating and comment left against a book order. Written by the WhatsApp book bot.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | bigint | NO | identity | **PK** |
+| `order_code` | text | NO | — | the `book_orders` row this rates |
+| `phone` | text | YES | — | |
+| `rating` | smallint | YES | — | |
+| `comment` | text | YES | — | |
+| `created_at` / `updated_at` | timestamptz | NO | `now()` | |
+
+#### `book_returns` 🟦
+A returned or replaced book order, and how the money was settled. Note the settlement columns are the record of who owes whom after courier costs both ways — `settlement_direction` (`none`/`refund`/`collect`), `settlement_amount`, `settlement_status`.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | bigint | NO | identity | **PK** |
+| `return_code` | text | NO | — | |
+| `order_code` | text | NO | — | the order being returned |
+| `phone` / `name` | text | YES | — | |
+| `returned_items` | jsonb | NO | `'{}'` | |
+| `reason` / `condition` / `notes` | text | YES | — | |
+| `resolution` | text | NO | `'replacement'` | |
+| `replacement_order_code` | text | YES | — | the new order, when replaced |
+| `replacement_items` | jsonb | YES | — | |
+| `price_delta` | numeric | NO | `0` | |
+| `inward_courier` / `outward_courier` | numeric | NO | `0` | ₹ each way |
+| `courier_borne_by` | text | NO | `'customer'` | |
+| `settlement_direction` | text | NO | `'none'` | |
+| `settlement_amount` | numeric | NO | `0` | |
+| `settlement_mode` / `settlement_note` | text | YES | — | |
+| `settlement_status` | text | NO | `'none'` | |
+| `status` | text | NO | `'requested'` | |
+| `created_by` | text | YES | — | |
+| `created_at` / `updated_at` | timestamptz | NO | `now()` | |
+
+#### `contact_notes` 🟦
+Free-text staff notes against a WhatsApp contact, shown in the admin console.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | bigint | NO | sequence | **PK** |
+| `phone` | text | NO | — | |
+| `note` | text | NO | — | |
+| `created_by` | text | YES | — | |
+| `created_at` | timestamptz | NO | `now()` | |
+
+#### `store_role_leases` 🟦
+Which box currently owns a coordinated role for a store — the lease that stops two PCs at one store both polling the printers. See [MULTI_BOX.md](MULTI_BOX.md); `device_lease.hold()` acquires and renews it every cycle.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `store_id` / `role` | text | NO | — | **PK** (composite) |
+| `owner_device` | text | YES | — | `store_devices.device_id` holding it |
+| `acquired_at` / `expires_at` | timestamptz | YES | — | an expired lease is free to take |
+| `updated_at` | timestamptz | NO | `now()` | |
+
+---
+
+
 ### B2B
 
 #### `b2b_clients` 🟦
@@ -585,15 +646,16 @@ Per-day aggregate over `konica_jobs`.
 
 ## Security gaps
 
-The check below was done against `pg_class.relrowsecurity`. **Three tables have RLS disabled** — they should be enabled, or the absence justified:
+Checked against `pg_class.relrowsecurity` on 2026-08-29. `project_builder_orders`, `referrers` and `referral_credits` were listed here as RLS-disabled; **all three now have RLS enabled** and the risk described below no longer applies to them.
+
+**Two tables still have RLS disabled**, and both are incident leftovers rather than product tables:
 
 | Table | Status | Risk |
 |---|---|---|
-| `project_builder_orders` | **RLS disabled** | Contains payment IDs and download URLs. Anon Supabase key can read all orders. Customer A can iterate over IDs and access customer B's DOCX downloads. |
-| `referrers` | **RLS disabled** | Referrer codes are semi-public (shared with influencers) but `total_orders` / `total_credited` are commercial info. Anon can scrape revenue per referrer. |
-| `referral_credits` | **RLS disabled** | Customer-phone + order-id pairs. PII leak via anon key. |
+| `backup_20260818_nattika_counters` | **RLS disabled** | 339 rows of Nattika printer counters, snapshotted by hand during the 18 Aug incident. Readable with the anon key. |
+| `backup_20260818_nattika_epson_jobs` | **RLS disabled** | 811 rows of Nattika Epson job history — filenames and user names among them. Readable with the anon key. |
 
-**Recommended action:** add a migration `SCHEMA_v19_rls_gaps.sql` enabling RLS on all three with a service-role-only policy. Same shape as the v18 `processed_webhooks` policy in this branch's `api/migrations/`.
+**Recommended action:** drop both once the incident data is confirmed no longer needed, and remove them from `ignored_tables` in `config/schema_manifest.yaml` at the same time. They are listed there so the drift check is not permanently red over two temporary tables; that listing is a deliberate exception, not an endorsement.
 
 ---
 

@@ -17,12 +17,27 @@
 
 version: 29
 description: Live schema after SCHEMA_v29 (processed_webhooks RLS) plus the DTP
-  transcription tables. 43 tables, all RLS-enabled.
+  transcription tables. 48 tables, all RLS-enabled
+  (excluding two ignored incident backups, which are not).
 
 # Tables with RLS DISABLED -- flagged for security review. As of 2026-06-08
 # every public table has RLS enabled (TASK-023 + TASK-024 closed the last gaps),
 # so this list is empty. If any table ever shows up here, investigate.
 rls_disabled_known: []
+
+# Tables that exist but are deliberately NOT part of the schema contract, so
+# they are neither expected nor reported as extra. Declaring one is meant to be
+# a visible decision -- the alternative is documenting a temporary table as if
+# it were permanent, or leaving the drift check red until people stop reading it.
+#
+# These two are snapshots taken by hand during the Nattika counter incident on
+# 2026-08-18. They hold real data (339 and 811 rows) and have RLS DISABLED, so
+# they are also the reason this project no longer has RLS on every public table.
+# They should be dropped once the incident data is confirmed no longer needed;
+# remove them from this list at the same time.
+ignored_tables:
+  - backup_20260818_nattika_counters
+  - backup_20260818_nattika_epson_jobs
 
 tables:
   academic_orders:
@@ -257,6 +272,37 @@ tables:
         nullable: true
         type: text
     rls: true
+  book_feedback:
+    columns:
+      comment:
+        default: null
+        nullable: true
+        type: text
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      id:
+        default: null
+        nullable: false
+        type: bigint
+      order_code:
+        default: null
+        nullable: false
+        type: text
+      phone:
+        default: null
+        nullable: true
+        type: text
+      rating:
+        default: null
+        nullable: true
+        type: smallint
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+    rls: true
   book_orders:
     columns:
       abandoned_reminder_at:
@@ -335,6 +381,10 @@ tables:
         default: null
         nullable: false
         type: bigint
+      is_replacement:
+        default: 'false'
+        nullable: false
+        type: boolean
       items:
         default: '''{}''::jsonb'
         nullable: false
@@ -346,6 +396,14 @@ tables:
       order_code:
         default: null
         nullable: false
+        type: text
+      packed_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      parent_order_code:
+        default: null
+        nullable: true
         type: text
       payment_collected_by:
         default: '''oxygen''::text'
@@ -367,6 +425,14 @@ tables:
         default: null
         nullable: false
         type: text
+      pradeep_commission:
+        default: '0'
+        nullable: true
+        type: numeric
+      return_code:
+        default: null
+        nullable: true
+        type: text
       source:
         default: '''whatsapp''::text'
         nullable: false
@@ -382,6 +448,10 @@ tables:
       updated_at:
         default: now()
         nullable: false
+        type: timestamp with time zone
+      verifier_reminder_at:
+        default: null
+        nullable: true
         type: timestamp with time zone
       via_divya:
         default: 'true'
@@ -417,6 +487,109 @@ tables:
       verified_at:
         default: null
         nullable: true
+        type: timestamp with time zone
+    rls: true
+  book_returns:
+    columns:
+      condition:
+        default: null
+        nullable: true
+        type: text
+      courier_borne_by:
+        default: '''customer''::text'
+        nullable: false
+        type: text
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      created_by:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: null
+        nullable: false
+        type: bigint
+      inward_courier:
+        default: '0'
+        nullable: false
+        type: numeric
+      name:
+        default: null
+        nullable: true
+        type: text
+      notes:
+        default: null
+        nullable: true
+        type: text
+      order_code:
+        default: null
+        nullable: false
+        type: text
+      outward_courier:
+        default: '0'
+        nullable: false
+        type: numeric
+      phone:
+        default: null
+        nullable: true
+        type: text
+      price_delta:
+        default: '0'
+        nullable: false
+        type: numeric
+      reason:
+        default: null
+        nullable: true
+        type: text
+      replacement_items:
+        default: null
+        nullable: true
+        type: jsonb
+      replacement_order_code:
+        default: null
+        nullable: true
+        type: text
+      resolution:
+        default: '''replacement''::text'
+        nullable: false
+        type: text
+      return_code:
+        default: null
+        nullable: false
+        type: text
+      returned_items:
+        default: '''{}''::jsonb'
+        nullable: false
+        type: jsonb
+      settlement_amount:
+        default: '0'
+        nullable: false
+        type: numeric
+      settlement_direction:
+        default: '''none''::text'
+        nullable: false
+        type: text
+      settlement_mode:
+        default: null
+        nullable: true
+        type: text
+      settlement_note:
+        default: null
+        nullable: true
+        type: text
+      settlement_status:
+        default: '''none''::text'
+        nullable: false
+        type: text
+      status:
+        default: '''requested''::text'
+        nullable: false
+        type: text
+      updated_at:
+        default: now()
+        nullable: false
         type: timestamp with time zone
     rls: true
   bot_sessions:
@@ -508,6 +681,29 @@ tables:
       updated_at:
         default: null
         nullable: true
+        type: text
+    rls: true
+  contact_notes:
+    columns:
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      created_by:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('contact_notes_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      note:
+        default: null
+        nullable: false
+        type: text
+      phone:
+        default: null
+        nullable: false
         type: text
     rls: true
   conversation_log:
@@ -955,6 +1151,10 @@ tables:
         default: null
         nullable: true
         type: text
+      orientation:
+        default: '''auto''::text'
+        nullable: true
+        type: text
       page_count:
         default: '0'
         nullable: true
@@ -975,6 +1175,18 @@ tables:
         default: null
         nullable: true
         type: timestamp with time zone
+      print_claimed_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      print_claimed_by:
+        default: null
+        nullable: true
+        type: text
+      print_spec:
+        default: null
+        nullable: true
+        type: jsonb
       printed_by:
         default: null
         nullable: true
@@ -1996,6 +2208,37 @@ tables:
         nullable: true
         type: text
     rls: true
+  store_devices:
+    columns:
+      app_version:
+        default: null
+        nullable: true
+        type: text
+      app_version_since:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      device_id:
+        default: null
+        nullable: false
+        type: text
+      first_seen:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      hostname:
+        default: null
+        nullable: true
+        type: text
+      last_seen:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      store_id:
+        default: null
+        nullable: false
+        type: text
+    rls: true
   store_pc_status:
     columns:
       clean_shutdown:
@@ -2022,8 +2265,39 @@ tables:
         default: null
         nullable: true
         type: text
+      stale_build_alerted:
+        default: null
+        nullable: true
+        type: text
       state:
         default: '''unknown''::text'
+        nullable: false
+        type: text
+      store_id:
+        default: null
+        nullable: false
+        type: text
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+    rls: true
+  store_role_leases:
+    columns:
+      acquired_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      expires_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      owner_device:
+        default: null
+        nullable: true
+        type: text
+      role:
+        default: null
         nullable: false
         type: text
       store_id:
@@ -2186,6 +2460,14 @@ tables:
         default: null
         nullable: false
         type: text
+      pinned:
+        default: 'false'
+        nullable: false
+        type: boolean
+      pinned_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
     rls: true
   work_sessions:
     columns:
