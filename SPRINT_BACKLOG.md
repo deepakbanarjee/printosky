@@ -107,6 +107,29 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 
 ---
 
+## ⚪ SPRINT 13 — Print scaling + post-press services
+
+Plan: [docs/plans/2026-08-30-scaling-and-post-press-services.md](docs/plans/2026-08-30-scaling-and-post-press-services.md)
+(design + shipping order + open questions). Both features are additive and inert
+until a job opts in — no change to the verified rotation matrix or the locked
+Konica dual-queue fix.
+
+| # | Task | Details |
+|---|------|---------|
+| S13-1 | **`pdf_scaler.py` + tests** | New module: bake Fit / Actual / Custom-% into the PDF. Nothing calls it yet (plan A-1) |
+| S13-2 | **Planner + print server wiring** | `print_spec.scale` → planner → `noscale` token; imposed path passes `perform_nup`'s existing `scale_behavior`. Guard test: a spec with no `scale` plans exactly as today (A-2) |
+| S13-3 | **`print_items.scale_mode/scale_percent`** | Additive SQLite columns + `handle_print_item` support (A-3) |
+| S13-4 | **Staff scaling UI + paper proof** | Print panel + New Job modal in jobs.html/admin.html; then prove Fit/Actual/75%/150% on the OSP Konica and append the result to `docs/PRINT_ROTATION_MATRIX.md` (A-4) |
+| S13-5 | **Customer scaling UI** | order-v2 card + `buildPrintSpec` emits `scale` only when non-default (A-5) |
+| S13-6 | **Service rate engine** | `rate_card.py` new Section 11: `calculate_service_quote()` over the existing lamination/scanning/binding tables. Foiling ships staff-priced — rates pending owner (B-1, Q1) |
+| S13-7 | **`jobs.service_kind` + `service_meta`** | `SCHEMA_v29_service_jobs.sql` (cloud) + SQLite ALTERs + `docs/SCHEMA.md` rows. NULL = print job (B-2) |
+| S13-8 | **`/service-quote` + `/new-service`** | Service jobs never create `print_items`, never enter a printer queue. Isolation tests pin it (B-3) |
+| S13-9 | **Service console UI** | `+ Service` modal + kind pills + service panel in jobs.html, mirrored in admin.html; MIS print counts filtered to `service_kind IS NULL` (B-4/B-5) |
+| S13-10 | **Copy/scan reconciliation** | Compare counter-recorded copy/scan service jobs against `konica_jobs.job_type IN ('Copy','Scan')` — first visibility into unbilled walk-in copying (B-6) |
+| S13-11 | **Customer post-press ordering** ❓ | order-v2 / WhatsApp entry for finishing-only work. Decide after S13-9 is live (B-7, Q7) |
+
+---
+
 ## ✅ COMPLETED (Session 1–6 reference)
 
 - WhatsApp bot + file capture
