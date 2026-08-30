@@ -574,14 +574,41 @@ live order page: `order-v2.html:418,421` offers both, `_VALID_FINISHING`
 all. The production rows confirm it — 1 colour page + Perfect quoted **₹10**, the
 page and nothing for the binding.
 
-**Gap 3 — two identical specs, two prices (unexplained).**
-`OSKY-20260821-6517-848b` and `-c724`, 14 minutes apart, have byte-identical
-stored specs (`total_pages 1`, `pages_included [1]`, `colour_mode col`,
-`binding perfect`, `png`) and were quoted **₹10 and ₹3**. ₹3 is the A4 B&W rate,
-so the second was priced as B&W despite a colour spec. Not explicable from the
-code, and not guessed at here. **Proposed check:** re-run `calculate_quote` over
-every stored `print_spec` and list jobs whose recomputed total differs from
-`amount_quoted`.
+**Gap 3 — A5 and Letter have no rates and silently bill as A4 B&W.** This is
+what the ₹10-vs-₹3 pair turned out to be, and it is not drift at all: the ₹3 job
+was **A5 colour**. `_VALID_SIZE` (`api/handlers_order.py:180`) accepts
+`{A4, A3, A5, Legal, Letter}` and order-v2's paper dropdown offers all five, but
+`PRINT_RATES` has keys only for A4, A3 and Legal. `get_print_rate` ends with
+`PRINT_RATES.get(paper_type, PRINT_RATES["A4_BW"])` — so **A5 and Letter, colour
+included, are billed at ₹3/sheet**. An A5 colour page bills ₹3 instead of ₹10;
+Letter is larger than A4 and bills at A4 rates. Same class of bug as the
+finishing gaps: a value the UI offers that the rate card does not know, failing
+to the cheapest thing instead of failing loud.
+
+**The audit — run 2026-08-30, `tools/quote_drift_audit.py`.** Every stored
+`print_spec` recomputed through `rate_card` and compared with what was charged:
+
+| | |
+|---|---|
+| Jobs with a stored quote | 104 |
+| Match the rate card exactly | 70 |
+| Drift | 32 |
+| Not recomputable (spec pre-dates `pages_included`) | 2 |
+| Unrated paper type | 1 (the A5 job above) |
+
+**There is no live drift.** Every drift row is dated **2026-08-07 → 08-13**;
+everything from 08-16 on matches exactly. Commit `6afb9b5` (2026-08-14,
+*"calc_sheets returns exact physical sheet count without odd-rounding bug"*)
+deliberately removed the old rounding, and **28 of the 32 drift rows are exactly
+reproduced by the pre-fix rule**. The other 4 are mixed-colour jobs from the same
+window, explained by colour moving to per-page billing. On those 32 rows
+customers paid ₹512 against ₹332 at today's rates — historically *over*-charged
+by ₹180, never under.
+
+> **One real leftover:** `rate_card.py:20` still documents the rule that commit
+> removed — *"Sheets for DS = ceil(pages/2), rounded UP to next even number."*
+> The code and its own docstring disagree, which is how the next person gets
+> this wrong. One-line fix, folded into B-0.
 
 **The fix — B-0, its own PR**, because it changes live print-job quote maths:
 
@@ -589,6 +616,8 @@ every stored `print_spec` and list jobs whose recomputed total differs from
 - `lam_roll` → `ROLL_LAM_RATES × max(sheets, 10)` · `lam_cover` → ₹50 · `id_card` → ₹100/card
 - `lam_sheet` → by paper size (₹70 / ₹120 / ₹140) instead of the hardcoded `LAMINATION_RATES["a4"]`
 - Spiral A3 → tiered · wiro → its own tiers · thermal → removed
+- **`A5_BW` / `A5_col` / `Letter_BW` / `Letter_col` added** so no offered size falls back to A4 B&W (rates pending, §6 N6)
+- `rate_card.py:20` docstring corrected to match `calc_sheets`
 - Add every missing key to `BINDING_RATES` / `FINISHING_DISPLAY` and the in-house/outsourced lists
 - **A guard test that every key in `_VALID_FINISHING` and every `data-binding` in order-v2 resolves to a non-zero, non-`None` price** — the test that would have caught all of this
 - Every other finishing key's price pinned unchanged, so the blast radius is provable
@@ -636,7 +665,8 @@ none of them blocks starting B-0, B-1 or A-1.
 | N2 | **Photo rates** for stamp / postcard / 4×6 (set of 5 ₹50 and full sheet ₹100 are set) | `photo` in B-1 | those two only; others quoted by hand |
 | N3 | **Drop-off expiry** — how many days before an un-received booking cancels | B-9 | 3 days, WhatsApp reminder first |
 | N4 | **OSP→Nattika internal rates** | nothing — deliberately configurable | 100 % (Nattika books the full finishing amount) |
-| N5 | **Go-ahead for the quote-drift audit** (§4.14 gap 3) | nothing | not run yet |
+| N5 | ~~Quote-drift audit~~ | — | **run 2026-08-30** — no live drift; see §4.14 |
+| N6 | **A5 and Letter print rates** (B&W and colour) — both are offered on the order page and currently bill at A4 B&W ₹3/sheet | B-0 | none — this one is live under-billing |
 
 **Answered 2026-08-30:** preview renders the baked PDF, one page, switchable
 (§3.6) · scaling 1-up only, everything else fits the printable area (A4) · all
