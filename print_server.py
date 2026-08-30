@@ -38,6 +38,40 @@ from store_config import get_store_config
 
 load_dotenv()
 
+# Log to the console AND a rotating file, so print history survives after the
+# console window is closed (chasing a live cmd window is not a diagnostic plan).
+# 2 MB × 5 backups ≈ 10 MB cap. File logging is best-effort — if the logs dir
+# can't be created, the console handler still works.
+#
+# Must be the FIRST logging call anywhere in this module. Python's logging.info()
+# / .warning() etc. silently trigger an implicit logging.basicConfig() with
+# default settings (WARNING level, console only) the first time any of them
+# runs with no handlers configured yet — which makes a LATER explicit
+# basicConfig() call a permanent no-op for the rest of the process, dropping
+# every .info() line, file and all. Confirmed: once printer_queue_names got
+# configured, the store_config override's own confirmation log line (an
+# earlier logging.info() call further down this file) triggered exactly this,
+# and every INFO-level log after it vanished for that entire process.
+import logging.handlers as _log_handlers_mod
+
+_log_handlers = [logging.StreamHandler()]
+try:
+    _log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+    os.makedirs(_log_dir, exist_ok=True)
+    _log_handlers.append(_log_handlers_mod.RotatingFileHandler(
+        os.path.join(_log_dir, "print_server.log"),
+        maxBytes=2_000_000, backupCount=5, encoding="utf-8",
+    ))
+except Exception:
+    pass
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [PRINT] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=_log_handlers,
+)
+
 # Rate card engine (same directory)
 sys.path.insert(0, os.path.dirname(__file__))
 try:
@@ -461,30 +495,6 @@ except Exception:
         DB_PATH = r"C:\Printosky\Data\jobs.db"
     else:
         DB_PATH = str(Path.home() / "Printosky" / "Data" / "jobs.db")
-
-# Log to the console AND a rotating file, so print history survives after the
-# console window is closed (chasing a live cmd window is not a diagnostic plan).
-# 2 MB × 5 backups ≈ 10 MB cap. File logging is best-effort — if the logs dir
-# can't be created, the console handler still works.
-import logging.handlers as _log_handlers_mod
-
-_log_handlers = [logging.StreamHandler()]
-try:
-    _log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-    os.makedirs(_log_dir, exist_ok=True)
-    _log_handlers.append(_log_handlers_mod.RotatingFileHandler(
-        os.path.join(_log_dir, "print_server.log"),
-        maxBytes=2_000_000, backupCount=5, encoding="utf-8",
-    ))
-except Exception:
-    pass
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [PRINT] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=_log_handlers,
-)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
