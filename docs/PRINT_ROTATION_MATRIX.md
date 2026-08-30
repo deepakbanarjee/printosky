@@ -37,6 +37,18 @@ _Generated from the code. Regenerate with `python tools/nup_matrix.py --markdown
 > Fit and Actual differ visibly, and they are what the customer preview promises.
 > Check 8 is the one that could disturb what is already verified — if a scaled
 > duplex job misregisters, the scaling is at fault, not the rotation model.
+>
+> **Run it with one command**, on the store PC, against the deployed code:
+>
+> ```
+> python tools/scale_proof.py notes.pdf            # writes the 8 PDFs, prints nothing
+> python tools/scale_proof.py notes.pdf --send --printer konica
+> python tools/scale_proof.py notes.pdf --only S3 S4 --send     # just the pair that decides it
+> ```
+>
+> The tool derives its own A5 source with plain PyMuPDF rather than with
+> `pdf_scaler` — deriving it with the code under test would prove nothing about
+> the code under test.
 
 Every rotation the imposer can apply, for every combination of layout,
 orientation choice and fill direction. The numbers here come out of
