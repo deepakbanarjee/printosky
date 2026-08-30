@@ -662,7 +662,8 @@ def _konica_queue_for_sides(sides: str | None) -> str | None:
 def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 1,
                     colour_mode: str = "auto", staff_id: str = None,
                     sides: str = None, paper_size: str = None,
-                    orientation: str = None, update_status: bool = True):
+                    orientation: str = None, update_status: bool = True,
+                    scale_applied: bool = False):
     """
     Execute print command via SumatraPDF (silent, no UI).
     Returns (success: bool, message: str)
@@ -671,6 +672,10 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
                       None -> leave to the queue default.
     ``paper_size``  : e.g. 'A4'/'A3'/'Legal'; None -> queue default.
     ``orientation`` : 'portrait'/'landscape'; 'auto'/None -> per-page (queue default).
+    ``scale_applied``: the file already carries its final geometry (print_planner
+                      baked Fit/Actual/Custom into it), so tell SumatraPDF not to
+                      scale it again. Default False emits nothing, which is what
+                      every job did before scaling existed.
     """
     # No-Konica stores: redirect a 'konica' dispatch to the Epson (shared helper).
     printer_key = _effective_printer_key(printer_key, job_id)
@@ -745,6 +750,13 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
     o = (orientation or "").strip().lower()
     if o in ("portrait", "landscape"):
         settings_parts.append(o)
+
+    # The page geometry is already baked into the file, so stop the driver
+    # having a second opinion about it. A guard, not the mechanism: if a driver
+    # ignores this the sheet is still right, because the correctness is in the
+    # PDF. Never emitted for a job that did not ask for scaling.
+    if scale_applied:
+        settings_parts.append("noscale")
 
     settings = ",".join(settings_parts)
 

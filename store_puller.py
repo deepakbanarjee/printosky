@@ -426,6 +426,8 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
             sub_sides = action["sides"]
             sub_paper = action["paper_size"]
             sub_orient = action["orientation"]
+            # .get(): a planner fallback action predates the key on old rows.
+            sub_scaled = action.get("scale_applied", False)
 
             send_colour = "colour" if sub_colour == "colour" else ("bw" if sub_colour == "bw" else colour_mode_for(colour))
             printer_key = printer_key_for(sub_colour)
@@ -440,7 +442,7 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
                 job_id, sub_pdf, printer_key,
                 copies=max(1, sub_copies), colour_mode=send_colour, staff_id=None,
                 sides=sub_sides, paper_size=sub_paper, orientation=sub_orient,
-                update_status=is_last,
+                update_status=is_last, scale_applied=sub_scaled,
             )
             if ok:
                 printed_actions += 1

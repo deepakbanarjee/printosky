@@ -208,7 +208,19 @@ Also baked, by the imposer, with parameters it already has — no imposer change
 | no `scale` (today) | nothing — defaults `"Auto-Fit"` (**unchanged**) |
 | `fit` | `scale_behavior="Auto-Fit"` (explicit, same result) |
 | `actual` | `scale_behavior="Original"` |
-| `custom` | `scale_behavior="Custom"`, `custom_scale_width/height` from `scale_rect()` |
+| `custom` | **not supported — dropped with an alert** (see below) |
+
+> **Scope reduction found while building A-2 (2026-08-30).** The plan assumed
+> `custom` on a landscape sheet was just `scale_behavior="Custom"` plus a target
+> box from `scale_rect()`. It is not: `perform_nup` takes ONE absolute box for
+> every slot, and on a landscape layout the page is rotated 90°, so the box has
+> to be transposed — and which way is a question the verified rotation matrix
+> answers only for the fitted case. Rather than guess at geometry that has never
+> been on paper, **1-up landscape supports `fit` and `actual`; `custom` there is
+> dropped with an ops_watchdog alert** telling the operator to use portrait or
+> fit/actual. `custom` is staff-only (A10) and landscape is the rarer half of
+> 1-up, so the gap is narrow. Reinstating it needs its own paper proof, not more
+> code.
 
 `nup >= 2` never reaches this table — it always uses the `"Auto-Fit"` default (A4).
 
