@@ -304,6 +304,17 @@ ALTER TABLE print_items ADD COLUMN scale_percent INTEGER; -- NULL = today
 `handle_print_item` bakes via `apply_scale` when `scale_mode` is set, prints the
 temp file, appends `noscale`, cleans up in a `finally`. NULL ⇒ today's path.
 
+> **Found while building A-3 (2026-08-30): the migration cannot be a
+> prerequisite.** Store PCs update by pulling code and restarting the watcher
+> (`docs/AUTO_UPDATE.md`) — **nothing runs `fix_db.py` for them**. A box running
+> new `print_server.py` against a database written before today would hit
+> `no such column: scale_mode` on the INSERT, and spec-saving would break at the
+> counter. So `handle_update_job` calls `_ensure_print_item_scale_columns()`
+> first: a cheap idempotent PRAGMA-and-ALTER that makes `fix_db.py` the tidy-up
+> rather than the prerequisite. `handle_print_item` already reads the columns
+> defensively. Worth remembering for the B-2 migrations, which have the same
+> exposure.
+
 ### 3.9 Tests (new files, no existing test edited)
 
 - `tests/test_pdf_scaler.py` — `scale_rect` geometry per mode, crop detection, percent clamping; `apply_scale` page sizes; `None` for every no-op case; **`custom` at 100 % equals `actual`** (A9), and an A5 page at 100 % on an A4 sheet stays A5-sized.

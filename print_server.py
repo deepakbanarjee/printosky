@@ -1019,6 +1019,28 @@ def update_job_quote(job_id: str, amount: float):
         logging.error("update_job_quote failed: %s", e)
 
 
+def _ensure_print_item_scale_columns(conn) -> None:
+    """Add print_items.scale_mode / scale_percent if this DB predates them.
+
+    Store PCs update by pulling code and restarting the watcher — nothing runs
+    fix_db.py for them (see docs/AUTO_UPDATE.md). So a box can be running this
+    file against a database written before 2026-08-30, and an INSERT naming
+    columns it does not have would break spec-saving at the counter. Cheap
+    PRAGMA, idempotent, and it keeps fix_db.py as the tidy-up rather than the
+    prerequisite.
+    """
+    try:
+        have = {row[1] for row in conn.execute("PRAGMA table_info(print_items)")}
+        for col, defn in (("scale_mode", "TEXT"), ("scale_percent", "INTEGER")):
+            if col not in have:
+                conn.execute(f"ALTER TABLE print_items ADD COLUMN {col} {defn}")
+                logging.info("print_items: added missing column %s", col)
+    except Exception as exc:
+        # Not fatal on its own — the INSERT below is what actually needs them,
+        # and it will surface a clear error if this could not run.
+        logging.warning("could not ensure print_items scale columns: %s", exc)
+
+
 # ── A1: Update job specs ───────────────────────────────────────────────────────
 
 def handle_update_job(body: dict) -> dict:
@@ -1038,6 +1060,7 @@ def handle_update_job(body: dict) -> dict:
         return {"ok": False, "error": "job_id required"}
 
     conn = _db()
+    _ensure_print_item_scale_columns(conn)
 
     # Upsert print_items — delete old, insert new
     conn.execute("DELETE FROM print_items WHERE job_id=?", (job_id,))
@@ -1054,13 +1077,28 @@ def handle_update_job(body: dict) -> dict:
         paper_gsm   = int(item.get("paper_gsm", 70))
         printer     = item.get("printer") or ("epson" if colour == "col" else "konica")
 
+        # Scaling. Absent/blank stays NULL, which is "no scaling" — so a panel
+        # that never sends these fields behaves exactly as it did before.
+        scale_mode = (item.get("scale_mode") or "").strip().lower() or None
+        if scale_mode not in (None, "fit", "actual", "custom"):
+            scale_mode = None
+        scale_percent = None
+        if scale_mode == "custom":
+            try:
+                from pdf_scaler import clamp_percent
+                scale_percent = clamp_percent(item.get("scale_percent"))
+            except Exception:
+                scale_percent = None
+            if scale_percent is None:
+                scale_mode = None      # a custom with no usable percent is no scale
+
         conn.execute("""
             INSERT INTO print_items
               (job_id, item_number, page_list, paper_type, colour, sides, layout,
-               copies, paper_gsm, printer, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,'Pending')
+               copies, paper_gsm, printer, status, scale_mode, scale_percent)
+            VALUES (?,?,?,?,?,?,?,?,?,?,'Pending',?,?)
         """, (job_id, item_number, page_list, paper_type, colour, sides, layout,
-              copies, paper_gsm, printer))
+              copies, paper_gsm, printer, scale_mode, scale_percent))
 
         # For quote calculation, approximate pages from page_list
         # If page_list = 'all', fetch page_count from jobs table
@@ -2049,6 +2087,10 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
     sides     = item["sides"] or "ss"       # 'ss' | 'ds'
     layout    = item["layout"] or "1-up"
     page_list = item["page_list"] or "all"
+    # Scaling. Guarded: rows written before 2026-08-30 have no such columns.
+    keys       = item.keys()
+    scale_mode = (item["scale_mode"] if "scale_mode" in keys else None) or None
+    scale_pct  = item["scale_percent"] if "scale_percent" in keys else None
 
     # Konica's driver won't honour a per-job duplex/simplex override — route to
     # a sides-specific queue if the store has one configured (see
@@ -2094,10 +2136,39 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
     if page_range:
         settings_parts.append(page_range)
 
+    # ── Scaling: baked into a temp PDF, never asked of the driver ────────────
+    # Same rule as the auto-print path (print_planner): the geometry goes in
+    # the file, and `noscale` rides along only as a guard. A row with no
+    # scale_mode skips all of this and prints the original file, as always.
+    print_path = filepath
+    scaled_tmp = None
+    if scale_mode:
+        try:
+            import pdf_scaler
+            with open(filepath, "rb") as fh:
+                scaled = pdf_scaler.apply_scale(
+                    fh.read(), scale_mode, scale_pct, job_size or "A4")
+            if scaled:
+                import tempfile
+                fd, scaled_tmp = tempfile.mkstemp(prefix=f"{job_id}_scaled_", suffix=".pdf")
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(scaled)
+                print_path = scaled_tmp
+                settings_parts.append("noscale")
+                logging.info("print %s item %s: baked scale=%s%s", job_id, item_number,
+                             scale_mode, f" {scale_pct}%" if scale_pct else "")
+        except Exception as exc:
+            # Print unscaled rather than not print — but never silently.
+            _report_health(
+                "print_server.item_scale_failed", False,
+                f"job {job_id} item {item_number}: could not apply scale="
+                f"{scale_mode!r} ({type(exc).__name__}: {exc}) — printed unscaled.",
+            )
+
     settings_str = ",".join(settings_parts)
 
-    file_dir2  = os.path.dirname(os.path.abspath(filepath))
-    file_name2 = os.path.basename(filepath)
+    file_dir2  = os.path.dirname(os.path.abspath(print_path))
+    file_name2 = os.path.basename(print_path)
     cmd = [
         sumatra,
         "-print-to", printer_name,
@@ -2120,6 +2191,12 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
         return {"ok": False, "error": "Print command timed out after 90s"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+    finally:
+        if scaled_tmp:
+            try:
+                os.remove(scaled_tmp)
+            except OSError as exc:
+                logging.warning("could not remove scaled temp %s: %s", scaled_tmp, exc)
 
     # ── Epson per-job accounting hook ─────────────────────────────────────────
     # On successful Epson dispatch, write a source='spec' row to epson_jobs so

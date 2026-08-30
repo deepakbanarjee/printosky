@@ -87,6 +87,11 @@ def run_migrations(db_path: str):
     """)
     print("  . print_items table ready")
 
+    # Scaling (2026-08-30). NULL on both = no scaling, which is what every row
+    # written before today means and how the print path behaves without them.
+    for col, defn in (("scale_mode", "TEXT"), ("scale_percent", "INTEGER")):
+        add_column("print_items", col, defn)
+
     # ─────────────────────────────────────────────────────────────────────────
     # MIGRATION 3 — vendors table (Sprint 3 — outsourced finishing)
     # ─────────────────────────────────────────────────────────────────────────
