@@ -616,7 +616,20 @@ by ₹180, never under.
 - `lam_roll` → `ROLL_LAM_RATES × max(sheets, 10)` · `lam_cover` → ₹50 · `id_card` → ₹100/card
 - `lam_sheet` → by paper size (₹70 / ₹120 / ₹140) instead of the hardcoded `LAMINATION_RATES["a4"]`
 - Spiral A3 → tiered · wiro → its own tiers · thermal → removed
-- **`A5_BW` / `A5_col` / `Letter_BW` / `Letter_col` added** so no offered size falls back to A4 B&W (rates pending, §6 N6)
+- **`A5_*` / `Letter_*` added** so no offered size falls back to A4 B&W *(owner, 2026-08-30)*:
+
+  | | B&W | Colour (≤30 / ≤50 / >50 sheets) |
+  |---|---|---|
+  | A4 *(reference)* | ₹3 | ₹10 / ₹9 / ₹8 |
+  | **A5** — half of A4 | **₹1.50** | **₹5 / ₹4.50 / ₹4** |
+  | **Letter** — same as A4 | **₹3** | **₹10 / ₹9 / ₹8** |
+
+  **No discounts on either.** The student rate stays A4 B&W only — which is
+  what `get_print_rate` already does (its student branch tests
+  `paper_type == "A4_BW"`), so this is a comment against a future "helpful"
+  extension rather than a change. A5 at ₹1.50 already equals the >100-sheet
+  student A4 rate.
+- A **guard test that every size in `_VALID_SIZE` has a rate**, the same shape as the finishing-key guard — the pair of tests that make this class of bug impossible to reintroduce
 - `rate_card.py:20` docstring corrected to match `calc_sheets`
 - Add every missing key to `BINDING_RATES` / `FINISHING_DISPLAY` and the in-house/outsourced lists
 - **A guard test that every key in `_VALID_FINISHING` and every `data-binding` in order-v2 resolves to a non-zero, non-`None` price** — the test that would have caught all of this
@@ -656,8 +669,8 @@ finishing (§4.1) are real subsystems rather than a field on a row.
 
 ## 6. Open questions
 
-Everything material is answered. What remains is four numbers and one go-ahead —
-none of them blocks starting B-0, B-1 or A-1.
+Everything material is answered, and every remaining item has a working default —
+nothing blocks B-0, B-1 or A-1.
 
 | # | Still needed | Blocks | Working default |
 |---|---|---|---|
@@ -666,7 +679,7 @@ none of them blocks starting B-0, B-1 or A-1.
 | N3 | **Drop-off expiry** — how many days before an un-received booking cancels | B-9 | 3 days, WhatsApp reminder first |
 | N4 | **OSP→Nattika internal rates** | nothing — deliberately configurable | 100 % (Nattika books the full finishing amount) |
 | N5 | ~~Quote-drift audit~~ | — | **run 2026-08-30** — no live drift; see §4.14 |
-| N6 | **A5 and Letter print rates** (B&W and colour) — both are offered on the order page and currently bill at A4 B&W ₹3/sheet | B-0 | none — this one is live under-billing |
+| N6 | ~~A5 and Letter print rates~~ | — | **answered** — A5 = half A4, Letter = A4, no discounts on either (§4.14) |
 
 **Answered 2026-08-30:** preview renders the baked PDF, one page, switchable
 (§3.6) · scaling 1-up only, everything else fits the printable area (A4) · all

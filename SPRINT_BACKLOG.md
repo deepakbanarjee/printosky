@@ -133,7 +133,7 @@ printer** (the driver is never asked to scale, only told `noscale` as a guard).
 | S13-14 | **Online drop-off bookings** | Customers book finishing-only work on the site and bring the item in. `item_received_at` NULL = not work-ready; WhatsApp reminder then auto-expire after ~3 days; part payment upfront above a threshold |
 | S13-15 | **Copy/scan reconciliation** | Compare counter-recorded copy/scan service jobs against `konica_jobs.job_type IN ('Copy','Scan')` — first visibility into unbilled walk-in copying |
 | S13-16 | ~~**Quote drift audit**~~ ✅ | Run 2026-08-30 via `tools/quote_drift_audit.py`: 104 quoted jobs, **70 match, 32 drift, all dated 08-07→08-13**, none after. Commit `6afb9b5` (08-14) deliberately removed the odd-sheet rounding and reproduces 28 of the 32 exactly; the other 4 are mixed-colour jobs from the same window. Customers were over-charged ₹180 historically, never under. **No live drift.** Two real findings fell out → S13-17, and `rate_card.py:20` still documents the removed rounding rule |
-| S13-17 | **A5 / Letter bill as A4 B&W** 🐞 | `_VALID_SIZE` and the order-v2 paper dropdown offer A4/A3/A5/Legal/Letter, but `PRINT_RATES` has keys only for A4, A3 and Legal. `get_print_rate` falls back to `PRINT_RATES["A4_BW"]`, so **A5 and Letter bill at ₹3/sheet — colour included**. An A5 colour page bills ₹3 instead of ₹10; Letter is bigger than A4 and bills at A4 rates. This is the real explanation of the ₹10-vs-₹3 pair. Live under-billing; needs rates, then folds into S13-0 |
+| S13-17 | **A5 / Letter bill as A4 B&W** 🐞 | `_VALID_SIZE` and the order-v2 paper dropdown offer A4/A3/A5/Legal/Letter, but `PRINT_RATES` has keys only for A4, A3 and Legal. `get_print_rate` falls back to `PRINT_RATES["A4_BW"]`, so **A5 and Letter bill at ₹3/sheet — colour included**. An A5 colour page bills ₹3 instead of ₹10; Letter is bigger than A4 and bills at A4 rates. This is the real explanation of the ₹10-vs-₹3 pair. Live under-billing. Rates set 2026-08-30: **A5 = half the A4 rate** (B&W ₹1.50; colour ₹5/₹4.50/₹4 by tier), **Letter = the A4 rate**, **no discounts on either** — the student rate stays A4 B&W only. Folds into S13-0, with a guard test that every size in `_VALID_SIZE` has a rate |
 
 ### Rates locked by owner 2026-08-30
 
@@ -157,9 +157,9 @@ constant is exactly ₹80 + ₹20); **thermal withdrawn — no longer offered** 
 · DTP per page typing only (ML ₹40 · EN ₹40 · HI ₹60) · **urgent ₹20 now applies to
 any service** · the ₹2 Sini/Ujjwala scan rate is removed.
 
-**Still needed:** **A5 and Letter print rates (live under-billing — no default possible)** ·
-service payment threshold + deposit (default ₹500 / 50%) · stamp, postcard, 4×6 photo
-rates · drop-off expiry days (default 3) · OSP→Nattika internal rates (default 100%).
+**Still needed — all have working defaults, none blocking:** service payment threshold +
+deposit (₹500 / 50%) · stamp, postcard, 4×6 photo rates · drop-off expiry days (3) ·
+OSP→Nattika internal rates (100%).
 
 **Locked by owner 2026-08-30:** scaling is offered on **1-up only** — every other
 layout always fits to the printable area (N-up *is* a fit; "Actual size" on 4-up
