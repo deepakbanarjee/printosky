@@ -4,7 +4,7 @@ Tests for rate_card.py — pricing engine for Printosky.
 Covers:
 - calc_sheets(): sheet counting for all sides/layout combinations
 - get_print_rate(): per-sheet rates, student discount, colour tiers
-- get_spiral_rate(), get_soft_binding_rate(), get_thermal_binding_rate()
+- get_spiral_rate(), get_soft_binding_rate(), get_wiro_rate()
 - calculate_item_cost(): single print item cost
 - calculate_finishing_cost(): all finishing types, urgent surcharge
 - calculate_quote(): full job quotes, multi-item jobs
@@ -185,22 +185,32 @@ class TestSoftBindingRate:
         assert rc.get_soft_binding_rate(300) == 180
 
 
-class TestThermalBindingRate:
-    """S7-5: Thermal binding rate lookup."""
+class TestWiroRate:
+    """Wiro got its own tiers on 2026-08-30 and a machine ceiling."""
 
-    def test_tier1(self):
-        # ≤50 sheets → Rs.60
-        assert rc.get_thermal_binding_rate(10) == 60
-        assert rc.get_thermal_binding_rate(50) == 60
+    def test_tiers(self):
+        assert rc.get_wiro_rate(30) == 50
+        assert rc.get_wiro_rate(70) == 100
+        assert rc.get_wiro_rate(100) == 150
+        assert rc.get_wiro_rate(130) == 200
+        assert rc.get_wiro_rate(150) == 250
 
-    def test_tier2(self):
-        # 51–100 sheets → Rs.80
-        assert rc.get_thermal_binding_rate(51) == 80
-        assert rc.get_thermal_binding_rate(100) == 80
+    def test_above_the_limit_returns_none_not_a_price(self):
+        assert rc.get_wiro_rate(151) is None
+        assert rc.get_wiro_rate(500) is None
 
-    def test_over_max(self):
-        # >100 → capped at last tier Rs.80
-        assert rc.get_thermal_binding_rate(200) == 80
+
+class TestSpiralA3Tiers:
+    """A3 spiral was a flat Rs.80 at every thickness until 2026-08-30, which
+    made a 250-sheet A3 spiral the cheapest binding in the shop."""
+
+    def test_a3_is_tiered(self):
+        assert rc.get_spiral_rate(10, "A3") == 80
+        assert rc.get_spiral_rate(250, "A3") == 400
+
+    def test_a3_is_dearer_than_a4_at_every_tier(self):
+        for sheets in (30, 70, 100, 130, 150, 170, 200, 250):
+            assert rc.get_spiral_rate(sheets, "A3") > rc.get_spiral_rate(sheets, "A4")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -272,9 +282,20 @@ class TestCalculateFinishingCost:
         r = rc.calculate_finishing_cost("spiral", 20)
         assert r["finishing_cost"] == 30
 
-    def test_wiro_same_as_spiral(self):
-        r = rc.calculate_finishing_cost("wiro", 20)
-        assert r["finishing_cost"] == 30
+    def test_wiro_has_its_own_tiers(self):
+        # Wiro used to borrow spiral's tiers behind a "for now" comment. Since
+        # 2026-08-30 it starts at Rs.50 and steps Rs.50 per tier.
+        assert rc.calculate_finishing_cost("wiro", 20)["finishing_cost"] == 50
+        assert rc.calculate_finishing_cost("wiro", 90)["finishing_cost"] == 150
+        assert rc.calculate_finishing_cost("wiro", 150)["finishing_cost"] == 250
+
+    def test_wiro_is_refused_above_the_machine_limit(self):
+        # Never a silent zero: over 150 sheets the counter must offer something
+        # else rather than quote nothing.
+        r = rc.calculate_finishing_cost("wiro", 200)
+        assert r["refused"]
+        assert r["finishing_cost"] == 0
+        assert "spiral or soft" in r["breakdown_line"]
 
     def test_soft(self):
         r = rc.calculate_finishing_cost("soft", 50)
@@ -294,18 +315,58 @@ class TestCalculateFinishingCost:
         assert r["finishing_cost"] == 400
         assert r["outsourced"] is True
 
-    def test_lam_sheet(self):
+    def test_lam_sheet_a4(self):
+        # Rs.60 + the owner's 2026-08-30 premium of Rs.10.
         r = rc.calculate_finishing_cost("lam_sheet", 1)
-        assert r["finishing_cost"] == 60
+        assert r["finishing_cost"] == 70
 
-    def test_thermal(self):
-        """S7-5: thermal binding cost."""
+    def test_lam_sheet_a3_is_not_billed_as_a4(self):
+        # calculate_finishing_cost used to hardcode LAMINATION_RATES["a4"], so
+        # an A3 pouch lamination billed as A4 and the A3 rates were dead code.
+        assert rc.calculate_finishing_cost("lam_sheet", 1, paper_size="A3")["finishing_cost"] == 120
+        assert rc.calculate_finishing_cost("lam_sheet", 1, paper_size="A3",
+                                           is_colour=True)["finishing_cost"] == 140
+
+    def test_lam_roll_is_per_sheet_with_a_floor(self):
+        # Had no branch at all before 2026-08-30 — every roll lamination was
+        # quoted at zero while being paid for as outsourced work.
+        assert rc.calculate_finishing_cost("lam_roll", 3)["finishing_cost"] == 150   # min 10
+        assert rc.calculate_finishing_cost("lam_roll", 14)["finishing_cost"] == 210
+        assert rc.calculate_finishing_cost("lam_roll", 14, paper_size="A3")["finishing_cost"] == 420
+
+    def test_lam_cover_reads_the_price_that_was_always_there(self):
+        # BINDING_RATES carried lam_cover: 50 and nothing ever read it.
+        assert rc.calculate_finishing_cost("lam_cover", 1)["finishing_cost"] == 50
+
+    def test_id_card_is_per_card(self):
+        # Rs.100 per card, printing included (owner, 2026-08-30).
+        assert rc.calculate_finishing_cost("id_card", 1)["finishing_cost"] == 100
+        assert rc.calculate_finishing_cost("id_card", 4)["finishing_cost"] == 400
+
+    def test_perfect_is_priced_as_soft(self):
+        for sheets in (50, 90, 140):
+            assert (rc.calculate_finishing_cost("perfect", sheets)["finishing_cost"]
+                    == rc.calculate_finishing_cost("soft", sheets)["finishing_cost"])
+
+    def test_thesis_flat_with_print_project_plus_premium_without(self):
+        assert rc.calculate_finishing_cost("thesis", 60)["finishing_cost"] == 500
+        assert rc.calculate_finishing_cost("thesis", 60,
+                                           with_print=False)["finishing_cost"] == 320
+        assert rc.calculate_finishing_cost("thesis", 60, with_print=False,
+                                           project_cover="gold")["finishing_cost"] == 350
+
+    def test_bind_only_premium_is_twenty_across_the_board(self):
+        for key in ("spiral", "wiro", "soft", "perfect"):
+            with_print = rc.calculate_finishing_cost(key, 50)["finishing_cost"]
+            bind_only = rc.calculate_finishing_cost(key, 50, with_print=False)["finishing_cost"]
+            assert bind_only - with_print == rc.BIND_ONLY_PREMIUM, key
+
+    def test_thermal_is_withdrawn(self):
+        """Withdrawn 2026-08-30 (was backlog S7-5, "rate never tested").
+        An order for it must be flagged, never quoted at zero."""
         r = rc.calculate_finishing_cost("thermal", 30)
-        assert r["finishing_cost"] == 60
-
-    def test_thermal_upper_tier(self):
-        r = rc.calculate_finishing_cost("thermal", 80)
-        assert r["finishing_cost"] == 80
+        assert r["unpriced"] is True
+        assert r["finishing_cost"] == 0
 
     def test_urgent_surcharge_on_soft(self):
         r = rc.calculate_finishing_cost("soft", 50, urgent=True)
@@ -315,11 +376,18 @@ class TestCalculateFinishingCost:
         r = rc.calculate_finishing_cost("project", 100, urgent=True)
         assert r["finishing_cost"] == 220 + 20
 
-    def test_urgent_not_applied_to_spiral(self):
-        # spiral is NOT in URGENT_ELIGIBLE
-        r_normal = rc.calculate_finishing_cost("spiral", 20, urgent=False)
-        r_urgent = rc.calculate_finishing_cost("spiral", 20, urgent=True)
-        assert r_normal["finishing_cost"] == r_urgent["finishing_cost"]
+    def test_urgent_now_applies_to_every_priced_finishing(self):
+        # Was soft + project only. Since 2026-08-30 anything can be rushed, so
+        # an operator has no exceptions to remember.
+        for key in sorted(rc.BINDING_RATES):
+            normal = rc.calculate_finishing_cost(key, 20, urgent=False)["finishing_cost"]
+            urgent = rc.calculate_finishing_cost(key, 20, urgent=True)["finishing_cost"]
+            expected = rc.URGENT_SURCHARGE if key in rc.URGENT_ELIGIBLE else 0
+            assert urgent - normal == expected, key
+
+    def test_urgent_never_applies_to_the_free_ones(self):
+        for key in sorted(rc.ZERO_PRICED_FINISHINGS):
+            assert rc.calculate_finishing_cost(key, 20, urgent=True)["finishing_cost"] == 0
 
     def test_breakdown_contains_label(self):
         r = rc.calculate_finishing_cost("spiral", 20)
@@ -429,15 +497,14 @@ class TestCalculateQuote:
         )
         assert q3["print_cost"] == q1["print_cost"] * 3
 
-    def test_quote_thermal_finishing(self):
-        """S7-5: full quote with thermal binding."""
+    def test_quote_flags_a_withdrawn_finishing_instead_of_charging_zero(self):
         q = rc.calculate_quote(
             [{"pages": 20, "paper_type": "A4_BW", "sides": "ss", "layout": "1-up", "copies": 1}],
             finishing="thermal"
         )
-        # 20 sheets BW × Rs.3 = Rs.60 print + Rs.60 thermal = Rs.120
-        assert q["finishing_cost"] == 60
-        assert q["total"] == 120.0
+        assert q["unpriced_finishing"] is True
+        assert q["finishing_cost"] == 0
+        assert q["total"] == 60          # the printing only — and flagged.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────

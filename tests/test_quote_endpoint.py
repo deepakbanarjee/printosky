@@ -104,10 +104,19 @@ class TestQuoteEndpoint:
         r_spiral = quote({"pages": 34, "sides": "ds", "copies": 1, "finishing": "spiral"})
         assert r_spiral["total"] > r_plain["total"]
 
-    def test_finishing_thermal(self):
-        """S7-5: /quote?finishing=thermal should return non-zero finishing cost."""
+    def test_finishing_thermal_is_withdrawn_and_flagged(self):
+        """Thermal was withdrawn 2026-08-30 (backlog S7-5, closed by deletion).
+        The endpoint must say it cannot price it rather than quote Rs.0."""
         r = quote({"pages": 20, "sides": "ss", "copies": 1, "finishing": "thermal"})
+        assert r["finishing_cost"] == 0
+        assert r["unpriced_finishing"] is True
+
+    def test_finishing_roll_lamination_is_priced(self):
+        """Had no branch at all before 2026-08-30 — quoted Rs.0 while being
+        paid for as outsourced work."""
+        r = quote({"pages": 20, "sides": "ss", "copies": 1, "finishing": "lam_roll"})
         assert r["finishing_cost"] > 0
+        assert r["unpriced_finishing"] is False
 
     def test_urgent_flag(self):
         r_normal = quote({"pages": 20, "sides": "ss", "copies": 1,
