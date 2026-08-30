@@ -110,23 +110,30 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 ## ⚪ SPRINT 13 — Print scaling + post-press services
 
 Plan: [docs/plans/2026-08-30-scaling-and-post-press-services.md](docs/plans/2026-08-30-scaling-and-post-press-services.md)
-(design + shipping order + open questions). Both features are additive and inert
-until a job opts in — no change to the verified rotation matrix or the locked
-Konica dual-queue fix.
+(design, shipping order, open questions). Both features are additive and inert
+until a job opts in. Two rules: **nothing already working changes**, and
+**everything is baked into the PDF before it reaches the printer** — the driver
+is never asked to scale, only told `noscale` as a guard.
 
 | # | Task | Details |
 |---|------|---------|
-| S13-1 | **`pdf_scaler.py` + tests** | New module: bake Fit / Actual / Custom-% into the PDF. Nothing calls it yet (plan A-1) |
-| S13-2 | **Planner + print server wiring** | `print_spec.scale` → planner → `noscale` token; imposed path passes `perform_nup`'s existing `scale_behavior`. Guard test: a spec with no `scale` plans exactly as today (A-2) |
-| S13-3 | **`print_items.scale_mode/scale_percent`** | Additive SQLite columns + `handle_print_item` support (A-3) |
-| S13-4 | **Staff scaling UI + paper proof** | Print panel + New Job modal in jobs.html/admin.html; then prove Fit/Actual/75%/150% on the OSP Konica and append the result to `docs/PRINT_ROTATION_MATRIX.md` (A-4) |
-| S13-5 | **Customer scaling UI** | order-v2 card + `buildPrintSpec` emits `scale` only when non-default (A-5) |
-| S13-6 | **Service rate engine** | `rate_card.py` new Section 11: `calculate_service_quote()` over the existing lamination/scanning/binding tables. Foiling ships staff-priced — rates pending owner (B-1, Q1) |
-| S13-7 | **`jobs.service_kind` + `service_meta`** | `SCHEMA_v29_service_jobs.sql` (cloud) + SQLite ALTERs + `docs/SCHEMA.md` rows. NULL = print job (B-2) |
-| S13-8 | **`/service-quote` + `/new-service`** | Service jobs never create `print_items`, never enter a printer queue. Isolation tests pin it (B-3) |
-| S13-9 | **Service console UI** | `+ Service` modal + kind pills + service panel in jobs.html, mirrored in admin.html; MIS print counts filtered to `service_kind IS NULL` (B-4/B-5) |
-| S13-10 | **Copy/scan reconciliation** | Compare counter-recorded copy/scan service jobs against `konica_jobs.job_type IN ('Copy','Scan')` — first visibility into unbilled walk-in copying (B-6) |
-| S13-11 | **Customer post-press ordering** ❓ | order-v2 / WhatsApp entry for finishing-only work. Decide after S13-9 is live (B-7, Q7) |
+| S13-1 | **`pdf_scaler.py` + tests** | `scale_rect()` (pure geometry — the single source of truth for print *and* both previews) + `apply_scale()` (bakes the PDF). Nothing calls it yet (plan A-1) |
+| S13-2 | **Planner + print server wiring** | `print_spec.scale` → planner bakes → `noscale` guard token; 1-up landscape uses `perform_nup`'s existing `scale_behavior`. Guard test: a spec with no `scale` plans exactly as today, and `nup ≥ 2` ignores `scale` entirely (A-2) |
+| S13-3 | **`print_items.scale_mode/scale_percent`** | Additive SQLite columns + `handle_print_item` bakes before printing (A-3) |
+| S13-4 | **Preview endpoints** | `GET /scale-preview` on the store PC returns a PNG of the **baked** page (same `apply_scale` the printer gets), one page, switchable; `GET /order/scale-rect` on Vercel returns the same geometry for the customer canvas. Offline → say so, never show an approximation (A-4) |
+| S13-5 | **Staff scaling UI + paper proof** | Fit / Actual / Custom in the print panel and New Job modal, preview beside it; then prove Fit/Actual/75%/150% on the OSP Konica and append the result to `docs/PRINT_ROTATION_MATRIX.md` (A-5) |
+| S13-6 | **Customer scaling UI + preview** | order-v2 card (1-up only) + sheet canvas with hatched crop region and "N pages will be cropped"; `buildPrintSpec` emits `scale` only when non-default (A-6) |
+| S13-7 | **Service rate engine** | `rate_card.py` new Section 11: `calculate_service_quote()` over the existing lamination/scanning/binding tables. `FOILING_RATES` awaiting owner's numbers (B-1, Q1) |
+| S13-8 | **`jobs.service_kind` + `service_meta`** | `SCHEMA_v29_service_jobs.sql` (cloud) + SQLite ALTERs + `docs/SCHEMA.md` rows. NULL = print job (B-2) |
+| S13-9 | **`/service-quote` + `/new-service`** | Service jobs never create `print_items`, never enter a printer queue, never auto-print. Isolation tests pin it (B-3) |
+| S13-10 | **Service console UI** | `+ Service` modal + kind pills + service panel in jobs.html, mirrored in admin.html; MIS print counts filtered to `service_kind IS NULL` (B-4/B-5) |
+| S13-11 | **Copy/scan reconciliation** | Compare counter-recorded copy/scan service jobs against `konica_jobs.job_type IN ('Copy','Scan')` — first visibility into unbilled walk-in copying (B-6) |
+| S13-12 | **Customer post-press ordering** ❓ | order-v2 / WhatsApp entry for finishing-only work. Decide after S13-10 is live (B-7, Q7) |
+
+**Locked by owner 2026-08-30:** scaling is offered on **1-up only** — every other
+layout always fits to the printable area (N-up *is* a fit; "Actual size" on 4-up
+would crop three-quarters of every page, and it keeps the verified slot geometry
+untouched). Previews render the baked PDF, one page at a time.
 
 ---
 
