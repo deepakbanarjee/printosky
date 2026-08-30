@@ -107,6 +107,55 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 
 ---
 
+## 🔴 BILLING FIX — unpriced finishings and paper sizes (2026-08-30)
+
+Five finishing keys and two paper sizes were orderable and quoted at ₹0 or at
+the wrong rate. All of them shared one shape: **a value the UI offers that the
+rate card does not know, failing to the cheapest thing instead of failing loud.**
+
+| # | Task | Details |
+|---|------|---------|
+| BF-1 | ~~**`lam_roll` / `lam_cover` / `id_card` bill ₹0**~~ ✅ | `calculate_finishing_cost` (`rate_card.py`) had no branch for any of them, so `cost` stayed at its `0` initialiser. `BINDING_RATES` even carried `lam_cover: 50` — never read. Roll and cover lamination are outsourced work the store pays a vendor for |
+| BF-2 | ~~**`perfect` / `thesis` orderable but unpriced**~~ ✅ | Worse: reachable from the **live order page**. `order-v2.html` offers both buttons and `_VALID_FINISHING` accepts them, but `rate_card` had no such keys at all. Two production orders exist, quoted binding-free (neither collected) |
+| BF-3 | ~~**A5 / Letter bill as A4 B&W**~~ ✅ | `_VALID_SIZE` and the paper dropdown offer A4/A3/A5/Legal/Letter; `PRINT_RATES` had keys for three. `get_print_rate` fell back to `A4_BW`, so **A5 and Letter billed at ₹3/sheet including colour** — an A5 colour page charged ₹3 instead of ₹5 |
+| BF-4 | ~~**A3 pouch lamination billed as A4**~~ ✅ | `lam_sheet` hardcoded `LAMINATION_RATES["a4"]`, leaving the A3 rates in the table dead |
+| BF-5 | ~~**Thermal binding withdrawn**~~ ✅ | No longer offered. Removed from the rate card and both console dropdowns rather than re-tested — closes **S7-5** ("listed in admin but rate never tested") by deletion |
+| BF-6 | ~~**Guard tests**~~ ✅ | Every key in `_VALID_FINISHING`, every `data-binding` in order-v2, every console dropdown option and every size in `_VALID_SIZE` must resolve to a real price. Reads the actual UI and API whitelist, so adding an option without a rate fails the build instead of the till |
+
+**Verified against production before changing anything** (`tools/quote_drift_audit.py`,
+included here): 476 jobs since March, 104 with a stored quote, **70 match the rate
+card exactly and all 32 disagreements pre-date commit `6afb9b5`** (14 Aug), which
+deliberately removed the odd-sheet rounding. No live drift. Nothing was
+under-billed through the ₹0 gaps either — no `lam_roll`, `lam_cover`, `id_card`,
+`thermal`, `project` or `record` job has ever existed in the cloud table.
+*Caveat: that is the cloud table; store-PC walk-ins that never sync are not
+visible in it.*
+
+### Rates (owner, 2026-08-30)
+
+| | A4 | A3 | Cover | Min |
+|---|---|---|---|---|
+| Foiling | ₹30/sheet | ₹50/sheet | ₹50/piece | 10 pieces (cover floor ₹500) |
+| Roll lamination | ₹15/sheet | ₹30/sheet | — | 10 sheets |
+| Pouch lamination | ₹70 | ₹120 B&W · ₹140 colour | — | — |
+| Cover lamination | ₹50 flat | | | |
+| ID card | ₹100 per card, printing included | | | |
+| A5 print | half the A4 rate (B&W ₹1.50; colour ₹5/₹4.50/₹4) | | | no discounts |
+| Letter print | the A4 rate | | | no discounts |
+
+Perfect = soft tiers. Thesis = **₹500** binding line with printing charged on top,
+or project **+₹100** (₹320/₹350) for the customer's own sheets. Spiral A3 now
+tiered (₹80→₹400) instead of a flat ₹80 at every thickness. Wiro has its own
+tiers (₹50→₹250) and is **refused above 150 sheets** rather than quoted. **Bind-only
+is +₹20 across the board** — one rule that was already in the code unnamed, since
+the old flat `SOFT_BINDING_WITHOUT_PRINT = 100` is exactly soft's ₹80 tier plus it.
+**Urgent (₹20) now applies to any finishing**, not just soft and project.
+
+> Foiling's own rates are recorded above but `foil` is **not** a finishing key —
+> it arrives with the post-press services work, which is a separate branch.
+
+---
+
 ## ✅ COMPLETED (Session 1–6 reference)
 
 - WhatsApp bot + file capture

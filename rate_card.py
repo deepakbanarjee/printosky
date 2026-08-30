@@ -17,7 +17,9 @@ BILLING RULE (confirmed with owner):
   Rates are PER SHEET (not per page).
   DS colour rate > SS colour rate (same total cost if you double-side colour).
   DS B&W rate = SS B&W rate per sheet (so DS saves customer ~50% on B&W).
-  Sheets for DS = ceil(pages/2), rounded UP to next even number.
+  Sheets for DS = ceil(pages/2).  (Until 6afb9b5, 2026-08-14, this rounded up
+  to the next even number; that rounding was a bug and was removed. This line
+  documented the old behaviour for two weeks after it stopped being true.)
   Layout 2-up: pages = ceil(original/2) before applying sides rule.
   Layout 4-up: pages = ceil(original/4) before applying sides rule.
 """
@@ -41,6 +43,18 @@ PRINT_RATES = {
     "A4_col_30":          {"ss": 10.0, "ds": 20.0},  # ≤30 sheets
     "A4_col_50":          {"ss": 9.0,  "ds": 18.0},  # 31–50 sheets
     "A4_col_50p":         {"ss": 8.0,  "ds": 16.0},  # >50 sheets
+
+    # A5 -- half the A4 rate, flat. No student discount (owner, 2026-08-30).
+    "A5_BW":              {"ss": 1.5, "ds": 1.5},
+    "A5_col_30":          {"ss": 5.0,  "ds": 10.0},   # <=30 sheets
+    "A5_col_50":          {"ss": 4.5,  "ds": 9.0},    # 31-50
+    "A5_col_50p":         {"ss": 4.0,  "ds": 8.0},    # >50
+
+    # Letter -- the A4 rate. No student discount (owner, 2026-08-30).
+    "Letter_BW":          {"ss": 3.0, "ds": 3.0},
+    "Letter_col_30":      {"ss": 10.0, "ds": 20.0},
+    "Letter_col_50":      {"ss": 9.0,  "ds": 18.0},
+    "Letter_col_50p":     {"ss": 8.0,  "ds": 16.0},
 
     # A4 Special paper
     "A4_bond_col":        {"ss": 15.0},
@@ -75,7 +89,21 @@ SPIRAL_A4_TIERS = [
     (250, 150),
 ]
 
-SPIRAL_A3_START = 80  # starting rate for A3 spiral
+# A3 spiral: the A4 tiers scaled by the ratio the two start rates already
+# implied (80/30 = 2.67), rounded to the nearest Rs.10 (owner, 2026-08-30).
+# Until then A3 was a flat Rs.80 at every thickness, so a 250-sheet A3 spiral
+# was the cheapest binding in the shop.
+SPIRAL_A3_TIERS = [
+    (30,  80),
+    (70,  110),
+    (100, 130),
+    (130, 160),
+    (150, 210),
+    (170, 240),
+    (200, 320),
+    (250, 400),
+]
+SPIRAL_A3_START = SPIRAL_A3_TIERS[0][1]  # kept: the entry rate, now tier one
 
 # Soft binding (with print) — tiered by sheet count
 SOFT_BINDING_TIERS = [
@@ -86,7 +114,24 @@ SOFT_BINDING_TIERS = [
     (200, 160),
     (250, 180),
 ]
-SOFT_BINDING_WITHOUT_PRINT = 100  # minimum without print
+# Binding a customer's own sheets costs Rs.20 more than binding what we printed
+# (owner, 2026-08-30). This was already in the code without being named: the old
+# SOFT_BINDING_WITHOUT_PRINT of 100 is exactly soft's Rs.80 tier plus this 20.
+# Applies to the bindings the owner was asked about -- spiral, wiro, soft and
+# perfect. Project, record and thesis have their own bind-only prices.
+BIND_ONLY_PREMIUM = 20
+BIND_ONLY_PREMIUM_APPLIES = {"spiral", "wiro", "soft", "perfect"}
+SOFT_BINDING_WITHOUT_PRINT = 100  # = SOFT_BINDING_TIERS[0][1] + BIND_ONLY_PREMIUM
+
+# Perfect binding is priced as soft binding (owner, 2026-08-30); the "+20 for
+# binding only" is the general rule above, not a perfect-specific premium.
+PERFECT_USES_SOFT_TIERS = True
+
+# Thesis: a flat binding line when we print it, printing charged per sheet on
+# top as normal. When the customer brings their own sheets it is the project
+# rate plus a premium (owner, 2026-08-30).
+THESIS_WITH_PRINT = 500
+THESIS_BIND_ONLY_PREMIUM = 100
 
 # Project binding — by cover type
 PROJECT_BINDING_RATES = {
@@ -99,8 +144,17 @@ PROJECT_BINDING_RATES = {
     "custom": 250,
 }
 
-# Wiro binding — staff quotes manually, approximate tiers similar to spiral
-WIRO_A4_TIERS = SPIRAL_A4_TIERS  # same tiers as spiral for now
+# Wiro binding: Rs.50 at the first tier, Rs.50 more at each one after, and the
+# machine stops at 150 sheets (owner, 2026-08-30). Until then wiro borrowed
+# spiral's tiers with a "for now" that nobody came back to.
+WIRO_A4_TIERS = [
+    (30,  50),
+    (70,  100),
+    (100, 150),
+    (130, 200),
+    (150, 250),
+]
+WIRO_MAX_SHEETS = 150
 
 BINDING_RATES = {
     "none":     {"price": 0,   "label": "No binding",         "outsourced": False},
@@ -108,30 +162,50 @@ BINDING_RATES = {
     "spiral":   {"price": None,"label": "Spiral binding",     "outsourced": False, "tiered": True},
     "wiro":     {"price": None,"label": "Wiro binding",       "outsourced": False, "tiered": True},
     "soft":     {"price": None,"label": "Soft binding",       "outsourced": False, "tiered": True},
+    "perfect":  {"price": None,"label": "Perfect binding",    "outsourced": False, "tiered": True},
     "project":  {"price": None,"label": "Project binding",    "outsourced": True,  "tiered": False},
+    "thesis":   {"price": None,"label": "Thesis binding",     "outsourced": True,  "tiered": False},
     "record":   {"price": 400, "label": "Record binding (A3)","outsourced": True,  "tiered": False},
-    "lam_sheet":{"price": 60,  "label": "Sheet lamination (A4)","outsourced": False,"tiered": False},
+    "lam_sheet":{"price": None,"label": "Pouch lamination",   "outsourced": False, "tiered": False},
     "lam_roll": {"price": None,"label": "Roll lamination",    "outsourced": True,  "tiered": False},
     "lam_cover":{"price": 50,  "label": "Cover lamination",   "outsourced": True,  "tiered": False},
-    "id_card":  {"price": None,"label": "ID card printing",   "outsourced": False, "tiered": False},
-    "thermal":  {"price": None,"label": "Thermal/sheet binding","outsourced": False,"tiered": True},
+    "id_card":  {"price": 100, "label": "ID card printing",   "outsourced": False, "tiered": False},
 }
 
-URGENT_SURCHARGE = 20  # applies to soft + project binding only
-URGENT_ELIGIBLE  = {"soft", "project"}
+# Every key above must be priced by calculate_finishing_cost. ZERO_PRICED names
+# the two that are legitimately free; anything else reaching cost 0 is a bug,
+# and calculate_finishing_cost flags it rather than quietly charging nothing.
+# tests/test_rate_card.py::TestNoUnpricedFinishing holds this in place.
+ZERO_PRICED_FINISHINGS = {"none", "staple"}
 
+URGENT_SURCHARGE = 20
+# Any finishing or service can be rushed (owner, 2026-08-30). Was soft +
+# project only; an operator should not have to remember which things can be
+# urgent and which cannot.
+URGENT_ELIGIBLE  = set(BINDING_RATES) - ZERO_PRICED_FINISHINGS
+
+# Pouch / sheet lamination, by size. The a4/a3 figures carry the owner's
+# 2026-08-30 premium (+Rs.10 up to A4, +Rs.20 for A3) on the rates that were
+# already here. Until then calculate_finishing_cost hardcoded LAMINATION_RATES
+# ["a4"], so an A3 pouch lamination billed as A4 and the A3 numbers were dead.
 LAMINATION_RATES = {
     "normal":    40,
     "with_col":  50,   # with colour copy (Aadhar, RC, licence)
-    "a4":        60,
-    "a3_bw":     100,
-    "a3_col":    120,
+    "a4":        70,
+    "a3_bw":     120,
+    "a3_col":    140,
 }
 
-THERMAL_BINDING_TIERS = [
-    (50,  60),
-    (100, 80),
-]
+# Roll lamination is a DIFFERENT process from pouch at a different price --
+# per sheet, minimum 10 sheets (owner, 2026-08-30). Wiring it to
+# LAMINATION_RATES would overcharge by roughly 4x.
+ROLL_LAM_RATES = {"A4": 15, "A3": 30}
+ROLL_LAM_MIN_SHEETS = 10
+
+# Thermal binding was withdrawn on 2026-08-30 -- no longer offered, in either
+# store or on the order page. Removed rather than re-tested (backlog S7-5 had
+# it listed as "rate never tested" since March). Its tiers were (50, 60) and
+# (100, 80) if it is ever revived.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 3 — OTHER SERVICE RATES
@@ -156,9 +230,16 @@ DELIVERY_CHARGE = 30
 # SECTION 4 — FINISHING TYPE METADATA (for UI dropdowns)
 # ─────────────────────────────────────────────────────────────────────────────
 
-FINISHING_INHOUSE    = ["none", "staple", "spiral", "wiro", "lam_sheet", "id_card"]
-FINISHING_OUTSOURCED = ["lam_roll", "lam_cover", "project", "record", "thermal"]
-FINISHING_URGENT_OK  = list(URGENT_ELIGIBLE)
+# NOTE (2026-08-30): these two lists are a whole-company answer to a per-store
+# question. Binding, roll lamination and foiling are done in house at Nattika
+# (PRINTK) and outsourced everywhere else, so "outsourced" is a property of the
+# store, not of the finishing. Backlog S13-12 replaces this with
+# is_outsourced(finishing, store_id) driven by store_config.json capabilities;
+# until then these stay as the no-store-context fallback.
+FINISHING_INHOUSE    = ["none", "staple", "spiral", "wiro", "perfect",
+                        "lam_sheet", "id_card"]
+FINISHING_OUTSOURCED = ["lam_roll", "lam_cover", "project", "record", "thesis"]
+FINISHING_URGENT_OK  = sorted(URGENT_ELIGIBLE)  # sorted: reaches the UI
 
 FINISHING_DISPLAY = {
     "none":     "No Finishing",
@@ -166,13 +247,14 @@ FINISHING_DISPLAY = {
     "spiral":   "Spiral Binding",
     "wiro":     "Wiro Binding",
     "soft":     "Soft Binding",
+    "perfect":  "Perfect Binding",
+    "thesis":   "Thesis Binding",
     "project":  "Project Binding",
     "record":   "Record Binding",
-    "lam_sheet":"Sheet Lamination",
+    "lam_sheet":"Pouch Lamination",
     "lam_roll": "Roll Lamination",
     "lam_cover":"Cover Lamination",
     "id_card":  "ID Card Printing",
-    "thermal":  "Thermal Binding",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -193,8 +275,13 @@ FINISHING_RATES = {
     "wiro":    {"price": 50,  "label": "Wiro binding",   "staff_quote": True},
     "soft":    {"price": 80,  "label": "Soft binding",   "staff_quote": True},
     "project": {"price": 200, "label": "Project binding","staff_quote": True},
+    "perfect": {"price": 80,  "label": "Perfect binding","staff_quote": True},
+    "thesis":  {"price": 500, "label": "Thesis binding", "staff_quote": False},
     "record":  {"price": 400, "label": "Record binding", "staff_quote": False},
-    "lam_sheet":{"price":60,  "label": "Sheet lam",      "staff_quote": False},
+    "lam_sheet":{"price":70,  "label": "Pouch lam",      "staff_quote": False},
+    "lam_roll":{"price": None,"label": "Roll lam",       "staff_quote": True},
+    "lam_cover":{"price":50,  "label": "Cover lam",      "staff_quote": False},
+    "id_card": {"price": 100, "label": "ID card",        "staff_quote": False},
 }
 
 # Multiple-up divisors (legacy support)
@@ -234,32 +321,69 @@ def calc_sheets(pages: int, sides: str = "ss", layout: str = "1-up") -> int:
     return max(1, sheets)
 
 
-def get_spiral_rate(sheets: int, size: str = "A4") -> int:
-    """Look up spiral binding rate for given sheet count and paper size."""
-    if size.upper() == "A3":
-        return SPIRAL_A3_START
-    for max_sheets, price in SPIRAL_A4_TIERS:
+def _tier_price(tiers: list, sheets: int) -> int:
+    """First tier whose ceiling the sheet count fits under; the last one caps."""
+    for max_sheets, price in tiers:
         if sheets <= max_sheets:
             return price
-    return SPIRAL_A4_TIERS[-1][1]  # cap at max tier price
+    return tiers[-1][1]
+
+
+def get_spiral_rate(sheets: int, size: str = "A4") -> int:
+    """Spiral binding rate for a sheet count and paper size. A3 is tiered too
+    (it used to be a flat Rs.80 however thick the job was)."""
+    tiers = SPIRAL_A3_TIERS if size.upper() == "A3" else SPIRAL_A4_TIERS
+    return _tier_price(tiers, sheets)
+
+
+def get_wiro_rate(sheets: int) -> int | None:
+    """Wiro binding rate, or None above WIRO_MAX_SHEETS -- the machine cannot
+    take it, so the counter offers spiral or soft instead. None means refuse,
+    never charge zero."""
+    if sheets > WIRO_MAX_SHEETS:
+        return None
+    return _tier_price(WIRO_A4_TIERS, sheets)
+
+
+def get_roll_lam_cost(sheets: int, size: str = "A4") -> int:
+    """Roll lamination: per sheet, billed at a minimum of 10 sheets."""
+    rate = ROLL_LAM_RATES.get(size.upper(), ROLL_LAM_RATES["A4"])
+    return max(sheets, ROLL_LAM_MIN_SHEETS) * rate
+
+
+def get_pouch_lam_rate(size: str = "A4", is_colour: bool = False) -> int:
+    """Pouch/sheet lamination, by paper size. Anything at or below A4 takes the
+    A4 rate; A3 has its own, and a colour A3 costs more than a mono one."""
+    if size.upper() == "A3":
+        return LAMINATION_RATES["a3_col"] if is_colour else LAMINATION_RATES["a3_bw"]
+    return LAMINATION_RATES["a4"]
 
 
 def get_soft_binding_rate(sheets: int, with_print: bool = True) -> int:
-    """Look up soft binding rate for given sheet count."""
-    if not with_print:
-        return SOFT_BINDING_WITHOUT_PRINT
-    for max_sheets, price in SOFT_BINDING_TIERS:
-        if sheets <= max_sheets:
-            return price
-    return SOFT_BINDING_TIERS[-1][1]
+    """Soft binding rate for a sheet count.
+
+    Without printing, the general bind-only premium applies -- which is what
+    the old flat SOFT_BINDING_WITHOUT_PRINT of 100 was all along, for the first
+    tier. It now scales with thickness instead of collapsing every job to 100.
+    """
+    price = _tier_price(SOFT_BINDING_TIERS, sheets)
+    return price + (0 if with_print else BIND_ONLY_PREMIUM)
 
 
-def get_thermal_binding_rate(sheets: int) -> int:
-    """Look up thermal/spiral sheet binding rate."""
-    for max_sheets, price in THERMAL_BINDING_TIERS:
-        if sheets <= max_sheets:
-            return price
-    return THERMAL_BINDING_TIERS[-1][1]
+def _colour_tier_key(size: str, sheets: int) -> str:
+    """Colour rates are banded by total sheet count, identically for every size
+    that has colour bands (A4, A5, Letter)."""
+    band = "30" if sheets <= 30 else ("50" if sheets <= 50 else "50p")
+    return f"{size}_col_{band}"
+
+
+# Sizes whose colour rate is banded by sheet count. Legal and A3 are flat.
+TIERED_COLOUR_SIZES = ("A4", "A5", "Letter")
+
+# The student discount is A4 B&W only, deliberately: A5 and Letter are already
+# priced without one (owner, 2026-08-30: "no discounts"). Do not widen this
+# without asking -- A5 at Rs.1.50 is already the heavy-volume student A4 rate.
+STUDENT_DISCOUNT_TYPES = ("A4_BW",)
 
 
 def get_print_rate(paper_type: str, sides: str, sheets: int,
@@ -268,27 +392,29 @@ def get_print_rate(paper_type: str, sides: str, sheets: int,
     Get per-sheet print rate based on paper type, sides, sheet count and
     student status.
 
-    paper_type: 'A4_BW' | 'A4_col' | 'A4_bond_col' | 'Legal_BW' | 'A3_BW' | etc.
+    paper_type: 'A4_BW' | 'A4_col' | 'A5_BW' | 'Letter_col' | 'A3_BW' | etc.
     sides:      'ss' | 'ds'
     sheets:     total sheet count (used for colour tier selection)
-    is_student: apply student discount (B&W only)
+    is_student: apply student discount (A4 B&W only)
+
+    Every size the order page offers must resolve to a real rate here. It did
+    not until 2026-08-30: A5 and Letter had no entries, so the fallback at the
+    bottom billed them -- colour included -- at A4 B&W. tests/test_rate_card.py
+    ::TestEverySizeHasARate holds that shut.
     """
     sides = sides if sides in ("ss", "ds") else "ss"
 
     # A4 B&W — student rate override
-    if paper_type == "A4_BW" and is_student:
+    if paper_type in STUDENT_DISCOUNT_TYPES and is_student:
         key = "A4_BW_student_100" if sheets <= 100 else "A4_BW_student_100p"
         return PRINT_RATES[key].get(sides, PRINT_RATES[key]["ss"])
 
-    # A4 Colour — tiered by sheet count
-    if paper_type == "A4_col":
-        if sheets <= 30:
-            key = "A4_col_30"
-        elif sheets <= 50:
-            key = "A4_col_50"
-        else:
-            key = "A4_col_50p"
-        return PRINT_RATES[key].get(sides, PRINT_RATES[key]["ss"])
+    # Banded colour — A4, A5, Letter
+    if paper_type.endswith("_col"):
+        size = paper_type[:-len("_col")]
+        if size in TIERED_COLOUR_SIZES:
+            key = _colour_tier_key(size, sheets)
+            return PRINT_RATES[key].get(sides, PRINT_RATES[key]["ss"])
 
     # All other types — flat rate
     rate_dict = PRINT_RATES.get(paper_type, PRINT_RATES["A4_BW"])
@@ -328,49 +454,106 @@ def calculate_finishing_cost(finishing: str, sheets: int,
                              paper_size: str = "A4",
                              urgent: bool = False,
                              with_print: bool = True,
-                             project_cover: str = "white") -> dict:
+                             project_cover: str = "white",
+                             is_colour: bool = False) -> dict:
     """
     Calculate finishing cost.
 
     Returns:
-        { finishing_cost, label, outsourced, breakdown_line }
+        { finishing_cost, label, outsourced, breakdown_line, unpriced, refused }
+
+    ``unpriced`` is the important one. Until 2026-08-30 this function had no
+    branch for lam_roll, lam_cover or id_card, and no key at all for perfect or
+    thesis -- all five fell through every branch and returned the zero this
+    function initialises with, so a job finished with roll lamination was
+    quoted the printing and nothing for the lamination. Now anything that
+    reaches zero outside ZERO_PRICED_FINISHINGS comes back flagged, for the
+    caller to alert on rather than silently charge nothing.
+
+    ``refused`` means the shop cannot do it at this size -- wiro above 150
+    sheets. Also never a silent zero.
+
+    ``is_colour`` only affects A3 pouch lamination, which costs more in colour.
     """
     finishing = finishing.lower().strip()
     cost = 0
     outsourced = finishing in FINISHING_OUTSOURCED
     label = FINISHING_DISPLAY.get(finishing, finishing)
+    unpriced = False
+    refused = ""
 
-    if finishing in ("none", "staple"):
+    if finishing in ZERO_PRICED_FINISHINGS:
         cost = 0
     elif finishing == "spiral":
         cost = get_spiral_rate(sheets, paper_size)
     elif finishing == "wiro":
-        cost = get_spiral_rate(sheets, paper_size)  # same tiers as spiral
-    elif finishing == "soft":
+        rate = get_wiro_rate(sheets)
+        if rate is None:
+            refused = (f"wiro binding stops at {WIRO_MAX_SHEETS} sheets "
+                       f"({sheets} asked for) — offer spiral or soft instead")
+        else:
+            cost = rate
+    elif finishing in ("soft", "perfect"):
+        # Perfect is priced as soft (owner, 2026-08-30).
         cost = get_soft_binding_rate(sheets, with_print)
     elif finishing == "project":
         cost = PROJECT_BINDING_RATES.get(project_cover.lower(), 220)
+    elif finishing == "thesis":
+        # A flat binding line when we print it; the customer's own sheets cost
+        # the project rate plus a premium.
+        cost = (THESIS_WITH_PRINT if with_print else
+                PROJECT_BINDING_RATES.get(project_cover.lower(), 220)
+                + THESIS_BIND_ONLY_PREMIUM)
     elif finishing == "record":
         cost = BINDING_RATES["record"]["price"]
     elif finishing == "lam_sheet":
-        cost = LAMINATION_RATES["a4"]
-    elif finishing == "thermal":
-        cost = get_thermal_binding_rate(sheets)
+        cost = get_pouch_lam_rate(paper_size, is_colour)
+    elif finishing == "lam_roll":
+        cost = get_roll_lam_cost(sheets, paper_size)
+    elif finishing == "lam_cover":
+        cost = BINDING_RATES["lam_cover"]["price"]
+    elif finishing == "id_card":
+        # Per card, printing included -- `sheets` is the card count here.
+        cost = BINDING_RATES["id_card"]["price"] * max(1, sheets)
+    else:
+        unpriced = True
 
-    # Urgent surcharge
+    # The bind-only premium, for the bindings it applies to. Soft AND perfect
+    # both price through get_soft_binding_rate, which already adds it, so
+    # adding it again here would charge them twice.
+    _ALREADY_PREMIUMED = {"soft", "perfect"}
+    if (not with_print and finishing in BIND_ONLY_PREMIUM_APPLIES
+            and finishing not in _ALREADY_PREMIUMED and not refused):
+        cost += BIND_ONLY_PREMIUM
+
+    if cost == 0 and finishing not in ZERO_PRICED_FINISHINGS and not refused:
+        unpriced = True
+
+    # Urgent surcharge — any finishing, not just soft and project.
     surcharge = 0
-    if urgent and finishing in URGENT_ELIGIBLE:
+    if urgent and finishing in URGENT_ELIGIBLE and not refused:
         surcharge = URGENT_SURCHARGE
         cost += surcharge
 
-    breakdown = f"{label}: Rs.{cost:.0f}"
-    if surcharge:
-        breakdown += f" (incl. urgent +Rs.{surcharge})"
-    if outsourced:
-        breakdown += " [outsourced]"
+    if refused:
+        breakdown = f"{label}: NOT POSSIBLE — {refused}"
+    else:
+        breakdown = f"{label}: Rs.{cost:.0f}"
+        if not with_print and finishing in BIND_ONLY_PREMIUM_APPLIES:
+            breakdown += " (binding only, incl. +Rs.20)"
+        if finishing == "lam_roll" and sheets < ROLL_LAM_MIN_SHEETS:
+            breakdown += (f" (minimum {ROLL_LAM_MIN_SHEETS} sheets applied, "
+                          f"{sheets} brought)")
+        if surcharge:
+            breakdown += f" (incl. urgent +Rs.{surcharge})"
+        if outsourced:
+            breakdown += " [outsourced]"
+    if unpriced:
+        breakdown = f"{label}: NO RATE — quote manually"
 
     return {"finishing_cost": cost, "label": label,
-            "outsourced": outsourced, "breakdown_line": breakdown}
+            "outsourced": outsourced, "breakdown_line": breakdown,
+            "unpriced": unpriced, "refused": refused}
 
 
 def calculate_quote(print_items: list, finishing: str = "none",
@@ -414,7 +597,9 @@ def calculate_quote(print_items: list, finishing: str = "none",
 
     # Finishing (calculated on total sheets across all items)
     fin = calculate_finishing_cost(
-        finishing, total_sheets, paper_size, urgent, with_print, project_cover
+        finishing, total_sheets, paper_size, urgent, with_print, project_cover,
+        is_colour=any("col" in str(i.get("paper_type", "")).lower()
+                      for i in print_items),
     )
     finishing_cost = fin["finishing_cost"]
     if fin["breakdown_line"]:
@@ -430,6 +615,9 @@ def calculate_quote(print_items: list, finishing: str = "none",
         "total":               total,
         "breakdown":           breakdown,
         "outsourced_finishing": fin["outsourced"],
+        # Callers must surface these rather than bill the total silently.
+        "unpriced_finishing":  fin["unpriced"],
+        "refused_finishing":   fin["refused"],
     }
 
 

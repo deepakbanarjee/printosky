@@ -1682,12 +1682,27 @@ def handle_quote(qs: dict) -> dict:
     result = _rc.calculate_quote(items, finishing, urgent, is_student, paper_size)
     sheets = _rc.calc_sheets(pages, sides, layout)
 
+    # A finishing the rate card cannot price must reach the console as a flag,
+    # not as a silently free line — five keys did exactly that until 2026-08-30
+    # (see rate_card.calculate_finishing_cost). Alert on it too: a quote the
+    # shop cannot stand behind is a failure, not a Rs.0 line item.
+    unpriced = result.get("unpriced_finishing", False)
+    refused  = result.get("refused_finishing", "")
+    if unpriced:
+        _report_health(
+            "rate_card.unpriced_finishing", False,
+            f"/quote asked for finishing={finishing!r}, which has no rate — quoted "
+            f"Rs.0 for it. Price it in rate_card or remove it from the UI.",
+        )
+
     return {
         "sheets":         sheets,
         "print_cost":     result["print_cost"],
         "finishing_cost": result["finishing_cost"],
         "total":          result["total"],
         "breakdown":      result["breakdown"],
+        "unpriced_finishing": unpriced,
+        "refused_finishing":  refused,
     }
 
 
