@@ -65,6 +65,22 @@ python tools/nup_matrix.py            # every combination, as sheets
 python tools/proof_run.py FILE.pdf    # impose all 12; --send to print
 ```
 
+## Locked: Konica duplex/simplex fix (2026-08-30) — confirm twice before changing
+The Konica driver silently ignores SumatraPDF's per-job duplex/simplex
+override in both directions (full history in
+[docs/PRINT_ROTATION_MATRIX.md](docs/PRINT_ROTATION_MATRIX.md)). Fixed and
+verified on paper at OSP via a dual-queue workaround. **Ask the user to
+confirm twice before modifying any of this:**
+- `print_server._konica_queue_for_sides()` and its two call sites (in
+  `send_to_printer()` and the staff manual-print item path)
+- The `logging.basicConfig()` placement at the very top of `print_server.py`
+  (must stay the first logging call in the module — moving it back down
+  silently breaks file logging the moment `printer_queue_names` is set; this
+  exact regression happened once already)
+- `tools/nup_final_test.py`'s 2-page-per-combo test design in `build()` — a
+  1-page simplex job can't distinguish simplex from duplex, don't shrink it
+  back down
+
 ## Key REPL Commands (`watcher.py`)
 ```
 pending                              → list pending jobs
