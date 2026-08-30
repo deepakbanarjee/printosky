@@ -1,17 +1,18 @@
 # Page rotation matrix — every combination
 
-> **🛑 BLOCKED — OSP Konica cannot be trusted for per-job duplex/simplex, 2026-08-29.**
-> SumatraPDF's `-print-settings duplexlong`/`simplex` token is silently ignored by
-> the `KONICA MINOLTA 1100 PS` driver in **both** directions — the printer just
-> prints whatever its Printing Preferences default currently is, regardless of
-> what the job asked for. Confirmed by log: `duplexlong` was sent for a job that
-> printed simplex. Every previous "verified" Konica duplex result only matched
-> because the driver's default happened to already be duplex at the time — it
-> was never actually proof the override worked. See "Not yet on paper" below for
-> the full writeup. **Do not route production jobs needing a specific
-> duplex/simplex mode through Konica until this is fixed** (newer SumatraPDF, or
-> a PCL driver instead of the PS one) — a mismatch is silent and affects sheet
-> count / billing, not just paper waste.
+> **✅ RESOLVED — OSP Konica duplex/simplex control fixed via dual-queue routing, 2026-08-30.**
+> The `KONICA MINOLTA 1100 PS` driver silently ignores SumatraPDF's per-job
+> `duplex`/`simplex` override in both directions (full writeup under "Not yet
+> on paper" below) — a driver limitation, never fixed at the SumatraPDF/code
+> level. Worked around by installing the same physical Konica as two Windows
+> queues, each with its own persisted Printing Preferences default, and
+> routing by queue instead of by per-job override
+> (`print_server._konica_queue_for_sides()`, `install/INSTALL.md`). Verified
+> on paper at OSP: `tools/nup_final_test.py --simplex --send --printer konica`
+> printed two genuinely separate single-sided sheets, and
+> `--only 2up_landscape --send --printer konica` printed one genuine duplex
+> sheet, back correctly turned. Epson re-verified the same way — both
+> printers now confirmed correct for duplex and simplex control.
 
 _Generated from the code. Regenerate with `python tools/nup_matrix.py --markdown`._
 
@@ -204,11 +205,12 @@ than the other. If the store wants the opposite handedness, swap 90 ↔ 270 in
 Run with `tools/proof_run.py --printer konica` at commit `3dbea4d`, checked
 sheet by sheet against the matrix above.
 
-> ⚠️ **Geometry ✅ below is still true — rotation/imposition is unaffected.**
-> But as of 2026-08-29 the Konica cannot be trusted to actually apply the
-> `duplex` sides mode itself; see the 🛑 warning under "Not yet on paper". These
-> checkmarks confirm the sheet layout is correct *given* that duplex actually
-> happened — they were run when the driver's default coincidentally matched.
+> ℹ️ **Geometry ✅ below is unaffected and was never in question.** Between
+> 2026-08-29 and 2026-08-30, the Konica driver was found not to honour a
+> per-job duplex/simplex override at all (these checkmarks only ever proved
+> the sheet layout is correct *given* duplex actually happened, which back
+> then was coincidental) — since fixed via dual-queue routing; see "Not yet on
+> paper" below for the full history.
 
 | Combination | A4 | A3 | A5 |
 |---|---|---|---|
@@ -324,15 +326,25 @@ us:
 > a naive single-pass set (which is what most GDI print utilities, including
 > SumatraPDF, do) gets silently dropped and the queue's persisted default wins.
 >
-> **Not yet root-caused. Do not rely on Konica for a job whose duplex/simplex
-> mode matters** (i.e. any real customer job) until one of these is tried and
-> reverified with a 2-page `nup_final_test.py` run in both modes:
-> - Update SumatraPDF past `3.5.2` (the version in use as of this writeup) —
->   later builds may handle the merge pass correctly for this driver class.
-> - Install Konica's **PCL** driver for this queue instead of the PS one — PCL
->   drivers are typically far more compliant with third-party duplex overrides.
-> - Failing both, route jobs by required sides: keep Konica's default matching
->   whichever mode is more common (duplex) and send jobs needing the other mode
->   to Epson instead (which has confirmed correct per-job overrides in both
->   directions). Not implemented — a routing change, so needs sign-off before
->   any customer job depends on it.
+> **Fixed, 2026-08-30 — not by patching the override, by not needing one.**
+> Neither a SumatraPDF upgrade nor a PCL driver was pursued; instead, the same
+> physical Konica was installed as a second Windows queue reusing the existing
+> driver and port:
+> ```powershell
+> Add-Printer -Name "KONICA MINOLTA 1100 PS (Duplex)" -DriverName "KONICA MINOLTA 1100 PS" -PortName "IP_192.168.55.110"
+> ```
+> with its own Printing Preferences default set to `2-Sided`, while the
+> original `KONICA MINOLTA 1100 PS` queue keeps the `1-Sided` default from
+> step 2 above. `print_server._konica_queue_for_sides()` picks between the two
+> queue names by the job's `sides` value instead of asking either driver
+> instance to override its own default — see `install/INSTALL.md` for the full
+> setup and `store_config.json`'s `printer_queue_names` keys
+> (`konica_duplex` / `konica_simplex`). Reverified on paper:
+> `--simplex --send --printer konica` printed two genuinely separate
+> single-sided sheets; `--only 2up_landscape --send --printer konica` printed
+> one genuine duplex sheet, back correctly turned. Both directions now work.
+>
+> This also caught a second, unrelated bug: once `printer_queue_names` was
+> configured, `print_server.py`'s own file logging silently stopped working
+> (a `logging.basicConfig()` ordering issue — see the commit fixing it). Fixed
+> separately; not a driver problem.
