@@ -316,292 +316,335 @@ temp file, appends `noscale`, cleans up in a `finally`. NULL ⇒ today's path.
 
 ---
 
-## 4. Feature B — Copy / scan / laminate / foil / bind, with no printing
+## 4. Feature B — post-press without printing
 
-### 4.1 Decisions
+### 4.1 What the owner's answers changed
 
-| # | Decision | Why |
-|---|---|---|
-| B1 | A service job is a **normal `jobs` row** with a new `service_kind`, not a new table | Revenue, payment, pickup code, WhatsApp notify, daily summary and MIS all already read `jobs`. A new table means re-implementing every one of them |
-| B2 | `service_kind` NULL ⇒ print job ⇒ everything behaves exactly as today | Same absent-means-unchanged rule as Feature A |
-| B3 | A service job **never** creates a `print_items` row, never enters a printer queue, never auto-prints | The one behaviour that makes "post-press without printing" true |
-| B4 | v1 kinds: `copy`, `scan`, `laminate`, `foil`, `bind` (+ `other` as escape hatch) | Covers the owner's list; `other` stops staff forcing a wrong kind |
-| B5 | **Foiling and roll-lamination rates are set** (§4.3.1, owner 2026-08-30): per sheet, A4/A3, minimum 10 sheets then piece rate. `other` stays staff-priced and flagged `needs_manual_price` | Real rates, no invented ones; a ₹0 service job still alerts |
-| B6 | `/new-photocopy` and its two console buttons stay exactly as they are | Already in daily use. Copy-as-a-service is the richer path; the old one keeps working until the owner retires it |
-| B7 | Staff-console first. Customer-facing (order-v2 / WhatsApp) is a later decision | Post-press needs the physical item in hand |
-| B8 | Copy is priced off the **existing print rate card** unless the owner says otherwise | No new numbers invented |
+Two answers turned this from "add service jobs" into something larger, and the
+plan says so rather than hiding it in an estimate:
 
-### 4.2 Data model (additive only)
+1. **Capability is per store, not per service.** *"Binding, roll lamination and
+   foiling happens in Printosky Nattika. For all other stores it is outsourced.
+   We need to account that properly."* `FINISHING_OUTSOURCED` is a module-level
+   global today (`rate_card.py:160`) — a single list that is simply wrong for one
+   of the two live stores.
+2. **Nattika is not a vendor, it is us.** OSP work finished at Nattika is an
+   **internal inter-store transfer**, with revenue **split print vs finishing**
+   and Nattika booking an **internal rate**. That needs per-line store
+   attribution the `jobs` table does not have.
 
-Cloud — new `api/migrations/SCHEMA_v29_service_jobs.sql`:
+Neither is hard, but together they are their own phase (B-7…B-9 below), and the
+service work should not wait on them.
+
+### 4.2 Decisions
+
+| # | Decision |
+|---|---|
+| B1 | A service job is a normal `jobs` row with a new `service_kind`, not a new table — revenue, payment, pickup codes, WhatsApp notify, daily summary and MIS all already read `jobs` |
+| B2 | `service_kind` NULL ⇒ print job ⇒ everything behaves exactly as today |
+| B3 | A service job **never** creates a `print_items` row, never enters a printer queue, never auto-prints |
+| B4 | Kinds: `copy`, `scan`, `laminate`, `foil`, `bind`, `cut`, `punch`, `photo`, `dtp`, `other` |
+| B5 | Rates in §4.4 are the owner's, given 2026-08-30. `other` stays staff-priced and flagged |
+| B6 | `/new-photocopy` and its buttons stay — but stop asking staff to type a price; the button quotes from the rate card like everything else |
+| B7 | Services are orderable **online as drop-off bookings**; an un-received booking auto-expires (§4.8) |
+| B8 | Payment: on collection, except **part payment upfront above a threshold** |
+| B9 | Capability is per store; **outsourced is the default** so a new store never silently claims it can finish (§4.7) |
+
+### 4.3 Data model (additive only)
+
+`api/migrations/SCHEMA_v29_service_jobs.sql`:
 
 ```sql
-ALTER TABLE jobs ADD COLUMN IF NOT EXISTS service_kind TEXT;   -- NULL = print job
-ALTER TABLE jobs ADD COLUMN IF NOT EXISTS service_meta JSONB;  -- per-kind quantities
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS service_kind  TEXT;   -- NULL = print job
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS service_meta  JSONB;  -- per-kind quantities
+-- inter-store finishing (§4.7)
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finishing_store_id TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finishing_status   TEXT;   -- sent | at_finisher | returned
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS print_amount       REAL;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finishing_amount   REAL;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finishing_internal_amount REAL;
+-- drop-off bookings (§4.8)
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS item_received_at timestamptz;
 CREATE INDEX IF NOT EXISTS jobs_service_kind_idx ON jobs (service_kind)
   WHERE service_kind IS NOT NULL;
 ```
 
-Store SQLite — the same two columns as `TEXT` via the `fix_db.py` ALTER pattern,
-plus the DDL in `install/bootstrap_db.py`. `docs/SCHEMA.md` gains the two rows.
+Store SQLite gets the same columns as `TEXT`/`REAL` via the `fix_db.py` ALTER
+pattern, plus `install/bootstrap_db.py` DDL and `docs/SCHEMA.md` rows.
 
-`service_meta` shape per kind (JSON, validated in one place):
+### 4.4 Rates *(owner, 2026-08-30)*
 
-| kind | meta |
+**Per-piece services — `max(pieces, minimum) × rate`, one formula for all:**
+
+| Service | A4 | A3 | Cover | Minimum |
+|---|---|---|---|---|
+| Foiling | ₹30/sheet | ₹50/sheet | ₹50/piece | 10 pieces (cover floor = ₹500) |
+| Roll lamination | ₹15/sheet | ₹30/sheet | — | 10 sheets |
+| Pouch lamination | ₹70 | ₹120 B&W · ₹140 colour | — | — |
+| Cover lamination | ₹50 flat | | | |
+| ID card | ₹100/card, **printing included** | | | |
+| Cutting | ₹20 per pass | | | ₹100 |
+| Punching | ₹20 per pass | | | ₹100 |
+
+A *pass* is one press of the machine, however many sheets it takes at a time — so
+a 60-sheet job punched in 4 passes is 4 × ₹20, floored to ₹100. **Cutting and
+punching are free when the job is one we printed or bound**; the rate applies only
+to a customer's own sheets.
+
+**Binding:**
+
+| Key | With print | Bind-only (customer's sheets) |
+|---|---|---|
+| Spiral A4 | ≤30 ₹30 · ≤70 ₹40 · ≤100 ₹50 · ≤130 ₹60 · ≤150 ₹80 · ≤170 ₹90 · ≤200 ₹120 · ≤250 ₹150 | **+₹20** |
+| Spiral A3 | ₹80 · ₹110 · ₹130 · ₹160 · ₹210 · ₹240 · ₹320 · ₹400 *(A4 × 2.67, rounded to ₹10)* | **+₹20** |
+| Wiro | ≤30 ₹50 · ≤70 ₹100 · ≤100 ₹150 · ≤130 ₹200 · ≤150 ₹250 — **refused above 150 sheets** | **+₹20** |
+| Soft | ≤70 ₹80 · ≤100 ₹110 · ≤130 ₹120 · ≤150 ₹140 · ≤200 ₹160 · ≤250 ₹180 | ₹100 (= ₹80 + ₹20) |
+| Perfect | **same as soft** | **+₹20** |
+| Project | ₹220 white/pink/blue/green · ₹250 gold/silver/custom | same |
+| Thesis | **₹500 binding line**, printing charged on top as normal | project **+ ₹100** → ₹320 / ₹350 |
+| Record | ₹400 | same |
+| ~~Thermal~~ | **withdrawn — no longer offered** (§4.9) | — |
+
+> **The bind-only premium is one rule: +₹20.** It is not a per-binding special
+> case — and it was already in the code without being named: the existing
+> `SOFT_BINDING_WITHOUT_PRINT = 100` is exactly soft's ₹80 tier plus ₹20. Perfect
+> binding is priced the same as soft; the "+₹20 for binding only" the owner
+> mentioned is this same rule, not a perfect-specific premium.
+
+**Other services:**
+
+| Service | Rate |
 |---|---|
-| `copy` | `{sheets, copies, colour, sides, paper_size}` |
-| `scan` | `{sheets, colour, dpi, delivery: "whatsapp"\|"email"\|"usb", destination}` |
-| `laminate` | `{sheets, paper_size, lam_type: "pouch"\|"roll"\|"cover"\|"id"}` — pouch reads `LAMINATION_RATES`, roll reads `ROLL_LAM_RATES` (§4.3.1) |
-| `foil` | `{sheets, paper_size, foil_type: "gold"\|"silver", notes}` — `foil_type` is for the work order; both cost the same |
-| `bind` | `{sheets, binding, paper_size, project_cover?}` — reuses `calculate_finishing_cost(..., with_print=False)` |
-| `other` | `{description, manual_price}` |
+| Copy | the print rate card (A4 B&W ₹3/sheet), **student rates apply** |
+| Scan A4 | ≤50 ₹10 · 51–100 ₹7 · >100 ₹5 per sheet |
+| Scan A3 | **double the A4 tiers** — ₹20 · ₹14 · ₹10 |
+| Photos | print from a **supplied soft copy — no shooting**. Set of 5 ₹50 · full sheet ₹100 · stamp / postcard / 4×6 *(rates pending)* |
+| DTP | per page, **typing only, printing extra**: Malayalam ₹40 · English ₹40 · Hindi ₹60 |
+| Urgent | **₹20 on any service**, not just soft/project binding as today |
 
-### 4.3 Pricing — `rate_card.py`, **new Section 11 only**
+**Withdrawn:** the ₹2 "special" scan rate (Sini/Ujjwala) is removed — a
+per-customer override left in the code is an override applied by accident.
+
+Student rates (₹2/sheet under 100 sheets, ₹1.50 over) extend to **photocopying**
+and nothing else.
+
+### 4.5 Pricing code — `rate_card.py`, new Section 11 only
 
 ```python
-SERVICE_KINDS = {...}      # labels, whether a manual price is required
+SERVICE_KINDS  = {...}                              # labels, manual-price flags
+FOILING_RATES  = {"A4": 30, "A3": 50, "cover": 50}
+ROLL_LAM_RATES = {"A4": 15, "A3": 30}
+HANDWORK_RATES = {"cut": 20, "punch": 20}           # per pass
+MIN_CHARGE     = {"cut": 100, "punch": 100}
+MIN_PIECES     = {"foil": 10, "lam_roll": 10}
+PHOTO_RATES    = {"set5": 50, "sheet": 100}         # + stamp/postcard/4x6 pending
+BIND_ONLY_PREMIUM = 20
+
 def calculate_service_quote(kind: str, meta: dict) -> dict:
     """{ total, breakdown[], needs_manual_price, label } — additive; no existing
     function's signature or behaviour changes."""
 ```
 
-It composes what is already there: `get_print_rate`/`calc_sheets` for `copy`,
-`SCANNING_RATES` tiers for `scan`, `LAMINATION_RATES` for pouch lamination,
-`calculate_finishing_cost(..., with_print=False)` for `bind` — plus the two new
-tables below.
-
-#### 4.3.1 Rates *(owner, 2026-08-30)*
-
-```python
-FOILING_RATES  = {"A4": 30, "A3": 50, "cover": 50}   # per sheet/piece
-ROLL_LAM_RATES = {"A4": 15, "A3": 30}                # per sheet
-MIN_PIECES     = {"foil": 10, "lam_roll": 10}        # bill at least this many
-ID_CARD_RATE   = 100                                 # per card, printing included
-```
-
-**Minimum 10, then straight piece rate.** 3 A4 foil sheets bill as 10 × ₹30 =
-₹300; 14 bill as 14 × ₹30 = ₹420. Same for roll lamination *(confirmed 2026-08-30)*.
-The breakdown must name it, so the operator can explain the number before the
-customer is surprised by it:
+Every minimum names itself in the breakdown, so the operator can explain the
+number before the customer is surprised by it:
 
 ```
 Foiling A4: minimum 10 sheets applied (3 brought) — 10 × ₹30 = ₹300
+Punching: 4 passes × ₹20 = ₹80 → minimum ₹100
 ```
 
-The console shows the same line live and hints "below minimum" the moment the
-count drops under 10.
-
-| Service | A4 | A3 | Cover | Minimum |
-|---|---|---|---|---|
-| **Foiling** | ₹30/sheet | ₹50/sheet | ₹50/piece — covers are always larger than A3 | 10 pieces (cover floor = **₹500**) |
-| **Roll lamination** | ₹15/sheet | ₹30/sheet | — | 10 sheets |
-| **ID card** | ₹100 per card, **printing included** | — | — | — |
-
-> The cover-foiling floor the owner quoted — "minimum ₹500 up to 10 sheets for
-> covers, then standard per-sheet rates" — is exactly 10 × ₹50, so covers need no
-> special case: they are the `"cover"` rate under the same minimum rule as
-> everything else. One formula, `max(pieces, 10) × rate`, prices all three.
-
-#### 4.3.2 Binding rates — the gaps now filled
-
-| Key | With print | Bind-only (customer brings sheets) |
-|---|---|---|
-| `perfect` | soft-binding tiers **+ ₹20** | ₹100 + ₹20 = **₹120** |
-| `thesis` | **₹500 binding line**, per-sheet printing charged on top as normal | project rate **+ ₹100** → ₹320 (white/pink/blue/green) or ₹350 (gold/silver/custom) |
-| `lam_sheet` (pouch) | A4 **₹70** · A3 B&W **₹120** · A3 colour **₹140** | same |
-| `lam_cover` | **₹50** flat, per cover | same |
-| `lam_roll` | `ROLL_LAM_RATES × max(sheets, 10)` | same |
-| `id_card` | **₹100 per card**, printing included | n/a |
-
-Pouch rates are the existing `LAMINATION_RATES` (₹60 / ₹100 / ₹120) **plus the
-owner's premium** — ₹10 up to A4, ₹20 for A3. Everything at or below A4 takes the
-A4 rate.
-
-Foiling on a thesis or book cover uses the standard cover rate above — no separate
-entry, no separate minimum.
-
-> **Do not conflate roll with pouch.** Roll lamination is a different process at
-> a different price. Wiring it to `LAMINATION_RATES` would overcharge by ~4×.
-
-### 4.4 Endpoints (`print_server.py`, new handlers beside the existing ones)
+### 4.6 Endpoints
 
 | Route | Purpose |
 |---|---|
-| `GET /service-quote?kind=laminate&sheets=6&lam_type=a4` | live price for the modal; mirrors `/quote`'s shape |
-| `POST /new-service` | create a service job: `Queued` (or `Draft` without payment/override — the same gate as `handle_create_job`), **no `print_items` row**, `service_kind` + `service_meta` set, `_jt_log` audit event |
-| `POST /complete-job` | **unchanged** — service jobs complete through the existing payment path |
+| `GET /service-quote?kind=laminate&sheets=6&lam_type=pouch&paper_size=A4` | live price for the modal |
+| `POST /new-service` | create the job — no `print_items` row, `service_kind` + `service_meta` set, audit event |
+| `POST /complete-job` | **unchanged** — services collect through the existing payment path |
 
-`handle_create_job` gains exactly one guard: skip the `print_items` insert when
+`handle_create_job` gains one guard: skip the `print_items` insert when
 `service_kind` is set and the kind does not print. Nothing else in it moves.
 
-### 4.5 Lifecycle
+### 4.7 Per-store capability and inter-store finishing
 
-```
-Queued ──(staff starts)──> In Progress ──> Ready (pickup code + WhatsApp notify,
-        reusing handle_mark_ready) ──> Completed (payment via handle_complete_job)
-```
-No `Printed` state, no printer, no claim (`jobs.print_claimed_at` untouched).
+**Capability lives in `store_config.json`**, the file that already decides store
+behaviour (a blank `konica_ip` is how a store declares it has no Konica):
 
-### 4.6 Where service jobs must be *excluded* — the full list
+```json
+"capabilities": { "binding": false, "foiling": false, "roll_lam": false }
+```
+
+**Absent or false = outsourced**, so a new store never silently claims it can
+finish. PRINTK (Nattika) sets all three true. `FINISHING_OUTSOURCED` stays as the
+fallback for callers with no store context, behind a new
+`is_outsourced(finishing, store_id)`.
+
+**A job OSP sells and Nattika finishes** is an internal transfer, not a vendor
+job: `finishing_store_id = 'PRINTK'`, `finishing_status` walks
+`sent → at_finisher → returned`, and Nattika's console grows an **incoming
+finishing work** queue. Pickup stays wherever the customer expects it.
+
+**Revenue splits**: `print_amount` books to the selling store, `finishing_amount`
+to the finishing store — at `finishing_internal_amount`, a **configurable
+per-service internal rate, editable from the console and seeded at 100 %** until
+the owner sets real numbers. Nothing blocks on those numbers.
+
+### 4.8 Online drop-off bookings
+
+A customer books lamination/foiling/binding on the site and brings the item in.
+The job exists before the item does, so:
+
+- `item_received_at` NULL = booked but not in hand. It is **not** work-ready and does not appear in the counter's active queue.
+- A WhatsApp reminder goes out, and an un-received booking **auto-expires after 3 days** *(day count to confirm)* — cancelled with a reason, not silently deleted.
+- Above the payment threshold the booking takes **part payment upfront** *(threshold and deposit pending)*, which also makes an abandoned booking cost the customer rather than the shop.
+
+### 4.9 Withdrawals — things to remove, deliberately
+
+Thermal binding is **no longer offered**. Remove it from `BINDING_RATES`,
+`FINISHING_OUTSOURCED`, `FINISHING_DISPLAY`, `THERMAL_BINDING_TIERS`,
+`get_thermal_binding_rate`, and the finishing dropdowns in both consoles
+(`jobs.html:1386`, `admin.html:2001`). This closes backlog **S7-5** ("thermal
+listed in admin but rate never tested") by deletion rather than by testing.
+
+Also removed: the ₹2 scan special rate (§4.4).
+
+### 4.10 Where service jobs must be excluded
 
 | Place | Change |
 |---|---|
-| `store_puller` pull loop | Already safe: no `file_url` ⇒ never pulled. **Add a test that pins it** |
-| `watcher.py` auto-print | File-driven; service jobs have no file. Pin with a test |
-| Printer-breakdown counts, jobs.html/admin.html "pending print" | Filter `service_kind IS NULL` |
-| Print panel | Replace the Print button with a **Service panel** (kind, quantities, quote, Start / Ready / Collect) |
+| `store_puller` pull loop | Already safe (no `file_url`) — **add a test that pins it** |
+| `watcher.py` auto-print | File-driven; pin with a test |
+| Printer-breakdown counts, "pending print" filters | Filter `service_kind IS NULL` |
+| Print panel | Service panel instead (kind, quantities, quote, Start / Ready / Collect) |
 | `handle_print_item` | Refuse a service job with a clear error, not a stack trace |
-| Colour detection / `/detect-colour` | Not offered for service jobs |
+| `/detect-colour` | Not offered for service jobs |
 
-### 4.7 Console UI
+### 4.11 Reporting + the reconciliation win
 
-- **jobs.html** — a `+ Service` button beside `+ Photocopy`, opening a 3-step modal (kind → quantities + live quote → payment), reusing the existing `nj-*` payment markup and CSS. Queue rows get a kind pill (`🖨 Print` / `📄 Copy` / `🔍 Scan` / `✨ Laminate` / `🥇 Foil` / `📕 Bind`).
-- **admin.html** — the same modal, mirrored (the two consoles already duplicate the photocopy/new-job modals).
-- Job detail shows the service panel instead of the print panel when `service_kind` is set.
+`daily_summary`, `/report` and MIS revenue panels sum `amount_collected` from
+`jobs`, so service revenue lands automatically. Panels claiming to count *print*
+jobs get a `service_kind IS NULL` filter. Per-store revenue reads the new
+`print_amount` / `finishing_amount` split.
 
-### 4.8 Reporting + a free reconciliation win
+`konica_jobs.job_type` already records **`Copy`** and **`Scan`** off the printer
+(`SCHEMA.sql:210`). Once copy/scan service jobs exist, MIS can compare
+counter-recorded against machine-counted copies — the gap is unbilled walk-in
+copying, knowable for the first time.
 
-`daily_summary`, `/report` and the MIS revenue panels sum `amount_collected` from
-`jobs`, so service revenue lands automatically once these are `jobs` rows — no
-change needed. Panels that claim to count *print* jobs get a `service_kind IS
-NULL` filter.
-
-Bonus: `konica_jobs.job_type` already records **`Copy`** and **`Scan`** straight
-off the printer (`SCHEMA.sql:210`). Once copy/scan service jobs exist, MIS can
-compare *counter-recorded* against *machine-counted* copies — the gap is unbilled
-walk-in copying. This is the first time that number becomes knowable.
-
-### 4.9 Tests (new files)
-
-- `tests/test_service_quote.py` — every kind, tier boundaries, `needs_manual_price`.
-- `tests/test_service_jobs.py` — `/new-service` creates the row with no `print_items`; payment gate; audit event; `handle_print_item` refuses a service job.
-- `tests/test_service_isolation.py` — **the guard test**: a service job is never pulled by `store_puller`, never auto-printed, never counted in printer queues.
-- Existing `tests/test_local_print.py`, `test_store_puller.py`, `test_print_planner.py`, `test_update_job.py` must pass unchanged.
-
-### 4.10 Fail-loud (per `docs/FAIL_LOUD.md`)
+### 4.12 Fail-loud
 
 | Condition | Alert |
 |---|---|
-| Foil/other job completed at ₹0 with no override reason | `report("service.unpriced", False, ...)` |
+| A service job completed at ₹0 with no override reason | `report("service.unpriced", False, …)` |
 | Unknown `service_kind` reaching a console or handler | alert, never a silent skip |
-| `/service-quote` raises | `guard("service.quote")` → alert; UI shows "enter price manually" |
-| A service job sitting in `Queued` > 24 h | daily digest line (reuses `store_digest.py`) |
+| `/service-quote` raises | `guard("service.quote")` → alert; UI says "enter price manually" |
+| A wiro job over 150 sheets | refused at the counter with "offer spiral or soft instead" |
+| A drop-off booking expiring | WhatsApp reminder first, then a cancellation with a reason |
+| A job sent to a finishing store and not returned in 48 h | daily digest line (`store_digest.py`) |
 
-New code adds **zero** `except Exception: pass` — `tests/test_fail_loud_rule.py`
-budgets stay as they are.
+New code adds **zero** `except Exception: pass`.
 
-### 4.11 Shipping order
+### 4.13 Tests
+
+- `tests/test_service_quote.py` — every kind, every tier boundary, both minimum rules, the +₹20 bind-only premium, wiro's 150-sheet refusal.
+- `tests/test_service_jobs.py` — `/new-service` creates the row with no `print_items`; payment threshold; audit event; `handle_print_item` refuses a service job.
+- `tests/test_service_isolation.py` — **guard test**: never pulled by `store_puller`, never auto-printed, never counted in printer queues.
+- `tests/test_store_capabilities.py` — capability defaults to outsourced; PRINTK is in-house; `is_outsourced` agrees with `store_config.json`.
+- `tests/test_dropoff_expiry.py` — a booking with no `item_received_at` expires, one with an item never does.
+
+### 4.14 Billing gaps this work uncovered — verified against production
+
+Queried Supabase `jobs` on 2026-08-30: **476 jobs** since 2026-03-12, **109 with a
+finishing value** (`none` 104, `spiral` 2, `perfect` 2, `soft` 1).
+
+**Nothing has been under-billed through these gaps.** No `lam_roll`, `lam_cover`,
+`id_card`, `thermal`, `project` or `record` job has ever existed in the cloud
+table, and the two `perfect` jobs were never collected. The gaps are latent.
+
+> Caveat: this is the **cloud** table. Walk-ins entered on a store PC that never
+> sync are invisible here, and `lam_cover`/`lam_roll` are in the store consoles'
+> dropdown. Nothing lost *through the cloud path* is not the same as nothing lost.
+
+**Gap 1 — `lam_roll`, `lam_cover`, `id_card` bill ₹0.** `calculate_finishing_cost`
+(`rate_card.py:327–360`) has no branch for any of them; `cost` stays at its `0`
+initialiser. `BINDING_RATES` even carries `lam_cover: 50` — never read.
+
+**Gap 2 — `perfect` and `thesis` are orderable but unpriced.** Reachable from the
+live order page: `order-v2.html:418,421` offers both, `_VALID_FINISHING`
+(`api/handlers_order.py:68`) accepts both, and `rate_card` has no such keys at
+all. The production rows confirm it — 1 colour page + Perfect quoted **₹10**, the
+page and nothing for the binding.
+
+**Gap 3 — two identical specs, two prices (unexplained).**
+`OSKY-20260821-6517-848b` and `-c724`, 14 minutes apart, have byte-identical
+stored specs (`total_pages 1`, `pages_included [1]`, `colour_mode col`,
+`binding perfect`, `png`) and were quoted **₹10 and ₹3**. ₹3 is the A4 B&W rate,
+so the second was priced as B&W despite a colour spec. Not explicable from the
+code, and not guessed at here. **Proposed check:** re-run `calculate_quote` over
+every stored `print_spec` and list jobs whose recomputed total differs from
+`amount_quoted`.
+
+**The fix — B-0, its own PR**, because it changes live print-job quote maths:
+
+- `perfect` → soft tiers · `thesis` → ₹500 / project + ₹100 · bind-only → +₹20
+- `lam_roll` → `ROLL_LAM_RATES × max(sheets, 10)` · `lam_cover` → ₹50 · `id_card` → ₹100/card
+- `lam_sheet` → by paper size (₹70 / ₹120 / ₹140) instead of the hardcoded `LAMINATION_RATES["a4"]`
+- Spiral A3 → tiered · wiro → its own tiers · thermal → removed
+- Add every missing key to `BINDING_RATES` / `FINISHING_DISPLAY` and the in-house/outsourced lists
+- **A guard test that every key in `_VALID_FINISHING` and every `data-binding` in order-v2 resolves to a non-zero, non-`None` price** — the test that would have caught all of this
+- Every other finishing key's price pinned unchanged, so the blast radius is provable
+
+### 4.15 Shipping order
 
 | PR | Contents | Risk |
 |---|---|---|
-| B-0 | **Unpriced-finishing fix** (§4.12): `perfect`, `thesis`, `lam_roll`, `lam_cover`, `id_card`, A3 pouch — its own PR | medium — touches live print-job billing |
-| B-1 | `rate_card` Section 11 (incl. foiling + roll-lam tables) + tests. Nothing calls it | none |
-| B-2 | Migrations (cloud + SQLite + `docs/SCHEMA.md`) | none — additive columns |
-| B-3 | `/service-quote` + `/new-service` + `handle_create_job` guard + isolation tests | low |
-| B-4 | jobs.html console UI (modal + pills + service panel) | low |
+| B-0 | Unpriced-finishing fix + thermal withdrawal (§4.14, §4.9) | medium — live billing |
+| B-1 | `rate_card` Section 11 + tests. Nothing calls it | none |
+| B-2 | Migrations (cloud + SQLite + `docs/SCHEMA.md`) | none — additive |
+| B-3 | `/service-quote` + `/new-service` + `create_job` guard + isolation tests | low |
+| B-4 | jobs.html console UI (modal, kind pills, service panel) | low |
 | B-5 | admin.html mirror + MIS `service_kind` filters | low |
-| B-6 | Konica copy/scan reconciliation panel | medium (new analysis, no print path) |
-| B-7 | Customer-facing post-press ordering — decide after B-4 is live | — |
-
-### 4.12 Billing gaps this work uncovered — verified against production
-
-Queried Supabase `jobs` on 2026-08-30: **476 jobs** since 2026-03-12, of which
-**109 carry a finishing value** (`none` 104, `spiral` 2, `perfect` 2, `soft` 1).
-
-**Good news first: nothing has been under-billed through these gaps.** There has
-never been a single `lam_roll`, `lam_cover`, `id_card`, `thermal`, `project` or
-`record` job in the cloud database, and the two `perfect` jobs were never
-collected (`amount_collected` null, still `Pending`). The gaps below are latent,
-not bleeding.
-
-> Caveat on that number: this is the **cloud** table. Walk-ins entered on a store
-> PC that never sync are not visible here, and `lam_cover` / `lam_roll` are
-> offered in the store consoles' finishing dropdown. So: nothing lost *through
-> the cloud path*, which is not the same as nothing lost ever.
-
-#### Gap 1 — `lam_roll`, `lam_cover`, `id_card` bill ₹0
-
-`calculate_finishing_cost` (`rate_card.py:327–360`) branches on `none`, `staple`,
-`spiral`, `wiro`, `soft`, `project`, `record`, `lam_sheet`, `thermal` — and
-**nothing else**. `cost` stays at its `0` initialiser. `BINDING_RATES` even
-carries `lam_cover: 50`; the number exists and is never read.
-
-#### Gap 2 — `perfect` and `thesis` are orderable but unpriced
-
-Worse than gap 1, because it is reachable from the **live customer order page**:
-`order-v2.html:418,421` offers 📗 Perfect and 🎓 Thesis buttons, and
-`_VALID_FINISHING` (`api/handlers_order.py:68`) accepts both — but `rate_card`
-has no such keys anywhere. `calculate_finishing_cost("perfect", …)` falls through
-every branch and returns ₹0. The two production orders confirm it: 1 colour page
-+ Perfect binding quoted **₹10**, i.e. the page and nothing for the binding.
-
-#### Gap 3 — two identical specs, two different prices *(unexplained)*
-
-`OSKY-20260821-6517-848b` and `-c724`, 14 minutes apart, have **byte-identical
-stored specs** — `total_pages 1`, `pages_included [1]`, `colour_mode col`,
-`binding perfect`, `sides single`, `png` — and were quoted **₹10 and ₹3**. ₹3 is
-the A4 B&W rate, so the second was priced as B&W despite a colour spec. Both
-`amount_quoted` values equal the client's own `amount_estimated`, which the
-server is supposed to recompute (`api/handlers_order.py:257`).
-
-I could not explain this from the code, and I am not going to guess. **Proposed
-check:** re-run `calculate_quote` over every stored `print_spec` and list the
-jobs whose recomputed total differs from `amount_quoted`. One query, and it
-either finds a systematic drift between the client estimate and the server price
-or clears it. Worth doing before the customer UI grows another price input
-(§3.7).
-
-#### The fix — B-0, its own PR
-
-**Decision (owner, 2026-08-30): fix it, separately.** It changes live print-job
-quote maths — the one thing the rest of this plan promises not to touch — so it
-ships on its own and reverts cleanly:
-
-- `perfect` → soft tiers + ₹20 · `thesis` → ₹500 with print, project + ₹100 bind-only
-- `lam_roll` → `ROLL_LAM_RATES × max(sheets, 10)` · `lam_cover` → ₹50 · `id_card` → ₹100/card
-- `lam_sheet` → by paper size (₹70 / ₹120 / ₹140) instead of the hardcoded `LAMINATION_RATES["a4"]`
-- Add `perfect` and `thesis` to `BINDING_RATES`, `FINISHING_DISPLAY`, and the in-house/outsourced lists, so no key can be orderable without a price again
-- **A guard test that every key in `_VALID_FINISHING` and every `data-binding` in order-v2 resolves to a non-zero, non-`None` price** — the test that would have caught all of this
-- Tests pin every other finishing key's price unchanged, so the blast radius is provably the keys above
+| B-6 | Photocopy button quotes from the rate card (B6) | low — one live button |
+| B-7 | Per-store capabilities + `is_outsourced()` | low |
+| B-8 | Inter-store transfer + revenue split + Nattika's incoming queue | medium |
+| B-9 | Online drop-off bookings + expiry sweep | medium |
+| B-10 | Konica copy/scan reconciliation panel | medium |
 
 ---
 
 ## 5. Suggested overall sequence
 
-1. **A-1 → A-3** (scaling core, invisible) — ships behind no UI, provable by tests.
-2. **B-1 → B-3** (service core, invisible) — same.
+1. **B-0** — the billing fix. It is the only item where money is currently wrong, and it is independent of everything else.
+2. **A-1 → A-3** (scaling core) and **B-1 → B-3** (service core) — both invisible, both provable by tests.
 3. **A-4 → A-5** preview endpoints + staff UI, then the **paper proof on the OSP Konica**.
-4. **B-4/B-5** service console UI — the counter can now take laminate/foil/scan work.
-5. **A-6** customer scaling UI + preview.
-6. **B-6** reconciliation; **B-7** customer post-press if wanted.
+4. **B-4 → B-6** service console — the counter can take laminate/foil/scan/cut/punch work.
+5. **A-6** customer scaling UI.
+6. **B-7 → B-9** per-store capability, inter-store finishing, online drop-off.
+7. **B-10** reconciliation.
 
-Rough size: Feature A ≈ 450 lines of code + 250 of tests (preview included);
-Feature B ≈ 500 + 300, plus console markup. Neither touches a locked file except
-through additive, default-off parameters.
+Rough size: Feature A ≈ 450 lines + 250 tests. Feature B ≈ 900 + 500 across ten
+PRs — larger than first estimated, because per-store capability and inter-store
+finishing (§4.1) are real subsystems rather than a field on a row.
 
----
+## 6. Open questions
 
-## 6. Open questions for the owner
+Everything material is answered. What remains is four numbers and one go-ahead —
+none of them blocks starting B-0, B-1 or A-1.
 
-| # | Question | Blocks | Status |
+| # | Still needed | Blocks | Working default |
 |---|---|---|---|
-| Q1 | ~~Foiling rates~~ | — | **answered** — per sheet, A4 ₹30 / A3 ₹50, gold = silver, minimum 10 sheets then piece rate (§4.3.1) |
-| Q1b | ~~Roll lamination minimum~~ | — | **answered** — yes, minimum 10 sheets |
-| Q8 | **Quote drift audit** — two identical specs priced ₹10 and ₹3 (§4.12 gap 3). Run the recompute-and-compare over all stored specs? | nothing, but do it before A-6 | proposed |
-| Q2 | **Custom scale bounds** — is 25–400 % right, and should customers get Custom % at all, or staff only? | A-6 | open |
-| Q3 | **Scan** — priced per sheet off `SCANNING_RATES` as-is? Default delivery (WhatsApp / email / USB)? Colour and DPI choices? | B-1 `scan` | open |
-| Q4 | **Copy** — should a walk-in copy become a tracked `Queued` job, or keep the current instant-Completed photocopy entry? | B-3/B-4 (both can coexist) | open |
-| Q5 | **Lamination** — which sizes are actually offered (A4 / A3 / ID card), and is ID-card lamination its own price? | B-1 `laminate` | open |
-| Q6 | **Bind-only** — is `SOFT_BINDING_WITHOUT_PRINT = 100` still current, and do spiral/wiro cost the same without print? | B-1 `bind` | open |
-| Q7 | Should customers be able to order post-press online (drop-off first), or is this counter-only? | B-7 | open |
+| N1 | **Upfront-payment threshold + deposit** for services (part payment above the limit) | B-3's payment gate | ₹500 threshold, 50 % deposit |
+| N2 | **Photo rates** for stamp / postcard / 4×6 (set of 5 ₹50 and full sheet ₹100 are set) | `photo` in B-1 | those two only; others quoted by hand |
+| N3 | **Drop-off expiry** — how many days before an un-received booking cancels | B-9 | 3 days, WhatsApp reminder first |
+| N4 | **OSP→Nattika internal rates** | nothing — deliberately configurable | 100 % (Nattika books the full finishing amount) |
+| N5 | **Go-ahead for the quote-drift audit** (§4.14 gap 3) | nothing | not run yet |
 
 **Answered 2026-08-30:** preview renders the baked PDF, one page, switchable
-(§3.6) · scaling is 1-up only, everything else fits to the printable area (A4) ·
-all outstanding rates set — foiling, roll lamination, pouch premium, perfect,
-thesis, ID card, minimum 10 pieces billed as 10 (§4.3.1–4.3.2) ·
-the unpriced-finishing bugs are fixed in their own PR (§4.12).
-
----
+(§3.6) · scaling 1-up only, everything else fits the printable area (A4) · all
+service and binding rates (§4.4) · thermal withdrawn · scan ₹2 special dropped ·
+urgent extends to all services · student rates cover printing and photocopy ·
+capability is per store, default outsourced · Nattika is an internal transfer,
+not a vendor · revenue splits print vs finishing at an internal rate · services
+orderable online as drop-off bookings · payment on collection below a threshold.
 
 ## 7. Explicit non-goals
 
@@ -610,8 +653,9 @@ the unpriced-finishing bugs are fixed in their own PR (§4.12).
 - No change to existing quote maths for print jobs.
 - No scaling controls on N-up layouts — those always fit to the printable area.
 - No new printer, tray or media handling.
+- Thermal binding is removed, not re-tested — an explicit withdrawal (§4.9).
 - No retirement of `/new-photocopy` or its buttons.
-- No pricing invented where the owner has not given a rate.
+- No pricing invented where the owner has not given a rate (§6 lists what is still missing, with the working default each will use until it arrives).
 - No change to pouch/sheet lamination pricing (`LAMINATION_RATES` is untouched).
 - The unpriced-finishing fixes are deliberately **outside** this work's
   no-change guarantee — a separate, separately revertible PR (§4.12).
