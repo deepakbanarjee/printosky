@@ -129,9 +129,23 @@ is never asked to scale, only told `noscale` as a guard.
 | S13-10 | **Service console UI** | `+ Service` modal + kind pills + service panel in jobs.html, mirrored in admin.html; MIS print counts filtered to `service_kind IS NULL` (B-4/B-5) |
 | S13-11 | **Copy/scan reconciliation** | Compare counter-recorded copy/scan service jobs against `konica_jobs.job_type IN ('Copy','Scan')` — first visibility into unbilled walk-in copying (B-6) |
 | S13-12 | **Customer post-press ordering** ❓ | order-v2 / WhatsApp entry for finishing-only work. Decide after S13-10 is live (B-7, Q7) |
-| S13-13 | **`lam_roll` / `lam_cover` bill ₹0** 🐞 | `calculate_finishing_cost` (`rate_card.py:327`) has no branch for either, so every print job finished with roll or cover lamination has been quoted **₹0 for the lamination** — while both are outsourced, i.e. paid for. Fix in its own PR: `lam_roll` → `ROLL_LAM_RATES × max(sheets,10)`, `lam_cover` → the ₹50 already sitting unused in `BINDING_RATES`, `id_card` → flagged not-priced. Touches live billing, so it ships separately from S13-7 and reverts cleanly (B-0) |
+| S13-13 | **Unpriced finishing keys bill ₹0** 🐞 | `calculate_finishing_cost` (`rate_card.py:327`) has no branch for `lam_roll`, `lam_cover` or `id_card`, and `rate_card` has no key at all for **`perfect` or `thesis`** — both of which the live order page offers and `_VALID_FINISHING` accepts. All five quote **₹0 for the finishing**. Also `lam_sheet` hardcodes the A4 rate, so A3 pouch lamination bills as A4. Fix in its own PR with the rates in the plan, plus a guard test that every orderable finishing key resolves to a real price (B-0) |
+| S13-14 | **Quote drift audit** ⏳ | Two orders with byte-identical stored specs (`total_pages 1`, `pages_included [1]`, `colour_mode col`, `binding perfect`) were quoted **₹10 and ₹3** 14 minutes apart — ₹3 is the B&W rate on a colour job. Unexplained. Re-run `calculate_quote` over every stored `print_spec` and list jobs where the recomputed total differs from `amount_quoted`. Do it before the customer UI grows another price input |
 
-**Rates locked by owner 2026-08-30:** foiling per sheet A4 ₹30 / A3 ₹50 (gold = silver), roll lamination A4 ₹15 / A3 ₹30, both **minimum 10 sheets** then piece rate. Pouch lamination (`LAMINATION_RATES`, A4 ₹60) is a different process and is unchanged.
+**Rates locked by owner 2026-08-30:**
+
+| | A4 | A3 | Cover | Min |
+|---|---|---|---|---|
+| Foiling | ₹30/sheet | ₹50/sheet | ₹50/piece | 10 pieces (cover floor ₹500) |
+| Roll lamination | ₹15/sheet | ₹30/sheet | — | 10 sheets |
+| Pouch lamination | ₹70 | ₹120 B&W · ₹140 colour | — | — |
+| ID card | ₹100 per card, printing included | | | |
+
+Perfect binding = soft tiers **+ ₹20** (bind-only ₹120). Thesis = **₹500** binding
+line with printing charged on top, or project rate **+ ₹100** (₹320/₹350) bind-only;
+cover foiling at the standard cover rate. Pouch rates are the existing
+`LAMINATION_RATES` plus the owner's ₹10 (≤A4) / ₹20 (A3) premium — roll lamination
+is a different process and keeps its own table.
 
 **Locked by owner 2026-08-30:** scaling is offered on **1-up only** — every other
 layout always fits to the printable area (N-up *is* a fit; "Actual size" on 4-up

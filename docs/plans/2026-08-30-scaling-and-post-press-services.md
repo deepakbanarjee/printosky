@@ -370,38 +370,58 @@ It composes what is already there: `get_print_rate`/`calc_sheets` for `copy`,
 `calculate_finishing_cost(..., with_print=False)` for `bind` — plus the two new
 tables below.
 
-#### 4.3.1 Foiling and roll lamination *(owner rates, 2026-08-30)*
+#### 4.3.1 Rates *(owner, 2026-08-30)*
 
 ```python
-FOILING_RATES  = {"A4": 30, "A3": 50}   # per sheet; gold and silver identical
-ROLL_LAM_RATES = {"A4": 15, "A3": 30}   # per sheet
-MIN_SHEETS     = {"foil": 10, "lam_roll": 10}
-
-def _min_qty_price(kind, sheets, paper_size) -> dict:
-    billable = max(sheets, MIN_SHEETS[kind])      # under the minimum bills as the minimum
-    return {"total": billable * RATE[kind][paper_size], "billable": billable}
+FOILING_RATES  = {"A4": 30, "A3": 50, "cover": 50}   # per sheet/piece
+ROLL_LAM_RATES = {"A4": 15, "A3": 30}                # per sheet
+MIN_PIECES     = {"foil": 10, "lam_roll": 10}        # bill at least this many
+ID_CARD_RATE   = 100                                 # per card, printing included
 ```
 
-**Minimum 10 sheets, then straight piece rate** — 3 A4 sheets of foil bill as
-10 × ₹30 = ₹300; 14 bill as 14 × ₹30 = ₹420. The quote breakdown must name it:
+**Minimum 10, then straight piece rate.** 3 A4 foil sheets bill as 10 × ₹30 =
+₹300; 14 bill as 14 × ₹30 = ₹420. Same for roll lamination *(confirmed 2026-08-30)*.
+The breakdown must name it, so the operator can explain the number before the
+customer is surprised by it:
 
 ```
 Foiling A4: minimum 10 sheets applied (3 brought) — 10 × ₹30 = ₹300
 ```
 
-so the operator can explain the number before the customer is surprised by it.
-The console shows the same line live in the modal, and a "below minimum" hint
-appears the moment sheets < 10.
+The console shows the same line live and hints "below minimum" the moment the
+count drops under 10.
 
-| | A4 | A3 | Minimum | Notes |
+| Service | A4 | A3 | Cover | Minimum |
 |---|---|---|---|---|
-| **Foiling** | ₹30/sheet | ₹50/sheet | 10 sheets | Gold and silver priced the same |
-| **Roll lamination** | ₹15/sheet | ₹30/sheet | 10 sheets *(assumed — "same principle")* | Outsourced (`FINISHING_OUTSOURCED`) |
+| **Foiling** | ₹30/sheet | ₹50/sheet | ₹50/piece — covers are always larger than A3 | 10 pieces (cover floor = **₹500**) |
+| **Roll lamination** | ₹15/sheet | ₹30/sheet | — | 10 sheets |
+| **ID card** | ₹100 per card, **printing included** | — | — | — |
 
-> **Do not conflate roll with pouch.** `LAMINATION_RATES` (A4 ₹60, A3 B&W ₹100,
-> A3 colour ₹120) is **sheet/pouch** lamination and is unchanged. Roll lamination
-> is a different process at a different price — hence its own table. Wiring roll
-> lamination to `LAMINATION_RATES` would overcharge by 4×.
+> The cover-foiling floor the owner quoted — "minimum ₹500 up to 10 sheets for
+> covers, then standard per-sheet rates" — is exactly 10 × ₹50, so covers need no
+> special case: they are the `"cover"` rate under the same minimum rule as
+> everything else. One formula, `max(pieces, 10) × rate`, prices all three.
+
+#### 4.3.2 Binding rates — the gaps now filled
+
+| Key | With print | Bind-only (customer brings sheets) |
+|---|---|---|
+| `perfect` | soft-binding tiers **+ ₹20** | ₹100 + ₹20 = **₹120** |
+| `thesis` | **₹500 binding line**, per-sheet printing charged on top as normal | project rate **+ ₹100** → ₹320 (white/pink/blue/green) or ₹350 (gold/silver/custom) |
+| `lam_sheet` (pouch) | A4 **₹70** · A3 B&W **₹120** · A3 colour **₹140** | same |
+| `lam_cover` | **₹50** flat, per cover | same |
+| `lam_roll` | `ROLL_LAM_RATES × max(sheets, 10)` | same |
+| `id_card` | **₹100 per card**, printing included | n/a |
+
+Pouch rates are the existing `LAMINATION_RATES` (₹60 / ₹100 / ₹120) **plus the
+owner's premium** — ₹10 up to A4, ₹20 for A3. Everything at or below A4 takes the
+A4 rate.
+
+Foiling on a thesis or book cover uses the standard cover rate above — no separate
+entry, no separate minimum.
+
+> **Do not conflate roll with pouch.** Roll lamination is a different process at
+> a different price. Wiring it to `LAMINATION_RATES` would overcharge by ~4×.
 
 ### 4.4 Endpoints (`print_server.py`, new handlers beside the existing ones)
 
@@ -474,7 +494,7 @@ budgets stay as they are.
 
 | PR | Contents | Risk |
 |---|---|---|
-| B-0 | **`lam_roll` / `lam_cover` ₹0 fix** (§4.12) — its own PR, before or after the rest | medium — touches live print-job billing |
+| B-0 | **Unpriced-finishing fix** (§4.12): `perfect`, `thesis`, `lam_roll`, `lam_cover`, `id_card`, A3 pouch — its own PR | medium — touches live print-job billing |
 | B-1 | `rate_card` Section 11 (incl. foiling + roll-lam tables) + tests. Nothing calls it | none |
 | B-2 | Migrations (cloud + SQLite + `docs/SCHEMA.md`) | none — additive columns |
 | B-3 | `/service-quote` + `/new-service` + `handle_create_job` guard + isolation tests | low |
@@ -483,35 +503,66 @@ budgets stay as they are.
 | B-6 | Konica copy/scan reconciliation panel | medium (new analysis, no print path) |
 | B-7 | Customer-facing post-press ordering — decide after B-4 is live | — |
 
-### 4.12 Known bug this work uncovers — `lam_roll` / `lam_cover` bill ₹0
+### 4.12 Billing gaps this work uncovered — verified against production
 
-`calculate_finishing_cost` (`rate_card.py:327–360`) has branches for `none`,
-`staple`, `spiral`, `wiro`, `soft`, `project`, `record`, `lam_sheet` and
-`thermal` — and **none for `lam_roll`, `lam_cover` or `id_card`**. `cost` stays
-at its `0` initialiser, so:
+Queried Supabase `jobs` on 2026-08-30: **476 jobs** since 2026-03-12, of which
+**109 carry a finishing value** (`none` 104, `spiral` 2, `perfect` 2, `soft` 1).
 
-> **Every print job finished with roll lamination or cover lamination has been
-> quoted the print cost only, with ₹0 for the lamination.**
+**Good news first: nothing has been under-billed through these gaps.** There has
+never been a single `lam_roll`, `lam_cover`, `id_card`, `thermal`, `project` or
+`record` job in the cloud database, and the two `perfect` jobs were never
+collected (`amount_collected` null, still `Pending`). The gaps below are latent,
+not bleeding.
 
-Both are offered in the finishing dropdown of both consoles
-(`website/jobs.html:1386`, `admin.html:2001`) and both are in
-`FINISHING_OUTSOURCED`, so the store pays a vendor for work it did not bill.
-`BINDING_RATES` even carries `lam_cover: 50` — the number exists and is simply
-never read. `lam_roll` carries `price: None`; the new `ROLL_LAM_RATES` fills it.
+> Caveat on that number: this is the **cloud** table. Walk-ins entered on a store
+> PC that never sync are not visible here, and `lam_cover` / `lam_roll` are
+> offered in the store consoles' finishing dropdown. So: nothing lost *through
+> the cloud path*, which is not the same as nothing lost ever.
 
-**Decision (owner, 2026-08-30): fix it, in its own PR (B-0).** It changes live
-print-job quote maths — the one thing the rest of this plan promises not to touch
-— so it ships separately and reverts cleanly:
+#### Gap 1 — `lam_roll`, `lam_cover`, `id_card` bill ₹0
 
-- `lam_roll` → `ROLL_LAM_RATES[paper_size] × max(sheets, 10)` (§4.3.1).
-- `lam_cover` → flat ₹50 from `BINDING_RATES` (per book cover, not per sheet).
-- `id_card` → still has no rate; stays ₹0 but is flagged `needs_manual_price`
-  rather than quietly free.
-- Tests pin every other finishing key's price as unchanged, so the blast radius
-  is provably the three keys above.
+`calculate_finishing_cost` (`rate_card.py:327–360`) branches on `none`, `staple`,
+`spiral`, `wiro`, `soft`, `project`, `record`, `lam_sheet`, `thermal` — and
+**nothing else**. `cost` stays at its `0` initialiser. `BINDING_RATES` even
+carries `lam_cover: 50`; the number exists and is never read.
 
-Worth a look at past jobs with `finishing IN ('lam_roll','lam_cover')` before the
-PR lands, to size what was under-billed.
+#### Gap 2 — `perfect` and `thesis` are orderable but unpriced
+
+Worse than gap 1, because it is reachable from the **live customer order page**:
+`order-v2.html:418,421` offers 📗 Perfect and 🎓 Thesis buttons, and
+`_VALID_FINISHING` (`api/handlers_order.py:68`) accepts both — but `rate_card`
+has no such keys anywhere. `calculate_finishing_cost("perfect", …)` falls through
+every branch and returns ₹0. The two production orders confirm it: 1 colour page
++ Perfect binding quoted **₹10**, i.e. the page and nothing for the binding.
+
+#### Gap 3 — two identical specs, two different prices *(unexplained)*
+
+`OSKY-20260821-6517-848b` and `-c724`, 14 minutes apart, have **byte-identical
+stored specs** — `total_pages 1`, `pages_included [1]`, `colour_mode col`,
+`binding perfect`, `sides single`, `png` — and were quoted **₹10 and ₹3**. ₹3 is
+the A4 B&W rate, so the second was priced as B&W despite a colour spec. Both
+`amount_quoted` values equal the client's own `amount_estimated`, which the
+server is supposed to recompute (`api/handlers_order.py:257`).
+
+I could not explain this from the code, and I am not going to guess. **Proposed
+check:** re-run `calculate_quote` over every stored `print_spec` and list the
+jobs whose recomputed total differs from `amount_quoted`. One query, and it
+either finds a systematic drift between the client estimate and the server price
+or clears it. Worth doing before the customer UI grows another price input
+(§3.7).
+
+#### The fix — B-0, its own PR
+
+**Decision (owner, 2026-08-30): fix it, separately.** It changes live print-job
+quote maths — the one thing the rest of this plan promises not to touch — so it
+ships on its own and reverts cleanly:
+
+- `perfect` → soft tiers + ₹20 · `thesis` → ₹500 with print, project + ₹100 bind-only
+- `lam_roll` → `ROLL_LAM_RATES × max(sheets, 10)` · `lam_cover` → ₹50 · `id_card` → ₹100/card
+- `lam_sheet` → by paper size (₹70 / ₹120 / ₹140) instead of the hardcoded `LAMINATION_RATES["a4"]`
+- Add `perfect` and `thesis` to `BINDING_RATES`, `FINISHING_DISPLAY`, and the in-house/outsourced lists, so no key can be orderable without a price again
+- **A guard test that every key in `_VALID_FINISHING` and every `data-binding` in order-v2 resolves to a non-zero, non-`None` price** — the test that would have caught all of this
+- Tests pin every other finishing key's price unchanged, so the blast radius is provably the keys above
 
 ---
 
@@ -535,7 +586,8 @@ through additive, default-off parameters.
 | # | Question | Blocks | Status |
 |---|---|---|---|
 | Q1 | ~~Foiling rates~~ | — | **answered** — per sheet, A4 ₹30 / A3 ₹50, gold = silver, minimum 10 sheets then piece rate (§4.3.1) |
-| Q1b | **Roll lamination minimum** — A4 ₹15 / A3 ₹30 per sheet is set; "same principle" is read as *minimum 10 sheets too*. Confirm or correct | `ROLL_LAM_RATES` in B-1 | assumed |
+| Q1b | ~~Roll lamination minimum~~ | — | **answered** — yes, minimum 10 sheets |
+| Q8 | **Quote drift audit** — two identical specs priced ₹10 and ₹3 (§4.12 gap 3). Run the recompute-and-compare over all stored specs? | nothing, but do it before A-6 | proposed |
 | Q2 | **Custom scale bounds** — is 25–400 % right, and should customers get Custom % at all, or staff only? | A-6 | open |
 | Q3 | **Scan** — priced per sheet off `SCANNING_RATES` as-is? Default delivery (WhatsApp / email / USB)? Colour and DPI choices? | B-1 `scan` | open |
 | Q4 | **Copy** — should a walk-in copy become a tracked `Queued` job, or keep the current instant-Completed photocopy entry? | B-3/B-4 (both can coexist) | open |
@@ -545,8 +597,9 @@ through additive, default-off parameters.
 
 **Answered 2026-08-30:** preview renders the baked PDF, one page, switchable
 (§3.6) · scaling is 1-up only, everything else fits to the printable area (A4) ·
-foiling and roll-lamination rates set, minimum 10 sheets billed as 10 (§4.3.1) ·
-the `lam_roll`/`lam_cover` ₹0 bug is fixed in its own PR (§4.12).
+all outstanding rates set — foiling, roll lamination, pouch premium, perfect,
+thesis, ID card, minimum 10 pieces billed as 10 (§4.3.1–4.3.2) ·
+the unpriced-finishing bugs are fixed in their own PR (§4.12).
 
 ---
 
@@ -560,5 +613,5 @@ the `lam_roll`/`lam_cover` ₹0 bug is fixed in its own PR (§4.12).
 - No retirement of `/new-photocopy` or its buttons.
 - No pricing invented where the owner has not given a rate.
 - No change to pouch/sheet lamination pricing (`LAMINATION_RATES` is untouched).
-- The `lam_roll`/`lam_cover` ₹0 fix is deliberately **outside** this work's
-  no-change guarantee — it is a separate, separately revertible PR (§4.12).
+- The unpriced-finishing fixes are deliberately **outside** this work's
+  no-change guarantee — a separate, separately revertible PR (§4.12).
