@@ -393,7 +393,8 @@ service work should not wait on them.
 
 ### 4.3 Data model (additive only)
 
-`api/migrations/SCHEMA_v29_service_jobs.sql`:
+`api/migrations/SCHEMA_v38_service_jobs.sql` *(built 2026-08-31 — v29 was
+already taken by `processed_webhooks_rls`; the next free number is v38)*:
 
 ```sql
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS service_kind  TEXT;   -- NULL = print job
@@ -412,6 +413,22 @@ CREATE INDEX IF NOT EXISTS jobs_service_kind_idx ON jobs (service_kind)
 
 Store SQLite gets the same columns as `TEXT`/`REAL` via the `fix_db.py` ALTER
 pattern, plus `install/bootstrap_db.py` DDL and `docs/SCHEMA.md` rows.
+
+> **Built 2026-08-31 (B-2).** The one list lives in `db_migrations.SERVICE_JOB_COLUMNS`
+> and `watcher.setup_database()` applies it on every start — the A-3 lesson above,
+> acted on rather than recorded again. `fix_db.py` and `install/bootstrap_db.py`
+> import the same list, so a fresh box and a three-year-old one end up identical.
+> A failed ALTER reports through `ops_watchdog` (`db.migrate.jobs`) instead of a
+> log line; it does not raise, because the statement that actually needs the
+> column will, with a better message.
+>
+> Two things make the SQLite half safe to ship before the Supabase half is run:
+> nothing reads these columns yet, and `supabase_sync.collect_jobs()` names its
+> columns explicitly — so a migrated store PC physically cannot push
+> `service_kind` to a cloud that has not got it. `tests/test_service_job_columns.py`
+> pins both. **The cloud migration still has to be run by hand in the Supabase SQL
+> Editor** (repo convention, `docs/SCHEMA.md` §Migrations) before B-3 writes a
+> service job.
 
 ### 4.4 Rates *(owner, 2026-08-30)*
 
@@ -682,7 +699,7 @@ by ₹180, never under.
 |---|---|---|
 | B-0 | Unpriced-finishing fix + thermal withdrawal (§4.14, §4.9) | medium — live billing |
 | B-1 | `rate_card` Section 11 + tests. Nothing calls it | none |
-| B-2 | Migrations (cloud + SQLite + `docs/SCHEMA.md`) | none — additive |
+| B-2 ✅ | Migrations (cloud + SQLite + `docs/SCHEMA.md`) — built 2026-08-31, cloud SQL not yet run | none — additive |
 | B-3 | `/service-quote` + `/new-service` + `create_job` guard + isolation tests | low |
 | B-4 | jobs.html console UI (modal, kind pills, service panel) | low |
 | B-5 | admin.html mirror + MIS `service_kind` filters | low |

@@ -153,6 +153,14 @@ def run_migrations(db_path: str):
     for col, defn in vendor_job_cols:
         add_column("jobs", col, defn)
 
+    # Post-press service jobs (2026-08-31, plan §4.3). One list, shared with
+    # watcher.setup_database() and install/bootstrap_db.py. Cloud counterpart:
+    # api/migrations/SCHEMA_v38_service_jobs.sql, run in the Supabase SQL Editor.
+    print("\n[Migration 5b] jobs table — post-press service columns")
+    from db_migrations import SERVICE_JOB_COLUMNS
+    for col, defn in SERVICE_JOB_COLUMNS:
+        add_column("jobs", col, defn)
+
     # ─────────────────────────────────────────────────────────────────────────
     # MIGRATION 6 — Seed default vendors
     # ─────────────────────────────────────────────────────────────────────────
