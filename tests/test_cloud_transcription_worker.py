@@ -59,6 +59,10 @@ class _Query:
     def eq(self, *_a, **_k):
         return self
 
+    def gte(self, column, value):
+        self._log.append(("filter", (self._table, "gte", column, value)))
+        return self
+
     def limit(self, *_a, **_k):
         return self
 
@@ -79,7 +83,11 @@ class _FakeClient:
         return _Query(self.queries, name, self._rows.get(name, []))
 
     def selected_columns(self):
-        return [cols for _t, cols in self.queries if isinstance(cols, str)]
+        return [cols for t, cols in self.queries
+                if isinstance(cols, str) and t != "filter"]
+
+    def filters(self):
+        return [payload for t, payload in self.queries if t == "filter"]
 
     def updates(self):
         return [payload for _t, payload in self.queries if isinstance(payload, dict)]
@@ -411,3 +419,89 @@ def test_the_scan_survives_a_missing_dtp_root(monkeypatch, tmp_path):
     root = tmp_path / "nothing-here"
     assert worker._synced_filenames(str(root)) == set()
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Egress, part two: the bytes, not the request count
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_the_sync_probe_is_bounded_by_age(monkeypatch, tmp_path):
+    r"""The probe used to ask for every completed job this store had ever
+    produced. Cheap while everything is on disk — but wipe C:\DTP or bring a
+    new PC online and the next cycle re-downloads the whole archive at ~9 MB a
+    manuscript, in one go. The window bounds that."""
+    fake = _install(monkeypatch, tmp_path, rows=[])
+
+    worker.sync_completed_jobs()
+
+    bound = [f for f in fake.filters() if f[1] == "gte" and f[2] == "updated_at"]
+    assert bound, "the sync probe must bound how far back it looks"
+    assert worker.SYNC_WINDOW_DAYS >= 30, (
+        "the window has to cover a store PC being off for a stretch"
+    )
+
+
+def test_the_cutoff_is_the_window_back_from_now():
+    from datetime import datetime, timezone
+    cutoff = datetime.fromisoformat(worker._sync_cutoff())
+    age_days = (datetime.now(timezone.utc) - cutoff).total_seconds() / 86400
+    assert abs(age_days - worker.SYNC_WINDOW_DAYS) < 1
+
+
+def test_a_transcribed_pdf_is_kept_instead_of_re_downloaded(monkeypatch, tmp_path, tmp_path_factory):
+    r"""The worker downloads the PDF to OCR it, then deleted it — and the sync
+    pass downloaded the same object again to put a copy in C:\DTP. ~9 MB twice
+    per manuscript, for bytes already on this disk."""
+    from datetime import datetime
+
+    _install(monkeypatch, tmp_path, rows=[{"id": "job-1", "filename": "notes.pdf"}])
+    # TEMP_DIR is outside C:\DTP in production; keep it outside the stand-in
+    # too, or _synced_filenames scans it and finds the file being retired.
+    temp = tmp_path_factory.mktemp("worker_tmp") / "notes.pdf"
+    temp.write_bytes(b"%PDF-transcribed")
+
+    worker._retire_temp_pdf(str(temp), "notes.pdf", completed=True)
+
+    today = tmp_path / datetime.now().strftime("%d%m%y")
+    assert (today / "notes.pdf").read_bytes() == b"%PDF-transcribed"
+    assert not temp.exists(), "the temp copy must not be left behind"
+
+    # ...and the sync pass now finds it and does not fetch the PDF again.
+    calls = _counting_fetchers(monkeypatch)
+    worker.sync_completed_jobs()
+    assert calls["pdf"] == 0, "the kept PDF must satisfy the sync"
+
+
+def test_a_failed_job_leaves_no_pdf_in_the_day_folder(monkeypatch, tmp_path, tmp_path_factory):
+    """A failed row never reaches `completed`, so the sync would never place
+    its PDF either. One sitting in the day folder would read as finished work
+    with no transcript beside it."""
+    from datetime import datetime
+
+    _install(monkeypatch, tmp_path, rows=[])
+    # TEMP_DIR is outside C:\DTP in production; keep it outside the stand-in
+    # too, or _synced_filenames scans it and finds the file being retired.
+    temp = tmp_path_factory.mktemp("worker_tmp") / "notes.pdf"
+    temp.write_bytes(b"%PDF-")
+
+    worker._retire_temp_pdf(str(temp), "notes.pdf", completed=False)
+
+    assert not temp.exists()
+    assert not (tmp_path / datetime.now().strftime("%d%m%y") / "notes.pdf").exists()
+
+
+def test_an_unmovable_pdf_does_not_fail_the_job(monkeypatch, tmp_path, tmp_path_factory):
+    """Keeping the file is an optimisation. If the move fails, the sync
+    re-downloads on its next cycle — the old behaviour — and the transcribed
+    job must not be dragged down with it."""
+    _install(monkeypatch, tmp_path, rows=[])
+    monkeypatch.setattr(worker.os, "replace",
+                        lambda *_a: (_ for _ in ()).throw(OSError("disk full")))
+    # TEMP_DIR is outside C:\DTP in production; keep it outside the stand-in
+    # too, or _synced_filenames scans it and finds the file being retired.
+    temp = tmp_path_factory.mktemp("worker_tmp") / "notes.pdf"
+    temp.write_bytes(b"%PDF-")
+
+    worker._retire_temp_pdf(str(temp), "notes.pdf", completed=True)   # must not raise
+
+    assert not temp.exists(), "a failed move must still clean up the temp file"

@@ -22,6 +22,11 @@ import sys
 import threading
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+import realtime_liveness  # noqa: E402  (after basicConfig, on purpose)
+
+# Without this the service_role key lands in this log on every realtime
+# connect — see realtime_liveness.quiet_transport_loggers.
+realtime_liveness.quiet_transport_loggers()
 logger = logging.getLogger("academic_pipeline_worker")
 
 # Ensure repo root is on path so sibling modules import cleanly.

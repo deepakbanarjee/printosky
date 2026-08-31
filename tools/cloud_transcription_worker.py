@@ -34,6 +34,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 load_dotenv(r"d:\PY\printosky\.env")
 from store_config import get_store_config
 from ops_watchdog import report as _report_health
+import realtime_liveness
+
+# Root level is INFO above, which would otherwise log the service_role key on
+# every connect — see realtime_liveness.quiet_transport_loggers.
+realtime_liveness.quiet_transport_loggers()
 
 try:
     from supabase import create_client
@@ -197,6 +202,10 @@ def process_transcription_job(job):
     # Urgent = gemini-3.5-flash
     # Standard = gemini-3.1-flash-lite
     model_name = "models/gemini-3.5-flash" if mode == "urgent" else "models/gemini-3.1-flash-lite"
+
+    # Read by the finally block below, which keeps the downloaded PDF only for
+    # a job that reached `completed`.
+    completed = False
     
     # Fetch current state from DB
     current_job = sb.table("manuscript_transcripts").select("content,transcribed_pages").eq("id", job_id).execute().data[0]
@@ -284,6 +293,7 @@ def process_transcription_job(job):
         # Complete job
         sb.table("manuscript_transcripts").update({"status": "completed"}).eq("id", job_id).execute()
         log.info(f"Job {job_id} successfully completed.")
+        completed = True
         _report_health("transcription_worker.job", True,
                        f"{filename}: {total_pages} page(s) transcribed")
 
@@ -291,10 +301,7 @@ def process_transcription_job(job):
         _fail_job(job_id, filename, f"transcription loop aborted: {e}")
     finally:
         doc.close()
-        try:
-            os.remove(pdf_temp_path)
-        except:
-            pass
+        _retire_temp_pdf(pdf_temp_path, filename, completed)
 
 def split_malayalam_english(text):
     # Regex to find blocks of Malayalam characters (Unicode block 0D00-0D7F and ZWJ 200D)
@@ -308,6 +315,72 @@ def split_malayalam_english(text):
         is_mal = any(("\u0d00" <= char <= "\u0d7f") or (char == "\u200d") for char in part)
         segments.append((part, is_mal))
     return segments
+
+# How far back the sync pass looks. The probe asked for every completed job
+# this store had ever produced, unbounded: cheap today at 25 rows, but the cost
+# of a re-sync is not — wipe C:\DTP, or bring a new PC online, and the next
+# cycle re-downloads the whole archive (~9 MB per manuscript) in one go. A
+# window bounds that to recent work while still covering any realistic stretch
+# of a store PC being off. Raise TRANSCRIBE_SYNC_DAYS to reach further back;
+# an archive older than the window is fetched from the console, not by this.
+SYNC_WINDOW_DAYS = int(os.environ.get("TRANSCRIBE_SYNC_DAYS", "60"))
+
+
+def _sync_cutoff():
+    """The oldest `updated_at` the sync pass will look at, as an ISO string."""
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(days=SYNC_WINDOW_DAYS)).isoformat()
+
+
+def _day_sync_dir():
+    r"""Today's sync folder, ``C:\DTP\DDMMYY``.
+
+    One definition, because two places now write into it: the sync pass, and
+    the transcription job retiring its temp PDF (see _retire_temp_pdf).
+    """
+    from datetime import datetime
+    return os.path.join(r"C:\DTP", datetime.now().strftime("%d%m%y"))
+
+
+def _retire_temp_pdf(pdf_temp_path, filename, completed):
+    r"""Move the just-transcribed PDF into the day folder instead of deleting it.
+
+    The worker downloaded this file from Storage to OCR it, and sync_completed_jobs
+    then downloaded the very same object again to put a copy in C:\DTP —
+    ~9 MB twice per manuscript, for bytes already on this disk. Moving it there
+    halves the egress per job and costs nothing: _synced_filenames finds it and
+    the sync skips the download.
+
+    Only for a job that completed. A failed row never reaches `completed`, so
+    the sync would never place its PDF either, and leaving one in the day folder
+    would look like finished work that has no transcript beside it.
+    """
+    if not completed:
+        _discard_temp_pdf(pdf_temp_path)
+        return
+    try:
+        if filename in _synced_filenames(os.path.dirname(_day_sync_dir())):
+            _discard_temp_pdf(pdf_temp_path)      # already on disk from a previous run
+            return
+        day_dir = _day_sync_dir()
+        os.makedirs(day_dir, exist_ok=True)
+        os.replace(pdf_temp_path, os.path.join(day_dir, filename))
+    except OSError as exc:
+        # Not worth failing a transcribed job over: the sync pass re-downloads
+        # the PDF on its next cycle, which is exactly the old behaviour.
+        log.warning(f"could not move {filename} into the day folder ({exc}); "
+                    f"the sync will download it again")
+        _discard_temp_pdf(pdf_temp_path)
+
+
+def _discard_temp_pdf(pdf_temp_path):
+    try:
+        os.remove(pdf_temp_path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        log.warning(f"could not remove the temp PDF {pdf_temp_path}: {exc}")
+
 
 def _fetch_transcript_content(job_id):
     """Fetch the ``content`` blob for a single job, on demand.
@@ -377,13 +450,12 @@ def sync_completed_jobs():
             .select("id,filename")
             .eq("status", "completed")
             .eq("uploaded_by_store", MY_STORE_ID)
+            .gte("updated_at", _sync_cutoff())
             .execute()
         )
         jobs = res.data or []
 
-        from datetime import datetime
-        today_str = datetime.now().strftime("%d%m%y")
-        local_sync_dir = os.path.join(r"C:\DTP", today_str)
+        local_sync_dir = _day_sync_dir()
 
         # What is already on disk anywhere under C:\DTP, not just in today's
         # folder — see _synced_filenames. dirname() rather than the literal

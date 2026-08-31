@@ -60,6 +60,38 @@ TICK_SECONDS = float(os.environ.get("REALTIME_TICK_SECONDS", "1.0"))
 BACKOFF_START = 5.0
 BACKOFF_MAX = 300.0
 
+# Transport libraries that log a full-privilege credential at INFO.
+#
+# The realtime client logs the URL it connects to and every frame it sends, and
+# the Supabase socket carries the service_role key in both — once in the
+# `?apikey=` query string, again in the phx_join `access_token`. A poller that
+# sets a root level of INFO therefore writes an RLS-bypassing credential into
+# its own log file at startup and on every reconnect, and buries its own lines
+# under three heartbeat frames every 25s on top.
+#
+# WARNING keeps everything these libraries say about a failure. It costs no
+# visibility either: each poller reports its subscription's health through
+# ops_watchdog, and never by reading these lines.
+_TRANSPORT_LOGGERS = ("realtime", "websockets", "httpx", "httpcore", "hpack", "h2")
+
+
+def quiet_transport_loggers() -> None:
+    """Raise the realtime/HTTP transport loggers above INFO.
+
+    Call once, right after ``logging.basicConfig``, in any process that opens a
+    Supabase realtime socket. Set ``REALTIME_TRANSPORT_LOG_LEVEL`` to DEBUG or
+    INFO to get the frames back while debugging a dead socket — with the
+    credential exposure above, on a machine whose logs you are willing to treat
+    as secret.
+    """
+    name = os.environ.get("REALTIME_TRANSPORT_LOG_LEVEL", "WARNING").upper()
+    level = getattr(logging, name, None)
+    if not isinstance(level, int):
+        log.warning("REALTIME_TRANSPORT_LOG_LEVEL=%r is not a log level — using WARNING", name)
+        level = logging.WARNING
+    for logger_name in _TRANSPORT_LOGGERS:
+        logging.getLogger(logger_name).setLevel(level)
+
 
 def socket_alive(realtime) -> bool:
     """Is this ``AsyncRealtimeClient``'s websocket actually up?
