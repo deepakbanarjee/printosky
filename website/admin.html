@@ -2001,9 +2001,10 @@
           <select id="nj-finishing" onchange="njFetchQuote()">
             <option value="none">None</option>
             <option value="spiral">Spiral Binding</option>
-            <option value="thermal">Thermal Binding</option>
             <option value="staple">Staple</option>
             <option value="soft">Soft Binding</option>
+            <option value="perfect">Perfect Binding</option>
+            <option value="thesis">Thesis Binding (Outsourced)</option>
             <option value="project">Project Binding (Outsourced)</option>
             <option value="record">Record Binding (Outsourced)</option>
             <option value="lam_cover">Cover Lamination (Outsourced)</option>
@@ -2929,13 +2930,15 @@ function panelHTML() {
               <option value="staple">Staple</option>
               <option value="spiral">Spiral Binding</option>
               <option value="wiro">Wiro Binding</option>
-              <option value="lam_sheet">Sheet Lamination</option>
+              <option value="soft">Soft Binding</option>
+              <option value="perfect">Perfect Binding</option>
+              <option value="lam_sheet">Pouch Lamination</option>
               <option value="id_card">ID Card Print</option>
               <option value="lam_roll">Roll Lamination (Outsourced)</option>
               <option value="lam_cover">Cover Lamination (Outsourced)</option>
               <option value="project">Project Binding (Outsourced)</option>
               <option value="record">Record Binding (Outsourced)</option>
-              <option value="thermal">Thermal Binding (Outsourced)</option>
+              <option value="thesis">Thesis Binding (Outsourced)</option>
             </select>
           </div>
           <div class="pp-field">
@@ -3813,7 +3816,7 @@ async function markReady() {
 
 // ── Payment Modal ─────────────────────────────────────────────────────────────
 // ── Vendor Modal ─────────────────────────────────────────────────────────────
-const OUTSOURCED_FINISHING = ["project","record","lam_roll","lam_cover","thermal","soft"];
+const OUTSOURCED_FINISHING = ["project","record","lam_roll","lam_cover","thesis","soft"];
 
 async function openVendorModal() {
   if (!selectedJob) return;
