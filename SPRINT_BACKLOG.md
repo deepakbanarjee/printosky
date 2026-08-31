@@ -107,6 +107,55 @@ Last updated: 2026-06-02 — Xtraa book-order flow, new-customer welcome, admin 
 
 ---
 
+## 🔴 BILLING FIX — unpriced finishings and paper sizes (2026-08-30)
+
+Five finishing keys and two paper sizes were orderable and quoted at ₹0 or at
+the wrong rate. All of them shared one shape: **a value the UI offers that the
+rate card does not know, failing to the cheapest thing instead of failing loud.**
+
+| # | Task | Details |
+|---|------|---------|
+| BF-1 | ~~**`lam_roll` / `lam_cover` / `id_card` bill ₹0**~~ ✅ | `calculate_finishing_cost` (`rate_card.py`) had no branch for any of them, so `cost` stayed at its `0` initialiser. `BINDING_RATES` even carried `lam_cover: 50` — never read. Roll and cover lamination are outsourced work the store pays a vendor for |
+| BF-2 | ~~**`perfect` / `thesis` orderable but unpriced**~~ ✅ | Worse: reachable from the **live order page**. `order-v2.html` offers both buttons and `_VALID_FINISHING` accepts them, but `rate_card` had no such keys at all. Two production orders exist, quoted binding-free (neither collected) |
+| BF-3 | ~~**A5 / Letter bill as A4 B&W**~~ ✅ | `_VALID_SIZE` and the paper dropdown offer A4/A3/A5/Legal/Letter; `PRINT_RATES` had keys for three. `get_print_rate` fell back to `A4_BW`, so **A5 and Letter billed at ₹3/sheet including colour** — an A5 colour page charged ₹3 instead of ₹5 |
+| BF-4 | ~~**A3 pouch lamination billed as A4**~~ ✅ | `lam_sheet` hardcoded `LAMINATION_RATES["a4"]`, leaving the A3 rates in the table dead |
+| BF-5 | ~~**Thermal binding withdrawn**~~ ✅ | No longer offered. Removed from the rate card and both console dropdowns rather than re-tested — closes **S7-5** ("listed in admin but rate never tested") by deletion |
+| BF-6 | ~~**Guard tests**~~ ✅ | Every key in `_VALID_FINISHING`, every `data-binding` in order-v2, every console dropdown option and every size in `_VALID_SIZE` must resolve to a real price. Reads the actual UI and API whitelist, so adding an option without a rate fails the build instead of the till |
+
+**Verified against production before changing anything** (`tools/quote_drift_audit.py`,
+included here): 476 jobs since March, 104 with a stored quote, **70 match the rate
+card exactly and all 32 disagreements pre-date commit `6afb9b5`** (14 Aug), which
+deliberately removed the odd-sheet rounding. No live drift. Nothing was
+under-billed through the ₹0 gaps either — no `lam_roll`, `lam_cover`, `id_card`,
+`thermal`, `project` or `record` job has ever existed in the cloud table.
+*Caveat: that is the cloud table; store-PC walk-ins that never sync are not
+visible in it.*
+
+### Rates (owner, 2026-08-30)
+
+| | A4 | A3 | Cover | Min |
+|---|---|---|---|---|
+| Foiling | ₹30/sheet | ₹50/sheet | ₹50/piece | 10 pieces (cover floor ₹500) |
+| Roll lamination | ₹15/sheet | ₹30/sheet | — | 10 sheets |
+| Pouch lamination | ₹70 | ₹120 B&W · ₹140 colour | — | — |
+| Cover lamination | ₹50 flat | | | |
+| ID card | ₹100 per card, printing included | | | |
+| A5 print | half the A4 rate (B&W ₹1.50; colour ₹5/₹4.50/₹4) | | | no discounts |
+| Letter print | the A4 rate | | | no discounts |
+
+Perfect = soft tiers. Thesis = **₹500** binding line with printing charged on top,
+or project **+₹100** (₹320/₹350) for the customer's own sheets. Spiral A3 now
+tiered (₹80→₹400) instead of a flat ₹80 at every thickness. Wiro has its own
+tiers (₹50→₹250) and is **refused above 150 sheets** rather than quoted. **Bind-only
+is +₹20 across the board** — one rule that was already in the code unnamed, since
+the old flat `SOFT_BINDING_WITHOUT_PRINT = 100` is exactly soft's ₹80 tier plus it.
+**Urgent (₹20) now applies to any finishing**, not just soft and project.
+
+> Foiling's own rates are recorded above but `foil` is **not** a finishing key —
+> it arrives with the post-press services work, which is a separate branch.
+
+---
+
 ## ⚪ SPRINT 13 — Print scaling + post-press services
 
 Plan: [docs/plans/2026-08-30-scaling-and-post-press-services.md](docs/plans/2026-08-30-scaling-and-post-press-services.md)
@@ -116,7 +165,6 @@ printer** (the driver is never asked to scale, only told `noscale` as a guard).
 
 | # | Task | Details |
 |---|------|---------|
-| S13-0 | ~~**Unpriced finishing keys bill ₹0**~~ ✅ | `calculate_finishing_cost` (`rate_card.py:327`) has no branch for `lam_roll`, `lam_cover` or `id_card`, and `rate_card` has **no key at all for `perfect` or `thesis`** — both offered on the live order page and accepted by `_VALID_FINISHING`. All five quote ₹0 for the finishing. `lam_sheet` also hardcodes the A4 rate, so A3 pouch bills as A4. Verified latent, not bleeding: no such job exists in the cloud DB and the two `perfect` orders were never collected. **Fixed 2026-08-30.** All five priced, `lam_sheet` now by size, spiral A3 tiered, wiro given its own tiers and a 150-sheet refusal, thermal withdrawn, A5/Letter rates added. `calculate_finishing_cost` returns `unpriced`/`refused` so a rate it does not know is flagged and alerted, never quoted at ₹0. 49 guard tests read the real API whitelist, the real order-v2 buttons and the real console dropdowns. 2024 tests green |
 | S13-1 | ~~**`pdf_scaler.py` + tests**~~ ✅ | **Built 2026-08-30.** `scale_rect()` (pure geometry — one source of truth for print *and* both previews), `apply_scale()` (bakes the PDF), plus `count_cropped_pages()` for the preview's "N pages will be cropped" line. Custom % is of the original page, so Custom 100% returns exactly what Actual returns — asserted, not assumed. Never rotates. 46 tests. **Nothing imports it yet** — inert until S13-2 wires it |
 | S13-2 | ~~**Planner + print server wiring**~~ ✅ | **Built 2026-08-30.** `print_spec.scale` → `resolve_scale()` → baked by `pdf_scaler` on the pass-through path, or by `perform_nup`'s own `scale_behavior` on 1-up landscape; `scale_applied` flows through `store_puller` to `send_to_printer`, which appends `noscale` as a guard. Every dropped combination alerts through `ops_watchdog` rather than half-applying: `nup ≥ 2`, unknown mode, junk percent, and **custom % on 1-up landscape** (deferred — the rotated target box is unproved on paper). 46 tests, incl. the sheets-identical-without-scale guard across 7 layouts |
 | S13-3 | ~~**`print_items.scale_mode/scale_percent`**~~ ✅ | **Built 2026-08-30.** Additive nullable columns (`fix_db.py` + `install/bootstrap_db.py`); `handle_update_job` persists them, `handle_print_item` bakes via `pdf_scaler` and appends `noscale`, cleaning up in a `finally`. **Self-migrating**: store PCs pull code and restart the watcher without ever running `fix_db.py`, so `handle_update_job` adds the columns itself if the DB predates them — otherwise spec-saving would break at the counter. 21 tests |
@@ -133,7 +181,6 @@ printer** (the driver is never asked to scale, only told `noscale` as a guard).
 | S13-14 | **Online drop-off bookings** | Customers book finishing-only work on the site and bring the item in. `item_received_at` NULL = not work-ready; WhatsApp reminder then auto-expire after ~3 days; part payment upfront above a threshold |
 | S13-15 | **Copy/scan reconciliation** | Compare counter-recorded copy/scan service jobs against `konica_jobs.job_type IN ('Copy','Scan')` — first visibility into unbilled walk-in copying |
 | S13-16 | ~~**Quote drift audit**~~ ✅ | Run 2026-08-30 via `tools/quote_drift_audit.py`: 104 quoted jobs, **70 match, 32 drift, all dated 08-07→08-13**, none after. Commit `6afb9b5` (08-14) deliberately removed the odd-sheet rounding and reproduces 28 of the 32 exactly; the other 4 are mixed-colour jobs from the same window. Customers were over-charged ₹180 historically, never under. **No live drift.** Two real findings fell out → S13-17, and `rate_card.py:20` still documents the removed rounding rule |
-| S13-17 | ~~**A5 / Letter bill as A4 B&W**~~ ✅ | `_VALID_SIZE` and the order-v2 paper dropdown offer A4/A3/A5/Legal/Letter, but `PRINT_RATES` has keys only for A4, A3 and Legal. `get_print_rate` falls back to `PRINT_RATES["A4_BW"]`, so **A5 and Letter bill at ₹3/sheet — colour included**. An A5 colour page bills ₹3 instead of ₹10; Letter is bigger than A4 and bills at A4 rates. This is the real explanation of the ₹10-vs-₹3 pair. Live under-billing. Rates set 2026-08-30: **A5 = half the A4 rate** (B&W ₹1.50; colour ₹5/₹4.50/₹4 by tier), **Letter = the A4 rate**, **no discounts on either** — the student rate stays A4 B&W only. **Fixed 2026-08-30** as part of S13-0, with a guard test that every size in `_VALID_SIZE` resolves to its own rate and that colour is always dearer than B&W |
 
 ### Rates locked by owner 2026-08-30
 
