@@ -425,7 +425,15 @@ pattern, plus `install/bootstrap_db.py` DDL and `docs/SCHEMA.md` rows.
 > **Applied to Supabase 2026-08-31** and verified from the database itself: all
 > eight columns present, every one nullable with no default, `service_meta` as
 > `jsonb`, `item_received_at` as `timestamptz`, and `jobs_service_kind_idx` in
-> place. `supabase_sync.collect_jobs()` began pushing `service_kind` /
+> place.
+>
+> **B-2 missed `config/schema_manifest.yaml`**, and applying the migration is
+> what exposed it: the live table had eight columns the manifest did not, which
+> is exactly the "columns deployed before code" drift `scripts/check_schema.py`
+> exists to catch (an extra live column is a drift, so the check would have gone
+> red on `main` the moment `SUPABASE_DB_URL` was set). Fixed and pinned by a
+> test; the manifest and the live `jobs` table now agree on all 56 columns.
+> A migration is not finished until that file moves with it. `supabase_sync.collect_jobs()` began pushing `service_kind` /
 > `service_meta` with B-4, once there was somewhere for them to land.
 >
 > Two things made the SQLite half safe to ship before the Supabase half was run:

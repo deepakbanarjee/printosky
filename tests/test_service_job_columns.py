@@ -234,6 +234,33 @@ def test_cloud_migration_indexes_service_kind_partially():
     assert "WHERE service_kind IS NOT NULL" in sql
 
 
+def test_schema_manifest_carries_every_v38_column():
+    """config/schema_manifest.yaml is what the drift check compares live against.
+
+    Missed in B-2 and caught on 2026-08-31 once the migration was applied: the
+    live database had eight columns the manifest did not, which is precisely the
+    "columns deployed before code" drift that file exists to catch. Types here
+    are the Postgres ones, not the SQLite ones.
+    """
+    import yaml
+    path = os.path.join(REPO, "config", "schema_manifest.yaml")
+    manifest = yaml.safe_load(open(path, encoding="utf-8"))
+    cols = manifest.get("tables", manifest)["jobs"]["columns"]
+    expected = {
+        "service_kind": "text", "service_meta": "jsonb",
+        "finishing_store_id": "text", "finishing_status": "text",
+        "print_amount": "real", "finishing_amount": "real",
+        "finishing_internal_amount": "real",
+        "item_received_at": "timestamp with time zone",
+    }
+    assert set(expected) == set(COLUMN_NAMES), "the v38 column list moved"
+    for col, pg_type in expected.items():
+        assert col in cols, f"{col} missing from config/schema_manifest.yaml"
+        assert cols[col]["type"] == pg_type
+        assert cols[col]["nullable"] is True
+        assert cols[col]["default"] is None
+
+
 def test_schema_doc_lists_every_column():
     doc = open(os.path.join(REPO, "docs", "SCHEMA.md"), encoding="utf-8").read()
     for col in COLUMN_NAMES:
