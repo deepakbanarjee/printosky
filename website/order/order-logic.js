@@ -34,6 +34,12 @@ const FINISHING_LABEL = { none:'No binding', staple:'Staple', spiral:'Spiral', w
 
 const ORIENTATION_LABEL = { auto:'Auto orientation', portrait:'Portrait', landscape:'Landscape' };
 
+// Customers get Fit and Actual; Custom % is staff-only (owner, 2026-08-30), so
+// this UI can never emit it. 'fit' is the default and is NOT sent — an absent
+// scale block means "leave it to the printer", which is what every order did
+// before scaling existed and what keeps those orders planning identically.
+const SCALE_LABEL = { fit:'Fit to page', actual:'Actual size' };
+
 export function buildPrintSpec(s) {
   const inc = includedList(s.included);
   const col = s.colourMode === 'mixed' ? colourListFn(s.colourPages) : [];
@@ -45,6 +51,7 @@ export function buildPrintSpec(s) {
     orientation: s.orientation || 'auto',
     nup_direction: s.direction || 'horizontal',   // 'horizontal' | 'vertical' (N-up fill order)
     binding: s.binding, sheet_count, amount_estimated: s.amountEstimated, price_exact: s.priceExact,
+    ...(s.scale === 'actual' ? { scale: { mode: 'actual' } } : {}),
   };
 }
 
@@ -64,6 +71,7 @@ export function buildOperatorNote(s) {
   if (s.nup !== 1) parts.push(`${s.nup}-up`);
   parts.push(s.sides === 'duplex' ? 'Duplex' : 'Single-sided');
   if (s.orientation && s.orientation !== 'auto') parts.push(ORIENTATION_LABEL[s.orientation] || s.orientation);
+  if (s.scale === 'actual') parts.push('ACTUAL SIZE (not resized to fit)');
   parts.push(FINISHING_LABEL[s.binding] || s.binding);
   if (!s.priceExact) parts.push('(page count ESTIMATED — non-PDF; confirm before print)');
   return parts.join(' · ');

@@ -140,6 +140,65 @@ class TestEveryIdItTouchesExists:
             assert f'id="{root}"' in html(name), sel
 
 
+class TestTheCustomerControl:
+    """order-v2 gets Fit and Actual — two choices that are hard to get wrong.
+    Custom % is staff-only (owner, 2026-08-30), so it must not be reachable
+    from the order page at all."""
+
+    def order_v2(self):
+        return open(os.path.join(ROOT, "website", "order-v2.html"), encoding="utf-8").read()
+
+    def order_ui(self):
+        return open(os.path.join(ROOT, "website", "order", "order-ui.js"), encoding="utf-8").read()
+
+    def test_exactly_two_choices(self):
+        assert re.findall(r'data-scale="([a-z]+)"', self.order_v2()) == ["fit", "actual"]
+
+    def test_custom_is_not_offered_anywhere_on_the_order_page(self):
+        page = self.order_v2()
+        assert 'data-scale="custom"' not in page
+        assert "Custom %" not in page
+
+    def test_fit_is_the_default(self):
+        assert 'class="ov2-tog active" data-scale="fit"' in self.order_v2()
+        assert "scale: 'fit'," in self.order_ui()
+
+    def test_the_price_note_is_shown(self):
+        assert "Price is per sheet — scaling does not change it." in self.order_v2()
+
+    def test_the_card_hides_on_nup(self):
+        """N-up already IS a fit — the planner drops any scale on it and alerts,
+        so the customer must not be offered a choice that gets ignored."""
+        js = self.order_ui()
+        assert "function syncScaleCardVisibility()" in js
+        assert "state.nup === 1 ? '' : 'none'" in js
+
+    def test_geometry_comes_from_the_endpoint(self):
+        """The whole design: no JS copy of the geometry to drift from what
+        actually prints."""
+        js = self.order_ui()
+        assert "/order/scale-rect?" in js
+        assert "sheet_w" in js and "sheet_h" in js
+
+    def test_a_failed_lookup_shows_no_invented_placement(self):
+        assert "(preview unavailable)" in self.order_ui()
+
+    def test_superseded_lookups_are_ignored(self):
+        js = self.order_ui()
+        assert "scaleRectSeq" in js and "if (seq !== scaleRectSeq) return;" in js
+
+    def test_cropping_is_shown_and_named(self):
+        assert "the edges will be cut off" in self.order_ui()
+        assert ".ov2-scale-page.crops" in self.order_v2()
+
+    def test_every_id_it_touches_exists(self):
+        page, js = self.order_v2(), self.order_ui()
+        start = js.index("// ── Page scaling (Fit / Actual size)")
+        block = js[start:js.index("function setDirection", start)]
+        for el_id in sorted(set(re.findall(r"\$\('([^']+)'\)", block))):
+            assert f'id="{el_id}"' in page, f"$({el_id!r}) has no element in order-v2.html"
+
+
 class TestTheTwoConsolesAgree:
     """jobs.html and admin.html mirror one panel. Drift between them has bitten
     this repo before, so the scaling blocks are compared directly."""

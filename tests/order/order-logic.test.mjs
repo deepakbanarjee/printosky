@@ -96,3 +96,51 @@ test('estimateDocxPages falls back to wordCount/500', () => {
 test('estimateDocxPages returns at least 1', () => {
   assert.equal(estimateDocxPages({ appXml: '', wordCount: 0 }), 1);
 });
+
+// ── Page scaling (A-6) ───────────────────────────────────────────────────────
+// Fit is the default and must NOT be sent: an absent scale block means "leave
+// it to the printer", which is what every order did before scaling existed and
+// what keeps those orders planning identically. Custom % is staff-only, so this
+// UI can never emit it whatever it is handed.
+
+const scaleBase = {
+  fileName: 'a.pdf', fileExt: 'pdf', totalPages: 2,
+  included: { 1: true, 2: true }, colourPages: {}, colourMode: 'bw',
+  nup: 1, copies: 1, paperSize: 'A4', sides: 'single',
+  orientation: 'auto', direction: 'horizontal', binding: 'none',
+  amountEstimated: 6, priceExact: true,
+};
+
+test('buildPrintSpec omits scale entirely at the Fit default', () => {
+  const spec = buildPrintSpec({ ...scaleBase, scale: 'fit' });
+  assert.equal('scale' in spec, false);
+});
+
+test('buildPrintSpec omits scale when the field is absent', () => {
+  const spec = buildPrintSpec({ ...scaleBase });
+  assert.equal('scale' in spec, false);
+});
+
+test('buildPrintSpec sends Actual size', () => {
+  const spec = buildPrintSpec({ ...scaleBase, scale: 'actual' });
+  assert.deepEqual(spec.scale, { mode: 'actual' });
+});
+
+test('the customer UI can never emit a custom scale', () => {
+  // Custom % is staff-only (owner, 2026-08-30). Even handed one, this builder
+  // must not pass it on.
+  for (const bogus of ['custom', 'CUSTOM', '150', 150, null, undefined, {}]) {
+    const spec = buildPrintSpec({ ...scaleBase, scale: bogus });
+    assert.equal('scale' in spec, false, `emitted a scale for ${JSON.stringify(bogus)}`);
+  }
+});
+
+test('the operator note flags Actual size so the counter sees it', () => {
+  const note = buildOperatorNote({ ...scaleBase, scale: 'actual' });
+  assert.match(note, /ACTUAL SIZE/);
+});
+
+test('the operator note says nothing at the Fit default', () => {
+  const note = buildOperatorNote({ ...scaleBase, scale: 'fit' });
+  assert.equal(/ACTUAL SIZE/.test(note), false);
+});
