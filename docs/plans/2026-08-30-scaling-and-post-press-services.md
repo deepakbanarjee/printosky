@@ -522,6 +522,27 @@ Punching: 4 passes × ₹20 = ₹80 → minimum ₹100
 `handle_create_job` gains one guard: skip the `print_items` insert when
 `service_kind` is set and the kind does not print. Nothing else in it moves.
 
+> **Built 2026-08-31 (B-3).** Three decisions worth recording:
+>
+> * **No service job gets a `print_items` row — no exceptions.** The plan said
+>   "the kind does not print", but every kind here is work on paper the customer
+>   already has; even `copy` runs on the copier, not through our print path. One
+>   rule is easier to keep true than ten.
+> * **`/create-job` stamps `service_kind` in a second `UPDATE`, not in its
+>   `INSERT`.** A print job's INSERT stays the exact statement it has always
+>   been, which is Rule 1 held to literally rather than approximately. Same
+>   reason the v38 migration only runs when a service job is actually being
+>   filed: a print job never touches it.
+> * **The deposit gate is live with the plan's defaults** (N1: ₹500 threshold,
+>   50 %) as `SERVICE_DEPOSIT_THRESHOLD` / `SERVICE_DEPOSIT_FRACTION` at the top
+>   of the section. Under the threshold, payment is on collection (B8); over it
+>   and unpaid, the job waits in `Draft` — an `override_reason` starts it anyway.
+>   Two numbers to change when the owner settles it.
+>
+> `/service-quote` runs on every keystroke in the modal, so a *healthy* quote is
+> announced to `ops_watchdog` once per process rather than per keypress; every
+> failure is reported, and the next success re-announces recovery.
+
 ### 4.7 Per-store capability and inter-store finishing
 
 **Capability lives in `store_config.json`**, the file that already decides store
@@ -700,7 +721,7 @@ by ₹180, never under.
 | B-0 | Unpriced-finishing fix + thermal withdrawal (§4.14, §4.9) | medium — live billing |
 | B-1 | `rate_card` Section 11 + tests. Nothing calls it | none |
 | B-2 ✅ | Migrations (cloud + SQLite + `docs/SCHEMA.md`) — built 2026-08-31, cloud SQL not yet run | none — additive |
-| B-3 | `/service-quote` + `/new-service` + `create_job` guard + isolation tests | low |
+| B-3 ✅ | `/service-quote` + `/new-service` + `create_job` guard + isolation tests — built 2026-08-31 | low |
 | B-4 | jobs.html console UI (modal, kind pills, service panel) | low |
 | B-5 | admin.html mirror + MIS `service_kind` filters | low |
 | B-6 | Photocopy button quotes from the rate card (B6) | low — one live button |

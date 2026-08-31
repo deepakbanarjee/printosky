@@ -374,6 +374,7 @@ def check_printer_reachable(ip: str | None, timeout=2) -> bool:
 
 import fitz  # PyMuPDF — page rendering for /scale-preview
 import pdf_scaler
+from db_migrations import ensure_job_service_columns
 
 from ops_watchdog import report as _report_health
 
@@ -1409,6 +1410,8 @@ def handle_complete_job(body: dict) -> dict:
           f"Completed at {_now()} by {staff_id} — Rs.{amount:.0f} {mode}",
           job_id))
     conn.commit()
+    # Fires only for service jobs; a print job returns from it immediately.
+    _alert_zero_priced_service(conn, job_id, amount, staff_id)
     conn.close()
 
     logging.info("Job %s COMPLETED — Rs.%.0f %s by %s", job_id, amount, mode, staff_id)
@@ -1450,18 +1453,8 @@ def handle_new_photocopy(body: dict) -> dict:
         mode = "Cash"
 
     # Generate next job_id
-    today = datetime.now().strftime("%Y%m%d")
-    conn  = _db()
-    row   = conn.execute(
-        "SELECT job_id FROM jobs WHERE (job_id LIKE ? OR job_id LIKE ?) ORDER BY job_id DESC LIMIT 1",
-        (f"OSKY-{today}-%", f"OSP-{today}-%")
-    ).fetchone()
-    if row:
-        last_seq = int(row["job_id"].split("-")[-1])
-        seq = last_seq + 1
-    else:
-        seq = 1
-    job_id = f"OSKY-{today}-{seq:04d}"
+    conn   = _db()
+    job_id = _next_job_id(conn)
     now    = _now()
 
     conn.execute("""
@@ -1482,6 +1475,299 @@ def handle_new_photocopy(body: dict) -> dict:
 
     logging.info("Photocopy job %s created — Rs.%.0f %s by %s", job_id, amount, mode, staff_id)
     return {"ok": True, "job_id": job_id}
+
+
+# ── B-3: Post-press services — work that never touches a printer ──────────────
+#
+# Copy, scan, laminate, foil, bind-only, cut, punch, photo, DTP. A service job is
+# an ordinary `jobs` row with `service_kind` set (plan §4.2 B1) — not a new table,
+# so revenue, payment, pickup codes, WhatsApp notify, the daily summary and MIS
+# all keep working without being taught anything.
+#
+# The three things that must stay true, and are pinned by
+# tests/test_service_isolation.py:
+#   * a service job never gets a print_items row,
+#   * it is never pulled by store_puller (no file_url, never status Paid there),
+#   * /print refuses it rather than inventing a print item for it.
+
+#: Above this quote, a deposit is taken before the work starts (owner default,
+#: 2026-08-30 — plan open question N1; change these two numbers to change the
+#: policy). At or below it, services are paid on collection like everything else.
+SERVICE_DEPOSIT_THRESHOLD = 500.0
+SERVICE_DEPOSIT_FRACTION  = 0.5
+
+#: Query-string keys understood by /service-quote, by type. Anything else is
+#: ignored rather than passed through, so a typo cannot become a silent meta key
+#: that the rate card then defaults away.
+_SERVICE_META_INTS  = ("sheets", "copies", "passes", "qty", "pages")
+_SERVICE_META_BOOLS = ("is_student", "is_colour", "with_our_job", "urgent")
+_SERVICE_META_TEXTS = ("paper_size", "colour", "sides", "lam_type", "binding",
+                       "project_cover", "unit", "language", "description",
+                       "manual_price")
+
+
+#: /service-quote runs on every keystroke in the modal, and ops_watchdog.report
+#: writes to SQLite on every call — so a healthy quote is only announced once per
+#: process, and again after any failure, rather than on each keypress. A failure
+#: is always reported: that is the edge a human needs.
+_service_quote_healthy_announced = False
+
+
+def _service_quote_ok() -> None:
+    global _service_quote_healthy_announced
+    if not _service_quote_healthy_announced:
+        _report_health("service.quote", True, "pricing services")
+        _service_quote_healthy_announced = True
+
+
+def _service_quote_failed(detail: str) -> None:
+    global _service_quote_healthy_announced
+    _service_quote_healthy_announced = False
+    _report_health("service.quote", False, detail)
+
+
+def _amount_or_none(value) -> float | None:
+    """A number, or None when the input is not one. Nothing is swallowed: every
+    caller decides out loud what a non-number means."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _service_meta_from_qs(qs: dict) -> dict:
+    """Build a rate-card meta dict from a query string, typed and bounded."""
+    meta: dict = {}
+    for key in _SERVICE_META_INTS:
+        if key in qs:
+            raw = (qs[key][0] or "").strip()
+            value = _amount_or_none(raw)
+            if value is None:
+                # A quantity that is not a number is a UI bug. Quoting it as the
+                # default would bill the wrong number quietly.
+                raise ValueError(f"{key}={raw!r} is not a number")
+            meta[key] = int(value)
+    for key in _SERVICE_META_BOOLS:
+        if key in qs:
+            meta[key] = (qs[key][0] or "").strip().lower() in ("true", "1", "yes", "on")
+    for key in _SERVICE_META_TEXTS:
+        if key in qs:
+            meta[key] = qs[key][0]
+    return meta
+
+
+def handle_service_quote(qs: dict) -> dict:
+    """
+    GET /service-quote?kind=laminate&sheets=6&lam_type=pouch&paper_size=A4
+    Price one post-press service. Writes nothing.
+
+    Never raises: a quote the shop cannot compute comes back as
+    needs_manual_price with a reason, so the counter types a price instead of
+    watching a spinner. Every such case alerts.
+    """
+    if _rc is None:
+        _service_quote_failed("rate_card not loaded — no service can be priced")
+        return {"ok": False, "total": 0, "needs_manual_price": True,
+                "error": "rate_card not loaded — enter the price manually"}
+
+    kind = (qs.get("kind", [""])[0] or "").strip().lower()
+    if kind not in _rc.SERVICE_KINDS:
+        _report_health(
+            "service.unknown_kind", False,
+            f"/service-quote asked for kind={kind!r}, which the rate card does not "
+            f"know. Known kinds: {', '.join(sorted(_rc.SERVICE_KINDS))}.",
+        )
+        return {"ok": False, "total": 0, "needs_manual_price": True, "unpriced": True,
+                "error": f"Unknown service {kind!r} — enter the price manually",
+                "kinds": sorted(_rc.SERVICE_KINDS)}
+
+    try:
+        meta = _service_meta_from_qs(qs)
+        result = _rc.calculate_service_quote(kind, meta)
+    except Exception as exc:
+        _service_quote_failed(f"/service-quote({kind}) failed: {type(exc).__name__}: {exc}")
+        return {"ok": False, "total": 0, "needs_manual_price": True,
+                "error": f"Could not price this — enter the price manually ({exc})"}
+
+    _service_quote_ok()
+    deposit = _service_deposit_for(result["total"])
+    return {
+        "ok": True,
+        "kind": kind,
+        "label": result["label"],
+        "total": result["total"],
+        "breakdown": result["breakdown"],
+        "needs_manual_price": result["needs_manual_price"],
+        "unpriced": result["unpriced"],
+        "deposit_required": deposit,
+    }
+
+
+def _service_deposit_for(total: float) -> float:
+    """Deposit due before the work starts, or 0 when payment is on collection."""
+    try:
+        total = float(total or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if total <= SERVICE_DEPOSIT_THRESHOLD:
+        return 0.0
+    return round(total * SERVICE_DEPOSIT_FRACTION, 2)
+
+
+def _next_job_id(conn, today_str: str | None = None) -> str:
+    """Next counter-issued job id for today (OSKY-YYYYMMDD-NNNN).
+
+    Extracted unchanged from /new-photocopy and /create-job, which computed it
+    identically; /new-service is the third caller and a third copy is one too
+    many. The OSP- prefix is in the LIKE because both prefixes share the daily
+    sequence.
+    """
+    today_str = today_str or datetime.now().strftime("%Y%m%d")
+    row = conn.execute(
+        "SELECT job_id FROM jobs WHERE (job_id LIKE ? OR job_id LIKE ?) ORDER BY job_id DESC LIMIT 1",
+        (f"OSKY-{today_str}-%", f"OSP-{today_str}-%")
+    ).fetchone()
+    seq = (int(row["job_id"].split("-")[-1]) + 1) if row else 1
+    return f"OSKY-{today_str}-{seq:04d}"
+
+
+def handle_new_service(body: dict) -> dict:
+    """
+    POST /new-service
+    Create a post-press service job. No print_items row, no printer queue, no
+    auto-print — this file never reaches a printer because there is no file.
+
+    Body: { kind, meta{}, customer_name, phone, staff_id, notes, source?,
+            amount_quoted?, amount_collected?, amount_partial?, payment_mode?,
+            override_reason? }
+    """
+    if _rc is None:
+        _service_quote_failed("rate_card not loaded — cannot create a service job")
+        return {"ok": False, "error": "rate_card not loaded"}
+
+    kind = (body.get("kind") or body.get("service_kind") or "").strip().lower()
+    if kind not in _rc.SERVICE_KINDS:
+        _report_health(
+            "service.unknown_kind", False,
+            f"/new-service asked for kind={kind!r}, which the rate card does not know.",
+        )
+        return {"ok": False, "error": f"Unknown service {kind!r}",
+                "kinds": sorted(_rc.SERVICE_KINDS)}
+
+    meta = body.get("meta") or {}
+    if not isinstance(meta, dict):
+        return {"ok": False, "error": "meta must be an object"}
+
+    staff_id        = body.get("staff_id", "")
+    customer_name   = body.get("customer_name", "")
+    phone           = body.get("phone", "")
+    source          = body.get("source", "Service")
+    notes           = body.get("notes", "")
+    payment_mode    = body.get("payment_mode", "Cash")
+    override_reason = (body.get("override_reason") or "").strip()
+
+    if payment_mode not in ("Cash", "UPI", "Online"):
+        payment_mode = "Cash"
+
+    try:
+        quote = _rc.calculate_service_quote(kind, meta)
+    except Exception as exc:
+        _service_quote_failed(
+            f"/new-service({kind}) could not price {meta!r}: {type(exc).__name__}: {exc}")
+        return {"ok": False, "error": f"Could not price this service: {exc}"}
+
+    # An explicit amount from the counter wins over the computed one — that is
+    # what the manual-price path is for — but it is recorded as an override.
+    amount_quoted = _amount_or_none(body.get("amount_quoted"))
+    if amount_quoted is None:
+        amount_quoted = float(quote["total"])
+    amount_collected = _amount_or_none(body.get("amount_collected")) or 0.0
+    amount_partial   = _amount_or_none(body.get("amount_partial")) or 0.0
+
+    deposit_due = _service_deposit_for(amount_quoted)
+    paid_now    = amount_collected + amount_partial
+    # Services are paid on collection (owner decision B8); only a job over the
+    # threshold has to leave money at the counter before the work starts.
+    deposit_met = paid_now >= deposit_due or bool(override_reason)
+    status      = "Queued" if deposit_met else "Draft"
+
+    now_str = _now()
+    conn = _db()
+    ensure_job_service_columns(conn)
+    job_id = _next_job_id(conn)
+
+    final_amount = amount_collected if amount_collected > 0 else (amount_partial or None)
+    label = quote["label"]
+
+    conn.execute("""
+        INSERT INTO jobs
+          (job_id, received_at, filename, source, sender, customer_name,
+           service_type, status, amount_quoted, amount_collected, amount_partial,
+           payment_mode, override_reason, queued_at, notes, staff_notes,
+           service_kind, service_meta)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (
+        job_id, now_str, label, source,
+        phone or None, customer_name or None,
+        label, status,
+        amount_quoted, final_amount,
+        amount_partial if amount_partial > 0 else None,
+        payment_mode if final_amount else None,
+        override_reason or None,
+        now_str if status == "Queued" else None,
+        notes or None,
+        f"Service ({kind}) booked at {now_str} by {staff_id}",
+        kind, json.dumps(meta, sort_keys=True),
+    ))
+    conn.commit()
+    conn.close()
+
+    # No print_items row. Deliberately, and pinned by test_service_isolation.
+
+    logging.info("Service job %s — %s — Rs.%.0f — status=%s — by %s",
+                 job_id, kind, amount_quoted, status, staff_id)
+    _jt_log(DB_PATH, job_id,
+            "service_created_queued" if status == "Queued" else "service_created_draft",
+            from_status=None, to_status=status, staff_id=staff_id,
+            notes=f"kind={kind} amount={amount_quoted} deposit_due={deposit_due} "
+                  f"paid={paid_now} payment={payment_mode if final_amount else 'none'}")
+
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "status": status,
+        "kind": kind,
+        "label": label,
+        "amount_quoted": amount_quoted,
+        "breakdown": quote["breakdown"],
+        "needs_manual_price": quote["needs_manual_price"],
+        "deposit_required": deposit_due,
+        "deposit_met": deposit_met,
+    }
+
+
+def _alert_zero_priced_service(conn, job_id: str, amount: float, staff_id: str) -> None:
+    """A service collected for nothing, with no reason given, is money lost.
+
+    Fires only for service jobs — a print job has service_kind NULL and returns
+    here immediately, so /complete-job behaves exactly as it did.
+    """
+    if amount > 0:
+        return
+    have = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    if "service_kind" not in have:
+        return                      # pre-B-2 database: no service job can exist
+    row = conn.execute(
+        "SELECT service_kind, override_reason FROM jobs WHERE job_id=?", (job_id,)
+    ).fetchone()
+    if not row or not row["service_kind"] or (row["override_reason"] or "").strip():
+        return
+    _report_health(
+        "service.unpriced", False,
+        f"{job_id} ({row['service_kind']}) was collected at Rs.0 by "
+        f"{staff_id or 'unknown staff'} with no override reason — the work was "
+        f"done and nothing was billed.",
+    )
 
 
 # ── A6b: Upload file (base64 JSON) ────────────────────────────────────────────
@@ -1560,15 +1846,24 @@ def handle_create_job(body: dict) -> dict:
     if not paid and not override_reason:
         return {"ok": False, "error": "Payment or override reason required"}
 
+    # B-3: a walk-in can be booked here as a post-press service instead of a
+    # print job. Absent (the only case before today) nothing below it runs and
+    # this function behaves exactly as it did; /new-service is the richer path.
+    service_kind = (body.get("service_kind") or "").strip().lower()
+    if service_kind and (_rc is None or service_kind not in _rc.SERVICE_KINDS):
+        _report_health(
+            "service.unknown_kind", False,
+            f"/create-job asked for service_kind={service_kind!r}, which the rate "
+            f"card does not know — refusing rather than filing an unbillable job.",
+        )
+        return {"ok": False, "error": f"Unknown service {service_kind!r}"}
+    service_meta = body.get("service_meta") or {}
+    if not isinstance(service_meta, dict):
+        return {"ok": False, "error": "service_meta must be an object"}
+
     # Generate job_id
-    today_str = datetime.now().strftime("%Y%m%d")
-    conn = _db()
-    row = conn.execute(
-        "SELECT job_id FROM jobs WHERE (job_id LIKE ? OR job_id LIKE ?) ORDER BY job_id DESC LIMIT 1",
-        (f"OSKY-{today_str}-%", f"OSP-{today_str}-%")
-    ).fetchone()
-    seq = (int(row["job_id"].split("-")[-1]) + 1) if row else 1
-    job_id  = f"OSKY-{today_str}-{seq:04d}"
+    conn    = _db()
+    job_id  = _next_job_id(conn)
     now_str = _now()
 
     status    = "Queued" if (paid or override_reason) else "Draft"
@@ -1616,8 +1911,19 @@ def handle_create_job(body: dict) -> dict:
     ))
     conn.commit()
 
-    # Insert a print_items row so the print panel loads specs immediately
-    if pages > 0:
+    # Service fields go on in a second statement, not into the INSERT above:
+    # a print job's INSERT must stay exactly the one it has always been.
+    if service_kind:
+        ensure_job_service_columns(conn)
+        conn.execute(
+            "UPDATE jobs SET service_kind=?, service_meta=? WHERE job_id=?",
+            (service_kind, json.dumps(service_meta, sort_keys=True), job_id),
+        )
+        conn.commit()
+
+    # Insert a print_items row so the print panel loads specs immediately.
+    # Never for a service job: there is nothing to print (plan §4.2 B3).
+    if pages > 0 and not service_kind:
         paper_type = f"{paper_size}_BW" if colour == "bw" else f"{paper_size}_col"
         printer    = "epson" if colour == "col" else "konica"
         try:
@@ -2171,6 +2477,18 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
         conn.close()
         return {"ok": False, "error": f"Job {job_id} not found"}
 
+    # A service job has no file and no print item. Refuse it here, before the
+    # auto-create below would invent one for it (plan §4.10). Columns may not
+    # exist on a store PC that has not restarted since B-2, hence the guard.
+    service_kind = job["service_kind"] if "service_kind" in job.keys() else None
+    if service_kind:
+        conn.close()
+        label = (_rc.SERVICE_KINDS.get(service_kind, (service_kind,))[0]
+                 if _rc is not None else service_kind)
+        return {"ok": False,
+                "error": f"{job_id} is a {label} job — there is nothing to print. "
+                         f"Mark it Ready when the work is done."}
+
     # Auto-create print_items row from job defaults if missing
     # (happens when staff clicks Print without saving specs first)
     if not item:
@@ -2696,6 +3014,9 @@ class PrintHandler(BaseHTTPRequestHandler):
             self._json(200, {"items": [dict(r) for r in rows]})
         elif path == "/quote":
             self._json(200, handle_quote(qs))
+        elif path == "/service-quote":
+            result = handle_service_quote(qs)
+            self._json(200 if result.get("ok") else 400, result)
         elif path == "/vendors":
             self._json(200, handle_get_vendors(qs))
         elif path == "/file":
@@ -2851,6 +3172,12 @@ class PrintHandler(BaseHTTPRequestHandler):
         if path == "/new-photocopy":
             body = self._read_body()
             self._json(200, handle_new_photocopy(body))
+            return
+
+        if path == "/new-service":
+            body = self._read_body()
+            result = handle_new_service(body)
+            self._json(200 if result.get("ok") else 400, result)
             return
 
         if path == "/upload-file":
