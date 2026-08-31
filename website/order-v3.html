@@ -9,9 +9,13 @@
 
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Place a Print Order — Acrobat-style preview | Printosky</title>
+<title>Place a Print Order (v3 — page scaling) | Printosky</title>
 <meta name="description" content="Upload your file, preview every page, pick colour/N-up/duplex/binding, see a live price, and order printing online — pickup from Thriprayar or Nattika.">
 <link rel="canonical" href="https://printosky.com/order-v2.html">
+<!-- v3 is the scaling trial. order-v2.html stays the live order page until
+     this has been tested and rewired; canonical deliberately points there so
+     the trial page is never indexed as the real one. -->
+<meta name="robots" content="noindex,nofollow">
 <link rel="stylesheet" href="styles.css">
 <script src="analytics.js" defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -166,6 +170,20 @@
 
   .ov2-select { width: 100%; padding: 8px 10px; border: 1.5px solid #e5e7eb; border-radius: 6px; font-size: 13px; color: #111827; background: #fff; cursor: pointer; outline: none; appearance: none; }
 
+  /* Page scaling — the sheet, with the page drawn where it will actually land.
+     The geometry comes from the printer's own code via /order/scale-rect; this
+     only draws it. */
+  .ov2-scale-stage { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
+  .ov2-scale-sheet { width: 58px; height: 82px; border: 2px solid var(--blue); border-radius: 4px;
+    background: #f8f9ff; position: relative; flex-shrink: 0; overflow: hidden; }
+  .ov2-scale-page { position: absolute; background: var(--blue); opacity: .85; border-radius: 1px;
+    transition: all .25s ease; }
+  .ov2-scale-page.crops { background: repeating-linear-gradient(45deg,
+    #e04b4b, #e04b4b 3px, #f08d8d 3px, #f08d8d 6px); }
+  .ov2-scale-caption { font-size: 11px; color: #6b7280; line-height: 1.5; }
+  .ov2-scale-caption b { color: #374151; }
+  .ov2-scale-note { font-size: 10.5px; color: #9aa1ab; margin-top: 8px; }
+  .ov2-scale-warn { color: #c0392b; font-weight: 600; }
   .ov2-nup-row { display: flex; gap: 10px; align-items: flex-start; }
   .ov2-nup-toggles { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
   .ov2-nup-sheet { width: 56px; height: 74px; border: 2px solid var(--blue); border-radius: 4px; background: #f8f9ff; padding: 4px; display: grid; gap: 3px; flex-shrink: 0; }
@@ -398,6 +416,23 @@
             </div>
           </div>
 
+          <div class="ov2-card full" id="ov2-scale-card">
+            <div class="ov2-card-label">Page size on paper</div>
+            <div class="ov2-tog-group">
+              <div class="ov2-tog active" data-scale="fit" id="ov2-sc-fit">Fit to page</div>
+              <div class="ov2-tog" data-scale="actual" id="ov2-sc-actual">Actual size</div>
+            </div>
+            <div class="ov2-scale-stage">
+              <div class="ov2-scale-sheet" id="ov2-scaleSheet">
+                <div class="ov2-scale-page" id="ov2-scalePage"></div>
+              </div>
+              <div class="ov2-scale-caption" id="ov2-scaleCaption">
+                <b>Fit to page:</b> your page is resized to fill the sheet.
+              </div>
+            </div>
+            <div class="ov2-scale-note">Price is per sheet — scaling does not change it.</div>
+          </div>
+
           <div class="ov2-card">
             <div class="ov2-card-label">Orientation</div>
             <div class="ov2-tog-group">
@@ -433,6 +468,7 @@
           <span class="ov2-tag" id="ov2-s-paper">A4</span>
           <span class="ov2-tag" id="ov2-s-sides">Single-sided</span>
           <span class="ov2-tag" id="ov2-s-orient" style="display:none;">Portrait</span>
+          <span class="ov2-tag" id="ov2-s-scale" style="display:none;">Actual size</span>
           <span class="ov2-tag" id="ov2-s-bind">No binding</span>
           <span class="ov2-tag sheets" id="ov2-s-sheets">0 sheets</span>
           <span class="ov2-tag price" id="ov2-s-price" style="display:none;">₹0</span>

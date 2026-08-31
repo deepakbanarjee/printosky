@@ -265,7 +265,17 @@ not change it."**
 
 ### 3.7 UI
 
-**Customer — `website/order-v2.html` + `website/order/order-logic.js`**
+**Customer — `website/order-v3.html` + `website/order/order-logic.js`**
+
+> **Ships as a trial page (owner, 2026-08-30):** *"merge it to live as v3 and
+> after successful testing we will rewire it to the latest."* `order-v3.html`
+> carries the scaling; `order-v2.html` stays byte-identical to what is live and
+> remains the page customers reach. v3 is `noindex` with its canonical pointing
+> at v2, so it cannot be found or indexed as the real order page. The two share
+> `order-ui.js` — the scaling code no-ops without the v3 markup, and
+> `tests/test_scale_ui.py::TestOrderV2IsUntouched` is what keeps that true.
+> Rewiring means pointing the site's order links at v3 (or renaming it over v2),
+> which is a separate, deliberate change.
 A new `.ov2-card` next to Paper size, hidden while `nup !== 1`. **Two choices —
 no Custom % for customers (A10):**
 

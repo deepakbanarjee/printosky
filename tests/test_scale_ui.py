@@ -140,13 +140,43 @@ class TestEveryIdItTouchesExists:
             assert f'id="{root}"' in html(name), sel
 
 
+class TestOrderV2IsUntouched:
+    """Scaling ships as order-v3.html, a trial page, while order-v2.html stays
+    the live order page until it has been tested and rewired (owner,
+    2026-08-30). The two share order-ui.js, so the new code must be inert
+    without the v3 markup — these tests are what make that claim checkable."""
+
+    def order_v2(self):
+        return open(os.path.join(ROOT, "website", "order-v2.html"), encoding="utf-8").read()
+
+    def test_the_live_page_has_no_scale_control(self):
+        page = self.order_v2()
+        assert "data-scale=" not in page
+        assert "ov2-scale-card" not in page
+        assert "Page size on paper" not in page
+
+    def test_the_shared_javascript_is_inert_without_the_markup(self):
+        """Every entry point the scaling code has must survive a missing
+        element, because order-v2 loads the same module and has none of them."""
+        js = open(os.path.join(ROOT, "website", "order", "order-ui.js"), encoding="utf-8").read()
+        start = js.index("// ── Page scaling (Fit / Actual size)")
+        block = js[start:js.index("function setDirection", start)]
+        assert "if (!sheet || !page || !cap) return;" in block   # renderScalePreview
+        assert "if (card) card.style.display" in block           # syncScaleCardVisibility
+        assert "if (scaleTag) {" in js                           # updateSummary
+
+    def test_the_default_state_sends_nothing(self):
+        js = open(os.path.join(ROOT, "website", "order", "order-ui.js"), encoding="utf-8").read()
+        assert "scale: 'fit'," in js   # and buildPrintSpec only emits for 'actual'
+
+
 class TestTheCustomerControl:
-    """order-v2 gets Fit and Actual — two choices that are hard to get wrong.
+    """order-v3 gets Fit and Actual — two choices that are hard to get wrong.
     Custom % is staff-only (owner, 2026-08-30), so it must not be reachable
     from the order page at all."""
 
     def order_v2(self):
-        return open(os.path.join(ROOT, "website", "order-v2.html"), encoding="utf-8").read()
+        return open(os.path.join(ROOT, "website", "order-v3.html"), encoding="utf-8").read()
 
     def order_ui(self):
         return open(os.path.join(ROOT, "website", "order", "order-ui.js"), encoding="utf-8").read()
@@ -190,6 +220,11 @@ class TestTheCustomerControl:
     def test_cropping_is_shown_and_named(self):
         assert "the edges will be cut off" in self.order_ui()
         assert ".ov2-scale-page.crops" in self.order_v2()
+
+    def test_the_trial_page_is_not_indexed(self):
+        page = self.order_v2()
+        assert 'name="robots" content="noindex,nofollow"' in page
+        assert 'canonical" href="https://printosky.com/order-v2.html"' in page
 
     def test_every_id_it_touches_exists(self):
         page, js = self.order_v2(), self.order_ui()
