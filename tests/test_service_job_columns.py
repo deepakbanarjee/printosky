@@ -250,18 +250,45 @@ def test_kinds_match_the_rate_card():
 
 # ── Nothing else moves ────────────────────────────────────────────────────────
 
-def test_cloud_sync_still_pushes_only_the_old_columns():
-    """collect_jobs names its columns, so v38 syncs nothing new to Supabase.
+def test_cloud_sync_pushes_only_columns_the_cloud_has():
+    """collect_jobs names its columns explicitly, and only ones v38 created.
 
-    This is what makes the SQLite half safe to ship before the SQL Editor half:
-    a store PC with the new columns cannot push a column the cloud lacks.
+    Until the Supabase migration was applied (2026-08-31) this asserted the
+    opposite — that NO v38 column was pushed — which is what made the SQLite
+    half safe to ship first. Now that the cloud has them, service_kind and
+    service_meta are pushed so the consoles can see a counter-booked service;
+    the columns B-8 and B-9 will use are still not, because nothing writes them.
     """
     import supabase_sync
     src = open(supabase_sync.__file__, encoding="utf-8").read()
     start = src.index("def collect_jobs")
     body = src[start:src.index("def collect_printer_counters")]
+    assert "service_kind" in body and "service_meta" in body
     for col in COLUMN_NAMES:
-        assert col not in body, f"collect_jobs would push {col} to a cloud without it"
+        if col in ("service_kind", "service_meta"):
+            continue
+        assert col not in body, f"collect_jobs pushes {col}, which nothing writes yet"
+
+
+def test_cloud_sync_survives_a_store_pc_that_has_not_migrated():
+    """A box running new code against an old DB must still sync its jobs."""
+    import supabase_sync
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(LEGACY_JOBS_DDL)
+    assert supabase_sync._has_service_columns(conn) is False
+    ensure_job_service_columns(conn)
+    assert supabase_sync._has_service_columns(conn) is True
+    conn.close()
+
+
+def test_service_meta_reaches_jsonb_as_an_object_not_a_string():
+    import supabase_sync
+    assert supabase_sync._as_json_object('{"sheets": 6}') == {"sheets": 6}
+    assert supabase_sync._as_json_object({"sheets": 6}) == {"sheets": 6}
+    assert supabase_sync._as_json_object(None) is None
+    assert supabase_sync._as_json_object("") is None
+    # Unparseable meta becomes NULL and is logged, never a jsonb string.
+    assert supabase_sync._as_json_object("sheets=6", "OSP-1") is None
 
 
 def test_fix_db_and_watcher_use_the_one_list():

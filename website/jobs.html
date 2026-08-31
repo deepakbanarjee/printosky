@@ -687,6 +687,56 @@
     font-family: var(--mono); font-size: .78rem; padding: .5rem 1rem; cursor: pointer;
   }
 
+  /* ── Service Modal + Service Panel (post-press, no printing) ────── */
+  .svc-modal-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-top: 2px solid var(--accent); padding: 1.5rem;
+    width: 460px; max-width: 96vw; max-height: 92vh; overflow-y: auto;
+    animation: fadeUp .2s ease;
+  }
+  .svc-pills { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: 1rem; }
+  .svc-pill {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    font-family: var(--mono); font-size: .68rem; padding: .35rem .55rem;
+    cursor: pointer; transition: all .15s; border-radius: 1px;
+  }
+  .svc-pill:hover { border-color: var(--accent); color: var(--text); }
+  .svc-pill.active {
+    border-color: var(--accent); color: var(--accent);
+    background: rgba(41,182,246,.1);
+  }
+  .svc-row { display: flex; gap: .5rem; }
+  .svc-row > .modal-field { flex: 1; }
+  .svc-check {
+    display: flex; align-items: center; gap: .4rem; font-family: var(--mono);
+    font-size: .7rem; color: var(--muted); margin-bottom: .8rem;
+  }
+  .svc-check input { width: auto; }
+  .svc-quote {
+    background: var(--bg); border: 1px solid var(--border);
+    padding: .6rem .7rem; margin: .8rem 0; font-family: var(--mono);
+    font-size: .7rem; color: var(--muted); line-height: 1.6;
+  }
+  .svc-quote .svc-total { font-size: 1.1rem; color: var(--green); display: block; margin-bottom: .3rem; }
+  .svc-quote.warn { border-color: var(--amber); }
+  .svc-quote .svc-warn { color: var(--amber); display: block; margin-top: .3rem; }
+  .svc-quote .svc-deposit { color: var(--accent); display: block; margin-top: .3rem; }
+  .svc-panel-body { padding: 1rem 1.2rem; }
+  .svc-panel-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: .6rem; margin-bottom: 1rem;
+  }
+  .svc-panel-cell { background: var(--bg); border: 1px solid var(--border); padding: .5rem .6rem; }
+  .svc-panel-cell .k {
+    display: block; font-size: .6rem; color: var(--muted); font-family: var(--mono);
+    text-transform: uppercase; letter-spacing: .1em; margin-bottom: .2rem;
+  }
+  .svc-panel-cell .v { font-family: var(--mono); font-size: .85rem; color: var(--text); }
+  .svc-noprint {
+    font-family: var(--mono); font-size: .68rem; color: var(--muted);
+    border-left: 2px solid var(--accent); padding: .4rem .7rem; margin-bottom: 1rem;
+  }
+
   /* ── New Job Modal (wizard) ─────────────────────── */
   .nj-modal-box {
     background: var(--surface); border: 1px solid var(--border);
@@ -1263,6 +1313,7 @@
         <span class="panel-badge" id="job-count">Loading…</span>
         <button class="nj-btn-new-job" style="margin-left:auto" onclick="window.open('order-v2.html?staff=1','_blank')" title="Add walk-in or manual job (N)">+ New Job</button>
         <button class="filter-btn" onclick="openPhotocopyModal()">+ Photocopy</button>
+        <button class="filter-btn" onclick="openServiceModal()" title="Copy, scan, laminate, foil, bind — work with no printing">+ Service</button>
       </div>
       <div class="filter-bar">
         <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
@@ -1560,6 +1611,196 @@
     <div class="modal-btns">
       <button class="modal-ok" id="pm-confirm-btn" onclick="confirmPayment()">Mark Complete</button>
       <button class="modal-cancel" onclick="closePaymentModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Service Modal — post-press work with no printing (B-4) ── -->
+<div class="modal-overlay" id="service-modal">
+  <div class="svc-modal-box">
+    <div class="modal-title">New Service — no printing</div>
+
+    <!-- One pill per rate_card.SERVICE_KINDS. Kept in that order deliberately:
+         a test pins this list against the rate card so a kind can never be
+         orderable here without being priceable there. -->
+    <div class="svc-pills" id="svc-pills">
+      <button class="svc-pill active" data-kind="copy"     onclick="setServiceKind('copy')">Photocopy</button>
+      <button class="svc-pill"        data-kind="scan"     onclick="setServiceKind('scan')">Scanning</button>
+      <button class="svc-pill"        data-kind="laminate" onclick="setServiceKind('laminate')">Lamination</button>
+      <button class="svc-pill"        data-kind="foil"     onclick="setServiceKind('foil')">Foiling</button>
+      <button class="svc-pill"        data-kind="bind"     onclick="setServiceKind('bind')">Binding only</button>
+      <button class="svc-pill"        data-kind="cut"      onclick="setServiceKind('cut')">Cutting / trimming</button>
+      <button class="svc-pill"        data-kind="punch"    onclick="setServiceKind('punch')">Punching</button>
+      <button class="svc-pill"        data-kind="photo"    onclick="setServiceKind('photo')">Photo prints</button>
+      <button class="svc-pill"        data-kind="dtp"      onclick="setServiceKind('dtp')">DTP / typing</button>
+      <button class="svc-pill"        data-kind="other"    onclick="setServiceKind('other')">Other</button>
+    </div>
+
+    <div class="svc-row">
+      <div class="modal-field">
+        <label>Customer Name (optional)</label>
+        <input type="text" id="svc-name" placeholder="Walk-in customer">
+      </div>
+      <div class="modal-field">
+        <label>Phone (optional)</label>
+        <input type="tel" id="svc-phone" placeholder="+91…">
+      </div>
+    </div>
+
+    <!-- Quantities. Every field is in the markup and shown per kind, so the
+         set a kind asks for is one list in setServiceKind() rather than ten
+         blocks of generated HTML. -->
+    <div class="svc-row">
+      <div class="modal-field" id="svc-f-sheets">
+        <label id="svc-sheets-label">Sheets</label>
+        <input type="number" id="svc-sheets" min="1" value="1" oninput="scheduleServiceQuote()">
+      </div>
+      <div class="modal-field" id="svc-f-copies">
+        <label>Copies</label>
+        <input type="number" id="svc-copies" min="1" value="1" oninput="scheduleServiceQuote()">
+      </div>
+      <div class="modal-field" id="svc-f-passes">
+        <label>Machine passes</label>
+        <input type="number" id="svc-passes" min="1" value="1" oninput="scheduleServiceQuote()">
+      </div>
+      <div class="modal-field" id="svc-f-qty">
+        <label>Quantity</label>
+        <input type="number" id="svc-qty" min="1" value="1" oninput="scheduleServiceQuote()">
+      </div>
+      <div class="modal-field" id="svc-f-pages">
+        <label>Pages</label>
+        <input type="number" id="svc-pages" min="1" value="1" oninput="scheduleServiceQuote()">
+      </div>
+    </div>
+
+    <div class="svc-row">
+      <div class="modal-field" id="svc-f-paper">
+        <label>Paper Size</label>
+        <select id="svc-paper" onchange="scheduleServiceQuote()">
+          <option value="A4">A4</option>
+          <option value="A3">A3</option>
+          <option value="A5">A5</option>
+          <option value="Letter">Letter</option>
+        </select>
+      </div>
+      <div class="modal-field" id="svc-f-foil-size">
+        <label>Size</label>
+        <select id="svc-foil-size" onchange="scheduleServiceQuote()">
+          <option value="A4">A4 sheet — Rs.30</option>
+          <option value="A3">A3 sheet — Rs.50</option>
+          <option value="cover">Cover — Rs.50</option>
+        </select>
+      </div>
+      <div class="modal-field" id="svc-f-colour">
+        <label>Colour</label>
+        <select id="svc-colour" onchange="scheduleServiceQuote()">
+          <option value="bw">B&amp;W</option>
+          <option value="col">Colour</option>
+        </select>
+      </div>
+      <div class="modal-field" id="svc-f-sides">
+        <label>Sides</label>
+        <select id="svc-sides" onchange="scheduleServiceQuote()">
+          <option value="ss">Single</option>
+          <option value="ds">Double</option>
+        </select>
+      </div>
+      <div class="modal-field" id="svc-f-lam-type">
+        <label>Lamination</label>
+        <select id="svc-lam-type" onchange="scheduleServiceQuote()">
+          <option value="pouch">Pouch</option>
+          <option value="roll">Roll (min 10)</option>
+          <option value="cover">Cover</option>
+          <option value="id">ID card</option>
+        </select>
+      </div>
+      <div class="modal-field" id="svc-f-binding">
+        <label>Binding</label>
+        <select id="svc-binding" onchange="scheduleServiceQuote()">
+          <option value="staple">Staple</option>
+          <option value="spiral">Spiral</option>
+          <option value="wiro">Wiro</option>
+          <option value="soft">Soft</option>
+          <option value="perfect">Perfect</option>
+          <option value="project">Project (outsourced)</option>
+          <option value="record">Record (outsourced)</option>
+          <option value="thesis">Thesis (outsourced)</option>
+        </select>
+      </div>
+      <div class="modal-field" id="svc-f-unit">
+        <label>Photo size</label>
+        <select id="svc-unit" onchange="scheduleServiceQuote()">
+          <option value="set5">Set of 5 — Rs.50</option>
+          <option value="sheet">Full sheet — Rs.100</option>
+          <option value="stamp">Stamp — no rate yet</option>
+          <option value="postcard">Postcard — no rate yet</option>
+          <option value="4x6">4x6 — no rate yet</option>
+        </select>
+      </div>
+      <div class="modal-field" id="svc-f-language">
+        <label>Language</label>
+        <select id="svc-language" onchange="scheduleServiceQuote()">
+          <option value="english">English — Rs.40/page</option>
+          <option value="malayalam">Malayalam — Rs.40/page</option>
+          <option value="hindi">Hindi — Rs.60/page</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="modal-field" id="svc-f-desc">
+      <label>What is the job?</label>
+      <input type="text" id="svc-desc" placeholder="Describe it — the price is typed below"
+             oninput="scheduleServiceQuote()">
+    </div>
+
+    <div class="svc-check" id="svc-f-student">
+      <input type="checkbox" id="svc-student" onchange="scheduleServiceQuote()">
+      <label for="svc-student" style="margin:0">Student rate</label>
+    </div>
+    <div class="svc-check" id="svc-f-lam-colour">
+      <input type="checkbox" id="svc-lam-colour" onchange="scheduleServiceQuote()">
+      <label for="svc-lam-colour" style="margin:0">Colour sheet (A3 pouch costs more)</label>
+    </div>
+    <div class="svc-check" id="svc-f-ourjob">
+      <input type="checkbox" id="svc-ourjob" onchange="scheduleServiceQuote()">
+      <label for="svc-ourjob" style="margin:0">Part of a job we printed or bound — free</label>
+    </div>
+    <div class="svc-check">
+      <input type="checkbox" id="svc-urgent" onchange="scheduleServiceQuote()">
+      <label for="svc-urgent" style="margin:0">Urgent</label>
+    </div>
+
+    <!-- The live quote. It is never blank and never a bare zero: an amount the
+         rate card cannot compute says so and asks for a typed price. -->
+    <div class="svc-quote" id="svc-quote">
+      <span class="svc-total" id="svc-total">Rs.—</span>
+      <span id="svc-breakdown">Pick a service.</span>
+      <span class="svc-warn"    id="svc-warn"    style="display:none"></span>
+      <span class="svc-deposit" id="svc-deposit" style="display:none"></span>
+    </div>
+
+    <div class="modal-field" id="svc-f-manual" style="display:none">
+      <label>Price (Rs.) — no rate for this, type it</label>
+      <input type="number" id="svc-manual" min="0" step="1" oninput="scheduleServiceQuote()">
+    </div>
+
+    <div class="svc-row">
+      <div class="modal-field">
+        <label>Taken now (Rs.) — optional</label>
+        <input type="number" id="svc-paid" min="0" step="1" value="0">
+      </div>
+      <div class="modal-field">
+        <label>Payment Mode</label>
+        <select id="svc-mode">
+          <option value="Cash">Cash</option>
+          <option value="UPI">UPI</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="modal-btns">
+      <button class="modal-ok" id="svc-confirm-btn" onclick="confirmService()">Book Service</button>
+      <button class="modal-cancel" onclick="closeServiceModal()">Cancel</button>
     </div>
   </div>
 </div>
@@ -2490,6 +2731,24 @@ function selectJob(jobId) {
   document.querySelectorAll("tr.job-row").forEach(r => r.classList.remove("active-row"));
   const row = document.getElementById("jrow-" + jobId);
   if (row) row.classList.add("active-row");
+
+  // A service job gets its own panel and returns here. Nothing below this line
+  // runs for it — no print items, no scale control, no colour detection, no
+  // job-items fetch. A print panel with the printing hidden is a print panel
+  // someone eventually prints from.
+  if (isServiceJob(job)) {
+    const svcRow = document.createElement("tr");
+    svcRow.id = "job-panel-row";
+    svcRow.className = "panel-row";
+    const svcTd = document.createElement("td");
+    svcTd.colSpan = 10;
+    svcTd.innerHTML = servicePanelHTML(job);
+    svcRow.appendChild(svcTd);
+    if (row) row.after(svcRow);
+    setTimeout(() => svcRow.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
+    loadTimeline(jobId);
+    return;
+  }
 
   // Init edit state from job
   editFinishing = job.finishing || "none";
@@ -3676,6 +3935,283 @@ async function confirmPayment() {
     alert("Cannot reach print server:\n" + e.message);
     btn.disabled = false; btn.textContent = "Mark Complete";
   }
+}
+
+// ── Service Modal — post-press work with no printing (B-4) ────────────────────
+//
+// A service job is an ordinary job row with service_kind set. It is quoted by
+// the store PC's /service-quote (never priced here — one rate card, one answer)
+// and filed by /new-service, which deliberately writes no print item.
+
+// kind -> which fields it asks for. The keys must match rate_card.SERVICE_KINDS
+// exactly; tests/test_service_ui.py fails if they drift apart.
+const SERVICE_FIELDS = {
+  copy:     ["sheets", "copies", "paper", "colour", "sides", "student"],
+  scan:     ["sheets", "paper"],
+  laminate: ["sheets", "paper", "lam-type", "lam-colour"],
+  foil:     ["sheets", "foil-size"],
+  bind:     ["sheets", "paper", "binding"],
+  cut:      ["passes", "ourjob"],
+  punch:    ["passes", "ourjob"],
+  photo:    ["qty", "unit"],
+  dtp:      ["pages", "language"],
+  other:    ["desc"],
+};
+const SERVICE_ALL_FIELDS = [
+  "sheets", "copies", "passes", "qty", "pages", "paper", "foil-size", "colour",
+  "sides", "lam-type", "binding", "unit", "language", "desc", "student",
+  "lam-colour", "ourjob",
+];
+// The word for "one unit of this", so the Sheets box does not ask a DTP job for
+// sheets or a photo job for pages.
+const SERVICE_SHEET_LABEL = {
+  copy: "Sheets", scan: "Sheets", laminate: "Sheets",
+  foil: "Sheets / pieces", bind: "Sheets",
+};
+
+let serviceKind    = "copy";
+let serviceQuote   = null;    // last answer from /service-quote
+let _svcQuoteTimer = null;
+
+function openServiceModal() {
+  document.getElementById("svc-name").value    = "";
+  document.getElementById("svc-phone").value   = "";
+  document.getElementById("svc-sheets").value  = "1";
+  document.getElementById("svc-copies").value  = "1";
+  document.getElementById("svc-passes").value  = "1";
+  document.getElementById("svc-qty").value     = "1";
+  document.getElementById("svc-pages").value   = "1";
+  document.getElementById("svc-desc").value    = "";
+  document.getElementById("svc-manual").value  = "";
+  document.getElementById("svc-paid").value    = "0";
+  document.getElementById("svc-mode").value    = "Cash";
+  ["svc-student", "svc-lam-colour", "svc-ourjob", "svc-urgent"]
+    .forEach(id => { document.getElementById(id).checked = false; });
+  const btn = document.getElementById("svc-confirm-btn");
+  btn.disabled = false; btn.textContent = "Book Service";
+  setServiceKind("copy");
+  document.getElementById("service-modal").classList.add("open");
+}
+
+function closeServiceModal() {
+  document.getElementById("service-modal").classList.remove("open");
+}
+
+function setServiceKind(kind) {
+  if (!SERVICE_FIELDS[kind]) return;
+  serviceKind = kind;
+  document.querySelectorAll("#svc-pills .svc-pill").forEach(p =>
+    p.classList.toggle("active", p.dataset.kind === kind));
+
+  const wanted = SERVICE_FIELDS[kind];
+  SERVICE_ALL_FIELDS.forEach(f => {
+    const el = document.getElementById("svc-f-" + f);
+    if (el) el.style.display = wanted.includes(f) ? "" : "none";
+  });
+  document.getElementById("svc-sheets-label").textContent =
+    SERVICE_SHEET_LABEL[kind] || "Sheets";
+  scheduleServiceQuote();
+}
+
+// What the rate card needs, per kind. Only the keys this kind actually uses are
+// sent — an unused key is a number the operator never saw and cannot explain.
+function serviceMeta() {
+  const val = id => document.getElementById(id).value;
+  const num = id => parseInt(val(id)) || 1;
+  const on  = id => document.getElementById(id).checked;
+  const meta = {};
+  const wanted = SERVICE_FIELDS[serviceKind] || [];
+
+  if (wanted.includes("sheets"))     meta.sheets       = num("svc-sheets");
+  if (wanted.includes("copies"))     meta.copies       = num("svc-copies");
+  if (wanted.includes("passes"))     meta.passes       = num("svc-passes");
+  if (wanted.includes("qty"))        meta.qty          = num("svc-qty");
+  if (wanted.includes("pages"))      meta.pages        = num("svc-pages");
+  if (wanted.includes("paper"))      meta.paper_size   = val("svc-paper");
+  if (wanted.includes("foil-size"))  meta.paper_size   = val("svc-foil-size");
+  if (wanted.includes("colour"))     meta.colour       = val("svc-colour");
+  if (wanted.includes("sides"))      meta.sides        = val("svc-sides");
+  if (wanted.includes("lam-type"))   meta.lam_type     = val("svc-lam-type");
+  if (wanted.includes("binding"))    meta.binding      = val("svc-binding");
+  if (wanted.includes("unit"))       meta.unit         = val("svc-unit");
+  if (wanted.includes("language"))   meta.language     = val("svc-language");
+  if (wanted.includes("desc"))       meta.description  = val("svc-desc");
+  if (wanted.includes("student"))    meta.is_student   = on("svc-student");
+  if (wanted.includes("lam-colour")) meta.is_colour    = on("svc-lam-colour");
+  if (wanted.includes("ourjob"))     meta.with_our_job = on("svc-ourjob");
+  if (on("svc-urgent"))              meta.urgent       = true;
+
+  const manual = val("svc-manual").trim();
+  if (manual !== "") meta.manual_price = manual;
+  return meta;
+}
+
+function scheduleServiceQuote() {
+  clearTimeout(_svcQuoteTimer);
+  _svcQuoteTimer = setTimeout(refreshServiceQuote, 250);
+}
+
+async function refreshServiceQuote() {
+  const box   = document.getElementById("svc-quote");
+  const total = document.getElementById("svc-total");
+  const lines = document.getElementById("svc-breakdown");
+  const warn  = document.getElementById("svc-warn");
+  const dep   = document.getElementById("svc-deposit");
+  if (!box) return;
+
+  if (!STORE_PC_URL) {
+    // Not a silent blank: without the store PC there is no rate card, and the
+    // operator needs to know that is why there is no price.
+    serviceQuote = null;
+    box.classList.add("warn");
+    total.textContent = "Rs.—";
+    lines.textContent = "Print server not configured — click PC Setup.";
+    warn.style.display = "none"; dep.style.display = "none";
+    document.getElementById("svc-f-manual").style.display = "block";
+    return;
+  }
+
+  const meta = serviceMeta();
+  const qs   = new URLSearchParams({ kind: serviceKind });
+  Object.entries(meta).forEach(([k, v]) => qs.set(k, v));
+
+  try {
+    const r    = await fetch(`${STORE_PC_URL}/service-quote?${qs.toString()}`);
+    const data = await r.json();
+    serviceQuote = data;
+
+    total.textContent = `Rs.${Math.ceil(data.total || 0)}`;
+    lines.innerHTML   = (data.breakdown || []).map(esc).join("<br>");
+
+    const needsPrice = !!data.needs_manual_price;
+    box.classList.toggle("warn", needsPrice || !data.ok);
+    document.getElementById("svc-f-manual").style.display = needsPrice ? "block" : "none";
+    if (needsPrice) {
+      warn.style.display = "block";
+      warn.textContent   = data.error || "No rate for this — type the price below.";
+    } else {
+      warn.style.display = "none";
+    }
+    if (data.deposit_required > 0) {
+      dep.style.display = "block";
+      dep.textContent   = `Deposit before work starts: Rs.${Math.ceil(data.deposit_required)}`;
+    } else {
+      dep.style.display = "none";
+    }
+  } catch (e) {
+    serviceQuote = null;
+    box.classList.add("warn");
+    total.textContent = "Rs.—";
+    lines.textContent = "Cannot reach print server — " + e.message;
+    warn.style.display = "none"; dep.style.display = "none";
+    document.getElementById("svc-f-manual").style.display = "block";
+  }
+}
+
+async function confirmService() {
+  if (!STORE_PC_URL) { alert("Print server not configured — click PC Setup"); return; }
+  const btn = document.getElementById("svc-confirm-btn");
+  btn.disabled = true; btn.textContent = "Booking…";
+  try {
+    const paid = parseFloat(document.getElementById("svc-paid").value) || 0;
+    const body = {
+      kind:          serviceKind,
+      meta:          serviceMeta(),
+      staff_id:      sessionStorage.getItem("staff_id"),
+      customer_name: document.getElementById("svc-name").value.trim(),
+      phone:         document.getElementById("svc-phone").value.trim(),
+      payment_mode:  document.getElementById("svc-mode").value,
+    };
+    if (paid > 0) body.amount_partial = paid;
+
+    const r    = await fetch(`${STORE_PC_URL}/new-service`, {
+      method: "POST", headers: storeHeaders(), body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      if (data.status === "Draft") {
+        alert(`${data.job_id} booked, but held as Draft — Rs.${Math.ceil(data.deposit_required)} `
+            + `deposit is due before the work starts.`);
+      }
+      closeServiceModal();
+      loadAll();
+    } else {
+      alert("Failed: " + (data.error || "Unknown error"));
+      btn.disabled = false; btn.textContent = "Book Service";
+    }
+  } catch (e) {
+    alert("Cannot reach print server:\n" + e.message);
+    btn.disabled = false; btn.textContent = "Book Service";
+  }
+}
+
+// ── Service Panel — what a service job shows instead of the print panel ───────
+//
+// Deliberately a separate panel rather than a print panel with parts hidden:
+// there is no file, no print item, no colour detection and no scaling here, and
+// a panel that pretends otherwise is a panel someone will eventually print from.
+
+function isServiceJob(job) {
+  return !!(job && job.service_kind);
+}
+
+function servicePanelHTML(j) {
+  const meta  = _serviceMetaOf(j);
+  const label = (SERVICE_LABELS[j.service_kind] || j.service_kind || "Service");
+  const cells = Object.entries(meta).map(([k, v]) =>
+    `<div class="svc-panel-cell"><span class="k">${esc(_svcPretty(k))}</span>`
+    + `<span class="v">${esc(_svcValue(v))}</span></div>`).join("");
+  return `<div id="job-panel">
+    <div class="jp-hdr">
+      <span class="jp-id"   id="jp-id">${esc(j.job_id)}</span>
+      <span class="jp-meta" id="jp-file">${esc(label)}</span>
+      <span class="jp-meta">no printing</span>
+      <span class="jp-meta" id="jp-source">${esc(j.source || "—")}</span>
+      <span id="jp-status">${badge(j.status || "—")}</span>
+      <button class="jp-close-btn" onclick="closeJobPanel()">✕ Close</button>
+    </div>
+    <div class="svc-panel-body">
+      <div class="svc-noprint">
+        ${esc(label)} — post-press work on the customer's own paper.
+        This job has no file and never reaches a printer.
+      </div>
+      <div class="svc-panel-grid">
+        <div class="svc-panel-cell"><span class="k">Service</span><span class="v">${esc(label)}</span></div>
+        ${cells}
+        <div class="svc-panel-cell"><span class="k">Quoted</span>
+          <span class="v">Rs.${Math.ceil(j.amount_quoted || 0)}</span></div>
+        <div class="svc-panel-cell"><span class="k">Collected</span>
+          <span class="v">${j.amount_collected != null ? "Rs." + Math.ceil(j.amount_collected) : "—"}</span></div>
+      </div>
+      <div class="jp-action-bar">
+        <button class="jp-btn notify"  id="jp-btn-notify"  onclick="markReady()">Notify Customer Ready →</button>
+        <button class="jp-btn collect" id="jp-btn-collect" onclick="openPaymentModal()">Collect Payment</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+const SERVICE_LABELS = {
+  copy: "Photocopy", scan: "Scanning", laminate: "Lamination", foil: "Foiling",
+  bind: "Binding only", cut: "Cutting / trimming", punch: "Punching",
+  photo: "Photo prints", dtp: "DTP / typing", other: "Other",
+};
+
+function _serviceMetaOf(j) {
+  const raw = j.service_meta;
+  if (!raw) return {};
+  if (typeof raw === "object") return raw;
+  try { return JSON.parse(raw) || {}; } catch (e) { return {}; }
+}
+
+function _svcPretty(key) {
+  return key.replace(/_/g, " ").replace(/^./, c => c.toUpperCase());
+}
+
+function _svcValue(v) {
+  if (v === true)  return "yes";
+  if (v === false) return "no";
+  return String(v);
 }
 
 // ── Photocopy Modal ───────────────────────────────────────────────────────────

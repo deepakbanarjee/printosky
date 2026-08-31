@@ -422,7 +422,13 @@ pattern, plus `install/bootstrap_db.py` DDL and `docs/SCHEMA.md` rows.
 > log line; it does not raise, because the statement that actually needs the
 > column will, with a better message.
 >
-> Two things make the SQLite half safe to ship before the Supabase half is run:
+> **Applied to Supabase 2026-08-31** and verified from the database itself: all
+> eight columns present, every one nullable with no default, `service_meta` as
+> `jsonb`, `item_received_at` as `timestamptz`, and `jobs_service_kind_idx` in
+> place. `supabase_sync.collect_jobs()` began pushing `service_kind` /
+> `service_meta` with B-4, once there was somewhere for them to land.
+>
+> Two things made the SQLite half safe to ship before the Supabase half was run:
 > nothing reads these columns yet, and `supabase_sync.collect_jobs()` names its
 > columns explicitly — so a migrated store PC physically cannot push
 > `service_kind` to a cloud that has not got it. `tests/test_service_job_columns.py`
@@ -722,7 +728,7 @@ by ₹180, never under.
 | B-1 | `rate_card` Section 11 + tests. Nothing calls it | none |
 | B-2 ✅ | Migrations (cloud + SQLite + `docs/SCHEMA.md`) — built 2026-08-31, cloud SQL not yet run | none — additive |
 | B-3 ✅ | `/service-quote` + `/new-service` + `create_job` guard + isolation tests — built 2026-08-31 | low |
-| B-4 | jobs.html console UI (modal, kind pills, service panel) | low |
+| B-4 ✅ | jobs.html console UI (modal, kind pills, service panel) — built 2026-08-31 | low |
 | B-5 | admin.html mirror + MIS `service_kind` filters | low |
 | B-6 | Photocopy button quotes from the rate card (B6) | low — one live button |
 | B-7 | Per-store capabilities + `is_outsourced()` | low |
