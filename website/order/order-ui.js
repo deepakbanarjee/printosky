@@ -845,6 +845,11 @@ function snapshotSpec() {
     colourMode: state.colourMode, nup: state.nup, copies: state.copies, paperSize: state.paperSize,
     sides: state.sides, orientation: state.orientation, direction: state.direction,
     binding: state.binding, amountEstimated: state.amountEstimated, priceExact: state.priceExact,
+    // Carried like every other print option: buildPrintSpec() reads a snapshot
+    // for batched files, so leaving this out would drop the customer's Actual
+    // size choice on every file but the last one — silently, since the summary
+    // tag reads live state.
+    scale: state.scale,
   };
 }
 
