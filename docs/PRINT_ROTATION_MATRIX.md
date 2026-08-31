@@ -16,6 +16,40 @@
 
 _Generated from the code. Regenerate with `python tools/nup_matrix.py --markdown`._
 
+> **⏳ NOT YET ON PAPER — page scaling (Fit / Actual size / Custom %), 2026-08-30.**
+> Scaling ships baked into the PDF (`pdf_scaler.apply_scale`), exactly like
+> imposition, and the code is covered by tests — but **no scaled sheet has been
+> printed yet**. Before the control is used in anger at the counter, run on the
+> OSP Konica and record the result here:
+>
+> | # | Combination | Expect |
+> |---|---|---|
+> | 1 | A4 doc, 1-up portrait, **Fit** | fills the page, ~20pt border, nothing cut |
+> | 2 | A4 doc, 1-up portrait, **Actual** | no-op — identical to a normal print |
+> | 3 | **A5** doc on A4, **Actual** | A5-sized block centred on the A4 sheet |
+> | 4 | **A5** doc on A4, **Fit** | enlarged to fill the A4 — visibly bigger than #3 |
+> | 5 | A4 doc, **Custom 75 %** | three-quarter-size, centred, nothing cut |
+> | 6 | A4 doc, **Custom 150 %** | enlarged, edges cropped evenly on all four sides |
+> | 7 | A4 doc, 1-up **landscape**, **Actual** | true size, rotated per the matrix below |
+> | 8 | Any of the above, **duplex** | backs register with fronts, per the matrix below |
+>
+> Checks 3 and 4 are the ones that matter most: they are the only pair where
+> Fit and Actual differ visibly, and they are what the customer preview promises.
+> Check 8 is the one that could disturb what is already verified — if a scaled
+> duplex job misregisters, the scaling is at fault, not the rotation model.
+>
+> **Run it with one command**, on the store PC, against the deployed code:
+>
+> ```
+> python tools/scale_proof.py notes.pdf            # writes the 8 PDFs, prints nothing
+> python tools/scale_proof.py notes.pdf --send --printer konica
+> python tools/scale_proof.py notes.pdf --only S3 S4 --send     # just the pair that decides it
+> ```
+>
+> The tool derives its own A5 source with plain PyMuPDF rather than with
+> `pdf_scaler` — deriving it with the code under test would prove nothing about
+> the code under test.
+
 Every rotation the imposer can apply, for every combination of layout,
 orientation choice and fill direction. The numbers here come out of
 `nup_imposer.impose_plan` — the same function `perform_nup` draws from — so this

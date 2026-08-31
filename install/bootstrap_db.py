@@ -145,6 +145,9 @@ def bootstrap(db_path: str) -> int:
                 status          TEXT DEFAULT 'Pending',
                 printed_at      TEXT,
                 printed_by      TEXT,
+                -- Fit / Actual size / Custom %. NULL on both = no scaling.
+                scale_mode      TEXT,
+                scale_percent   INTEGER,
                 UNIQUE(job_id, item_number)
             );
         """)

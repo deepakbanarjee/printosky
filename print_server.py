@@ -21,6 +21,7 @@ import hmac
 import json
 import logging
 import math
+import collections
 import os
 import socket
 import sqlite3
@@ -371,6 +372,9 @@ def check_printer_reachable(ip: str | None, timeout=2) -> bool:
     except Exception:
         return False
 
+import fitz  # PyMuPDF — page rendering for /scale-preview
+import pdf_scaler
+
 from ops_watchdog import report as _report_health
 
 _PRINTERS_CFG = get_store_config().printers
@@ -662,7 +666,8 @@ def _konica_queue_for_sides(sides: str | None) -> str | None:
 def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 1,
                     colour_mode: str = "auto", staff_id: str = None,
                     sides: str = None, paper_size: str = None,
-                    orientation: str = None, update_status: bool = True):
+                    orientation: str = None, update_status: bool = True,
+                    scale_applied: bool = False):
     """
     Execute print command via SumatraPDF (silent, no UI).
     Returns (success: bool, message: str)
@@ -671,6 +676,10 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
                       None -> leave to the queue default.
     ``paper_size``  : e.g. 'A4'/'A3'/'Legal'; None -> queue default.
     ``orientation`` : 'portrait'/'landscape'; 'auto'/None -> per-page (queue default).
+    ``scale_applied``: the file already carries its final geometry (print_planner
+                      baked Fit/Actual/Custom into it), so tell SumatraPDF not to
+                      scale it again. Default False emits nothing, which is what
+                      every job did before scaling existed.
     """
     # No-Konica stores: redirect a 'konica' dispatch to the Epson (shared helper).
     printer_key = _effective_printer_key(printer_key, job_id)
@@ -745,6 +754,13 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
     o = (orientation or "").strip().lower()
     if o in ("portrait", "landscape"):
         settings_parts.append(o)
+
+    # The page geometry is already baked into the file, so stop the driver
+    # having a second opinion about it. A guard, not the mechanism: if a driver
+    # ignores this the sheet is still right, because the correctness is in the
+    # PDF. Never emitted for a job that did not ask for scaling.
+    if scale_applied:
+        settings_parts.append("noscale")
 
     settings = ",".join(settings_parts)
 
@@ -985,6 +1001,151 @@ def _job_quote(print_items: list, finishing: str, is_student: bool,
     )
 
 
+# Rendered previews, keyed by everything that can change one. Bounded: a
+# counter flicking through a 200-page job must not grow this without limit.
+_PREVIEW_CACHE: "collections.OrderedDict[tuple, bytes]" = collections.OrderedDict()
+_PREVIEW_CACHE_MAX = 24
+_PREVIEW_DPI = 96
+
+
+def handle_scale_preview(qs: dict) -> tuple[bytes | None, dict]:
+    """GET /scale-preview?job_id=&page=1&mode=fit&percent=&paper_size=A4
+
+    Returns (png_bytes, meta) or (None, {"error": ..., "status": ...}).
+
+    The PNG is a render of the **baked** page — the same pdf_scaler.apply_scale()
+    output the printer would receive — not a drawing of where the page ought to
+    go. What the operator sees is the artifact.
+
+    `meta` carries what a picture cannot: total pages, whether this page crops,
+    and how many pages crop overall. They travel as X- headers so the panel can
+    fetch the blob and read them in one request.
+    """
+    job_id = (qs.get("job_id", [""])[0] or "").strip()
+    if not job_id:
+        return None, {"status": 400, "error": "job_id required"}
+
+    mode = (qs.get("mode", [""])[0] or "").strip().lower()
+    if mode not in pdf_scaler.MODES:
+        return None, {"status": 400,
+                      "error": f"mode must be one of {', '.join(pdf_scaler.MODES)}"}
+
+    percent = pdf_scaler.clamp_percent(qs.get("percent", [None])[0]) if mode == "custom" else None
+    if mode == "custom" and percent is None:
+        return None, {"status": 400, "error": "custom needs a numeric percent"}
+
+    paper_size = (qs.get("paper_size", ["A4"])[0] or "A4").strip()
+    try:
+        page_no = max(1, int(qs.get("page", ["1"])[0]))
+    except (TypeError, ValueError):
+        page_no = 1
+
+    fp = _resolve_job_file(job_id)
+    if not fp:
+        return None, {"status": 404, "error": "File not found on disk"}
+    if os.path.splitext(fp)[1].lower() != ".pdf":
+        # Only PDFs have page geometry to preview. The panel keeps its ordinary
+        # file view for anything else rather than showing a wrong picture.
+        return None, {"status": 415, "error": "preview is available for PDFs only"}
+
+    try:
+        key = (fp, os.path.getmtime(fp), page_no, mode, percent, paper_size)
+    except OSError as exc:
+        return None, {"status": 404, "error": f"file unreadable: {exc}"}
+
+    try:
+        with open(fp, "rb") as fh:
+            raw = fh.read()
+
+        sizes = pdf_scaler.page_sizes(raw)
+        total = len(sizes)
+        if total == 0:
+            return None, {"status": 422, "error": "PDF has no pages"}
+        page_no = min(page_no, total)
+        key = key[:2] + (page_no,) + key[3:]
+
+        w, h = sizes[page_no - 1]
+        rect = pdf_scaler.scale_rect(w, h, paper_size, mode, percent)
+        meta = {
+            "total_pages": total,
+            "page": page_no,
+            "crops": bool(rect and rect["crops"]),
+            "cropped_pages": pdf_scaler.count_cropped_pages(raw, mode, percent, paper_size),
+            "scaled": rect is not None,
+        }
+
+        cached = _PREVIEW_CACHE.get(key)
+        if cached is not None:
+            _PREVIEW_CACHE.move_to_end(key)
+            return cached, meta
+
+        baked = pdf_scaler.apply_scale(raw, mode, percent, paper_size)
+        source = baked if baked else raw          # a no-op previews as-is
+        doc = fitz.open("pdf", source)
+        try:
+            png = doc[page_no - 1].get_pixmap(dpi=_PREVIEW_DPI).tobytes("png")
+        finally:
+            doc.close()
+
+        _PREVIEW_CACHE[key] = png
+        while len(_PREVIEW_CACHE) > _PREVIEW_CACHE_MAX:
+            _PREVIEW_CACHE.popitem(last=False)
+        return png, meta
+
+    except Exception as exc:
+        # An operator who cannot see the preview must be told, not shown a
+        # stale or invented one — the panel disables the control on this.
+        logging.warning("scale preview failed for %s: %s", job_id, exc)
+        return None, {"status": 500, "error": f"preview failed: {exc}"}
+
+
+def _resolve_job_file(job_id: str) -> str:
+    """The file on disk for a job, or "" if it cannot be found.
+
+    A puller-downloaded cloud job (multi-store) may have NO local jobs row and
+    lives in Jobs\\Assigned named <job_id>*, so a row is not required and the
+    job directories are searched too. Shared by /file and /scale-preview so the
+    preview can never render a different file than the panel shows.
+    """
+    _JOB_DIRS = (r"C:\Printosky\Jobs\Assigned",
+                 r"C:\Printosky\Jobs\Archive",
+                 r"C:\Printosky\Jobs\Incoming")
+    fp = ""
+    try:
+        conn = _db()
+        job = conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        conn.close()
+    except Exception:
+        job = None
+
+    if job:
+        keys = job.keys()
+        fp = (job["filepath"] if "filepath" in keys else "") or ""
+        if not fp:
+            fp = (job["file_path"] if "file_path" in keys else "") or ""
+        fname = job["filename"] if "filename" in keys else ""
+        if (not fp or not os.path.exists(fp)) and fname:
+            for base in _JOB_DIRS:
+                cand = os.path.join(base, fname)
+                if os.path.exists(cand):
+                    fp = cand
+                    break
+
+    # Fallback: match by job_id prefix in the job dirs (covers pulled jobs with
+    # no local row). job_id is sanitised to prevent traversal.
+    if not fp or not os.path.exists(fp):
+        import glob as _glob, re as _re
+        safe_id = _re.sub(r"[^A-Za-z0-9_-]", "", job_id or "")
+        if safe_id:
+            for base in _JOB_DIRS:
+                matches = _glob.glob(os.path.join(base, safe_id + "*"))
+                if matches:
+                    fp = matches[0]
+                    break
+
+    return fp if fp and os.path.exists(fp) else ""
+
+
 def _build_page_range_arg(page_list: str, total_pages: int) -> str:
     """
     Convert page_list string to SumatraPDF -print-settings range format.
@@ -1007,6 +1168,28 @@ def update_job_quote(job_id: str, amount: float):
         logging.error("update_job_quote failed: %s", e)
 
 
+def _ensure_print_item_scale_columns(conn) -> None:
+    """Add print_items.scale_mode / scale_percent if this DB predates them.
+
+    Store PCs update by pulling code and restarting the watcher — nothing runs
+    fix_db.py for them (see docs/AUTO_UPDATE.md). So a box can be running this
+    file against a database written before 2026-08-30, and an INSERT naming
+    columns it does not have would break spec-saving at the counter. Cheap
+    PRAGMA, idempotent, and it keeps fix_db.py as the tidy-up rather than the
+    prerequisite.
+    """
+    try:
+        have = {row[1] for row in conn.execute("PRAGMA table_info(print_items)")}
+        for col, defn in (("scale_mode", "TEXT"), ("scale_percent", "INTEGER")):
+            if col not in have:
+                conn.execute(f"ALTER TABLE print_items ADD COLUMN {col} {defn}")
+                logging.info("print_items: added missing column %s", col)
+    except Exception as exc:
+        # Not fatal on its own — the INSERT below is what actually needs them,
+        # and it will surface a clear error if this could not run.
+        logging.warning("could not ensure print_items scale columns: %s", exc)
+
+
 # ── A1: Update job specs ───────────────────────────────────────────────────────
 
 def handle_update_job(body: dict) -> dict:
@@ -1026,6 +1209,7 @@ def handle_update_job(body: dict) -> dict:
         return {"ok": False, "error": "job_id required"}
 
     conn = _db()
+    _ensure_print_item_scale_columns(conn)
 
     # Upsert print_items — delete old, insert new
     conn.execute("DELETE FROM print_items WHERE job_id=?", (job_id,))
@@ -1042,13 +1226,28 @@ def handle_update_job(body: dict) -> dict:
         paper_gsm   = int(item.get("paper_gsm", 70))
         printer     = item.get("printer") or ("epson" if colour == "col" else "konica")
 
+        # Scaling. Absent/blank stays NULL, which is "no scaling" — so a panel
+        # that never sends these fields behaves exactly as it did before.
+        scale_mode = (item.get("scale_mode") or "").strip().lower() or None
+        if scale_mode not in (None, "fit", "actual", "custom"):
+            scale_mode = None
+        scale_percent = None
+        if scale_mode == "custom":
+            try:
+                from pdf_scaler import clamp_percent
+                scale_percent = clamp_percent(item.get("scale_percent"))
+            except Exception:
+                scale_percent = None
+            if scale_percent is None:
+                scale_mode = None      # a custom with no usable percent is no scale
+
         conn.execute("""
             INSERT INTO print_items
               (job_id, item_number, page_list, paper_type, colour, sides, layout,
-               copies, paper_gsm, printer, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,'Pending')
+               copies, paper_gsm, printer, status, scale_mode, scale_percent)
+            VALUES (?,?,?,?,?,?,?,?,?,?,'Pending',?,?)
         """, (job_id, item_number, page_list, paper_type, colour, sides, layout,
-              copies, paper_gsm, printer))
+              copies, paper_gsm, printer, scale_mode, scale_percent))
 
         # For quote calculation, approximate pages from page_list
         # If page_list = 'all', fetch page_count from jobs table
@@ -2037,6 +2236,10 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
     sides     = item["sides"] or "ss"       # 'ss' | 'ds'
     layout    = item["layout"] or "1-up"
     page_list = item["page_list"] or "all"
+    # Scaling. Guarded: rows written before 2026-08-30 have no such columns.
+    keys       = item.keys()
+    scale_mode = (item["scale_mode"] if "scale_mode" in keys else None) or None
+    scale_pct  = item["scale_percent"] if "scale_percent" in keys else None
 
     # Konica's driver won't honour a per-job duplex/simplex override — route to
     # a sides-specific queue if the store has one configured (see
@@ -2082,10 +2285,39 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
     if page_range:
         settings_parts.append(page_range)
 
+    # ── Scaling: baked into a temp PDF, never asked of the driver ────────────
+    # Same rule as the auto-print path (print_planner): the geometry goes in
+    # the file, and `noscale` rides along only as a guard. A row with no
+    # scale_mode skips all of this and prints the original file, as always.
+    print_path = filepath
+    scaled_tmp = None
+    if scale_mode:
+        try:
+            import pdf_scaler
+            with open(filepath, "rb") as fh:
+                scaled = pdf_scaler.apply_scale(
+                    fh.read(), scale_mode, scale_pct, job_size or "A4")
+            if scaled:
+                import tempfile
+                fd, scaled_tmp = tempfile.mkstemp(prefix=f"{job_id}_scaled_", suffix=".pdf")
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(scaled)
+                print_path = scaled_tmp
+                settings_parts.append("noscale")
+                logging.info("print %s item %s: baked scale=%s%s", job_id, item_number,
+                             scale_mode, f" {scale_pct}%" if scale_pct else "")
+        except Exception as exc:
+            # Print unscaled rather than not print — but never silently.
+            _report_health(
+                "print_server.item_scale_failed", False,
+                f"job {job_id} item {item_number}: could not apply scale="
+                f"{scale_mode!r} ({type(exc).__name__}: {exc}) — printed unscaled.",
+            )
+
     settings_str = ",".join(settings_parts)
 
-    file_dir2  = os.path.dirname(os.path.abspath(filepath))
-    file_name2 = os.path.basename(filepath)
+    file_dir2  = os.path.dirname(os.path.abspath(print_path))
+    file_name2 = os.path.basename(print_path)
     cmd = [
         sumatra,
         "-print-to", printer_name,
@@ -2108,6 +2340,12 @@ def handle_print_item(job_id: str, item_number: int, staff_id: str = None,
         return {"ok": False, "error": "Print command timed out after 90s"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+    finally:
+        if scaled_tmp:
+            try:
+                os.remove(scaled_tmp)
+            except OSError as exc:
+                logging.warning("could not remove scaled temp %s: %s", scaled_tmp, exc)
 
     # ── Epson per-job accounting hook ─────────────────────────────────────────
     # On successful Epson dispatch, write a source='spec' row to epson_jobs so
@@ -2465,41 +2703,8 @@ class PrintHandler(BaseHTTPRequestHandler):
             if not job_id:
                 self._json(400, {"error": "job_id required"})
                 return
-            conn = _db()
-            job  = conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
-            conn.close()
-            # Resolve the file. A puller-downloaded cloud job (multi-store) may
-            # have NO local jobs row and lives in Jobs\Assigned named <job_id>*,
-            # so we do not hard-require a row and we search Assigned/Incoming too.
-            _JOB_DIRS = (r"C:\Printosky\Jobs\Assigned",
-                         r"C:\Printosky\Jobs\Archive",
-                         r"C:\Printosky\Jobs\Incoming")
-            fp = ""
-            if job:
-                try:    fp = job["filepath"] or ""
-                except Exception: pass
-                if not fp:
-                    try: fp = job["file_path"] or ""
-                    except Exception: pass
-                fname = job["filename"] if "filename" in job.keys() else ""
-                if (not fp or not os.path.exists(fp)) and fname:
-                    for base in _JOB_DIRS:
-                        cand = os.path.join(base, fname)
-                        if os.path.exists(cand):
-                            fp = cand
-                            break
-            # Fallback: match by job_id prefix in the job dirs (covers pulled
-            # jobs with no local row). job_id is sanitised to prevent traversal.
-            if not fp or not os.path.exists(fp):
-                import glob as _glob, re as _re
-                safe_id = _re.sub(r"[^A-Za-z0-9_-]", "", job_id)
-                if safe_id:
-                    for base in _JOB_DIRS:
-                        matches = _glob.glob(os.path.join(base, safe_id + "*"))
-                        if matches:
-                            fp = matches[0]
-                            break
-            if not fp or not os.path.exists(fp):
+            fp = _resolve_job_file(job_id)
+            if not fp:
                 self._json(404, {"error": "File not found on disk"})
                 return
             # Serve the file
@@ -2523,6 +2728,29 @@ class PrintHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(data)
+        elif path == "/scale-preview":
+            png, meta = handle_scale_preview(qs)
+            if png is None:
+                # Say so plainly. The panel shows the error and disables the
+                # scale control rather than leaving a stale image on screen.
+                self._json(meta.get("status", 500), {"error": meta.get("error")})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(png)))
+            # Metadata a picture cannot carry, so the panel gets it in the same
+            # request: page count for the switcher, crop counts for the warning.
+            self.send_header("X-Total-Pages", str(meta["total_pages"]))
+            self.send_header("X-Page", str(meta["page"]))
+            self.send_header("X-Crops", "1" if meta["crops"] else "0")
+            self.send_header("X-Cropped-Pages", str(meta["cropped_pages"]))
+            self.send_header("X-Scaled", "1" if meta["scaled"] else "0")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Expose-Headers",
+                             "X-Total-Pages, X-Page, X-Crops, X-Cropped-Pages, X-Scaled")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(png)
         elif path == "/events":
             # Require store token — audit trail contains staff IDs and action history
             token = self.headers.get("X-Store-Token", "")

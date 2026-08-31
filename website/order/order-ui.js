@@ -39,6 +39,7 @@ const state = {
   paperSize: 'A4',
   sides: 'single',   // 'single' | 'duplex'
   orientation: 'auto', // 'auto' | 'portrait' | 'landscape'
+  scale: 'fit',      // 'fit' | 'actual' — Custom % is staff-only, never emitted here
   direction: 'horizontal', // 'horizontal' | 'vertical' (N-up page fill order)
   binding: 'none',   // 'none' | 'staple' | 'spiral' | 'wiro' | 'soft' | 'perfect' | 'project' | 'record' | 'thesis'
   amountEstimated: 0,
@@ -55,6 +56,7 @@ const runtime = {
   delivery: 0,
   pickup_store: 'thriprayar',  // which location fulfils — 'thriprayar' | 'nattika'
   lastTotal: null,      // last successful quote total (kept on network error)
+  firstPageSize: null,  // { w, h } in points — drives the scale preview
 };
 
 const EAGER_THUMBS = 12;
@@ -150,12 +152,22 @@ async function loadPdf(bytes) {
   const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
   runtime.pdf = pdf;
   state.priceExact = true;
+  // The scale preview needs the page's true size in points. Rotation-aware:
+  // scale 1 gives the size the page presents, which is the size that has to
+  // fit on the sheet.
+  try {
+    const vp = (await pdf.getPage(1)).getViewport({ scale: 1 });
+    runtime.firstPageSize = { w: vp.width, h: vp.height };
+  } catch { runtime.firstPageSize = null; }
   initPages(pdf.numPages);
   $('ov2-pagecount').textContent = pdf.numPages + (pdf.numPages === 1 ? ' page' : ' pages');
+  syncScaleCardVisibility();
+  renderScalePreview();
 }
 
 function loadImage() {
   state.priceExact = true;
+  runtime.firstPageSize = null;   // no page box to preview — caption only
   initPages(1);
   $('ov2-pagecount').textContent = '1 page';
 }
@@ -351,6 +363,8 @@ function setNup(n) {
     el.classList.toggle('active', parseInt(el.dataset.nup, 10) === n);
   });
   renderNupSheet();
+  syncScaleCardVisibility();
+  renderScalePreview();
   updateSummary();
   requestQuote();
 }
@@ -388,6 +402,90 @@ function renderNupSheet() {
   $('ov2-nupLabel').textContent = (n === 1 ? '1 / sheet' : n + ' / sheet') + (n > 1 ? dirSym : '');
   const dirRow = $('ov2-dir-row');
   if (dirRow) dirRow.style.display = n > 1 ? 'flex' : 'none';
+}
+
+// ── Page scaling (Fit / Actual size) ─────────────────────────────────────────
+// The customer sees where their page will land on the sheet. The geometry is
+// NOT worked out here: it comes from GET /order/scale-rect, which calls the
+// same pdf_scaler.scale_rect() the printer bakes with. A preview drawn by
+// different code than the printer gets is a preview that can lie, so there is
+// deliberately no JavaScript copy of it.
+let scaleRectSeq = 0;
+
+function setScale(mode) {
+  state.scale = mode;
+  document.querySelectorAll('[data-scale]').forEach((el) => {
+    el.classList.toggle('active', el.dataset.scale === mode);
+  });
+  renderScalePreview();
+  updateSummary();
+}
+
+// Scaling is 1-up only: N-up already IS a fit, so the card hides rather than
+// offering a choice that would be ignored (print_planner drops it and alerts).
+function syncScaleCardVisibility() {
+  const card = $('ov2-scale-card');
+  if (card) card.style.display = state.nup === 1 ? '' : 'none';
+}
+
+function firstPageSize() {
+  const page = runtime.firstPageSize;
+  return page && page.w > 0 && page.h > 0 ? page : null;
+}
+
+async function renderScalePreview() {
+  const sheet = $('ov2-scaleSheet');
+  const page = $('ov2-scalePage');
+  const cap = $('ov2-scaleCaption');
+  if (!sheet || !page || !cap) return;
+
+  const src = firstPageSize();
+  const seq = ++scaleRectSeq;
+
+  // Fit is the default and never crops; describe it without a round trip.
+  if (state.scale === 'fit' || !src) {
+    page.className = 'ov2-scale-page';
+    Object.assign(page.style, { left: '6%', top: '6%', width: '88%', height: '88%' });
+    cap.innerHTML = '<b>Fit to page:</b> your page is resized to fill the sheet.';
+    return;
+  }
+
+  try {
+    const p = new URLSearchParams({
+      page_w: src.w.toFixed(2), page_h: src.h.toFixed(2),
+      sheet: state.paperSize, mode: 'actual',
+    });
+    const r = await fetch(`${API}/order/scale-rect?${p}`);
+    if (!r.ok) throw new Error('scale-rect ' + r.status);
+    const { scale } = await r.json();
+    if (seq !== scaleRectSeq) return;            // a newer request won
+
+    if (!scale) {
+      // Already exactly the sheet size — nothing to show but the full page.
+      page.className = 'ov2-scale-page';
+      Object.assign(page.style, { left: '0%', top: '0%', width: '100%', height: '100%' });
+      cap.innerHTML = '<b>Actual size:</b> your page is already this size — nothing changes.';
+      return;
+    }
+    const pct = (v, total) => (v / total * 100).toFixed(2) + '%';
+    page.className = 'ov2-scale-page' + (scale.crops ? ' crops' : '');
+    Object.assign(page.style, {
+      left: pct(scale.x0, scale.sheet_w), top: pct(scale.y0, scale.sheet_h),
+      width: pct(scale.width, scale.sheet_w), height: pct(scale.height, scale.sheet_h),
+    });
+    cap.innerHTML = scale.crops
+      ? '<b>Actual size:</b> your page is bigger than the paper — '
+        + '<span class="ov2-scale-warn">the edges will be cut off.</span>'
+      : '<b>Actual size:</b> printed at its true size, centred on the sheet.';
+  } catch (e) {
+    if (seq !== scaleRectSeq) return;
+    // Never show an invented placement. Say the preview is unavailable and let
+    // the words carry the meaning instead.
+    page.className = 'ov2-scale-page';
+    Object.assign(page.style, { left: '6%', top: '6%', width: '88%', height: '88%' });
+    cap.innerHTML = '<b>Actual size:</b> printed at its true size, not resized. '
+                  + '<span style="color:#9aa1ab">(preview unavailable)</span>';
+  }
 }
 
 function setDirection(mode) {
@@ -491,6 +589,13 @@ function updateSummary() {
 
   $('ov2-s-paper').textContent = state.paperSize;
   $('ov2-s-sides').textContent = state.sides === 'single' ? 'Single-sided' : 'Duplex';
+
+  const scaleTag = $('ov2-s-scale');
+  if (scaleTag) {
+    if (state.scale === 'actual' && state.nup === 1) {
+      scaleTag.style.display = ''; scaleTag.textContent = 'Actual size'; flashTag(scaleTag);
+    } else { scaleTag.style.display = 'none'; }
+  }
 
   const orientTag = $('ov2-s-orient');
   if (orientTag) {
@@ -1277,9 +1382,13 @@ function wire() {
     el.addEventListener('click', () => setNup(parseInt(el.dataset.nup, 10))));
   document.querySelectorAll('[data-direction]').forEach((el) =>
     el.addEventListener('click', () => setDirection(el.dataset.direction)));
+  document.querySelectorAll('[data-scale]').forEach((el) =>
+    el.addEventListener('click', () => setScale(el.dataset.scale)));
   $('ov2-copiesMinus').addEventListener('click', () => changeCopies(-1));
   $('ov2-copiesPlus').addEventListener('click', () => changeCopies(1));
-  $('ov2-paper').addEventListener('change', (e) => { state.paperSize = e.target.value; updateSummary(); requestQuote(); });
+  $('ov2-paper').addEventListener('change', (e) => {
+    state.paperSize = e.target.value; renderScalePreview(); updateSummary(); requestQuote();
+  });
   document.querySelectorAll('[data-sides]').forEach((el) =>
     el.addEventListener('click', () => setSides(el.dataset.sides)));
   document.querySelectorAll('[data-orientation]').forEach((el) =>

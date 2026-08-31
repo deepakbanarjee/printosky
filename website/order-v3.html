@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- printosky-favicons -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+  <link rel="apple-touch-icon" href="/apple-touch-180.png">
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Place a Print Order (v3 — page scaling) | Printosky</title>
+<meta name="description" content="Upload your file, preview every page, pick colour/N-up/duplex/binding, see a live price, and order printing online — pickup from Thriprayar or Nattika.">
+<link rel="canonical" href="https://printosky.com/order-v2.html">
+<!-- v3 is the scaling trial. order-v2.html stays the live order page until
+     this has been tested and rewired; canonical deliberately points there so
+     the trial page is never indexed as the real one. -->
+<meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="styles.css">
+<script src="analytics.js" defer></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+<!-- pdf.js 3.11.174 (UMD) — sets window.pdfjsLib; classic worker renders
+     reliably cross-origin. NOTE: do NOT bump to 4.x — its pdf.min.js UMD build
+     is 404 on cdnjs and the .mjs module worker is unreliable cross-origin. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  if (window['pdfjsLib']) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+</script>
+<!-- pdf-lib — extract selected pages on submit -->
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<!-- JSZip — read DOCX docProps/app.xml for page estimate -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- Supabase JS — detect a logged-in account (Google / email session) so a
+     registered customer skips re-entering name + WhatsApp at Step 2. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<style>
+  /* ── Acrobat-style order page (scoped under .ov2) ── */
+  .ov2-page { max-width: 600px; margin: 0 auto; padding: 28px 12px 64px; }
+  .ov2-shell {
+    background: var(--white); border-radius: 16px; box-shadow: 0 8px 40px rgba(0,0,0,0.10);
+    overflow: hidden; border: 1px solid #eef0f4;
+  }
+  .ov2-topbar { background: var(--blue); padding: 14px 20px; display: flex; align-items: center; gap: 10px; }
+  .ov2-topbar-logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 18px; color: #fff; letter-spacing: -0.5px; }
+  .ov2-topbar-logo span { color: var(--orange, #e8500a); }
+  .ov2-topbar-sub { font-size: 12px; color: rgba(255,255,255,0.6); margin-left: auto; }
+
+  .ov2-steps { display: flex; gap: 0; padding: 14px 20px 0; }
+  .ov2-step-pill {
+    flex: 1; text-align: center; font-size: 11px; font-weight: 600; padding: 6px 4px;
+    color: #9ca3af; border-bottom: 2px solid #e5e7eb; transition: all 0.3s;
+  }
+  .ov2-step-pill.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+  .ov2-section-header { display: flex; align-items: center; gap: 8px; padding: 18px 20px 12px; }
+  .ov2-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: var(--orange, #e8500a); }
+  .ov2-section-line { flex: 1; height: 1px; background: #f0f0f0; }
+
+  /* Upload zone */
+  .ov2-drop {
+    margin: 6px 20px 4px; border: 2px dashed #c7d2e8; border-radius: 12px;
+    background: #f8f9ff; padding: 28px 18px; text-align: center; cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .ov2-drop:hover, .ov2-drop.dragover { border-color: var(--blue); background: #eef2fb; }
+  .ov2-drop .ov2-drop-icon { font-size: 34px; }
+  .ov2-drop .ov2-drop-title { font-weight: 700; color: var(--ink); margin-top: 8px; font-size: 15px; }
+  .ov2-drop .ov2-drop-sub { font-size: 12px; color: #6b7280; margin-top: 4px; }
+  .ov2-drop input[type=file] { display: none; }
+  .ov2-filechip {
+    margin: 8px 20px 0; display: none; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 10px 14px;
+    font-size: 13px; color: #065f46;
+  }
+  .ov2-filechip.show { display: flex; }
+  .ov2-filechip b { color: #064e3b; }
+  .ov2-filechip .ov2-change { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--blue); cursor: pointer; text-decoration: underline; }
+  #ov2-batchbar { margin-top: 8px; }
+  .ov2-addfile { width: 100%; border: 1px dashed var(--blue); background: #f4f7ff; color: var(--blue);
+    font-weight: 600; font-size: 13px; padding: 9px; border-radius: 8px; cursor: pointer; }
+  .ov2-addfile:hover { background: #eaf0ff; }
+  .ov2-batch { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .ov2-batch.show { display: flex; }
+  .ov2-batch-title { font-size: 12px; font-weight: 700; color: #374151; }
+  .ov2-batch-chip { display: flex; align-items: center; gap: 8px; background: #ecfdf5; border: 1px solid #a7f3d0;
+    border-radius: 6px; padding: 6px 10px; font-size: 12px; color: #064e3b; }
+  .ov2-batch-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ov2-batch-x { margin-left: auto; border: none; background: none; color: #6b7280; cursor: pointer; font-size: 13px; }
+  .ov2-amber {
+    margin: 8px 20px 0; display: none; font-size: 12px; line-height: 1.5;
+    background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; border-radius: 8px; padding: 8px 12px;
+  }
+  .ov2-amber.show { display: block; }
+  .ov2-manual { margin: 8px 20px 0; display: none; align-items: center; gap: 8px; font-size: 13px; color: var(--ink); }
+  .ov2-manual.show { display: flex; }
+  .ov2-manual input { width: 80px; padding: 6px 8px; border: 1.5px solid #e5e7eb; border-radius: 6px; font-size: 13px; }
+
+  /* Preview grid */
+  .ov2-preview-toolbar { display: flex; align-items: center; gap: 8px; padding: 0 20px 10px; flex-wrap: wrap; }
+  .ov2-preview-count { font-size: 12px; color: #6b7280; }
+  .ov2-preview-count b { color: var(--blue); }
+  .ov2-mini-btn { font-size: 11px; font-weight: 600; color: var(--blue); background: #eef2fb; border: 1px solid #d3ddf2; border-radius: 6px; padding: 4px 10px; cursor: pointer; transition: all 0.15s; }
+  .ov2-mini-btn:hover { background: #dde6f8; }
+
+  .ov2-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 0 20px; max-height: 360px; overflow-y: auto; }
+  @media (max-width: 380px) { .ov2-strip { grid-template-columns: repeat(3, 1fr); } }
+  .ov2-thumb {
+    position: relative; aspect-ratio: 3/4; border: 2px solid #d8dde6; border-radius: 5px;
+    background: #fff; cursor: pointer; overflow: hidden; transition: all 0.18s ease;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .ov2-thumb:hover { border-color: var(--blue); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(27,63,139,0.12); }
+  .ov2-thumb.included { border-color: var(--blue); }
+  .ov2-thumb canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .ov2-thumb .ov2-pg-num {
+    position: absolute; bottom: 0; left: 0; right: 0; font-size: 9px; font-weight: 700;
+    color: #6b7280; text-align: center; background: rgba(255,255,255,0.85); padding: 1px 0;
+  }
+  .ov2-thumb .ov2-skeleton {
+    position: absolute; inset: 0; background: linear-gradient(100deg, #f3f4f6 30%, #e9ebef 50%, #f3f4f6 70%);
+    background-size: 200% 100%; animation: ov2-shimmer 1.2s infinite;
+  }
+  .ov2-thumb.placeholder { background: #f8f9ff; color: #9ca3af; font-size: 22px; font-weight: 700; }
+  .ov2-thumb.excluded { opacity: 0.4; border-style: dashed; }
+  .ov2-thumb.excluded::after {
+    content: '✕ skip'; position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; font-size: 11px; font-weight: 700; color: #6b7280; background: rgba(243,244,246,0.55);
+  }
+  .ov2-thumb.colour-on canvas { filter: none; }
+  .ov2-thumb.bw-mono canvas { filter: grayscale(1); }
+  .ov2-colour-dot, .ov2-bw-dot {
+    position: absolute; top: 4px; right: 4px; width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2); display: none; z-index: 2;
+  }
+  .ov2-colour-dot { background: linear-gradient(135deg,#ef4444,#3b82f6,#22c55e); }
+  .ov2-bw-dot { background: #6b7280; }
+  .ov2-thumb.dot-colour .ov2-colour-dot { display: block; animation: ov2-popDot 0.25s ease; }
+  .ov2-thumb.dot-bw .ov2-bw-dot { display: block; }
+
+  .ov2-hint { margin: 10px 20px 0; font-size: 11px; color: #6b7280; background: #f8f9ff; border: 1px dashed #c7d2e8; border-radius: 8px; padding: 8px 12px; line-height: 1.5; }
+  .ov2-hint.mixed-on { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+
+  /* Controls */
+  .ov2-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 20px; }
+  .ov2-card { border: 1.5px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; transition: border-color 0.2s; }
+  .ov2-card:hover { border-color: #c7d2e8; }
+  .ov2-card.full { grid-column: 1 / -1; }
+  .ov2-card-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--orange, #e8500a); margin-bottom: 10px; }
+
+  .ov2-tog-group { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ov2-tog {
+    padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer;
+    border: 1.5px solid #e5e7eb; background: #fff; color: #4b5563; transition: all 0.18s ease;
+    display: flex; align-items: center; gap: 5px; user-select: none;
+  }
+  .ov2-tog:hover { border-color: var(--blue); color: var(--blue); }
+  .ov2-tog.active { background: var(--blue); border-color: var(--blue); color: #fff; transform: scale(1.03); box-shadow: 0 2px 8px rgba(27,63,139,0.25); }
+
+  .ov2-copies-row { display: flex; align-items: center; gap: 10px; }
+  .ov2-copies-btn { width: 32px; height: 32px; border-radius: 6px; border: 1.5px solid #e5e7eb; background: #fff; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; color: #374151; user-select: none; }
+  .ov2-copies-btn:hover { border-color: var(--blue); color: var(--blue); background: #f0f3ff; }
+  .ov2-copies-val { font-size: 22px; font-weight: 700; color: #111827; min-width: 34px; text-align: center; }
+  .ov2-copies-val.bump { animation: ov2-bump 0.2s ease; }
+
+  .ov2-select { width: 100%; padding: 8px 10px; border: 1.5px solid #e5e7eb; border-radius: 6px; font-size: 13px; color: #111827; background: #fff; cursor: pointer; outline: none; appearance: none; }
+
+  /* Page scaling — the sheet, with the page drawn where it will actually land.
+     The geometry comes from the printer's own code via /order/scale-rect; this
+     only draws it. */
+  .ov2-scale-stage { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
+  .ov2-scale-sheet { width: 58px; height: 82px; border: 2px solid var(--blue); border-radius: 4px;
+    background: #f8f9ff; position: relative; flex-shrink: 0; overflow: hidden; }
+  .ov2-scale-page { position: absolute; background: var(--blue); opacity: .85; border-radius: 1px;
+    transition: all .25s ease; }
+  .ov2-scale-page.crops { background: repeating-linear-gradient(45deg,
+    #e04b4b, #e04b4b 3px, #f08d8d 3px, #f08d8d 6px); }
+  .ov2-scale-caption { font-size: 11px; color: #6b7280; line-height: 1.5; }
+  .ov2-scale-caption b { color: #374151; }
+  .ov2-scale-note { font-size: 10.5px; color: #9aa1ab; margin-top: 8px; }
+  .ov2-scale-warn { color: #c0392b; font-weight: 600; }
+  .ov2-nup-row { display: flex; gap: 10px; align-items: flex-start; }
+  .ov2-nup-toggles { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+  .ov2-nup-sheet { width: 56px; height: 74px; border: 2px solid var(--blue); border-radius: 4px; background: #f8f9ff; padding: 4px; display: grid; gap: 3px; flex-shrink: 0; }
+  .ov2-nup-cell { background: var(--blue); border-radius: 1px; opacity: 0.85; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 7px; font-weight: 700; animation: ov2-popCell 0.25s ease; }
+  .ov2-nup-label { font-size: 10px; color: #6b7280; text-align: center; margin-top: 5px; }
+
+  .ov2-duplex-stage { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 10px; min-height: 70px; }
+  .ov2-flip-scene { perspective: 400px; width: 48px; height: 60px; }
+  .ov2-flip-card { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform 0.7s cubic-bezier(.4,.2,.2,1); }
+  .ov2-flip-card.flipped { transform: rotateY(180deg); }
+  .ov2-flip-face { position: absolute; inset: 0; backface-visibility: hidden; border-radius: 3px; border: 2px solid var(--blue); background: #eff3fb; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--blue); font-weight: 700; font-size: 9px; }
+  .ov2-flip-face .ov2-mini-lines { display: flex; flex-direction: column; gap: 2px; width: 60%; }
+  .ov2-flip-face .ov2-mini-lines i { height: 2px; background: #9db4dd; border-radius: 2px; display: block; }
+  .ov2-flip-face.back { transform: rotateY(180deg); border-color: var(--orange, #e8500a); background: #fff5f0; color: var(--orange, #e8500a); }
+  .ov2-flip-face.back .ov2-mini-lines i { background: #f0b896; }
+  .ov2-duplex-caption { font-size: 11px; color: #6b7280; line-height: 1.5; max-width: 200px; }
+  .ov2-duplex-caption b { color: var(--blue); }
+
+  .ov2-summary { margin: 18px 20px 0; background: #f8f9ff; border: 1.5px solid #c7d2e8; border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ov2-summary-label { font-size: 12px; color: #6b7280; }
+  .ov2-tag { background: #e8edf8; color: var(--blue); font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; }
+  .ov2-tag.flash { animation: ov2-fadeTag 0.25s ease; }
+  .ov2-tag.sheets { background: var(--blue); color: #fff; }
+  .ov2-tag.price { background: var(--orange, #e8500a); color: #fff; }
+
+  .ov2-nav { padding: 16px 20px 24px; display: flex; gap: 10px; }
+  .ov2-btn { flex: 1; padding: 15px; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: background 0.2s, transform 0.1s; }
+  .ov2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .ov2-btn-primary { background: var(--blue); color: #fff; }
+  .ov2-btn-primary:hover:not(:disabled) { background: #163372; }
+  .ov2-btn-ghost { background: #fff; color: var(--blue); border: 1.5px solid #d3ddf2; flex: 0 0 auto; padding: 15px 18px; }
+  .ov2-btn-ghost:hover { background: #f0f3ff; }
+  .ov2-price-badge { background: rgba(255,255,255,0.2); padding: 2px 10px; border-radius: 20px; font-size: 13px; font-weight: 600; }
+
+  /* Step 2 */
+  .ov2-recap { margin: 6px 20px 0; background: #ecfdf5; border: 1.5px solid #a7f3d0; border-radius: 10px; padding: 12px 16px; }
+  .ov2-recap-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #047857; margin-bottom: 8px; }
+  .ov2-recap-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ov2-recap-pill { background: #fff; border: 1px solid #a7f3d0; color: #065f46; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; }
+  .ov2-identity { margin: 6px 20px 0; background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 10px; padding: 10px 14px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #1e3a8a; flex-wrap: wrap; }
+  .ov2-identity-tick { width: 18px; height: 18px; border-radius: 50%; background: #2563eb; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+  .ov2-identity-logout { margin-left: auto; background: none; border: none; color: #2563eb; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0; }
+
+  .ov2-fields { padding: 6px 20px 0; display: flex; flex-direction: column; gap: 14px; }
+  .ov2-field label { display: block; font-size: 12px; font-weight: 600; color: var(--ink); margin-bottom: 5px; }
+  .ov2-field label .ov2-req { color: var(--orange, #e8500a); }
+  .ov2-field input, .ov2-field textarea, .ov2-field select {
+    width: 100%; padding: 10px 12px; border: 1.5px solid #e5e7eb; border-radius: 8px;
+    font-size: 14px; color: var(--ink); font-family: inherit; outline: none; transition: border-color 0.15s;
+  }
+  .ov2-field input:focus, .ov2-field textarea:focus { border-color: var(--blue); }
+  .ov2-field textarea { resize: vertical; min-height: 64px; }
+  .ov2-addr { display: none; }
+  .ov2-addr.show { display: block; }
+
+  .ov2-error { margin: 12px 20px 0; display: none; background: #fef2f2; border: 1.5px solid #fecaca; color: #991b1b; border-radius: 8px; padding: 10px 14px; font-size: 13px; line-height: 1.5; }
+  .ov2-error.show { display: block; }
+  .ov2-error a { color: #991b1b; font-weight: 700; }
+
+  /* Success */
+  .ov2-success { display: none; padding: 36px 24px 40px; text-align: center; }
+  .ov2-success.show { display: block; }
+  .ov2-success .ov2-check { font-size: 52px; }
+  .ov2-success h2 { font-family: 'Syne', sans-serif; font-size: 24px; color: var(--ink); margin: 10px 0 6px; }
+  .ov2-success .ov2-job { font-size: 14px; color: #6b7280; margin-bottom: 4px; }
+  .ov2-success .ov2-job b { color: var(--blue); font-size: 18px; }
+  .ov2-success .ov2-wa-link {
+    display: inline-flex; align-items: center; gap: 8px; margin-top: 20px; background: #25d366;
+    color: #fff; font-weight: 700; padding: 13px 24px; border-radius: 10px; text-decoration: none; font-size: 15px;
+  }
+
+  .ov2-busy { display: none; align-items: center; gap: 10px; justify-content: center; padding: 12px 20px; font-size: 13px; color: var(--blue); }
+  .ov2-busy.show { display: flex; }
+  .ov2-spinner { width: 18px; height: 18px; border: 3px solid #d3ddf2; border-top-color: var(--blue); border-radius: 50%; animation: ov2-spin 0.8s linear infinite; }
+
+  .ov2-hidden { display: none !important; }
+
+  @keyframes ov2-bump { 0% { transform: scale(1); } 40% { transform: scale(1.3); color: var(--orange, #e8500a); } 100% { transform: scale(1); color: #111827; } }
+  @keyframes ov2-fadeTag { from { opacity: 0.3; transform: scale(0.85); } to { opacity: 1; transform: scale(1); } }
+  @keyframes ov2-popCell { from { opacity: 0; transform: scale(0.4); } to { opacity: 0.85; transform: scale(1); } }
+  @keyframes ov2-popDot { from { opacity: 0; transform: scale(0.3); } to { opacity: 1; transform: scale(1); } }
+  @keyframes ov2-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  @keyframes ov2-spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="logo"><img src="assets/printosky-wordmark.svg" alt="Printosky" style="height:28px;width:auto;display:inline-block;vertical-align:middle"></a>
+  <ul class="nav-links">
+    <li><a href="services.html">Services</a></li>
+    <li><a href="about.html">About</a></li>
+    <li><a href="contact.html">Contact</a></li>
+    <li><a href="account.html">Account</a></li>
+    <li><a href="order-v2.html" class="nav-cta active">Place Order →</a></li>
+  </ul>
+  <button class="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></button>
+</nav>
+<div class="mobile-menu" id="mobileMenu">
+  <a href="services.html">Services</a>
+  <a href="about.html">About</a>
+  <a href="contact.html">Contact</a>
+  <a href="account.html">Account</a>
+  <a href="order-v2.html">Place Order</a>
+</div>
+
+<div class="ov2-page">
+  <div class="ov2-shell">
+    <div class="ov2-topbar">
+      <div class="ov2-topbar-logo"><img src="assets/printosky-wordmark-reverse.svg" alt="Printosky" style="height:24px;width:auto;display:inline-block;vertical-align:middle"></div>
+      <div class="ov2-topbar-sub">Place your print order</div>
+    </div>
+    <div class="ov2-steps">
+      <div class="ov2-step-pill active" id="ov2-step1pill">1 · File &amp; Print Settings</div>
+      <div class="ov2-step-pill" id="ov2-step2pill">2 · Your Details</div>
+    </div>
+
+    <!-- ════════ STEP 1 ════════ -->
+    <div id="ov2-step1">
+      <!-- Upload -->
+      <div class="ov2-section-header"><div class="ov2-section-title">📄 Your file</div><div class="ov2-section-line"></div></div>
+      <label class="ov2-drop" id="ov2-drop">
+        <div class="ov2-drop-icon">⬆️</div>
+        <div class="ov2-drop-title">Tap to upload your file</div>
+        <div class="ov2-drop-sub">PDF, JPG, PNG or DOCX · PDF gives exact pricing</div>
+        <input type="file" id="ov2-file" accept=".pdf,.jpg,.jpeg,.png,.docx" />
+      </label>
+      <div class="ov2-filechip" id="ov2-filechip">
+        <span>✓ <b id="ov2-filename">file.pdf</b></span>
+        <span id="ov2-pagecount">— pages</span>
+        <span class="ov2-change" id="ov2-change">change</span>
+      </div>
+      <!-- Staff multi-file batch (revealed in ?staff=1 mode once a file loads) -->
+      <div id="ov2-batchbar" class="ov2-hidden">
+        <button type="button" id="ov2-addfile" class="ov2-addfile">➕ Add another file (its own settings)</button>
+        <div class="ov2-batch" id="ov2-batch"></div>
+      </div>
+      <div class="ov2-amber" id="ov2-amber">Estimated page count — real page previews aren't available for this format. Upload a PDF for an exact preview &amp; price.</div>
+      <div class="ov2-manual" id="ov2-manual">
+        <label for="ov2-manual-pages">How many pages?</label>
+        <input type="number" id="ov2-manual-pages" min="1" max="500" value="1" />
+      </div>
+
+      <!-- Preview (hidden until file loads) -->
+      <div id="ov2-previewBlock" class="ov2-hidden">
+        <div class="ov2-section-header"><div class="ov2-section-title">Print preview</div><div class="ov2-section-line"></div></div>
+        <div class="ov2-preview-toolbar">
+          <span class="ov2-preview-count">Printing <b id="ov2-incCount">0</b> of <span id="ov2-totalCount">0</span> pages</span>
+          <span class="ov2-mini-btn" id="ov2-selAll">Select all</span>
+          <span class="ov2-mini-btn" id="ov2-skipAll">Skip all</span>
+        </div>
+        <div class="ov2-strip" id="ov2-strip"></div>
+        <div class="ov2-hint" id="ov2-hint">Tap any page to skip it. The page won't be printed.</div>
+      </div>
+
+      <!-- Controls (hidden until file loads) -->
+      <div id="ov2-controlsBlock" class="ov2-hidden">
+        <div class="ov2-section-header" style="margin-top:14px;"><div class="ov2-section-title">Print settings</div><div class="ov2-section-line"></div></div>
+        <div class="ov2-controls">
+
+          <div class="ov2-card full">
+            <div class="ov2-card-label">Colour mode</div>
+            <div class="ov2-tog-group">
+              <div class="ov2-tog active" data-colour="bw" id="ov2-col-bw">⬛ All B&amp;W</div>
+              <div class="ov2-tog" data-colour="col" id="ov2-col-col">🎨 All Colour</div>
+              <div class="ov2-tog" data-colour="mixed" id="ov2-col-mixed">🖍️ Mixed (pick pages)</div>
+            </div>
+          </div>
+
+          <div class="ov2-card full">
+            <div class="ov2-card-label">Pages per sheet (N-up)</div>
+            <div class="ov2-nup-row">
+              <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+                <div class="ov2-nup-toggles">
+                  <div class="ov2-tog active" data-nup="1">1</div>
+                  <div class="ov2-tog" data-nup="2">2-up</div>
+                  <div class="ov2-tog" data-nup="4">4-up</div>
+                  <div class="ov2-tog" data-nup="6">6-up</div>
+                  <div class="ov2-tog" data-nup="9">9-up</div>
+                </div>
+                <!-- N-up fill direction — only relevant for 2-up+ (shown by renderNupSheet) -->
+                <div class="ov2-nup-toggles" id="ov2-dir-row" style="display:none">
+                  <div class="ov2-tog active" data-direction="horizontal">→ Horizontal</div>
+                  <div class="ov2-tog" data-direction="vertical">↓ Vertical</div>
+                </div>
+              </div>
+              <div>
+                <div class="ov2-nup-sheet" id="ov2-nupSheet"></div>
+                <div class="ov2-nup-label" id="ov2-nupLabel">1 / sheet</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ov2-card">
+            <div class="ov2-card-label">Copies</div>
+            <div class="ov2-copies-row">
+              <div class="ov2-copies-btn" id="ov2-copiesMinus">−</div>
+              <div class="ov2-copies-val" id="ov2-copiesVal">1</div>
+              <div class="ov2-copies-btn" id="ov2-copiesPlus">+</div>
+            </div>
+          </div>
+
+          <div class="ov2-card">
+            <div class="ov2-card-label">Paper size</div>
+            <select class="ov2-select" id="ov2-paper">
+              <option value="A4">A4</option>
+              <option value="A3">A3</option>
+              <option value="A5">A5</option>
+              <option value="Legal">Legal</option>
+              <option value="Letter">Letter</option>
+            </select>
+          </div>
+
+          <div class="ov2-card full">
+            <div class="ov2-card-label">Print sides</div>
+            <div class="ov2-tog-group">
+              <div class="ov2-tog active" data-sides="single" id="ov2-sd-single">Single-sided</div>
+              <div class="ov2-tog" data-sides="duplex" id="ov2-sd-duplex">Duplex (both sides)</div>
+            </div>
+            <div class="ov2-duplex-stage">
+              <div class="ov2-flip-scene">
+                <div class="ov2-flip-card" id="ov2-flipCard">
+                  <div class="ov2-flip-face front"><div class="ov2-mini-lines"><i></i><i></i><i></i></div><span>Page 1</span></div>
+                  <div class="ov2-flip-face back"><div class="ov2-mini-lines"><i></i><i></i><i></i></div><span>Page 2</span></div>
+                </div>
+              </div>
+              <div class="ov2-duplex-caption" id="ov2-duplexCaption">
+                <b>Single-sided:</b> each page on its own sheet. Page 1 here, page 2 on the next sheet.
+              </div>
+            </div>
+          </div>
+
+          <div class="ov2-card full" id="ov2-scale-card">
+            <div class="ov2-card-label">Page size on paper</div>
+            <div class="ov2-tog-group">
+              <div class="ov2-tog active" data-scale="fit" id="ov2-sc-fit">Fit to page</div>
+              <div class="ov2-tog" data-scale="actual" id="ov2-sc-actual">Actual size</div>
+            </div>
+            <div class="ov2-scale-stage">
+              <div class="ov2-scale-sheet" id="ov2-scaleSheet">
+                <div class="ov2-scale-page" id="ov2-scalePage"></div>
+              </div>
+              <div class="ov2-scale-caption" id="ov2-scaleCaption">
+                <b>Fit to page:</b> your page is resized to fill the sheet.
+              </div>
+            </div>
+            <div class="ov2-scale-note">Price is per sheet — scaling does not change it.</div>
+          </div>
+
+          <div class="ov2-card">
+            <div class="ov2-card-label">Orientation</div>
+            <div class="ov2-tog-group">
+              <div class="ov2-tog active" data-orientation="auto" id="ov2-or-auto">Auto</div>
+              <div class="ov2-tog" data-orientation="portrait" id="ov2-or-portrait">📄 Portrait</div>
+              <div class="ov2-tog" data-orientation="landscape" id="ov2-or-landscape">🖼️ Landscape</div>
+            </div>
+          </div>
+
+          <div class="ov2-card full">
+            <div class="ov2-card-label">Binding</div>
+            <div class="ov2-tog-group">
+              <div class="ov2-tog active" data-binding="none" id="ov2-bd-none">No binding</div>
+              <div class="ov2-tog" data-binding="staple" id="ov2-bd-staple">📎 Staple</div>
+              <div class="ov2-tog" data-binding="spiral" id="ov2-bd-spiral">🌀 Spiral</div>
+              <div class="ov2-tog" data-binding="wiro" id="ov2-bd-wiro">🔗 Wiro</div>
+              <div class="ov2-tog" data-binding="soft" id="ov2-bd-soft">📕 Soft</div>
+              <div class="ov2-tog" data-binding="perfect" id="ov2-bd-perfect">📗 Perfect</div>
+              <div class="ov2-tog" data-binding="project" id="ov2-bd-project">📘 Project</div>
+              <div class="ov2-tog" data-binding="record" id="ov2-bd-record">📔 Record</div>
+              <div class="ov2-tog" data-binding="thesis" id="ov2-bd-thesis">🎓 Thesis</div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="ov2-summary">
+          <span class="ov2-summary-label">Summary:</span>
+          <span class="ov2-tag" id="ov2-s-pages">0 pages</span>
+          <span class="ov2-tag" id="ov2-s-colour">All B&amp;W</span>
+          <span class="ov2-tag" id="ov2-s-nup" style="display:none;">1-up</span>
+          <span class="ov2-tag" id="ov2-s-copies">1 copy</span>
+          <span class="ov2-tag" id="ov2-s-paper">A4</span>
+          <span class="ov2-tag" id="ov2-s-sides">Single-sided</span>
+          <span class="ov2-tag" id="ov2-s-orient" style="display:none;">Portrait</span>
+          <span class="ov2-tag" id="ov2-s-scale" style="display:none;">Actual size</span>
+          <span class="ov2-tag" id="ov2-s-bind">No binding</span>
+          <span class="ov2-tag sheets" id="ov2-s-sheets">0 sheets</span>
+          <span class="ov2-tag price" id="ov2-s-price" style="display:none;">₹0</span>
+        </div>
+
+        <div class="ov2-nav">
+          <button class="ov2-btn ov2-btn-primary" id="ov2-toStep2">
+            <span>Next: Your Details</span><span class="ov2-price-badge" id="ov2-nextPrice">→</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ STEP 2 ════════ -->
+    <div id="ov2-step2" class="ov2-hidden">
+      <div class="ov2-section-header"><div class="ov2-section-title">✅ Your order</div><div class="ov2-section-line"></div></div>
+      <div class="ov2-recap">
+        <div class="ov2-recap-title">What we'll print</div>
+        <div class="ov2-recap-pills" id="ov2-recapPills"></div>
+      </div>
+
+      <div class="ov2-section-header"><div class="ov2-section-title">Your details</div><div class="ov2-section-line"></div></div>
+      <!-- Logged-in account: identity is auto-filled from the account; the name +
+           WhatsApp fields below are hidden and this banner is shown instead. -->
+      <div id="ov2-identity" class="ov2-identity ov2-hidden">
+        <span class="ov2-identity-tick">✓</span>
+        <span>Ordering as <b id="ov2-identity-name"></b></span>
+        <button type="button" class="ov2-identity-logout" id="ov2-logout">Not you? Log out</button>
+      </div>
+      <div class="ov2-fields">
+        <div class="ov2-field" id="ov2-field-name">
+          <label for="ov2-name">Name <span class="ov2-req">*</span></label>
+          <input type="text" id="ov2-name" autocomplete="name" placeholder="Your name" />
+        </div>
+        <div class="ov2-field" id="ov2-field-wa">
+          <label for="ov2-whatsapp">WhatsApp number <span class="ov2-req">*</span></label>
+          <input type="tel" id="ov2-whatsapp" inputmode="tel" autocomplete="tel" placeholder="10-digit mobile number" />
+        </div>
+        <div class="ov2-field" id="ov2-field-store">
+          <label>Which location?</label>
+          <div class="ov2-tog-group">
+            <div class="ov2-tog active" data-store="thriprayar" id="ov2-st-thriprayar">🏪 Thriprayar</div>
+            <div class="ov2-tog" data-store="nattika" id="ov2-st-nattika">🏪 Nattika</div>
+          </div>
+        </div>
+        <div class="ov2-field">
+          <label>Pickup or delivery</label>
+          <div class="ov2-tog-group">
+            <div class="ov2-tog active" data-delivery="0" id="ov2-dl-pickup">🏪 Pickup at store</div>
+            <div class="ov2-tog" data-delivery="1" id="ov2-dl-deliver">🛵 Delivery</div>
+          </div>
+        </div>
+        <div class="ov2-field ov2-addr" id="ov2-addrField">
+          <label for="ov2-address">Delivery address <span class="ov2-req">*</span></label>
+          <textarea id="ov2-address" placeholder="House / street / landmark / pincode"></textarea>
+        </div>
+        <div class="ov2-field">
+          <label for="ov2-payment">Payment</label>
+          <select class="ov2-select" id="ov2-payment">
+            <option value="cash">Cash on pickup/delivery</option>
+            <option value="upi">UPI on pickup/delivery</option>
+            <option value="online">Pay online (we'll send a link)</option>
+          </select>
+        </div>
+        <div class="ov2-field">
+          <label for="ov2-instructions">Special instructions</label>
+          <textarea id="ov2-instructions" placeholder="Anything we should know? (optional)"></textarea>
+        </div>
+      </div>
+
+      <div class="ov2-error" id="ov2-error"></div>
+      <div class="ov2-busy" id="ov2-busy"><div class="ov2-spinner"></div><span id="ov2-busyText">Placing your order…</span></div>
+
+      <div class="ov2-nav">
+        <button class="ov2-btn ov2-btn-ghost" id="ov2-back">← Back</button>
+        <button class="ov2-btn ov2-btn-primary" id="ov2-submit" disabled>
+          <span>Place order</span><span class="ov2-price-badge" id="ov2-submitPrice">→</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ════════ SUCCESS ════════ -->
+    <div class="ov2-success" id="ov2-success">
+      <div class="ov2-check">🎉</div>
+      <h2>Order placed!</h2>
+      <div class="ov2-job">Your order number is <b id="ov2-successJob">OSP-…</b></div>
+      <div class="ov2-job">We'll confirm everything on WhatsApp shortly.</div>
+      <a class="ov2-wa-link" id="ov2-waLink" href="https://wa.me/919495706405" target="_blank" rel="noopener">💬 Message us on WhatsApp</a>
+    </div>
+
+  </div>
+</div>
+
+<footer>
+  <div class="footer-grid">
+    <div>
+      <a href="index.html" class="footer-logo"><img src="assets/printosky-wordmark-reverse.svg" alt="Printosky" style="height:24px;width:auto;display:inline-block;vertical-align:middle"></a>
+      <div class="footer-tagline">Two locations across Thrissur</div>
+      <div class="footer-contact-item">📞 +91 94957 06405 (WhatsApp)</div>
+      <div class="footer-contact-item">📍 Thriprayar &amp; Nattika, Kerala</div>
+      <div class="footer-contact-item">🕐 Mon–Sat · Thriprayar 8am–7pm · Nattika 9am–6pm</div>
+    </div>
+    <div>
+      <div class="footer-col-title">Pages</div>
+      <ul class="footer-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="services.html">Services</a></li>
+        <li><a href="order-v2.html">Place Order</a></li>
+        <li><a href="about.html">About</a></li>
+        <li><a href="contact.html">Contact</a></li>
+      </ul>
+    </div>
+    <div>
+      <div class="footer-col-title">Services</div>
+      <ul class="footer-links">
+        <li><a href="services.html">Bulk Printing</a></li>
+        <li><a href="services.html">Student Documents</a></li>
+        <li><a href="services.html">Binding</a></li>
+        <li><a href="services.html">Lamination</a></li>
+        <li><a href="services.html">PVC Cards</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 Printosky. All rights reserved.</span>
+    <span>Thriprayar &amp; Nattika, Thrissur</span>
+  </div>
+</footer>
+
+<script>function toggleMenu() { document.getElementById('mobileMenu').classList.toggle('open'); }</script>
+<script type="module" src="./order/order-ui.js"></script>
+</body>
+</html>

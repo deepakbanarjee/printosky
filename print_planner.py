@@ -3,8 +3,65 @@ import os
 import shutil
 import fitz  # PyMuPDF
 import nup_imposer
+import pdf_scaler
 
 logger = logging.getLogger("print_planner")
+
+
+def _report(check: str, ok: bool, detail: str) -> None:
+    """Alert, never a bare log — a print that quietly ignored what the customer
+    asked for is exactly the silent failure CLAUDE.md forbids."""
+    try:
+        from ops_watchdog import report
+        report(check, ok, detail)
+    except Exception as exc:                      # never break a print over this
+        logger.warning("ops_watchdog report failed (%s): %s", check, exc)
+
+
+def resolve_scale(spec: dict, nup: int, nup_orient: str) -> tuple[str | None, int | None]:
+    """The scale this job actually gets: (mode, percent), or (None, None).
+
+    Scaling is 1-up only (owner, 2026-08-30): N-up already IS a fit, so a
+    scale on an N-up job is a UI leak and is dropped loudly rather than
+    half-honoured. 1-up landscape supports fit and actual through the imposer;
+    custom % there needs a rotated target box that has never been proved on
+    paper, so it is dropped too, and says so.
+
+    Absent scale returns (None, None) — the whole safety property: a spec
+    without it plans exactly as it did before this existed.
+    """
+    scale = spec.get("scale") or {}
+    mode = str(scale.get("mode") or "").strip().lower()
+    if not mode:
+        return None, None
+    if mode not in pdf_scaler.MODES:
+        _report("print_planner.scale_unknown_mode", False,
+                f"print_spec asked for scale mode {mode!r}, which does not exist — "
+                f"printing unscaled. Valid modes: {', '.join(pdf_scaler.MODES)}.")
+        return None, None
+
+    percent = pdf_scaler.clamp_percent(scale.get("percent")) if mode == "custom" else None
+    if mode == "custom" and percent is None:
+        _report("print_planner.scale_bad_percent", False,
+                f"print_spec asked for a custom scale with percent="
+                f"{scale.get('percent')!r}, which is not a number — printing unscaled.")
+        return None, None
+
+    if nup != 1:
+        _report("print_planner.scale_on_nup", False,
+                f"print_spec carried scale={mode!r} on a {nup}-up job. N-up always "
+                f"fits to the slot, so the scale was ignored — the UI should not "
+                f"have offered it.")
+        return None, None
+
+    if nup_orient == "landscape" and mode == "custom":
+        _report("print_planner.scale_custom_landscape", False,
+                f"custom {percent}% on a 1-up LANDSCAPE job is not supported yet "
+                f"(the rotated target box is unproved on paper) — printed at the "
+                f"landscape default instead. Use portrait, or fit/actual.")
+        return None, None
+
+    return mode, percent
 
 def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str) -> list[dict]:
     """Decompose a PDF file + print_spec into an ordered list of SumatraPDF print actions.
@@ -50,7 +107,8 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
             "copies": copies,
             "sides": sides,
             "paper_size": paper_size,
-            "orientation": orientation
+            "orientation": orientation,
+            "scale_applied": False,
         }], None
 
     # If no print_spec parameters, return single fallback action
@@ -61,7 +119,8 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
             "copies": copies,
             "sides": None,
             "paper_size": None,
-            "orientation": None
+            "orientation": None,
+            "scale_applied": False,
         }], None
 
     # Prepare temp directory
@@ -128,6 +187,39 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
         nup_orient = nup_imposer.resolve_orientation(nup, orientation, nup_dir)
         cols, rows = nup_imposer.sheet_grid(nup, orientation, nup_dir)
 
+        # 2a. Scaling — Fit / Actual size / Custom %, baked into the PDF.
+        #
+        # Nothing is asked of the driver: the Konica has already been caught
+        # ignoring per-job overrides, so the geometry goes in the file (the same
+        # reason the imposer exists). `scale_applied` tells send_to_printer to
+        # add SumatraPDF's `noscale` as a guard on top.
+        #
+        # A spec with no scale leaves every line below inert, so such a job
+        # plans exactly as it did before this existed.
+        scale_mode, scale_percent = resolve_scale(spec, nup, nup_orient)
+        scale_applied = False
+
+        if scale_mode and nup_orient != "landscape":
+            # Pass-through path: bake it here, because nothing else will touch
+            # this file on its way to the printer.
+            try:
+                with open(current_pdf, "rb") as f:
+                    scaled = pdf_scaler.apply_scale(
+                        f.read(), scale_mode, scale_percent, paper_size or "A4")
+                if scaled:
+                    scaled_path = os.path.join(temp_dir, "scaled.pdf")
+                    with open(scaled_path, "wb") as f:
+                        f.write(scaled)
+                    current_pdf = scaled_path
+                    scale_applied = True
+                    logger.info("job %s: baked scale=%s%s", job_id, scale_mode,
+                                f" {scale_percent}%" if scale_percent else "")
+            except Exception as exc:
+                # Print unscaled rather than not print — but never silently.
+                _report("print_planner.scale_failed", False,
+                        f"job {job_id}: could not apply scale={scale_mode!r} "
+                        f"({type(exc).__name__}: {exc}) — printing unscaled.")
+
         # 1-up on a landscape sheet is still an imposition: the page turns 90
         # degrees on the front and -90 on the back. 1-up portrait is a pure
         # pass-through and never touches the imposer.
@@ -143,12 +235,24 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
             with open(current_pdf, "rb") as f:
                 pdf_bytes = f.read()
 
+            # 1-up landscape with a scale: the imposition is the only thing
+            # that touches this file, so it does the scaling too, through
+            # parameters perform_nup has always had. Absent a scale we pass
+            # nothing and it keeps its "Auto-Fit" default — which is what every
+            # job on the verified rotation matrix does.
+            impose_kwargs = {}
+            if scale_mode and nup_orient == "landscape":
+                impose_kwargs["scale_behavior"] = (
+                    "Original" if scale_mode == "actual" else "Auto-Fit")
+                scale_applied = True
+
             imposed_stream = nup_imposer.perform_nup(
                 pdf_bytes, cols=cols, rows=rows,
                 paper_size=paper_size or "A4",
                 orientation=nup_orient,
                 is_duplex=(sides == "ds"),
-                layout_direction=nup_dir
+                layout_direction=nup_dir,
+                **impose_kwargs
             )
             
             imposed_path = os.path.join(temp_dir, "imposed.pdf")
@@ -212,7 +316,8 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                     "copies": copies,
                     "sides": out_sides,
                     "paper_size": paper_size,
-                    "orientation": orientation
+                    "orientation": orientation,
+                    "scale_applied": scale_applied,
                 }], temp_dir
 
             # Otherwise, split into multiple sequential PDF files
@@ -230,7 +335,8 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                     "copies": copies,
                     "sides": out_sides,
                     "paper_size": paper_size,
-                    "orientation": orientation
+                    "orientation": orientation,
+                    "scale_applied": scale_applied,
                 })
             return actions, temp_dir
 
@@ -243,7 +349,8 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                 "copies": copies,
                 "sides": out_sides,
                 "paper_size": paper_size,
-                "orientation": orientation
+                "orientation": orientation,
+                "scale_applied": scale_applied,
             }], temp_dir
 
     except Exception as e:
@@ -257,7 +364,8 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
             "copies": copies,
             "sides": None,
             "paper_size": None,
-            "orientation": None
+            "orientation": None,
+            "scale_applied": False,
         }], None
 
 

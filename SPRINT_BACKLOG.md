@@ -156,6 +156,67 @@ the old flat `SOFT_BINDING_WITHOUT_PRINT = 100` is exactly soft's ₹80 tier plu
 
 ---
 
+## ⚪ SPRINT 13 — Print scaling + post-press services
+
+Plan: [docs/plans/2026-08-30-scaling-and-post-press-services.md](docs/plans/2026-08-30-scaling-and-post-press-services.md)
+— full rate tables, design and shipping order. Two rules: **nothing already
+working changes**, and **everything is baked into the PDF before it reaches the
+printer** (the driver is never asked to scale, only told `noscale` as a guard).
+
+| # | Task | Details |
+|---|------|---------|
+| S13-1 | ~~**`pdf_scaler.py` + tests**~~ ✅ | **Built 2026-08-30.** `scale_rect()` (pure geometry — one source of truth for print *and* both previews), `apply_scale()` (bakes the PDF), plus `count_cropped_pages()` for the preview's "N pages will be cropped" line. Custom % is of the original page, so Custom 100% returns exactly what Actual returns — asserted, not assumed. Never rotates. 46 tests. **Nothing imports it yet** — inert until S13-2 wires it |
+| S13-2 | ~~**Planner + print server wiring**~~ ✅ | **Built 2026-08-30.** `print_spec.scale` → `resolve_scale()` → baked by `pdf_scaler` on the pass-through path, or by `perform_nup`'s own `scale_behavior` on 1-up landscape; `scale_applied` flows through `store_puller` to `send_to_printer`, which appends `noscale` as a guard. Every dropped combination alerts through `ops_watchdog` rather than half-applying: `nup ≥ 2`, unknown mode, junk percent, and **custom % on 1-up landscape** (deferred — the rotated target box is unproved on paper). 46 tests, incl. the sheets-identical-without-scale guard across 7 layouts |
+| S13-3 | ~~**`print_items.scale_mode/scale_percent`**~~ ✅ | **Built 2026-08-30.** Additive nullable columns (`fix_db.py` + `install/bootstrap_db.py`); `handle_update_job` persists them, `handle_print_item` bakes via `pdf_scaler` and appends `noscale`, cleaning up in a `finally`. **Self-migrating**: store PCs pull code and restart the watcher without ever running `fix_db.py`, so `handle_update_job` adds the columns itself if the DB predates them — otherwise spec-saving would break at the counter. 21 tests |
+| S13-4 | ~~**Preview endpoints**~~ ✅ | `GET /scale-preview` returns a PNG of the **baked** page (same `apply_scale` the printer gets), one page, switchable; `GET /order/scale-rect` gives the customer canvas the same geometry. Offline → say so, never approximate |
+| S13-5 | **Staff scaling UI + paper proof** ⏳ | Fit / Actual / Custom in the print panel and New Job modal — **Custom % is staff-only**, presets 50/75/90/125/150/200 plus free entry, clamped 25–400%, percent **of the original page** (so Custom 100% ≡ Actual). Over 100% is allowed, warned and shown cropped, never silently clamped. **UI built 2026-08-30** — control in both consoles' print panels, baked preview with page switcher and crop warning, saved through `/update-job`, defaulting to no scaling. **Paper proof still outstanding**: the 8-check list is written into `docs/PRINT_ROTATION_MATRIX.md` and needs running on the OSP Konica before the control is used in anger |
+| S13-6 | ~~**Customer scaling UI + preview**~~ ✅ *(ships as order-v3)* | order-v2 card (1-up only) + sheet canvas with hatched crop region and "N pages will be cropped" |
+| S13-7 | **Service rate engine** | `rate_card.py` Section 11: `calculate_service_quote()` over the rates below. Every minimum names itself in the breakdown |
+| S13-8 | **`jobs.service_kind` + `service_meta`** + transfer/booking columns | `SCHEMA_v29_service_jobs.sql` + SQLite ALTERs + `docs/SCHEMA.md`. NULL = print job |
+| S13-9 | **`/service-quote` + `/new-service`** | Service jobs never create `print_items`, never enter a printer queue, never auto-print. Isolation tests pin it |
+| S13-10 | **Service console UI** | `+ Service` modal + kind pills + service panel in jobs.html, mirrored in admin.html; MIS print counts filtered to `service_kind IS NULL` |
+| S13-11 | **Photocopy button quotes properly** | Keep the one-tap button, but price it from the rate card instead of asking staff to type a number |
+| S13-12 | **Per-store capabilities** | `store_config.json` gains `capabilities {binding, foiling, roll_lam}`, **default false = outsourced** so a new store never silently claims it can finish. PRINTK sets all three true. `FINISHING_OUTSOURCED` becomes `is_outsourced(finishing, store_id)` |
+| S13-13 | **Inter-store finishing + revenue split** | OSP work finished at Nattika is an **internal transfer, not a vendor job**: `finishing_store_id`, `finishing_status`, an incoming-work queue in Nattika's console, and revenue split `print_amount` / `finishing_amount` at a configurable internal rate (seeded 100%) |
+| S13-14 | **Online drop-off bookings** | Customers book finishing-only work on the site and bring the item in. `item_received_at` NULL = not work-ready; WhatsApp reminder then auto-expire after ~3 days; part payment upfront above a threshold |
+| S13-15 | **Copy/scan reconciliation** | Compare counter-recorded copy/scan service jobs against `konica_jobs.job_type IN ('Copy','Scan')` — first visibility into unbilled walk-in copying |
+| S13-16 | ~~**Quote drift audit**~~ ✅ | Run 2026-08-30 via `tools/quote_drift_audit.py`: 104 quoted jobs, **70 match, 32 drift, all dated 08-07→08-13**, none after. Commit `6afb9b5` (08-14) deliberately removed the odd-sheet rounding and reproduces 28 of the 32 exactly; the other 4 are mixed-colour jobs from the same window. Customers were over-charged ₹180 historically, never under. **No live drift.** Two real findings fell out → S13-17, and `rate_card.py:20` still documents the removed rounding rule |
+
+### Rates locked by owner 2026-08-30
+
+| Per-piece | A4 | A3 | Cover | Min |
+|---|---|---|---|---|
+| Foiling | ₹30 | ₹50 | ₹50 | 10 pieces (cover floor ₹500) |
+| Roll lamination | ₹15 | ₹30 | — | 10 sheets |
+| Pouch lamination | ₹70 | ₹120 B&W · ₹140 col | — | — |
+| Cover lamination | ₹50 flat | | | |
+| ID card | ₹100/card, printing included | | | |
+| Cutting · Punching | ₹20 per machine pass, min ₹100 — **free on our own print/bind jobs** | | | |
+
+**Binding:** spiral A4 unchanged; **spiral A3 now tiered** (₹80/110/130/160/210/240/320/400
+= A4 × 2.67); **wiro ₹50 → ₹250 in ₹50 steps, refused above 150 sheets**; perfect =
+soft; thesis = **₹500** binding line with printing on top, or project **+₹100**
+bind-only; **bind-only is +₹20 across the board** (the existing ₹100 soft-no-print
+constant is exactly ₹80 + ₹20); **thermal withdrawn — no longer offered** (closes S7-5).
+
+**Other:** copy at print rates with student discount · scan A4 ₹10/₹7/₹5, **A3 double**
+· photos printed from a supplied file, **no shooting** — set of 5 ₹50, full sheet ₹100
+· DTP per page typing only (ML ₹40 · EN ₹40 · HI ₹60) · **urgent ₹20 now applies to
+any service** · the ₹2 Sini/Ujjwala scan rate is removed.
+
+**Still needed — all have working defaults, none blocking:** service payment threshold +
+deposit (₹500 / 50%) · stamp, postcard, 4×6 photo rates · drop-off expiry days (3) ·
+OSP→Nattika internal rates (100%).
+
+**Locked by owner 2026-08-30:** scaling is offered on **1-up only** — every other
+layout always fits to the printable area (N-up *is* a fit; "Actual size" on 4-up
+would crop three-quarters of every page, and it keeps the verified slot geometry
+untouched). Previews render the baked PDF, one page at a time. **Custom % is staff-only and
+measured against the original page** — 100% is the document's own size wherever it
+lands, so Custom 100% and Actual size are the same thing.
+
+---
+
 ## ✅ COMPLETED (Session 1–6 reference)
 
 - WhatsApp bot + file capture

@@ -3144,6 +3144,7 @@ from api.handlers_pb import (  # noqa: E402
     _handle_pb_upload_sign,
 )
 from api.handlers_order import (
+    _handle_order_scale_rect,
     _handle_order_upload_sign,
     _handle_order_quote,
     _handle_order_create,
@@ -3181,6 +3182,10 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # ── v4 job status poll ──────────────────────────────────────────────
+        if self.path.startswith("/order/scale-rect"):
+            _handle_order_scale_rect(self, self.path)
+            return
+
         if self.path.startswith("/project-builder/format-job-status"):
             qs = parse_qs(urlparse(self.path).query)
             _handle_pb_format_job_status(self, qs)
