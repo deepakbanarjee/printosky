@@ -33,6 +33,19 @@ class TestTheControl:
         values = re.findall(r'<option value="([a-z]*)"', block.group(0))
         assert values == ["", "fit", "actual", "custom"]
 
+    def test_the_control_is_labelled_scale_option(self, name):
+        """Owner's wording, 2026-09-01.
+
+        It was "Page size on paper", which described what the control does but
+        not what anyone at the counter calls it — the owner could not find
+        Custom % because nothing on the page said "scale". A label nobody
+        searches for is a feature nobody uses.
+        """
+        block = re.search(r'<label>([^<]+)</label>\s*<select class="pp-sel" id="jp-scale-mode"',
+                          html(name))
+        assert block, "no label immediately above the scale control"
+        assert block.group(1).strip() == "Scale option"
+
     def test_the_default_is_no_scaling(self, name):
         """The first option is the empty one, so a panel opened and saved
         without touching this leaves the job exactly as it was."""
@@ -270,3 +283,21 @@ class TestTheTwoConsolesAgree:
         a = self._extract("jobs.html", '<div class="jp-scale-preview"', 'id="jp-preview-footer"')
         b = self._extract("admin.html", '<div class="jp-scale-preview"', 'id="jp-preview-footer"')
         assert a == b
+
+
+def test_the_customer_card_uses_the_same_words_as_the_staff_panel():
+    """One name for one thing, across all three places it appears.
+
+    The staff panel, the admin mirror and the customer page each label this
+    control independently; they drifted into agreement once and could drift out.
+    """
+    order = open(os.path.join(ROOT, "website", "order-v2.html"), encoding="utf-8").read()
+    card = re.search(r'id="ov2-scale-card">\s*<div class="ov2-card-label">([^<]+)</div>', order)
+    assert card, "no label on the customer scale card"
+    assert card.group(1).strip() == "Scale option"
+    for name in CONSOLES:
+        assert "Scale option" in html(name)
+    # The old wording is gone everywhere, not just renamed in one file.
+    assert "Page size on paper" not in order
+    for name in CONSOLES:
+        assert "Page size on paper" not in html(name)
