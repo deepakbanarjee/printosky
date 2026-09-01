@@ -50,6 +50,7 @@ JOBS_DDL = """
         completed_at     TEXT,
         delivered_at     TEXT,
         filepath         TEXT,
+        printed_by       TEXT,
         pickup_code      TEXT,
         notes            TEXT,
         staff_notes      TEXT

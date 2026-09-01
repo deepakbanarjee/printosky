@@ -755,7 +755,7 @@ by ₹180, never under.
 | B-3 ✅ | `/service-quote` + `/new-service` + `create_job` guard + isolation tests — built 2026-08-31 | low |
 | B-4 ✅ | jobs.html console UI (modal, kind pills, service panel) — built 2026-08-31 | low |
 | B-5 ✅ | admin.html mirror + print-count exclusion — built 2026-09-01 | low |
-| B-6 | Photocopy button quotes from the rate card (B6) | low — one live button |
+| B-6 ✅ | Photocopy button quotes from the rate card (B6) — built 2026-09-01 | low — one live button |
 | B-7 | Per-store capabilities + `is_outsourced()` | low |
 | B-8 | Inter-store transfer + revenue split + Nattika's incoming queue | medium |
 | B-9 | Online drop-off bookings + expiry sweep | medium |

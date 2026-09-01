@@ -2435,32 +2435,64 @@
     <div style="display:flex;gap:.5rem">
       <div class="modal-field" style="flex:1">
         <label>Sheets</label>
-        <input type="number" id="pc-pages" min="1" value="1">
+        <input type="number" id="pc-pages" min="1" value="1" oninput="schedulePhotocopyQuote()">
       </div>
       <div class="modal-field" style="flex:1">
         <label>Copies</label>
-        <input type="number" id="pc-copies" min="1" value="1">
+        <input type="number" id="pc-copies" min="1" value="1" oninput="schedulePhotocopyQuote()">
       </div>
     </div>
     <div style="display:flex;gap:.5rem">
       <div class="modal-field" style="flex:1">
         <label>Colour</label>
-        <select id="pc-colour">
+        <select id="pc-colour" onchange="schedulePhotocopyQuote()">
           <option value="bw">B&amp;W</option>
           <option value="col">Colour</option>
         </select>
       </div>
       <div class="modal-field" style="flex:1">
-        <label>Amount (Rs.)</label>
-        <input type="number" id="pc-amount" min="0" step="1" value="0">
+        <label>Paper Size</label>
+        <select id="pc-paper" onchange="schedulePhotocopyQuote()">
+          <option value="A4">A4</option>
+          <option value="A3">A3</option>
+          <option value="A5">A5</option>
+          <option value="Letter">Letter</option>
+        </select>
+      </div>
+      <div class="modal-field" style="flex:1">
+        <label>Sides</label>
+        <select id="pc-sides" onchange="schedulePhotocopyQuote()">
+          <option value="ss">Single</option>
+          <option value="ds">Double</option>
+        </select>
       </div>
     </div>
-    <div class="modal-field">
-      <label>Payment Mode</label>
-      <select id="pc-mode">
-        <option value="Cash">Cash</option>
-        <option value="UPI">UPI</option>
-      </select>
+    <div class="svc-check">
+      <input type="checkbox" id="pc-student" onchange="schedulePhotocopyQuote()">
+      <label for="pc-student" style="margin:0">Student rate</label>
+    </div>
+
+    <!-- The price comes from the rate card, not from a number staff type
+         (B-6). The box below is an override, and starts empty so the quote is
+         what bills unless someone deliberately changes it. -->
+    <div class="svc-quote" id="pc-quote">
+      <span class="svc-total" id="pc-total">Rs.—</span>
+      <span id="pc-breakdown">Enter sheets to see the price.</span>
+      <span class="svc-warn" id="pc-warn" style="display:none"></span>
+    </div>
+
+    <div style="display:flex;gap:.5rem">
+      <div class="modal-field" style="flex:1">
+        <label>Override (Rs.) — optional</label>
+        <input type="number" id="pc-amount" min="0" step="1" placeholder="quoted price">
+      </div>
+      <div class="modal-field" style="flex:1">
+        <label>Payment Mode</label>
+        <select id="pc-mode">
+          <option value="Cash">Cash</option>
+          <option value="UPI">UPI</option>
+        </select>
+      </div>
     </div>
     <div class="modal-btns">
       <button class="modal-ok" id="pc-confirm-btn" onclick="confirmPhotocopy()" style="border-color:var(--amber);color:var(--amber);background:rgba(255,171,64,.08)">Add &amp; Complete</button>
@@ -4790,16 +4822,85 @@ function _svcValue(v) {
 
 // ── Photocopy Modal ───────────────────────────────────────────────────────────
 function openPhotocopyModal() {
-  document.getElementById("pc-name").value   = "";
-  document.getElementById("pc-phone").value  = "";
-  document.getElementById("pc-pages").value  = "1";
-  document.getElementById("pc-copies").value = "1";
-  document.getElementById("pc-colour").value = "bw";
-  document.getElementById("pc-amount").value = "0";
-  document.getElementById("pc-mode").value   = "Cash";
+  document.getElementById("pc-name").value    = "";
+  document.getElementById("pc-phone").value   = "";
+  document.getElementById("pc-pages").value   = "1";
+  document.getElementById("pc-copies").value  = "1";
+  document.getElementById("pc-colour").value  = "bw";
+  document.getElementById("pc-paper").value   = "A4";
+  document.getElementById("pc-sides").value   = "ss";
+  document.getElementById("pc-student").checked = false;
+  // Empty, not "0": the quote is the price unless someone deliberately
+  // overrides it, and a pre-filled 0 is how a job goes out free (B-6).
+  document.getElementById("pc-amount").value  = "";
+  document.getElementById("pc-mode").value    = "Cash";
   document.getElementById("pc-confirm-btn").disabled = false;
   document.getElementById("pc-confirm-btn").textContent = "Add & Complete";
   document.getElementById("photocopy-modal").classList.add("open");
+  refreshPhotocopyQuote();
+}
+
+// ── Photocopy pricing (B-6) ──────────────────────────────────────────────────
+//
+// The one-tap button stays; what changes is that it stops asking staff to
+// invent a number. A photocopy is priced through the same rate card as
+// everything else, over the same /service-quote endpoint the service modal
+// uses — kind "copy" is exactly this job.
+
+let photocopyQuote   = null;   // last answer from /service-quote
+let _pcQuoteTimer    = null;
+
+function photocopyMeta() {
+  return {
+    kind:       "copy",
+    sheets:     parseInt(document.getElementById("pc-pages").value)  || 1,
+    copies:     parseInt(document.getElementById("pc-copies").value) || 1,
+    colour:     document.getElementById("pc-colour").value,
+    paper_size: document.getElementById("pc-paper").value,
+    sides:      document.getElementById("pc-sides").value,
+    is_student: document.getElementById("pc-student").checked,
+  };
+}
+
+function schedulePhotocopyQuote() {
+  clearTimeout(_pcQuoteTimer);
+  _pcQuoteTimer = setTimeout(refreshPhotocopyQuote, 250);
+}
+
+async function refreshPhotocopyQuote() {
+  const total = document.getElementById("pc-total");
+  const lines = document.getElementById("pc-breakdown");
+  const warn  = document.getElementById("pc-warn");
+  const box   = document.getElementById("pc-quote");
+  if (!total) return;
+
+  if (!STORE_PC_URL) {
+    photocopyQuote = null;
+    box.classList.add("warn");
+    total.textContent = "Rs.—";
+    lines.textContent = "Print server not configured — click PC Setup, or type an override.";
+    warn.style.display = "none";
+    return;
+  }
+
+  const qs = new URLSearchParams(photocopyMeta());
+  try {
+    const r    = await fetch(`${STORE_PC_URL}/service-quote?${qs.toString()}`);
+    const data = await r.json();
+    photocopyQuote = data;
+    total.textContent = `Rs.${Math.ceil(data.total || 0)}`;
+    lines.innerHTML   = (data.breakdown || []).map(esc).join("<br>");
+    const bad = !data.ok || data.needs_manual_price;
+    box.classList.toggle("warn", bad);
+    warn.style.display = bad ? "block" : "none";
+    if (bad) warn.textContent = data.error || "No rate for this — type an override below.";
+  } catch (e) {
+    photocopyQuote = null;
+    box.classList.add("warn");
+    total.textContent = "Rs.—";
+    lines.textContent = "Cannot reach print server — " + e.message;
+    warn.style.display = "none";
+  }
 }
 
 function closePhotocopyModal() {
@@ -4856,16 +4957,23 @@ async function confirmPhotocopy() {
   const btn = document.getElementById("pc-confirm-btn");
   btn.disabled = true; btn.textContent = "Adding…";
   try {
+    const meta = photocopyMeta();
     const body = {
-      staff_id:         sessionStorage.getItem("staff_id"),
-      customer_name:    document.getElementById("pc-name").value.trim(),
-      phone:            document.getElementById("pc-phone").value.trim(),
-      pages:            parseInt(document.getElementById("pc-pages").value) || 1,
-      copies:           parseInt(document.getElementById("pc-copies").value) || 1,
-      colour:           document.getElementById("pc-colour").value,
-      amount_collected: parseFloat(document.getElementById("pc-amount").value) || 0,
-      payment_mode:     document.getElementById("pc-mode").value,
+      staff_id:      sessionStorage.getItem("staff_id"),
+      customer_name: document.getElementById("pc-name").value.trim(),
+      phone:         document.getElementById("pc-phone").value.trim(),
+      pages:         meta.sheets,
+      copies:        meta.copies,
+      colour:        meta.colour,
+      paper_size:    meta.paper_size,
+      sides:         meta.sides,
+      is_student:    meta.is_student,
+      payment_mode:  document.getElementById("pc-mode").value,
     };
+    // Only send an amount when someone actually typed one. Absent, the store
+    // PC quotes it from the rate card — that is the whole point of B-6.
+    const override = document.getElementById("pc-amount").value.trim();
+    if (override !== "") body.amount_collected = parseFloat(override) || 0;
     const r    = await fetch(`${STORE_PC_URL}/new-photocopy`, {
       method: "POST", headers: storeHeaders(),
       body: JSON.stringify(body),
@@ -4875,8 +4983,10 @@ async function confirmPhotocopy() {
       closePhotocopyModal();
       loadAll(); // reload job list to show new entry
     } else {
+      // The store PC refuses rather than filing a Rs.0 job it could not price.
       alert("Failed: " + (data.error || "Unknown error"));
       btn.disabled = false; btn.textContent = "Add & Complete";
+      if (data.needs_manual_price) document.getElementById("pc-amount").focus();
     }
   } catch (e) {
     alert("Cannot reach print server:\n" + e.message);
