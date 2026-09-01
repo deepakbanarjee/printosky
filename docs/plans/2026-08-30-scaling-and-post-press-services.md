@@ -780,7 +780,7 @@ by ₹180, never under.
 | B-5 ✅ | admin.html mirror + print-count exclusion — built 2026-09-01 | low |
 | B-6 ✅ | Photocopy button quotes from the rate card (B6) — built 2026-09-01 | low — one live button |
 | B-7 ✅ | Per-store capabilities + `is_outsourced()` — built 2026-09-01, inert until B-8 | low |
-| B-8 | Inter-store transfer + revenue split + Nattika's incoming queue | medium |
+| B-8 ◑ | Inter-store transfer + revenue split + Nattika's incoming queue — server half built 2026-09-01; console queue UI and the 48h digest line remain | medium |
 | B-9 | Online drop-off bookings + expiry sweep | medium |
 | B-10 | Konica copy/scan reconciliation panel | medium |
 
