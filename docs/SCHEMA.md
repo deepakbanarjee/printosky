@@ -91,6 +91,22 @@ Single print-job records. Primary key for everything print-related.
 | `delivered_at` | timestamptz | YES | — | |
 | `take_rate_amount` | real | YES | — | platform fee for partner stores |
 | `route_transfer_id` | text | YES | — | Razorpay Route transfer id |
+| `print_spec` | jsonb | YES | — | full-fidelity auto-print settings (v35) |
+| `service_kind` | text | YES | — | **v38** post-press service without printing: `copy` / `scan` / `laminate` / `foil` / `bind` / `cut` / `punch` / `photo` / `dtp` / `other`. **NULL = ordinary print job** |
+| `service_meta` | jsonb | YES | — | v38 — per-kind quantities priced by `rate_card.calculate_service_quote()` |
+| `finishing_store_id` | text | YES | — | v38 — store doing the finishing, when not the selling store |
+| `finishing_status` | text | YES | — | v38 — `sent` / `at_finisher` / `returned` |
+| `print_amount` | real | YES | — | v38 — ₹ split of `amount_quoted`: printing |
+| `finishing_amount` | real | YES | — | v38 — ₹ split of `amount_quoted`: finishing, as charged |
+| `finishing_internal_amount` | real | YES | — | v38 — ₹ the finishing store keeps on an inter-store job |
+| `item_received_at` | timestamptz | YES | — | v38 — customer's physical item reached the counter (drop-off bookings) |
+
+`service_kind IS NULL` is the print-job path and must stay so: every existing
+"pending print" / printer-breakdown query filters on it rather than learning a
+new table. Migration: [`api/migrations/SCHEMA_v38_service_jobs.sql`](../api/migrations/SCHEMA_v38_service_jobs.sql);
+store SQLite gets the same columns as `TEXT`/`REAL` from
+[`db_migrations.SERVICE_JOB_COLUMNS`](../db_migrations.py), applied by
+`watcher.setup_database()` on every start because store PCs never run `fix_db.py`.
 
 #### `job_batches` 🟦
 Multi-job WhatsApp orders that share a single payment link.

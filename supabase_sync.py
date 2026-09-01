@@ -13,6 +13,7 @@ Setup:
 Runs as a background thread started by watcher.py.
 """
 
+import json
 import os
 import time
 import sqlite3
@@ -74,24 +75,60 @@ def upsert(table, rows, on_conflict=None):
         return False
 
 # ── Data collectors ───────────────────────────────────────────────────────────
+def _has_service_columns(cursor) -> bool:
+    """Does this store PC's jobs table carry the v38 service columns yet?"""
+    have = {row[1] for row in cursor.execute("PRAGMA table_info(jobs)")}
+    return "service_kind" in have and "service_meta" in have
+
+
+def _as_json_object(raw, job_id=None):
+    """Parse a stored service_meta string into an object for the jsonb column.
+
+    A value that will not parse is dropped to NULL rather than pushed as a
+    string, and says so — a silently mangled meta is a job nobody can explain.
+    """
+    if raw in (None, ""):
+        return None
+    if isinstance(raw, (dict, list)):
+        return raw
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        logger.error("collect_jobs: service_meta for %s is not JSON (%s): %r",
+                     job_id or "?", exc, raw)
+        return None
+
+
 def collect_jobs(db_path):
     """Pull all jobs from local SQLite."""
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        c.execute("""
+        # service_kind / service_meta joined this list on 2026-08-31, once
+        # SCHEMA_v38 was applied to Supabase. Until then they were deliberately
+        # absent: a store PC must never push a column the cloud has not got.
+        # Selected defensively because a store PC that has not restarted since
+        # B-2 does not have them locally either.
+        service_cols = _has_service_columns(c)
+        extra = ", service_kind, service_meta" if service_cols else ""
+        c.execute(f"""
             SELECT job_id, received_at, filename, file_extension, file_size_kb,
                    source, sender, status, customer_name, service_type,
                    amount_quoted, amount_collected, payment_mode, completed_at,
                    filepath, printer, page_count, copies, colour, size, printed_by,
-                   pickup_code, pickup_ready_at, delivered_at
+                   pickup_code, pickup_ready_at, delivered_at{extra}
             FROM jobs ORDER BY received_at DESC LIMIT 500
         """)
         rows = []
         for row in c.fetchall():
             d = dict(row)
             d["store_id"] = STORE_ID
+            # jobs.service_meta is jsonb in Supabase and TEXT here. Pushing the
+            # string would store a jsonb *string* — valid, and unreadable by
+            # every query that expects an object.
+            if "service_meta" in d:
+                d["service_meta"] = _as_json_object(d["service_meta"], d.get("job_id"))
             rows.append(d)
         conn.close()
         return rows

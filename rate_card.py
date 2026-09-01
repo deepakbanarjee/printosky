@@ -211,18 +211,52 @@ ROLL_LAM_MIN_SHEETS = 10
 # SECTION 3 — OTHER SERVICE RATES
 # ─────────────────────────────────────────────────────────────────────────────
 
-SCANNING_RATES = {
-    "standard_50":  10,   # per sheet, ≤50
-    "standard_100": 7,    # 51–100 (average of 6–8)
-    "standard_100p":5,    # >100
-    "special":      2,    # Sini/Ujjwala special rate (customer profile override)
+# Scanning, per sheet, banded by how many sheets. A3 is double A4 throughout
+# (owner, 2026-08-30).
+#
+# The old "special": 2 entry — a per-customer rate for Sini/Ujjwala — was
+# removed the same day. A per-customer override living in a shared table is one
+# that gets applied by accident; if it comes back it belongs on the customer,
+# not here.
+SCANNING_TIERS = {
+    "A4": [(50, 10), (100, 7), (None, 5)],
+    "A3": [(50, 20), (100, 14), (None, 10)],
+}
+SCANNING_RATES = {            # kept: existing callers read these three keys
+    "standard_50":  10,
+    "standard_100": 7,
+    "standard_100p": 5,
 }
 
+# Typing only — printing the typed pages is charged at the ordinary print rates
+# on top (owner, 2026-08-30). Per page.
 DTP_RATES = {
     "malayalam": 40,
     "english":   40,
     "hindi":     60,
 }
+
+# Foiling, per sheet or piece, with a 10-piece minimum (owner, 2026-08-30).
+# A cover is always larger than A3 and takes the "cover" rate — which is why
+# the owner's "minimum Rs.500 for up to 10 covers" needs no special case:
+# 10 x 50 IS 500, so one max(pieces, minimum) rule prices all three.
+FOILING_RATES = {"A4": 30, "A3": 50, "cover": 50}
+
+# Cutting and punching, per PASS of the machine — one press, however many
+# sheets it takes at a time — with a floor per job. Free when the job is one we
+# printed or bound; the rate is for a customer's own sheets (owner, 2026-08-30).
+HANDWORK_RATES = {"cut": 20, "punch": 20}
+HANDWORK_MIN_CHARGE = {"cut": 100, "punch": 100}
+
+# Minimum billable quantity, by service. Under it, the minimum is what bills.
+MIN_PIECES = {"foil": 10, "lam_roll": ROLL_LAM_MIN_SHEETS}
+
+# Photos are printed from a soft copy the customer supplies — Printosky does
+# not shoot them (owner, 2026-08-30). Stamp, postcard and 4x6 are offered but
+# their rates have not been given yet, so they price manually rather than
+# guess.
+PHOTO_RATES = {"set5": 50, "sheet": 100}
+PHOTO_SIZES_PENDING_RATES = ("stamp", "postcard", "4x6")
 
 DELIVERY_CHARGE = 30
 
@@ -785,6 +819,252 @@ def get_pdf_page_count(filepath: str) -> int:
     except Exception:
         pass
     return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 11 — POST-PRESS SERVICES (work with no printing)
+#
+# Copy, scan, laminate, foil, bind, cut, punch, photo, DTP — the things a
+# customer brings in that never touch a printer, plus photocopying which does.
+# Rates and rules are the owner's, given 2026-08-30; the plan and its reasoning
+# are in docs/plans/2026-08-30-scaling-and-post-press-services.md.
+#
+# Nothing calls this yet. It is wired up in B-3 (/service-quote, /new-service).
+#
+# Two rules run through all of it:
+#   * A minimum always names itself in the breakdown. An operator has to be able
+#     to explain "why is 3 sheets Rs.300" before the customer asks.
+#   * A service this cannot price comes back flagged, never as a Rs.0 line.
+#     That is the whole lesson of the five finishings that billed zero.
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: kind -> (label, whether the operator must type the price)
+SERVICE_KINDS = {
+    "copy":     ("Photocopy",          False),
+    "scan":     ("Scanning",           False),
+    "laminate": ("Lamination",         False),
+    "foil":     ("Foiling",            False),
+    "bind":     ("Binding only",       False),
+    "cut":      ("Cutting / trimming", False),
+    "punch":    ("Punching",           False),
+    "photo":    ("Photo prints",       False),
+    "dtp":      ("DTP / typing",       False),
+    "other":    ("Other",              True),
+}
+
+# Any service can be rushed (owner, 2026-08-30) — not just the bindings that
+# used to be the only urgent-eligible work.
+SERVICE_URGENT_SURCHARGE = URGENT_SURCHARGE
+
+# The student rate reaches photocopying and printing, and nothing else
+# (owner, 2026-08-30).
+STUDENT_RATE_KINDS = ("copy",)
+
+
+def get_scan_rate(sheets: int, paper_size: str = "A4") -> int:
+    """Per-sheet scan rate for a sheet count and size. A3 is double A4."""
+    tiers = SCANNING_TIERS.get(paper_size.upper(), SCANNING_TIERS["A4"])
+    for max_sheets, price in tiers:
+        if max_sheets is None or sheets <= max_sheets:
+            return price
+    return tiers[-1][1]
+
+
+def get_foiling_cost(pieces: int, paper_size: str = "A4") -> tuple[int, int]:
+    """Foiling: (cost, billable pieces). Under the minimum, the minimum bills."""
+    rate = FOILING_RATES.get(_foil_size_key(paper_size), FOILING_RATES["A4"])
+    billable = max(int(pieces or 0), MIN_PIECES["foil"])
+    return billable * rate, billable
+
+
+def _foil_size_key(paper_size: str) -> str:
+    """A cover is larger than A3 and has its own rate; everything else maps to
+    the sheet sizes."""
+    p = (paper_size or "A4").strip().lower()
+    if p in ("cover", "covers"):
+        return "cover"
+    return "A3" if p == "a3" else "A4"
+
+
+def get_handwork_cost(kind: str, passes: int, with_our_job: bool = False) -> int:
+    """Cutting or punching: per machine pass, with a floor — and free when the
+    job is one we printed or bound."""
+    if with_our_job:
+        return 0
+    rate = HANDWORK_RATES[kind]
+    return max(int(passes or 1) * rate, HANDWORK_MIN_CHARGE[kind])
+
+
+def calculate_service_quote(kind: str, meta: dict | None = None) -> dict:
+    """Price one post-press service.
+
+    Returns:
+        { total, breakdown[], label, needs_manual_price, unpriced }
+
+    ``needs_manual_price`` means the shop does this but no rate is set for it
+    (foiling on an unlisted size, a photo size whose rate has not been given,
+    "other"). ``unpriced`` means the kind itself is unknown — a bug, not a
+    business case. Either way the caller must surface it rather than bill the
+    zero: see docs/FAIL_LOUD.md.
+    """
+    meta = meta or {}
+    kind = (kind or "").strip().lower()
+
+    if kind not in SERVICE_KINDS:
+        return {"total": 0, "breakdown": [f"Unknown service {kind!r} — NO RATE"],
+                "label": kind or "(none)", "needs_manual_price": True,
+                "unpriced": True}
+
+    label, manual_by_default = SERVICE_KINDS[kind]
+    lines: list[str] = []
+    total = 0.0
+    needs_manual = manual_by_default
+
+    sheets = max(0, int(meta.get("sheets") or 0))
+    size = (meta.get("paper_size") or "A4").strip()
+
+    if kind == "copy":
+        # A photocopied sheet costs what a printed one costs — same machine,
+        # same paper — so it prices through the print rate card, student rate
+        # included.
+        copies = max(1, int(meta.get("copies") or 1))
+        colour = "col" if str(meta.get("colour", "bw")).lower() in ("col", "colour", "color") else "bw"
+        sides = meta.get("sides", "ss")
+        paper_type = f"{size.upper()}_{'col' if colour == 'col' else 'BW'}"
+        r = calculate_item_cost(max(1, sheets), paper_type, sides, "1-up", copies,
+                                bool(meta.get("is_student")))
+        total = r["print_cost"]
+        lines.append(r["breakdown_line"])
+
+    elif kind == "scan":
+        rate = get_scan_rate(sheets, size)
+        total = sheets * rate
+        lines.append(f"Scan {size.upper()}: {sheets} sheets x Rs.{rate} = Rs.{total:.0f}")
+
+    elif kind == "laminate":
+        lam_type = str(meta.get("lam_type", "pouch")).strip().lower()
+        qty = max(1, sheets)
+        if lam_type == "roll":
+            total = get_roll_lam_cost(qty, size)
+            lines.append(_min_line("Roll lamination", size, qty,
+                                   MIN_PIECES["lam_roll"],
+                                   ROLL_LAM_RATES.get(size.upper(), ROLL_LAM_RATES["A4"]),
+                                   total))
+        elif lam_type == "cover":
+            rate = BINDING_RATES["lam_cover"]["price"]
+            total = qty * rate
+            lines.append(f"Cover lamination: {qty} x Rs.{rate} = Rs.{total:.0f}")
+        elif lam_type == "id":
+            # ID-card lamination is a different product from ID card PRINTING
+            # (Rs.100/card, printing included) and has no rate of its own yet.
+            needs_manual = True
+            lines.append("ID lamination: NO RATE — enter the price")
+        else:
+            rate = get_pouch_lam_rate(size, bool(meta.get("is_colour")))
+            total = qty * rate
+            lines.append(f"Pouch lamination {size.upper()}: {qty} x Rs.{rate} = Rs.{total:.0f}")
+
+    elif kind == "foil":
+        key = _foil_size_key(size)
+        if key not in FOILING_RATES:
+            needs_manual = True
+            lines.append(f"Foiling {size}: NO RATE — enter the price")
+        else:
+            total, billable = get_foiling_cost(sheets, size)
+            lines.append(_min_line("Foiling", key, sheets, MIN_PIECES["foil"],
+                                   FOILING_RATES[key], total))
+
+    elif kind == "bind":
+        fin = calculate_finishing_cost(
+            str(meta.get("binding", "none")), max(1, sheets), size,
+            urgent=False, with_print=False,
+            project_cover=str(meta.get("project_cover", "white")))
+        total = fin["finishing_cost"]
+        lines.append(fin["breakdown_line"])
+        needs_manual = needs_manual or fin["unpriced"] or bool(fin["refused"])
+
+    elif kind in ("cut", "punch"):
+        passes = max(1, int(meta.get("passes") or 1))
+        free = bool(meta.get("with_our_job"))
+        total = get_handwork_cost(kind, passes, free)
+        if free:
+            lines.append(f"{label}: free — part of a job we printed or bound")
+        else:
+            raw = passes * HANDWORK_RATES[kind]
+            line = f"{label}: {passes} pass{'es' if passes != 1 else ''} x Rs.{HANDWORK_RATES[kind]} = Rs.{raw}"
+            if total > raw:
+                line += f" -> minimum Rs.{HANDWORK_MIN_CHARGE[kind]} applied"
+            lines.append(line)
+
+    elif kind == "photo":
+        unit = str(meta.get("unit", "set5")).strip().lower()
+        qty = max(1, int(meta.get("qty") or 1))
+        if unit in PHOTO_RATES:
+            rate = PHOTO_RATES[unit]
+            total = qty * rate
+            what = "set of 5" if unit == "set5" else "full sheet"
+            lines.append(f"Photo prints ({what}): {qty} x Rs.{rate} = Rs.{total:.0f}")
+        else:
+            needs_manual = True
+            pending = ", ".join(PHOTO_SIZES_PENDING_RATES)
+            lines.append(f"Photo prints ({unit}): NO RATE yet — enter the price "
+                         f"(pending: {pending})")
+
+    elif kind == "dtp":
+        lang = str(meta.get("language", "english")).strip().lower()
+        pages = max(1, int(meta.get("pages") or 1))
+        if lang not in DTP_RATES:
+            needs_manual = True
+            lines.append(f"DTP ({lang}): NO RATE — enter the price")
+        else:
+            rate = DTP_RATES[lang]
+            total = pages * rate
+            lines.append(f"DTP {lang.title()}: {pages} pages x Rs.{rate} = Rs.{total:.0f}"
+                         " (typing only — printing charged separately)")
+
+    elif kind == "other":
+        lines.append(f"{meta.get('description') or 'Other service'}: enter the price")
+
+    # A manual price, once the operator has typed one, is the price. A typed
+    # value that is not a number leaves the job flagged AND says so — swallowing
+    # it would look identical to not having typed anything, which is how a job
+    # goes out unbilled.
+    raw_manual = meta.get("manual_price")
+    if needs_manual and raw_manual not in (None, ""):
+        manual = _as_amount(raw_manual)
+        if manual is None:
+            lines.append(f"Price {raw_manual!r} is not a number — not applied")
+        else:
+            total = manual
+            needs_manual = False
+            lines.append(f"Price entered by staff: Rs.{total:.0f}")
+
+    if meta.get("urgent"):
+        total += SERVICE_URGENT_SURCHARGE
+        lines.append(f"Urgent: +Rs.{SERVICE_URGENT_SURCHARGE}")
+
+    total = round(total, 2)
+    lines.append(f"--- Total: Rs.{total:.2f}")
+    return {"total": total, "breakdown": lines, "label": label,
+            "needs_manual_price": needs_manual, "unpriced": False}
+
+
+def _as_amount(value) -> float | None:
+    """A money value, or None if it is not one. No exception escapes and none is
+    swallowed: the caller decides what to say about a rejected price."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _min_line(what: str, size: str, asked: int, minimum: int, rate: int,
+              total: float) -> str:
+    """One breakdown line that says out loud when a minimum did the billing."""
+    if asked < minimum:
+        return (f"{what} {size.upper()}: minimum {minimum} sheets applied "
+                f"({asked} brought) — {minimum} x Rs.{rate} = Rs.{total:.0f}")
+    return f"{what} {size.upper()}: {asked} x Rs.{rate} = Rs.{total:.0f}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

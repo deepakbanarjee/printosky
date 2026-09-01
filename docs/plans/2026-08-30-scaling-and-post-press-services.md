@@ -393,7 +393,8 @@ service work should not wait on them.
 
 ### 4.3 Data model (additive only)
 
-`api/migrations/SCHEMA_v29_service_jobs.sql`:
+`api/migrations/SCHEMA_v38_service_jobs.sql` *(built 2026-08-31 — v29 was
+already taken by `processed_webhooks_rls`; the next free number is v38)*:
 
 ```sql
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS service_kind  TEXT;   -- NULL = print job
@@ -412,6 +413,36 @@ CREATE INDEX IF NOT EXISTS jobs_service_kind_idx ON jobs (service_kind)
 
 Store SQLite gets the same columns as `TEXT`/`REAL` via the `fix_db.py` ALTER
 pattern, plus `install/bootstrap_db.py` DDL and `docs/SCHEMA.md` rows.
+
+> **Built 2026-08-31 (B-2).** The one list lives in `db_migrations.SERVICE_JOB_COLUMNS`
+> and `watcher.setup_database()` applies it on every start — the A-3 lesson above,
+> acted on rather than recorded again. `fix_db.py` and `install/bootstrap_db.py`
+> import the same list, so a fresh box and a three-year-old one end up identical.
+> A failed ALTER reports through `ops_watchdog` (`db.migrate.jobs`) instead of a
+> log line; it does not raise, because the statement that actually needs the
+> column will, with a better message.
+>
+> **Applied to Supabase 2026-08-31** and verified from the database itself: all
+> eight columns present, every one nullable with no default, `service_meta` as
+> `jsonb`, `item_received_at` as `timestamptz`, and `jobs_service_kind_idx` in
+> place.
+>
+> **B-2 missed `config/schema_manifest.yaml`**, and applying the migration is
+> what exposed it: the live table had eight columns the manifest did not, which
+> is exactly the "columns deployed before code" drift `scripts/check_schema.py`
+> exists to catch (an extra live column is a drift, so the check would have gone
+> red on `main` the moment `SUPABASE_DB_URL` was set). Fixed and pinned by a
+> test; the manifest and the live `jobs` table now agree on all 56 columns.
+> A migration is not finished until that file moves with it. `supabase_sync.collect_jobs()` began pushing `service_kind` /
+> `service_meta` with B-4, once there was somewhere for them to land.
+>
+> Two things made the SQLite half safe to ship before the Supabase half was run:
+> nothing reads these columns yet, and `supabase_sync.collect_jobs()` names its
+> columns explicitly — so a migrated store PC physically cannot push
+> `service_kind` to a cloud that has not got it. `tests/test_service_job_columns.py`
+> pins both. **The cloud migration still has to be run by hand in the Supabase SQL
+> Editor** (repo convention, `docs/SCHEMA.md` §Migrations) before B-3 writes a
+> service job.
 
 ### 4.4 Rates *(owner, 2026-08-30)*
 
@@ -504,6 +535,27 @@ Punching: 4 passes × ₹20 = ₹80 → minimum ₹100
 
 `handle_create_job` gains one guard: skip the `print_items` insert when
 `service_kind` is set and the kind does not print. Nothing else in it moves.
+
+> **Built 2026-08-31 (B-3).** Three decisions worth recording:
+>
+> * **No service job gets a `print_items` row — no exceptions.** The plan said
+>   "the kind does not print", but every kind here is work on paper the customer
+>   already has; even `copy` runs on the copier, not through our print path. One
+>   rule is easier to keep true than ten.
+> * **`/create-job` stamps `service_kind` in a second `UPDATE`, not in its
+>   `INSERT`.** A print job's INSERT stays the exact statement it has always
+>   been, which is Rule 1 held to literally rather than approximately. Same
+>   reason the v38 migration only runs when a service job is actually being
+>   filed: a print job never touches it.
+> * **The deposit gate is live with the plan's defaults** (N1: ₹500 threshold,
+>   50 %) as `SERVICE_DEPOSIT_THRESHOLD` / `SERVICE_DEPOSIT_FRACTION` at the top
+>   of the section. Under the threshold, payment is on collection (B8); over it
+>   and unpaid, the job waits in `Draft` — an `override_reason` starts it anyway.
+>   Two numbers to change when the owner settles it.
+>
+> `/service-quote` runs on every keystroke in the modal, so a *healthy* quote is
+> announced to `ops_watchdog` once per process rather than per keypress; every
+> failure is reported, and the next success re-announces recovery.
 
 ### 4.7 Per-store capability and inter-store finishing
 
@@ -682,9 +734,9 @@ by ₹180, never under.
 |---|---|---|
 | B-0 | Unpriced-finishing fix + thermal withdrawal (§4.14, §4.9) | medium — live billing |
 | B-1 | `rate_card` Section 11 + tests. Nothing calls it | none |
-| B-2 | Migrations (cloud + SQLite + `docs/SCHEMA.md`) | none — additive |
-| B-3 | `/service-quote` + `/new-service` + `create_job` guard + isolation tests | low |
-| B-4 | jobs.html console UI (modal, kind pills, service panel) | low |
+| B-2 ✅ | Migrations (cloud + SQLite + `docs/SCHEMA.md`) — built 2026-08-31, cloud SQL not yet run | none — additive |
+| B-3 ✅ | `/service-quote` + `/new-service` + `create_job` guard + isolation tests — built 2026-08-31 | low |
+| B-4 ✅ | jobs.html console UI (modal, kind pills, service panel) — built 2026-08-31 | low |
 | B-5 | admin.html mirror + MIS `service_kind` filters | low |
 | B-6 | Photocopy button quotes from the rate card (B6) | low — one live button |
 | B-7 | Per-store capabilities + `is_outsourced()` | low |

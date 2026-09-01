@@ -45,6 +45,12 @@ def _ensure_parent(db_path: str) -> None:
         print(f"  created folder: {parent}")
 
 
+def _ensure_job_service_columns(conn: sqlite3.Connection) -> list:
+    """Import-late so bootstrap still runs if the repo root is unusual."""
+    from db_migrations import ensure_job_service_columns
+    return ensure_job_service_columns(conn)
+
+
 def _run_init(name: str, fn, *args) -> None:
     try:
         fn(*args)
@@ -106,6 +112,16 @@ def bootstrap(db_path: str) -> int:
         print("  OK  jobs table + daily_summary view (inlined)")
     except Exception as e:
         print(f"  ERR jobs / daily_summary: {e}")
+
+    # 1b. Post-press service columns on jobs (v38). Same list watcher.py and
+    #     fix_db.py apply, so a brand-new box and an old one end up identical.
+    try:
+        conn = sqlite3.connect(db_path)
+        added = _ensure_job_service_columns(conn)
+        conn.close()
+        print(f"  OK  jobs service columns ({len(added)} added)")
+    except Exception as e:
+        print(f"  ERR jobs service columns: {e}")
 
     # 2. Print items + staff + sessions (via print_server init paths).
     #    Explicit CREATE statements mirror print_server.py for safety, so

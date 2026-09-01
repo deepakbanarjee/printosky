@@ -292,6 +292,12 @@ def setup_database():
         except Exception:
             pass  # column already exists
 
+    # v38: post-press service jobs. Shared with fix_db.py and bootstrap_db.py so
+    # there is one list, and applied here because store PCs never run fix_db.py
+    # (docs/AUTO_UPDATE.md). All nullable -> a row without them is a print job.
+    from db_migrations import ensure_job_service_columns
+    ensure_job_service_columns(conn)
+
     # Batch table â€” groups multiple files from same customer into one payment
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS job_batches (

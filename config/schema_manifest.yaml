@@ -1127,6 +1127,22 @@ tables:
         default: null
         nullable: true
         type: text
+      finishing_amount:
+        default: null
+        nullable: true
+        type: real
+      finishing_internal_amount:
+        default: null
+        nullable: true
+        type: real
+      finishing_status:
+        default: null
+        nullable: true
+        type: text
+      finishing_store_id:
+        default: null
+        nullable: true
+        type: text
       graph_count:
         default: '0'
         nullable: true
@@ -1143,6 +1159,10 @@ tables:
         default: '0'
         nullable: true
         type: integer
+      item_received_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
       job_id:
         default: null
         nullable: false
@@ -1175,6 +1195,10 @@ tables:
         default: null
         nullable: true
         type: timestamp with time zone
+      print_amount:
+        default: null
+        nullable: true
+        type: real
       print_claimed_at:
         default: null
         nullable: true
@@ -1211,6 +1235,14 @@ tables:
         default: null
         nullable: true
         type: text
+      service_kind:
+        default: null
+        nullable: true
+        type: text
+      service_meta:
+        default: null
+        nullable: true
+        type: jsonb
       service_type:
         default: null
         nullable: true
