@@ -1311,7 +1311,7 @@
       <div class="panel-hdr">
         <div class="panel-title">Job Log</div>
         <span class="panel-badge" id="job-count">Loading…</span>
-        <button class="nj-btn-new-job" style="margin-left:auto" onclick="window.open('order-v2.html?staff=1','_blank')" title="Add walk-in or manual job (N)">+ New Job</button>
+        <button class="nj-btn-new-job" style="margin-left:auto" onclick="openNewJobModal()" title="Add walk-in or manual job (N)">+ New Job</button>
         <button class="filter-btn" onclick="openPhotocopyModal()">+ Photocopy</button>
         <button class="filter-btn" onclick="openServiceModal()" title="Copy, scan, laminate, foil, bind — work with no printing">+ Service</button>
       </div>
@@ -1473,6 +1473,28 @@
             <option value="lam_cover">Cover Lamination (Outsourced)</option>
             <option value="lam_roll">Roll Lamination (Outsourced)</option>
           </select>
+        </div>
+      </div>
+      <div class="nj-row">
+        <div class="modal-field">
+          <label>Scale option</label>
+          <select id="nj-scale-mode" onchange="njSetScaleMode(this.value)">
+            <option value="">Printer default (no scaling)</option>
+            <option value="fit">Fit to page</option>
+            <option value="actual">Actual size</option>
+            <option value="custom">Custom %</option>
+          </select>
+          <div class="jp-scale-custom" id="nj-scale-custom">
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(50)">50</button>
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(75)">75</button>
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(90)">90</button>
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(125)">125</button>
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(150)">150</button>
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(200)">200</button>
+            <input type="number" id="nj-scale-percent" min="25" max="400" step="5" value="100"
+                   oninput="njSetScalePercent(this.value)"> %
+          </div>
+          <div class="jp-scale-note">Price is per sheet — scaling does not change it.</div>
         </div>
       </div>
       <div class="modal-field">
@@ -4363,6 +4385,9 @@ function openNewJobModal() {
   document.getElementById("nj-finishing").value = "none";
   document.getElementById("nj-service").value = "";
   document.getElementById("nj-student").checked = false;
+  document.getElementById("nj-scale-mode").value = "";
+  document.getElementById("nj-scale-percent").value = "100";
+  njSetScaleMode("");
   document.getElementById("nj-quote-val").textContent = "₹—";
   document.getElementById("nj-quote-breakdown").textContent = "—";
   document.getElementById("nj-amount").value  = "";
@@ -4408,6 +4433,32 @@ function njNext(to) {
 }
 
 function njBack(to) { njShowStep(to); }
+
+// ── Scale on intake (New Job modal) ──────────────────────────────────────────
+//
+// The same four choices as the job panel, set while the walk-in is still at the
+// counter rather than after the job exists. The percent is stored on the print
+// item the job is created with; the bake still happens at print time, from the
+// one place it has always happened.
+
+let njScaleMode    = "";
+let njScalePercent = null;
+
+function njSetScaleMode(mode) {
+  njScaleMode = mode || "";
+  if (njScaleMode !== "custom") njScalePercent = null;
+  else if (!njScalePercent) njScalePercent = 100;
+  document.getElementById("nj-scale-custom").classList.toggle("show", njScaleMode === "custom");
+}
+
+function njSetScalePercent(pct) {
+  const n = parseInt(pct, 10);
+  njScalePercent = isNaN(n) ? null : Math.max(25, Math.min(400, n));
+  const box = document.getElementById("nj-scale-percent");
+  if (box && njScalePercent && String(njScalePercent) !== box.value) box.value = njScalePercent;
+  document.querySelectorAll("#nj-scale-custom .jp-preset").forEach(b =>
+    b.classList.toggle("on", parseInt(b.textContent, 10) === njScalePercent));
+}
 
 function njSkipFile() {
   njUploadedFile = null;
@@ -4537,6 +4588,8 @@ async function njSubmit() {
     finishing:       document.getElementById("nj-finishing").value,
     service_type:    document.getElementById("nj-service").value.trim(),
     is_student:      document.getElementById("nj-student").checked,
+    scale_mode:      njScaleMode,
+    scale_percent:   njScaleMode === "custom" ? njScalePercent : null,
     amount_quoted:   njQuotedAmount,
     amount_collected: mode === "full"    ? amountInput : 0,
     amount_partial:   mode === "partial" ? amountInput : 0,
