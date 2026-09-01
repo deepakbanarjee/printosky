@@ -540,6 +540,7 @@
   .jp-pager button:disabled { opacity: .35; cursor: default; }
   .jp-crop-warn { font-family: var(--mono); font-size: .62rem; color: var(--amber);
     text-align: center; margin-top: .3rem; }
+  .jp-scale-note.blocked { color: var(--amber); }
   .jp-scale-note { font-family: var(--mono); font-size: .58rem; color: var(--muted);
     margin-top: .25rem; line-height: 1.5; }
   .jp-scale-custom { display: none; gap: .3rem; align-items: center; margin-top: .4rem; flex-wrap: wrap; }
@@ -3270,6 +3271,7 @@ function renderJobPanel() {
   const scaleSel = document.getElementById("jp-scale-mode");
   if (scaleSel) {
     scaleSel.disabled = false;
+    scaleNote(SCALE_NOTE_DEFAULT, false);
     scaleSel.value = editScaleMode;
     document.getElementById("jp-scale-custom").classList.toggle("show", editScaleMode === "custom");
     if (editScalePercent) document.getElementById("jp-scale-percent").value = editScalePercent;
@@ -3455,6 +3457,27 @@ function setScaleMode(mode) {
   refreshScalePreview();
 }
 
+// Say why the control is off, next to the control — not only in the preview
+// pane, which the operator may not be looking at.
+function setScaleUnavailable(why) {
+  const sel = document.getElementById("jp-scale-mode");
+  if (sel) { sel.value = ""; sel.disabled = true; }
+  editScaleMode = "";
+  editScalePercent = null;
+  const custom = document.getElementById("jp-scale-custom");
+  if (custom) custom.classList.remove("show");
+  scaleNote(why, true);
+}
+
+function scaleNote(text, blocked) {
+  const note = document.getElementById("jp-scale-note");
+  if (!note) return;
+  note.textContent = text;
+  note.classList.toggle("blocked", !!blocked);
+}
+
+const SCALE_NOTE_DEFAULT = "Price is per sheet — scaling does not change it.";
+
 function setScalePercent(pct) {
   const n = parseInt(pct, 10);
   editScalePercent = isNaN(n) ? null : Math.max(25, Math.min(400, n));
@@ -3517,12 +3540,19 @@ function refreshScalePreview() {
         let why = `Preview unavailable (${r.status})`;
         try { const j = await r.json(); if (j.error) why = j.error; } catch {}
         scaleMsg(why, true);
-        // Scaling cannot work on this job at all — do not leave a control that
-        // would silently do nothing.
-        if (r.status === 404 || r.status === 415) {
-          document.getElementById("jp-scale-mode").value = "";
-          document.getElementById("jp-scale-mode").disabled = true;
-          editScaleMode = "";
+        // A preview that cannot render is not the same as scaling that cannot
+        // work, and conflating them cost the owner the feature: picking
+        // "Custom %" on a job whose file was not on this PC snapped the control
+        // back to "Printer default" and greyed it out, which reads as the
+        // option not existing (reported 2026-09-01).
+        //
+        // 415 is the only honest "cannot scale": scaling is baked into a PDF,
+        // so a non-PDF has nothing to bake. Everything else — file not pulled
+        // yet, store PC busy, a 500 — leaves the control alone and says why.
+        if (r.status === 415) {
+          setScaleUnavailable("Not a PDF — scaling applies to PDFs only.");
+        } else {
+          scaleNote(why + " — the setting is still saved with the job.", true);
         }
         return;
       }
