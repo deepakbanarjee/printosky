@@ -14,3 +14,5 @@
 /pb-retrieve     /pb-retrieve.html     200
 /books           /books.html           200
 /admin/operator-mode/*    /operator-mode.html?id=:splat    200
+/order-v3            /order-v2.html            301
+/order-v3.html       /order-v2.html            301

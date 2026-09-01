@@ -140,26 +140,29 @@ class TestEveryIdItTouchesExists:
             assert f'id="{root}"' in html(name), sel
 
 
-class TestOrderV2IsUntouched:
-    """Scaling ships as order-v3.html, a trial page, while order-v2.html stays
-    the live order page until it has been tested and rewired (owner,
-    2026-08-30). The two share order-ui.js, so the new code must be inert
-    without the v3 markup — these tests are what make that claim checkable."""
+class TestTheTrialPageIsRetired:
+    """order-v3.html was the scaling trial; order-v2.html is the page every
+    link, WhatsApp message and search result points at. The trial has been
+    folded into the live page (owner, 2026-08-31), so the trial file must be
+    gone and its URL must land on the real page rather than 404.
 
-    def order_v2(self):
-        return open(os.path.join(ROOT, "website", "order-v2.html"), encoding="utf-8").read()
+    The inertness guards stay: order.html and any future page can still load
+    order-ui.js without the scale markup, and the default must still send
+    nothing, which is what keeps pre-scaling orders planning identically."""
 
-    def test_the_live_page_has_no_scale_control(self):
-        page = self.order_v2()
-        assert "data-scale=" not in page
-        assert "ov2-scale-card" not in page
-        assert "Page size on paper" not in page
+    def test_the_trial_page_is_gone(self):
+        assert not os.path.exists(os.path.join(ROOT, "website", "order-v3.html"))
+
+    def test_the_trial_url_redirects_to_the_live_page(self):
+        rules = open(os.path.join(ROOT, "website", "_redirects"), encoding="utf-8").read()
+        for src in ("/order-v3", "/order-v3.html"):
+            assert re.search(rf"^{re.escape(src)}\s+/order-v2\.html\s+301$", rules, re.M), src
 
     def test_the_shared_javascript_is_inert_without_the_markup(self):
         """Every entry point the scaling code has must survive a missing
-        element, because order-v2 loads the same module and has none of them."""
+        element, because a page can load the same module and have none of them."""
         js = open(os.path.join(ROOT, "website", "order", "order-ui.js"), encoding="utf-8").read()
-        start = js.index("// ── Page scaling (Fit / Actual size)")
+        start = js.index("// \u2500\u2500 Page scaling (Fit / Actual size)")
         block = js[start:js.index("function setDirection", start)]
         assert "if (!sheet || !page || !cap) return;" in block   # renderScalePreview
         assert "if (card) card.style.display" in block           # syncScaleCardVisibility
@@ -169,14 +172,22 @@ class TestOrderV2IsUntouched:
         js = open(os.path.join(ROOT, "website", "order", "order-ui.js"), encoding="utf-8").read()
         assert "scale: 'fit'," in js   # and buildPrintSpec only emits for 'actual'
 
+    def test_a_batched_file_keeps_its_own_choice(self):
+        """Staff can queue several files, each with its own options; the batch
+        snapshot feeds buildPrintSpec, so dropping scale there would lose the
+        choice on every file but the last one — and lose it silently."""
+        js = open(os.path.join(ROOT, "website", "order", "order-ui.js"), encoding="utf-8").read()
+        snap = js[js.index("function snapshotSpec()"):js.index("function currentRecord()")]
+        assert "scale: state.scale," in snap
+
 
 class TestTheCustomerControl:
-    """order-v3 gets Fit and Actual — two choices that are hard to get wrong.
+    """The customer gets Fit and Actual — two choices that are hard to get wrong.
     Custom % is staff-only (owner, 2026-08-30), so it must not be reachable
     from the order page at all."""
 
     def order_v2(self):
-        return open(os.path.join(ROOT, "website", "order-v3.html"), encoding="utf-8").read()
+        return open(os.path.join(ROOT, "website", "order-v2.html"), encoding="utf-8").read()
 
     def order_ui(self):
         return open(os.path.join(ROOT, "website", "order", "order-ui.js"), encoding="utf-8").read()
@@ -221,9 +232,11 @@ class TestTheCustomerControl:
         assert "the edges will be cut off" in self.order_ui()
         assert ".ov2-scale-page.crops" in self.order_v2()
 
-    def test_the_trial_page_is_not_indexed(self):
+    def test_the_live_page_is_indexable(self):
+        """The trial carried noindex so it could never outrank the real page.
+        Folded in, it must not carry that flag onto the page customers land on."""
         page = self.order_v2()
-        assert 'name="robots" content="noindex,nofollow"' in page
+        assert "noindex" not in page
         assert 'canonical" href="https://printosky.com/order-v2.html"' in page
 
     def test_every_id_it_touches_exists(self):
