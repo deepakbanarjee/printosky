@@ -1891,6 +1891,38 @@ def handle_upload_file(body: dict) -> dict:
 
 # ── A6c: Create job — manual / walk-in entry ──────────────────────────────────
 
+def _intake_scale(body: dict) -> tuple[str | None, int | None]:
+    """(scale_mode, scale_percent) from a /create-job body, or (None, None).
+
+    Absent or blank is "no scaling", byte-for-byte what every caller before
+    2026-09-01 meant. A mode the baker does not know is refused rather than
+    stored, because a print_items row carrying a mode nothing can apply would
+    print unscaled while the panel claimed otherwise.
+    """
+    mode = (body.get("scale_mode") or "").strip().lower()
+    if not mode:
+        return None, None
+    if mode not in pdf_scaler.MODES:
+        _report_health(
+            "scale.unknown_mode", False,
+            f"/create-job was given scale_mode={mode!r}, which pdf_scaler cannot "
+            f"bake. Known modes: {', '.join(sorted(pdf_scaler.MODES))}. Stored as "
+            f"no scaling rather than as a setting that would silently do nothing.",
+        )
+        return None, None
+    if mode != "custom":
+        return mode, None
+    percent = pdf_scaler.clamp_percent(body.get("scale_percent"))
+    if percent is None:
+        _report_health(
+            "scale.unknown_mode", False,
+            f"/create-job asked for custom scaling with percent="
+            f"{body.get('scale_percent')!r}, which is not a usable number.",
+        )
+        return None, None
+    return mode, percent
+
+
 def handle_create_job(body: dict) -> dict:
     """
     POST /create-job
@@ -2007,13 +2039,21 @@ def handle_create_job(body: dict) -> dict:
     if pages > 0 and not service_kind:
         paper_type = f"{paper_size}_BW" if colour == "bw" else f"{paper_size}_col"
         printer    = "epson" if colour == "col" else "konica"
+        # Scaling chosen at intake rides on the item the job is created with, so
+        # a walk-in booked at 75 % prints at 75 % without a second visit to the
+        # panel. Absent (every caller before 2026-09-01) both stay NULL, which
+        # is what "no scaling" has always meant.
+        scale_mode, scale_percent = _intake_scale(body)
         try:
+            _ensure_print_item_scale_columns(conn)
             conn.execute("""
                 INSERT INTO print_items
                   (job_id, item_number, page_list, paper_type, colour, sides,
-                   layout, copies, paper_gsm, printer, status)
-                VALUES (?,1,'all',?,?,?,?,?,70,?,'Pending')
-            """, (job_id, paper_type, colour, sides, "1-up", copies, printer))
+                   layout, copies, paper_gsm, printer, status,
+                   scale_mode, scale_percent)
+                VALUES (?,1,'all',?,?,?,?,?,70,?,'Pending',?,?)
+            """, (job_id, paper_type, colour, sides, "1-up", copies, printer,
+                  scale_mode, scale_percent))
             conn.commit()
         except Exception as exc:
             logging.warning("print_items insert skipped for %s: %s", job_id, exc)

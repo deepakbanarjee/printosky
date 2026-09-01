@@ -540,6 +540,7 @@
   .jp-pager button:disabled { opacity: .35; cursor: default; }
   .jp-crop-warn { font-family: var(--mono); font-size: .62rem; color: var(--amber);
     text-align: center; margin-top: .3rem; }
+  .jp-scale-note.blocked { color: var(--amber); }
   .jp-scale-note { font-family: var(--mono); font-size: .58rem; color: var(--muted);
     margin-top: .25rem; line-height: 1.5; }
   .jp-scale-custom { display: none; gap: .3rem; align-items: center; margin-top: .4rem; flex-wrap: wrap; }
@@ -2088,6 +2089,28 @@
             <option value="lam_cover">Cover Lamination (Outsourced)</option>
             <option value="lam_roll">Roll Lamination (Outsourced)</option>
           </select>
+        </div>
+      </div>
+      <div class="nj-row">
+        <div class="modal-field">
+          <label>Scale option</label>
+          <select id="nj-scale-mode" onchange="njSetScaleMode(this.value)">
+            <option value="">Printer default (no scaling)</option>
+            <option value="fit">Fit to page</option>
+            <option value="actual">Actual size</option>
+            <option value="custom">Custom %</option>
+          </select>
+          <div class="jp-scale-custom" id="nj-scale-custom">
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(50)">50</button>
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(75)">75</button>
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(90)">90</button>
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(125)">125</button>
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(150)">150</button>
+            <button type="button" class="jp-preset" onclick="njSetScalePercent(200)">200</button>
+            <input type="number" id="nj-scale-percent" min="25" max="400" step="5" value="100"
+                   oninput="njSetScalePercent(this.value)"> %
+          </div>
+          <div class="jp-scale-note">Price is per sheet — scaling does not change it.</div>
         </div>
       </div>
       <div class="modal-field">
@@ -3862,6 +3885,7 @@ function renderJobPanel() {
   const scaleSel = document.getElementById("jp-scale-mode");
   if (scaleSel) {
     scaleSel.disabled = false;
+    scaleNote(SCALE_NOTE_DEFAULT, false);
     scaleSel.value = editScaleMode;
     document.getElementById("jp-scale-custom").classList.toggle("show", editScaleMode === "custom");
     if (editScalePercent) document.getElementById("jp-scale-percent").value = editScalePercent;
@@ -4040,6 +4064,27 @@ function setScaleMode(mode) {
   refreshScalePreview();
 }
 
+// Say why the control is off, next to the control — not only in the preview
+// pane, which the operator may not be looking at.
+function setScaleUnavailable(why) {
+  const sel = document.getElementById("jp-scale-mode");
+  if (sel) { sel.value = ""; sel.disabled = true; }
+  editScaleMode = "";
+  editScalePercent = null;
+  const custom = document.getElementById("jp-scale-custom");
+  if (custom) custom.classList.remove("show");
+  scaleNote(why, true);
+}
+
+function scaleNote(text, blocked) {
+  const note = document.getElementById("jp-scale-note");
+  if (!note) return;
+  note.textContent = text;
+  note.classList.toggle("blocked", !!blocked);
+}
+
+const SCALE_NOTE_DEFAULT = "Price is per sheet — scaling does not change it.";
+
 function setScalePercent(pct) {
   const n = parseInt(pct, 10);
   editScalePercent = isNaN(n) ? null : Math.max(25, Math.min(400, n));
@@ -4102,12 +4147,19 @@ function refreshScalePreview() {
         let why = `Preview unavailable (${r.status})`;
         try { const j = await r.json(); if (j.error) why = j.error; } catch {}
         scaleMsg(why, true);
-        // Scaling cannot work on this job at all — do not leave a control that
-        // would silently do nothing.
-        if (r.status === 404 || r.status === 415) {
-          document.getElementById("jp-scale-mode").value = "";
-          document.getElementById("jp-scale-mode").disabled = true;
-          editScaleMode = "";
+        // A preview that cannot render is not the same as scaling that cannot
+        // work, and conflating them cost the owner the feature: picking
+        // "Custom %" on a job whose file was not on this PC snapped the control
+        // back to "Printer default" and greyed it out, which reads as the
+        // option not existing (reported 2026-09-01).
+        //
+        // 415 is the only honest "cannot scale": scaling is baked into a PDF,
+        // so a non-PDF has nothing to bake. Everything else — file not pulled
+        // yet, store PC busy, a 500 — leaves the control alone and says why.
+        if (r.status === 415) {
+          setScaleUnavailable("Not a PDF — scaling applies to PDFs only.");
+        } else {
+          scaleNote(why + " — the setting is still saved with the job.", true);
         }
         return;
       }
@@ -7296,6 +7348,9 @@ function openNewJobModal() {
   document.getElementById("nj-finishing").value = "none";
   document.getElementById("nj-service").value = "";
   document.getElementById("nj-student").checked = false;
+  document.getElementById("nj-scale-mode").value = "";
+  document.getElementById("nj-scale-percent").value = "100";
+  njSetScaleMode("");
   document.getElementById("nj-quote-val").textContent = "₹—";
   document.getElementById("nj-quote-breakdown").textContent = "—";
   document.getElementById("nj-amount").value  = "";
@@ -7341,6 +7396,32 @@ function njNext(to) {
 }
 
 function njBack(to) { njShowStep(to); }
+
+// ── Scale on intake (New Job modal) ──────────────────────────────────────────
+//
+// The same four choices as the job panel, set while the walk-in is still at the
+// counter rather than after the job exists. The percent is stored on the print
+// item the job is created with; the bake still happens at print time, from the
+// one place it has always happened.
+
+let njScaleMode    = "";
+let njScalePercent = null;
+
+function njSetScaleMode(mode) {
+  njScaleMode = mode || "";
+  if (njScaleMode !== "custom") njScalePercent = null;
+  else if (!njScalePercent) njScalePercent = 100;
+  document.getElementById("nj-scale-custom").classList.toggle("show", njScaleMode === "custom");
+}
+
+function njSetScalePercent(pct) {
+  const n = parseInt(pct, 10);
+  njScalePercent = isNaN(n) ? null : Math.max(25, Math.min(400, n));
+  const box = document.getElementById("nj-scale-percent");
+  if (box && njScalePercent && String(njScalePercent) !== box.value) box.value = njScalePercent;
+  document.querySelectorAll("#nj-scale-custom .jp-preset").forEach(b =>
+    b.classList.toggle("on", parseInt(b.textContent, 10) === njScalePercent));
+}
 
 function njSkipFile() {
   njUploadedFile = null;
@@ -7470,6 +7551,8 @@ async function njSubmit() {
     finishing:       document.getElementById("nj-finishing").value,
     service_type:    document.getElementById("nj-service").value.trim(),
     is_student:      document.getElementById("nj-student").checked,
+    scale_mode:      njScaleMode,
+    scale_percent:   njScaleMode === "custom" ? njScalePercent : null,
     amount_quoted:   njQuotedAmount,
     amount_collected: mode === "full"    ? amountInput : 0,
     amount_partial:   mode === "partial" ? amountInput : 0,

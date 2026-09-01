@@ -97,10 +97,16 @@ class TestThePreview:
         assert "Preview unavailable" in page
         assert "Store PC unreachable — preview unavailable" in page
 
-    def test_an_unscalable_job_disables_the_control(self, name):
-        """404/415 mean scaling cannot work here at all, so the control must
-        not sit there looking usable while doing nothing."""
-        assert "if (r.status === 404 || r.status === 415)" in html(name)
+    def test_only_a_non_pdf_disables_the_control(self, name):
+        """Narrowed 2026-09-01. This used to catch 404 as well, and that cost
+        the owner the feature: a job whose file was not yet on that store PC
+        made "Custom %" snap back to "Printer default" and grey out, which
+        reads as the option not existing. 415 — not a PDF — is the only case
+        where scaling genuinely cannot work, because scaling is baked into a
+        PDF. Everything else says why and leaves the control alone."""
+        src = html(name)
+        assert "if (r.status === 415)" in src
+        assert "if (r.status === 404 || r.status === 415)" not in src
 
     def test_no_scaling_keeps_the_ordinary_file_view(self, name):
         assert "if (!editScaleMode) {" in html(name)
@@ -301,3 +307,48 @@ def test_the_customer_card_uses_the_same_words_as_the_staff_panel():
     assert "Page size on paper" not in order
     for name in CONSOLES:
         assert "Page size on paper" not in html(name)
+
+
+# ── A failed preview must not swallow the control ────────────────────────────
+#
+# Reported 2026-09-01: the owner could not find Custom % at all. The label was
+# half of it (S13-5b). The other half is here — picking "Custom %" on a job
+# whose file was not on that store PC snapped the dropdown back to "Printer
+# default" and disabled it, which reads exactly like the option not existing.
+
+@pytest.mark.parametrize("name", CONSOLES)
+def test_a_missing_file_leaves_the_control_usable_and_says_why(name):
+    src = html(name)
+    block = src[src.index("function refreshScalePreview()"):]
+    assert "the setting is still saved with the job" in block
+
+
+@pytest.mark.parametrize("name", CONSOLES)
+def test_disabling_clears_the_custom_row_too(name):
+    """Otherwise the percent box lingers under a dropdown reading
+    'Printer default' — two controls disagreeing about the same job."""
+    src = html(name)
+    fn = src[src.index("function setScaleUnavailable("):src.index("function scaleNote(")]
+    assert 'custom.classList.remove("show")' in fn
+    assert "sel.disabled = true" in fn
+    assert 'editScaleMode = ""' in fn
+
+
+@pytest.mark.parametrize("name", CONSOLES)
+def test_the_reason_is_shown_next_to_the_control(name):
+    """Not only in the preview pane, which the operator may not be looking at."""
+    src = html(name)
+    fn = src[src.index("function scaleNote("):src.index("const SCALE_NOTE_DEFAULT")]
+    assert 'getElementById("jp-scale-note")' in fn
+    assert 'classList.toggle("blocked"' in fn
+    assert ".jp-scale-note.blocked" in src
+
+
+@pytest.mark.parametrize("name", CONSOLES)
+def test_opening_another_job_re_enables_the_control(name):
+    """A control disabled on one job must not stay dead for the next one."""
+    src = html(name)
+    block = src[src.index('const scaleSel = document.getElementById("jp-scale-mode");'):]
+    head = block[:400]
+    assert "scaleSel.disabled = false;" in head
+    assert "scaleNote(SCALE_NOTE_DEFAULT, false);" in head
