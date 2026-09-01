@@ -571,6 +571,29 @@ finish. PRINTK (Nattika) sets all three true. `FINISHING_OUTSOURCED` stays as th
 fallback for callers with no store context, behind a new
 `is_outsourced(finishing, store_id)`.
 
+> **Built 2026-09-01 (B-7).** Three things worth recording:
+>
+> * **`FINISHING_CAPABILITY` covers exactly `FINISHING_OUTSOURCED`, no more.** A
+>   finishing we already do everywhere — spiral, wiro, staple, pouch lamination,
+>   ID cards — is deliberately *not* capability-gated. Gating it would let a
+>   store lose work it has always done simply by not writing a claim down. A
+>   test asserts the two sets stay equal in both directions.
+> * **A box will not answer for a store it cannot see.** `is_outsourced(f,
+>   store_id="PRINTK")` on the OSP machine returns the safe default rather than
+>   OSP's own capabilities under another store's name.
+> * **Parsing is defensive, and the warning is a log line on purpose.**
+>   `ops_watchdog` resolves its store id through `store_config`, so reporting
+>   from inside the parser recurses — the same loop that already bit
+>   `store_config.missing_file`. The alerting check belongs where capabilities
+>   are *read*, which is B-8.
+>
+> **Found while building it:** both consoles hardcode `soft` binding as
+> outsourced (`OUTSOURCED_FINISHING`, 6 entries) while `FINISHING_OUTSOURCED`
+> does not (5). One side is wrong, and which is a business question — making the
+> consoles match removes soft binding's "Send to Vendor" button; making the rate
+> card match changes what `outsourced` means in every quote. Pinned by a test
+> until the owner settles it.
+
 **A job OSP sells and Nattika finishes** is an internal transfer, not a vendor
 job: `finishing_store_id = 'PRINTK'`, `finishing_status` walks
 `sent → at_finisher → returned`, and Nattika's console grows an **incoming
@@ -756,7 +779,7 @@ by ₹180, never under.
 | B-4 ✅ | jobs.html console UI (modal, kind pills, service panel) — built 2026-08-31 | low |
 | B-5 ✅ | admin.html mirror + print-count exclusion — built 2026-09-01 | low |
 | B-6 ✅ | Photocopy button quotes from the rate card (B6) — built 2026-09-01 | low — one live button |
-| B-7 | Per-store capabilities + `is_outsourced()` | low |
+| B-7 ✅ | Per-store capabilities + `is_outsourced()` — built 2026-09-01, inert until B-8 | low |
 | B-8 | Inter-store transfer + revenue split + Nattika's incoming queue | medium |
 | B-9 | Online drop-off bookings + expiry sweep | medium |
 | B-10 | Konica copy/scan reconciliation panel | medium |

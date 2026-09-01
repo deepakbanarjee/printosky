@@ -99,7 +99,46 @@ _LEGACY_OXYGEN_DEFAULTS: dict[str, Any] = {
     "agent_secret": None,
     "platform_url": None,
     "poll_printers": True,
+    # No capabilities claimed. Absent or false means outsourced, so the legacy
+    # fallback never has a store silently announce it can finish in-house.
+    "capabilities": {},
 }
+
+
+#: The finishing work a store can own. Anything not listed here is not a
+#: capability, so a typo in store_config.json cannot invent one.
+KNOWN_CAPABILITIES = ("binding", "foiling", "roll_lam")
+
+
+def _normalise_capabilities(raw: Any) -> dict[str, bool]:
+    """A plain {name: bool} map of the capabilities this store claims.
+
+    Only known names survive, and only truthy values are kept — so a config
+    saying `"binding": "yes"` claims binding, one saying `"bindng": true`
+    claims nothing, and neither can crash a store PC at import time. An
+    unknown key is reported rather than ignored: it is almost always a typo
+    standing between a store and work it can actually do.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, bool] = {}
+    unknown: list[str] = []
+    for key, value in raw.items():
+        name = str(key).strip().lower()
+        if name in KNOWN_CAPABILITIES:
+            out[name] = bool(value)
+        else:
+            unknown.append(str(key))
+    if unknown:
+        # A log line, not an ops_watchdog alert: the watchdog resolves its own
+        # store id through this module, and reporting from here recurses (that
+        # exact loop already bit store_config.missing_file). The store-facing
+        # check belongs where capabilities are read, not where they are parsed.
+        log.warning(
+            "store_config: unknown capabilities %s ignored — known names are %s",
+            ", ".join(sorted(unknown)), ", ".join(KNOWN_CAPABILITIES),
+        )
+    return out
 
 
 @dataclass(frozen=True)
@@ -130,7 +169,17 @@ class StoreConfig:
     # were doing (all 388 of PRINTK's Epson job rows are also PRIOFF's).
     # One machine per physical printer should own polling.
     poll_printers: bool = True
+    # What this store can finish in-house — {"binding", "foiling", "roll_lam"}.
+    # **Absent or false means outsourced** (plan §4.7): a new store must never
+    # silently claim it can do work it has no machine for, because the claim
+    # decides whether a job is sent to a vendor or promised for today.
+    # OSP claims nothing; PRINTK (Nattika) is the finishing shop.
+    capabilities: dict[str, bool] = field(default_factory=dict)
     source_path: str | None = field(default=None, compare=False)
+
+    def can(self, capability: str) -> bool:
+        """Does this store do `capability` in-house? Unknown name -> False."""
+        return bool(self.capabilities.get(capability, False))
 
     @property
     def is_legacy_fallback(self) -> bool:
@@ -214,6 +263,8 @@ def _merge_with_defaults(raw: dict[str, Any]) -> dict[str, Any]:
     for key, value in raw.items():
         if key == "printers" and isinstance(value, dict):
             merged["printers"] = {**merged["printers"], **value}
+        elif key == "capabilities" and isinstance(value, dict):
+            merged["capabilities"] = {**merged.get("capabilities", {}), **value}
         else:
             merged[key] = value
     return merged
@@ -241,6 +292,7 @@ def _build(raw: dict[str, Any], source: str | None) -> StoreConfig:
         platform_url=raw.get("platform_url"),
         printer_queue_names=printer_queue_names,
         poll_printers=bool(raw.get("poll_printers", True)),
+        capabilities=_normalise_capabilities(raw.get("capabilities")),
         source_path=source,
     )
 
