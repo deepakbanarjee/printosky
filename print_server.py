@@ -1435,27 +1435,97 @@ def handle_complete_job(body: dict) -> dict:
 
 # ── A5: New photocopy job ─────────────────────────────────────────────────────
 
+def _photocopy_meta(body: dict) -> dict:
+    """The rate-card meta for a counter photocopy.
+
+    A photocopy is priced as a print of the same sheets on the same machine —
+    same paper, same toner — so it goes through the one rate card rather than a
+    second table that would drift from it.
+    """
+    return {
+        "sheets":     max(1, int(body.get("pages") or 1)),
+        "copies":     max(1, int(body.get("copies") or 1)),
+        "colour":     body.get("colour", "bw"),
+        "sides":      body.get("sides", "ss"),
+        "paper_size": (body.get("paper_size") or "A4").upper(),
+        "is_student": bool(body.get("is_student", False)),
+    }
+
+
+def _photocopy_quote(meta: dict) -> tuple[float | None, list[str]]:
+    """(price, breakdown) from the rate card, or (None, [why]) if it cannot.
+
+    Never raises. A photocopy the shop cannot price is a thing a human has to
+    know about — it is the same class of failure as the five finishings that
+    billed Rs.0 — so it alerts and comes back None rather than as a free job.
+    """
+    if _rc is None:
+        _report_health("photocopy.quote", False,
+                       "rate_card not loaded — /new-photocopy cannot price anything")
+        return None, ["rate_card not loaded"]
+    try:
+        result = _rc.calculate_service_quote("copy", meta)
+    except Exception as exc:
+        _report_health("photocopy.quote", False,
+                       f"/new-photocopy could not price {meta!r}: "
+                       f"{type(exc).__name__}: {exc}")
+        return None, [f"could not price this: {exc}"]
+    if result["needs_manual_price"]:
+        _report_health("photocopy.quote", False,
+                       f"the rate card has no price for {meta!r} — staff must type one")
+        return None, result["breakdown"]
+    _report_health("photocopy.quote", True, "pricing photocopies")
+    return float(result["total"]), result["breakdown"]
+
+
 def handle_new_photocopy(body: dict) -> dict:
     """
     POST /new-photocopy
     Create an immediate Completed job entry for a photocopy (no file).
+
+    B-6 (2026-09-01): **the price comes from the rate card, not from a number
+    staff type.** The button and its flow are unchanged — it still files one
+    Completed job with no file and no print item — but the amount is quoted the
+    way every other price in the system is quoted. A typed amount still wins,
+    because a discount or a miscount has to be possible; it is recorded against
+    the quote so the two are visible side by side rather than one silently
+    replacing the other.
     """
     staff_id      = body.get("staff_id", "")
     customer_name = body.get("customer_name", "")
     phone         = body.get("phone", "")
-    pages         = int(body.get("pages", 1))
-    colour        = body.get("colour", "bw")
-    copies        = int(body.get("copies", 1))
-    amount        = float(body.get("amount_collected", 0))
     mode          = body.get("payment_mode", "Cash")
 
     if mode not in ("Cash", "UPI", "Online"):
         mode = "Cash"
 
-    # Generate next job_id
+    meta = _photocopy_meta(body)
+    quoted, breakdown = _photocopy_quote(meta)
+
+    typed = _amount_or_none(body.get("amount_collected"))
+    if typed is not None and typed > 0:
+        amount = typed
+    elif quoted is not None:
+        amount = quoted
+    else:
+        # Nothing typed and nothing quotable. Refusing beats filing a Rs.0 job:
+        # the counter types an amount and the sale completes on the next click.
+        return {"ok": False, "needs_manual_price": True,
+                "error": "Could not price this photocopy — enter the amount. "
+                         + "; ".join(breakdown),
+                "breakdown": breakdown}
+
+    overridden = quoted is not None and typed is not None and typed > 0 and typed != quoted
+
     conn   = _db()
     job_id = _next_job_id(conn)
     now    = _now()
+
+    note = f"Photocopy job created at {now} by {staff_id}"
+    if breakdown:
+        note += " | " + " | ".join(breakdown)
+    if overridden:
+        note += f" | staff set Rs.{amount:.0f} over the quoted Rs.{quoted:.0f}"
 
     conn.execute("""
         INSERT INTO jobs
@@ -1465,16 +1535,27 @@ def handle_new_photocopy(body: dict) -> dict:
            printed_by, notes, amount_quoted)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (job_id, now, "Photocopy Job", "Photocopy", phone or None, customer_name or None,
-          "Photocopy", pages, colour, copies,
+          "Photocopy", meta["sheets"], meta["colour"], meta["copies"],
           "Completed", amount, mode, now,
           staff_id,
-          f"Photocopy job created at {now} by {staff_id}",
-          amount))
+          note,
+          quoted if quoted is not None else amount))
     conn.commit()
     conn.close()
 
-    logging.info("Photocopy job %s created — Rs.%.0f %s by %s", job_id, amount, mode, staff_id)
-    return {"ok": True, "job_id": job_id}
+    if amount <= 0:
+        _report_health(
+            "photocopy.unpriced", False,
+            f"{job_id} was completed at Rs.0 by {staff_id or 'unknown staff'} — "
+            f"{meta['sheets']} sheet(s) copied and nothing billed.",
+        )
+
+    logging.info("Photocopy job %s created — Rs.%.0f %s by %s%s",
+                 job_id, amount, mode, staff_id,
+                 f" (quoted Rs.{quoted:.0f})" if overridden else "")
+    return {"ok": True, "job_id": job_id, "amount": amount,
+            "amount_quoted": quoted, "breakdown": breakdown,
+            "overridden": overridden}
 
 
 # ── B-3: Post-press services — work that never touches a printer ──────────────
