@@ -607,6 +607,23 @@ Also removed: the ₹2 scan special rate (§4.4).
 | `store_puller` pull loop | Already safe (no `file_url`) — **add a test that pins it** |
 | `watcher.py` auto-print | File-driven; pin with a test |
 | Printer-breakdown counts, "pending print" filters | Filter `service_kind IS NULL` |
+
+> **Built 2026-09-01 (B-5).** Only one place actually needed the filter:
+> `renderPrinterBreakdown()` in both consoles, which buckets every one of the
+> day's jobs into a printer panel via `guessprinter()` — a function with no idea
+> what a service job is. A lamination was being counted as a Konica job.
+>
+> **MIS needed no filter at all**, and that is worth writing down rather than
+> adding a no-op: every `jobs` read there is gated on `printed_by=not.is.null`,
+> which nothing sets on a service job, and the page-count breakdown reads
+> `printer_counters` / `konica_jobs` — machine data a service job cannot appear
+> in. Both properties are pinned by tests, including one asserting
+> `handle_new_service` never writes `printed_by`, because that is what the
+> structural exclusion rests on.
+>
+> The stat cards (Jobs / Completed / Pending / Revenue) deliberately **do** count
+> services: money taken for lamination is money taken, and pending work is
+> pending work. Those are job counts, not print counts.
 | Print panel | Service panel instead (kind, quantities, quote, Start / Ready / Collect) |
 | `handle_print_item` | Refuse a service job with a clear error, not a stack trace |
 | `/detect-colour` | Not offered for service jobs |
@@ -737,7 +754,7 @@ by ₹180, never under.
 | B-2 ✅ | Migrations (cloud + SQLite + `docs/SCHEMA.md`) — built 2026-08-31, cloud SQL not yet run | none — additive |
 | B-3 ✅ | `/service-quote` + `/new-service` + `create_job` guard + isolation tests — built 2026-08-31 | low |
 | B-4 ✅ | jobs.html console UI (modal, kind pills, service panel) — built 2026-08-31 | low |
-| B-5 | admin.html mirror + MIS `service_kind` filters | low |
+| B-5 ✅ | admin.html mirror + print-count exclusion — built 2026-09-01 | low |
 | B-6 | Photocopy button quotes from the rate card (B6) | low — one live button |
 | B-7 | Per-store capabilities + `is_outsourced()` | low |
 | B-8 | Inter-store transfer + revenue split + Nattika's incoming queue | medium |

@@ -2386,6 +2386,10 @@ function renderPrinterBreakdown() {
   // Per-store console: scope the breakdown to this machine's store, same as the queue.
   const todayJobs = allJobs.filter(j => {
     const owner = j.assigned_store_id || j.store_id;  // fulfilling store
+    // Service jobs never reach a printer, so they must never be counted into
+    // one's panel — a lamination booked at the counter is not a Konica job
+    // (plan §4.10/§4.11). service_kind NULL is every print job that exists.
+    if (j.service_kind) return false;
     return (j.received_at || "").startsWith(todayStr) &&
       (storeFilter === "all" || !owner || owner === storeFilter);
   });
