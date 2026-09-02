@@ -265,14 +265,37 @@ def test_the_stat_cards_still_count_service_jobs(name):
 
 
 def test_mis_staff_panels_cannot_see_a_service_job():
-    """MIS reads jobs only where printed_by is set, and nothing sets it on a
-    service job — so the exclusion is structural, not a filter someone can drop.
+    """MIS's staff panels read jobs only where printed_by is set, and nothing
+    sets it on a service job — so the exclusion is structural, not a filter
+    someone can drop.
+
+    Updated for B-10 (2026-09-02). This asserted the gate on *every* MIS jobs
+    query, using "every query" as a proxy for "every staff query". B-10's
+    reconciliation panel is the case that separates them: it exists to count
+    copy/scan **service** jobs, so gating it on printed_by would hide exactly
+    the rows it is there to find. The property being pinned is unchanged — the
+    staff panels cannot see a service job — but it is now stated about the
+    staff queries rather than about all of them, and the reconciliation queries
+    are pinned from the other side: they must never carry the gate.
     """
     mis = html("mis.html")
     job_queries = re.findall(r'sbFetch\("jobs",\s*`([^`]+)`', mis)
     assert job_queries, "expected MIS to read the jobs table"
-    for q in job_queries:
-        assert "printed_by=not.is.null" in q, f"MIS jobs query without the printed_by gate: {q}"
+
+    staff = [q for q in job_queries if "printed_by" in q]
+    recon = [q for q in job_queries if "${RC_SELECT}" in q]
+    assert staff, "expected MIS to read jobs for the staff panels"
+    assert recon, "expected MIS to read jobs for the reconciliation panel"
+    assert len(staff) + len(recon) == len(job_queries), (
+        f"an MIS jobs query is neither a staff nor a reconciliation read: "
+        f"{set(job_queries) - set(staff) - set(recon)}")
+
+    for q in staff:
+        assert "printed_by=not.is.null" in q, f"staff query without the gate: {q}"
+    for q in recon:
+        assert "printed_by" not in q, (
+            f"the reconciliation counts service jobs; the printed_by gate would "
+            f"hide every one of them: {q}")
 
     # The claim above only holds while nothing writes printed_by on a service job.
     server = open(os.path.join(ROOT, "print_server.py"), encoding="utf-8").read()
@@ -284,11 +307,24 @@ def test_mis_printer_counts_come_from_the_machines_not_from_jobs():
     """The page-count breakdown reads printer_counters and konica_jobs — machine
     data a service job cannot appear in. Worth pinning: the tempting "fix" is to
     recount those from the jobs table, which would quietly include services.
+
+    B-10 note: the reconciliation panel reads both sides on purpose, and that is
+    the one place they are allowed to meet. It compares them; it never sums them
+    into a printer count.
     """
     mis = html("mis.html")
     assert 'sbFetch("printer_counters"' in mis
     assert 'sbFetch("konica_jobs"' in mis
-    # Every jobs read in MIS is a staff-performance one, gated on printed_by.
+
+    # Machine page counts are never derived from the jobs table.
+    for fn in ("renderCounterStats", "renderBreakdown", "renderKJPeriod"):
+        body = _block(mis, f"function {fn}(", "\n}")
+        assert "sbFetch" not in body, f"{fn} must be handed machine rows, not fetch jobs"
+
+    # Every jobs read is either a staff-performance one (gated on printed_by) or
+    # a reconciliation one (deliberately not) — no third kind has crept in.
     assert mis.count('sbFetch("jobs"') == len(
         re.findall(r'sbFetch\("jobs",\s*`[^`]*printed_by=not\.is\.null[^`]*`', mis)
+    ) + len(
+        re.findall(r'sbFetch\("jobs",\s*`[^`]*\$\{RC_SELECT\}[^`]*`', mis)
     )

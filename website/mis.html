@@ -172,6 +172,25 @@
   .kj-bar-fill  { height: 100%; border-radius: 2px; }
   .kj-bar-val   { width: 55px; text-align: right; color: var(--text); flex-shrink: 0; }
 
+  /* ── Copy/scan reconciliation ───────────────────── */
+  .rc-verdict { font-family: var(--mono); font-size: .72rem; padding: .7rem .9rem;
+    border-left: 3px solid var(--border); background: var(--surface); margin-bottom: 1rem;
+    line-height: 1.5; }
+  .rc-verdict.gap   { border-left-color: var(--red);   color: var(--red); }
+  .rc-verdict.blind { border-left-color: var(--amber); color: var(--amber); }
+  .rc-verdict.ok    { border-left-color: var(--green); color: var(--green); }
+  .rc-verdict.quiet { color: var(--muted); }
+  .rc-verdict-sub { color: var(--muted); margin-top: .35rem; font-size: .65rem; }
+  .rc-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: .68rem; }
+  .rc-table th { text-align: right; padding: .45rem .6rem; color: var(--muted);
+    font-size: .58rem; letter-spacing: .1em; text-transform: uppercase;
+    border-bottom: 1px solid var(--border); font-weight: 400; }
+  .rc-table th:first-child, .rc-table td:first-child { text-align: left; }
+  .rc-table td { text-align: right; padding: .5rem .6rem; border-bottom: 1px solid var(--border); }
+  .rc-gap    { color: var(--red); }
+  .rc-nogap  { color: var(--green); }
+  .rc-blind  { color: var(--amber); font-style: italic; }
+
   /* ── Staff performance ──────────────────────────── */
   .staff-online { color: var(--green); }
   .staff-offline { color: var(--muted); }
@@ -329,13 +348,39 @@
       </div>
     </div>
 
+    <!-- Copy/scan reconciliation — the counter's word against the machine's -->
+    <div class="panel">
+      <div class="panel-hdr" style="flex-wrap:wrap; gap:.5rem;">
+        <div class="panel-title">Copy &amp; Scan Reconciliation</div>
+        <span class="panel-sub" id="rc-sub">machine log vs. what was rung up</span>
+      </div>
+      <div class="tab-bar" id="rc-tabs">
+        <button class="tab-btn active" onclick="setRCTab('today',this)">Today</button>
+        <button class="tab-btn"        onclick="setRCTab('week', this)">This Week</button>
+        <button class="tab-btn"        onclick="setRCTab('month',this)">This Month</button>
+        <button class="tab-btn"        onclick="setRCTab('year', this)">This Year</button>
+      </div>
+      <div id="rc-today" class="jobs-period-content active">
+        <div class="empty"><span class="spinner"></span> Loading…</div>
+      </div>
+      <div id="rc-week"  class="jobs-period-content">
+        <div class="empty"><span class="spinner"></span> Loading…</div>
+      </div>
+      <div id="rc-month" class="jobs-period-content">
+        <div class="empty"><span class="spinner"></span> Loading…</div>
+      </div>
+      <div id="rc-year"  class="jobs-period-content">
+        <div class="empty"><span class="spinner"></span> Loading…</div>
+      </div>
+    </div>
+
     <!-- Staff Performance -->
     <div class="panel">
       <div class="panel-hdr">
         <div class="panel-title">Staff Performance</div>
         <span class="panel-sub" id="sp-online-count"></span>
       </div>
-      <div class="tab-bar">
+      <div class="tab-bar" id="sp-tabs">
         <button class="tab-btn active" onclick="setSPTab('today',this)">Today</button>
         <button class="tab-btn"        onclick="setSPTab('week', this)">This Week</button>
         <button class="tab-btn"        onclick="setSPTab('month',this)">This Month</button>
@@ -437,6 +482,58 @@ function weekStartIST()  {
 function monthStartIST() { return todayIST().slice(0,8) + "01"; }
 function yearStartIST()  { return todayIST().slice(0,4) + "-01-01"; }
 
+// ── Konica field normalisation (mirrors konica_normalize.py) ─────────────────
+//
+// konica_jobs has had two writers that never agreed:
+//
+//   column      CSV importer (Feb-Mar 2026)     SOAP fetcher (Apr 2026 ->)
+//   job_type    Print / Copy / Scan             PRINT / COPY / SCAN
+//   result      No Error / Canceled / Error     OK / USERCANCEL / UNKNOWNERROR
+//   job_date    2026-03-16 09:46:14             2026/09/02 09:18:59
+//
+// SCHEMA_v39 backfills the table and the fetcher writes the canonical shape
+// from now on, but a store PC keeps writing whatever it last pulled, so this
+// page reads BOTH shapes rather than trusting the migration to have run.
+
+const KJ_SELECT = "job_type,result,job_date,user_name,pages_printed,num_pages," +
+                  "mono_pages,color_pages,paper_size,copies,attributed_to";
+
+const KJ_TYPES = ["Print", "Copy", "Scan"];
+const KJ_RESULT_OK = new Set(["OK", "NOERROR", "NO ERROR"]);
+
+function kjType(row) {
+  const raw = String(row && row.job_type || "").trim().toUpperCase();
+  return KJ_TYPES.find(t => t.toUpperCase() === raw) || null;
+}
+
+function kjOk(row) {
+  const raw = String(row && row.result || "").trim().toUpperCase();
+  return KJ_RESULT_OK.has(raw);
+}
+
+// "2026/09/02 09:18:59" -> "2026-09-02". '/' (0x2F) sorts above '-' (0x2D), so
+// a slash-dated row passes every `job_date=gte.<date>` filter PostgREST does as
+// a string — today, this week, this month and this year were the same query.
+// The window is decided here instead.
+function kjDay(row) {
+  const raw = String(row && row.job_date || "").trim();
+  if (!raw) return null;
+  const m = raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (!m) return null;
+  return m[1] + "-" + String(m[2]).padStart(2, "0") + "-" + String(m[3]).padStart(2, "0");
+}
+
+// Completed work inside the window. A row with no readable date is skipped
+// rather than placed by guesswork — the same rule store_digest follows, because
+// a job in the wrong day is worse than a job in no day.
+function kjUsable(rows, startDay) {
+  return (rows || []).filter(r => {
+    if (!kjOk(r)) return false;
+    const day = kjDay(r);
+    return day !== null && day >= startDay;
+  });
+}
+
 // ── Load all ─────────────────────────────────────────────────────────────────
 let _kjRows = {};  // cache konica_jobs rows per period key
 
@@ -454,7 +551,8 @@ async function loadAll() {
       kjToday, kjWeek, kjMonth, kjYear, kjMeta,
       spSessToday, spSessWeek, spSessMonth,
       spJobsToday, spJobsWeek, spJobsMonth,
-      spOpen
+      spOpen,
+      rcToday, rcWeek, rcMonth, rcYear
     ] = await Promise.all([
       sbFetch("printer_counters", "order=polled_at.desc&limit=2"),
       sbFetch("printer_supplies", "order=polled_at.desc&limit=30"),
@@ -464,10 +562,16 @@ async function loadAll() {
       sbFetch("printer_counters", `order=polled_at.asc&limit=10&polled_at=gte.${dWeek}`),
       sbFetch("printer_counters", `order=polled_at.asc&limit=10&polled_at=gte.${dMonth}`),
       sbFetch("printer_counters", `order=polled_at.asc&limit=10&polled_at=gte.${dYear}`),
-      sbFetch("konica_jobs", `job_date=gte.${dToday}&result=eq.No Error&select=job_type,user_name,pages_printed,mono_pages,color_pages,paper_size,copies,attributed_to&limit=2000`),
-      sbFetch("konica_jobs", `job_date=gte.${dWeek}&result=eq.No Error&select=job_type,user_name,pages_printed,mono_pages,color_pages,paper_size,copies,attributed_to&limit=5000`),
-      sbFetch("konica_jobs", `job_date=gte.${dMonth}&result=eq.No Error&select=job_type,user_name,pages_printed,mono_pages,color_pages,paper_size,copies,attributed_to&limit=5000`),
-      sbFetch("konica_jobs", `job_date=gte.${dYear}&result=eq.No Error&select=job_type,user_name,pages_printed,mono_pages,color_pages,paper_size,copies&limit=10000`),
+      // KJ_SELECT / no result= filter / client-side window: see kjOk() and
+      // kjInWindow(). The old `result=eq.No Error` matched only the rows the
+      // retired CSV importer wrote, and a slash-dated job_date passes every
+      // `gte` string comparison — together they froze this panel on
+      // February-March data for five months. Both are now decided in the
+      // browser, where either field shape is understood.
+      sbFetch("konica_jobs", `job_date=gte.${dToday}&select=${KJ_SELECT}&order=job_date.desc&limit=10000`),
+      sbFetch("konica_jobs", `job_date=gte.${dWeek}&select=${KJ_SELECT}&order=job_date.desc&limit=10000`),
+      sbFetch("konica_jobs", `job_date=gte.${dMonth}&select=${KJ_SELECT}&order=job_date.desc&limit=10000`),
+      sbFetch("konica_jobs", `job_date=gte.${dYear}&select=${KJ_SELECT}&order=job_date.desc&limit=20000`),
       sbFetch("konica_jobs", "order=job_date.desc&limit=1&select=job_date,job_number"),
       sbFetch("staff_sessions", `login_at=gte.${dToday}&select=staff_id,login_at,logout_at,pc_id`).catch(()=>[]),
       sbFetch("staff_sessions", `login_at=gte.${dWeek}&select=staff_id,login_at,logout_at`).catch(()=>[]),
@@ -476,6 +580,13 @@ async function loadAll() {
       sbFetch("jobs", `received_at=gte.${dWeek}&printed_by=not.is.null&select=printed_by,amount_collected&limit=5000`).catch(()=>[]),
       sbFetch("jobs", `received_at=gte.${dMonth}&printed_by=not.is.null&select=printed_by,amount_collected&limit=5000`).catch(()=>[]),
       sbFetch("staff_sessions", "logout_at=is.null&select=staff_id,pc_id,login_at").catch(()=>[]),
+      // Counter-recorded copy/scan — deliberately NOT gated on printed_by,
+      // which a service job never has (that gate is what keeps services out of
+      // the print panels; here it would hide the very rows being counted).
+      sbFetch("jobs", `received_at=gte.${dToday}&select=${RC_SELECT}&limit=2000`).catch(()=>[]),
+      sbFetch("jobs", `received_at=gte.${dWeek}&select=${RC_SELECT}&limit=5000`).catch(()=>[]),
+      sbFetch("jobs", `received_at=gte.${dMonth}&select=${RC_SELECT}&limit=5000`).catch(()=>[]),
+      sbFetch("jobs", `received_at=gte.${dYear}&select=${RC_SELECT}&limit=20000`).catch(()=>[]),
     ]);
 
     renderCounterStats(counters);
@@ -484,7 +595,12 @@ async function loadAll() {
     renderHistory(history);
     renderBreakdown(counters, todayFirst, weekFirst, monthFirst, yearFirst);
 
-    _kjRows = { today: kjToday, week: kjWeek, month: kjMonth, year: kjYear };
+    _kjRows = {
+      today: kjUsable(kjToday, dToday),
+      week:  kjUsable(kjWeek,  dWeek),
+      month: kjUsable(kjMonth, dMonth),
+      year:  kjUsable(kjYear,  dYear),
+    };
     if (kjMeta && kjMeta.length) {
       set("kj-last-job", "last job: #" + kjMeta[0].job_number + " · " + shortTime(kjMeta[0].job_date));
     }
@@ -496,7 +612,7 @@ async function loadAll() {
     _spData = {
       sessions: { today: spSessToday, week: spSessWeek, month: spSessMonth },
       jobs:     { today: spJobsToday, week: spJobsWeek, month: spJobsMonth },
-      konica:   { today: kjToday,     week: kjWeek,     month: kjMonth },
+      konica:   { today: _kjRows.today, week: _kjRows.week, month: _kjRows.month },
       open:     spOpen,
     };
     const onlineCount = (spOpen||[]).length;
@@ -504,6 +620,10 @@ async function loadAll() {
     renderStaffPanel("today");
     renderStaffPanel("week");
     renderStaffPanel("month");
+
+    _rcRows = { today: rcToday, week: rcWeek, month: rcMonth, year: rcYear };
+    _rcFreshness = kjFreshness(kjMeta);
+    ["today","week","month","year"].forEach(renderReconPeriod);
 
     setSyncState("ok");
   } catch(e) {
@@ -702,14 +822,14 @@ function renderKJPeriod(period) {
   const rows = _kjRows[period] || [];
 
   if (!rows.length) {
-    container.innerHTML = `<div class="empty">No job data for this period. Import a Konica CSV first.</div>`;
+    container.innerHTML = `<div class="empty">No completed Konica jobs in this window.</div>`;
     return;
   }
 
   // Aggregate
   let totalPages = 0, totalMono = 0, totalColour = 0;
-  let printPages = 0, copyPages  = 0;
-  let printJobs  = 0, copyJobs   = 0;
+  let printPages = 0, copyPages  = 0, scanPages = 0;
+  let printJobs  = 0, copyJobs   = 0, scanJobs  = 0;
   const byUser   = {};
   const bySize   = {};
 
@@ -721,13 +841,19 @@ function renderKJPeriod(period) {
     totalMono   += mp;
     totalColour += cp;
 
-    if (r.job_type === "Print") { printPages += pp; printJobs++; }
-    if (r.job_type === "Copy")  { copyPages  += pp; copyJobs++;  }
+    // kjType(), not `r.job_type === "Print"`: the live SOAP fetcher writes
+    // PRINT/COPY/SCAN, so the old exact match bucketed 12,864 rows as neither.
+    const t = kjType(r);
+    if (t === "Print") { printPages += pp; printJobs++; }
+    if (t === "Copy")  { copyPages  += pp; copyJobs++;  }
+    // A scan prints nothing, so its pages live in num_pages; reading
+    // pages_printed would report every scan as zero work.
+    if (t === "Scan")  { scanPages  += (r.num_pages || 0); scanJobs++; }
 
     const u = r.user_name || "(Copy / no user)";
     byUser[u] = (byUser[u] || 0) + pp;
 
-    const sz = r.paper_size || "Unknown";
+    const sz = (r.paper_size || "").trim().toUpperCase() || "Unknown";
     bySize[sz] = (bySize[sz] || 0) + pp;
   }
 
@@ -763,9 +889,14 @@ function renderKJPeriod(period) {
           <div class="kj-sub">${fmt(copyPages)} pages</div>
         </div>
         <div class="kj-stat">
+          <div class="kj-label">Scan Jobs</div>
+          <div class="kj-value">${fmt(scanJobs)}</div>
+          <div class="kj-sub">${fmt(scanPages)} pages · no paper used</div>
+        </div>
+        <div class="kj-stat">
           <div class="kj-label">Total Jobs</div>
           <div class="kj-value" style="color:var(--green)">${fmt(rows.length)}</div>
-          <div class="kj-sub">print + copy combined</div>
+          <div class="kj-sub">print + copy + scan</div>
         </div>
       </div>
       <div class="kj-split">
@@ -809,6 +940,198 @@ function shortTime(iso) {
   } catch { return iso.slice(0,16); }
 }
 
+// ── Copy/scan reconciliation ─────────────────────────────────────────────────
+//
+// Mirrors copy_reconciliation.py. Every other number on this page is
+// self-reported — a sale exists because somebody filed it. Copying is the one
+// job with an independent second witness: the Konica writes its own log whether
+// or not the sale was rung up. The difference is unbilled walk-in copying, and
+// tests/test_copy_reconciliation.py pins these constants against the Python.
+
+const RC_SELECT = "received_at,service_kind,service_meta,source,service_type,page_count,copies";
+const RC_TYPES = ["Copy", "Scan"];
+const RC_COUNTER_KINDS = { copy: "Copy", scan: "Scan" };
+const RC_PHOTOCOPY_MARKERS = new Set(["photocopy"]);
+const GAP_FLOOR_PAGES = 25;      // below this a window is too small to judge
+const GAP_ALERT_FRACTION = 0.20; // unrecorded share that earns a flag
+const RC_STALE_HOURS = 24;       // machine log older than this = not reconciling
+
+let _rcRows = {};
+let _rcFreshness = { hours: null, last: null };
+
+function rcInt(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+function rcMeta(row) {
+  const raw = row && row.service_meta;
+  if (raw && typeof raw === "object") return raw;
+  if (typeof raw === "string" && raw.trim()) {
+    try { const p = JSON.parse(raw); return (p && typeof p === "object") ? p : {}; }
+    catch (e) { return {}; }
+  }
+  return {};
+}
+
+// A counter row is copy/scan by its B-3 service_kind, or by the B-6 photocopy
+// markers. /new-photocopy deliberately sets no service_kind — that is what
+// keeps a photocopy inside the printer counts so this comparison works at all.
+// A row matching both is one job, counted once.
+function rcCounterKind(row) {
+  const kind = String(row && row.service_kind || "").trim().toLowerCase();
+  if (RC_COUNTER_KINDS[kind]) return RC_COUNTER_KINDS[kind];
+  for (const f of ["source", "service_type"]) {
+    if (RC_PHOTOCOPY_MARKERS.has(String(row && row[f] || "").trim().toLowerCase()))
+      return "Copy";
+  }
+  return null;
+}
+
+function rcCounterPages(row) {
+  const meta   = rcMeta(row);
+  const sheets = rcInt(meta.sheets) || rcInt(row.page_count);
+  const copies = rcInt(meta.copies) || rcInt(row.copies) || 1;
+  return sheets * copies;
+}
+
+function rcMachinePages(row) {
+  if (kjType(row) === "Scan") return rcInt(row.num_pages);
+  return rcInt(row.pages_printed) || rcInt(row.num_pages);
+}
+
+function reconcile(machineRows, counterRows) {
+  const machine = {}, counter = {};
+  RC_TYPES.forEach(t => { machine[t] = {jobs:0, pages:0}; counter[t] = {jobs:0, pages:0}; });
+
+  for (const r of machineRows || []) {
+    const t = kjType(r);
+    if (!machine[t]) continue;
+    if ("result" in r && !kjOk(r)) continue;
+    machine[t].jobs++;
+    machine[t].pages += rcMachinePages(r);
+  }
+  for (const r of counterRows || []) {
+    const t = rcCounterKind(r);
+    if (!counter[t]) continue;
+    counter[t].jobs++;
+    counter[t].pages += rcCounterPages(r);
+  }
+
+  const types = {};
+  for (const t of RC_TYPES) {
+    const m = machine[t], c = counter[t];
+    const gap = m.pages - c.pages;
+    let status;
+    if (m.pages === 0 && m.jobs === 0)                            status = "blind";
+    else if (m.pages < GAP_FLOOR_PAGES)                           status = "quiet";
+    else if (gap > 0 && (gap / m.pages) >= GAP_ALERT_FRACTION)    status = "gap";
+    else                                                          status = "ok";
+    types[t] = { machine_jobs:m.jobs, machine_pages:m.pages,
+                 counter_jobs:c.jobs, counter_pages:c.pages,
+                 gap_pages:gap, gap_fraction: m.pages ? gap/m.pages : 0, status };
+  }
+
+  const mp = RC_TYPES.reduce((a,t) => a + types[t].machine_pages, 0);
+  const cp = RC_TYPES.reduce((a,t) => a + types[t].counter_pages, 0);
+  const st = new Set(RC_TYPES.map(t => types[t].status));
+  const status = st.has("gap") ? "gap" : st.has("ok") ? "ok"
+               : st.has("quiet") ? "quiet" : "blind";
+  return { types, machine_pages: mp, counter_pages: cp, gap_pages: mp - cp,
+           gap_fraction: mp ? (mp - cp)/mp : 0, status };
+}
+
+// How long since the printer last told us anything. A reconciliation running on
+// a dead feed reports "nothing unbilled", which is the exact failure this panel
+// exists to prevent — so staleness is stated, not inferred from a low number.
+function kjFreshness(kjMeta) {
+  const last = (kjMeta && kjMeta.length) ? kjMeta[0].job_date : null;
+  if (!last) return { hours: null, last: null };
+  const iso = String(last).trim().replace(/^(\d{4})\/(\d{2})\/(\d{2})/, "$1-$2-$3");
+  const t = Date.parse(iso.replace(" ", "T"));
+  if (!Number.isFinite(t)) return { hours: null, last: last };
+  return { hours: (Date.now() - t) / 3600000, last: last };
+}
+
+function setRCTab(period, btn) {
+  document.querySelectorAll("#rc-today,#rc-week,#rc-month,#rc-year")
+    .forEach(el => el.classList.remove("active"));
+  document.getElementById("rc-" + period).classList.add("active");
+  const bar = document.getElementById("rc-tabs");
+  if (bar) bar.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+}
+
+const RC_WINDOW_LABEL = { today:"today", week:"this week", month:"this month", year:"this year" };
+
+function renderReconPeriod(period) {
+  const el = document.getElementById("rc-" + period);
+  if (!el) return;
+  const r = reconcile(_kjRows[period] || [], _rcRows[period] || []);
+  const label = RC_WINDOW_LABEL[period] || period;
+
+  let verdict, cls, sub = "";
+  const stale = _rcFreshness.hours !== null && _rcFreshness.hours > RC_STALE_HOURS;
+
+  if (r.status === "blind") {
+    cls = "blind";
+    verdict = "No Konica copy or scan jobs " + label + " — nothing to reconcile.";
+    sub = "This is not the same as “nothing unbilled”. If the shop copied " +
+          "today, the job fetcher is not reaching the printer.";
+  } else if (r.status === "gap") {
+    cls = "gap";
+    verdict = `${fmt(r.gap_pages)} of ${fmt(r.machine_pages)} pages the machine ` +
+              `copied or scanned ${label} were never rung up ` +
+              `(${(r.gap_fraction*100).toFixed(0)}%).`;
+    sub = "The counter recorded " + fmt(r.counter_pages) + " pages. The rest is " +
+          "walk-in work that left the shop without a sale.";
+  } else if (r.status === "quiet") {
+    cls = "quiet";
+    verdict = `Only ${fmt(r.machine_pages)} machine pages ${label} — too few to judge.`;
+    sub = `A gap is only called above ${GAP_FLOOR_PAGES} pages.`;
+  } else {
+    cls = "ok";
+    verdict = `The counter accounts for the machine ${label}: ` +
+              `${fmt(r.counter_pages)} pages billed against ${fmt(r.machine_pages)} copied.`;
+  }
+
+  if (stale) {
+    cls = "blind";
+    sub = `⚠️ The newest Konica job is ${Math.floor(_rcFreshness.hours)}h old ` +
+          `(${shortTime(_rcFreshness.last)}). Anything below is that stale too.` +
+          (sub ? " " + sub : "");
+  }
+
+  const row = (t) => {
+    const d = r.types[t];
+    const cell = d.status === "blind"
+      ? `<td class="rc-blind" colspan="1">no machine data</td>`
+      : `<td class="${d.gap_pages > 0 ? "rc-gap" : "rc-nogap"}">${fmt(d.gap_pages)}</td>`;
+    return `<tr>
+      <td>${t}</td>
+      <td>${fmt(d.machine_jobs)}</td>
+      <td>${fmt(d.machine_pages)}</td>
+      <td>${fmt(d.counter_jobs)}</td>
+      <td>${fmt(d.counter_pages)}</td>
+      ${cell}
+    </tr>`;
+  };
+
+  el.innerHTML = `
+    <div class="rc-verdict ${cls}">${verdict}
+      ${sub ? `<div class="rc-verdict-sub">${sub}</div>` : ""}
+    </div>
+    <div class="table-wrap">
+      <table class="rc-table">
+        <thead><tr>
+          <th></th><th>Machine jobs</th><th>Machine pages</th>
+          <th>Counter jobs</th><th>Counter pages</th><th>Unbilled pages</th>
+        </tr></thead>
+        <tbody>${RC_TYPES.map(row).join("")}</tbody>
+      </table>
+    </div>`;
+}
+
 // ── Staff Performance ─────────────────────────────────────────────────────────
 const KNOWN_STAFF = ["priya","revana","bini","anu","deepak"];
 const STAFF_NAMES = { priya:"Priya", revana:"Revana", bini:"Bini", anu:"Anu", deepak:"Deepak" };
@@ -819,8 +1142,13 @@ function setSPTab(period, btn) {
   _spTab = period;
   document.querySelectorAll("#sp-today,#sp-week,#sp-month").forEach(el => el.classList.remove("active"));
   document.getElementById("sp-" + period).classList.add("active");
-  document.querySelectorAll(".tab-bar")[2] && document.querySelectorAll(".tab-bar")[2]
-    .querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  // By id, not by position. This read `.tab-bar[2]` while the page had two tab
+  // bars, so the lookup was undefined and the `&&` swallowed it: clicking a
+  // staff tab added `.active` without ever removing it from the last one, and
+  // the tabs slowly all lit up. Adding a panel above would have "fixed" it by
+  // accident and broken it again on the next one.
+  const bar = document.getElementById("sp-tabs");
+  if (bar) bar.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
   if (btn) btn.classList.add("active");
 }
 
