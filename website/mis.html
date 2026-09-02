@@ -190,6 +190,9 @@
   .rc-gap    { color: var(--red); }
   .rc-nogap  { color: var(--green); }
   .rc-blind  { color: var(--amber); font-style: italic; }
+  .rc-unknown { font-family: var(--mono); font-size: .68rem; color: var(--amber);
+    background: #2a2410; border: 1px solid var(--amber); border-radius: 3px;
+    padding: .6rem .8rem; margin-bottom: 1rem; line-height: 1.6; }
 
   /* ── Staff performance ──────────────────────────── */
   .staff-online { color: var(--green); }
@@ -500,6 +503,19 @@ const KJ_SELECT = "job_type,result,job_date,user_name,pages_printed,num_pages," 
 
 const KJ_TYPES = ["Print", "Copy", "Scan"];
 const KJ_RESULT_OK = new Set(["OK", "NOERROR", "NO ERROR"]);
+// Every result this build understands. A code outside this set is work of
+// UNKNOWN status — not the same as a known cancellation, and counting it as one
+// shrinks the machine side of the reconciliation. Mirrors
+// konica_normalize.KNOWN_RESULTS; the printer emitted 'X2' on 2026-09-02 and
+// nothing had mapped it.
+const KJ_RESULT_KNOWN = new Set([
+  "OK", "NOERROR", "NO ERROR", "USERCANCEL", "CANCEL", "CANCELED", "CANCELLED",
+  "UNKNOWNERROR", "ERROR", "",
+]);
+
+function kjKnownResult(row) {
+  return KJ_RESULT_KNOWN.has(String(row && row.result || "").trim().toUpperCase());
+}
 
 function kjType(row) {
   const raw = String(row && row.job_type || "").trim().toUpperCase();
@@ -1004,9 +1020,17 @@ function reconcile(machineRows, counterRows) {
   const machine = {}, counter = {};
   RC_TYPES.forEach(t => { machine[t] = {jobs:0, pages:0}; counter[t] = {jobs:0, pages:0}; });
 
+  let unknownJobs = 0, unknownPages = 0;
   for (const r of machineRows || []) {
     const t = kjType(r);
     if (!machine[t]) continue;
+    if ("result" in r && !kjKnownResult(r)) {
+      // Neither billed nor counted as machine work. Said out loud below rather
+      // than rounded away — a gap that reads smaller than it is, is worse than
+      // no gap at all.
+      unknownJobs++; unknownPages += rcMachinePages(r);
+      continue;
+    }
     if ("result" in r && !kjOk(r)) continue;
     machine[t].jobs++;
     machine[t].pages += rcMachinePages(r);
@@ -1038,7 +1062,8 @@ function reconcile(machineRows, counterRows) {
   const status = st.has("gap") ? "gap" : st.has("ok") ? "ok"
                : st.has("quiet") ? "quiet" : "blind";
   return { types, machine_pages: mp, counter_pages: cp, gap_pages: mp - cp,
-           gap_fraction: mp ? (mp - cp)/mp : 0, status };
+           gap_fraction: mp ? (mp - cp)/mp : 0, status,
+           unknown_jobs: unknownJobs, unknown_pages: unknownPages };
 }
 
 // How long since the printer last told us anything. A reconciliation running on
@@ -1117,10 +1142,18 @@ function renderReconPeriod(period) {
     </tr>`;
   };
 
+  const unknownNote = r.unknown_jobs
+    ? `<div class="rc-unknown">⚠️ ${fmt(r.unknown_jobs)} machine job${r.unknown_jobs === 1 ? "" : "s"}
+       (${fmt(r.unknown_pages)} pages) carr${r.unknown_jobs === 1 ? "ies" : "y"} a result code
+       this build does not understand — in neither column, so the figures below are
+       incomplete by at least that much.</div>`
+    : "";
+
   el.innerHTML = `
     <div class="rc-verdict ${cls}">${verdict}
       ${sub ? `<div class="rc-verdict-sub">${sub}</div>` : ""}
     </div>
+    ${unknownNote}
     <div class="table-wrap">
       <table class="rc-table">
         <thead><tr>

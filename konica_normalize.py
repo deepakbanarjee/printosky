@@ -111,6 +111,26 @@ def normalize_result(raw) -> str | None:
     return text
 
 
+#: The results this build understands. Anything else is a code the printer
+#: produced and this module has never been taught — see is_known_result.
+KNOWN_RESULTS: frozenset[str] = frozenset({RESULT_OK, "Canceled", "Error"})
+
+
+def is_known_result(raw) -> bool:
+    """Does this build understand what this result MEANS?
+
+    The distinction that matters downstream: a `Canceled` job is known work
+    that did not happen, and excluding it from a count is correct. An unmapped
+    code is work of UNKNOWN status, and excluding it silently is a count
+    pretending to a completeness it does not have — which is how a
+    reconciliation quietly stops reconciling.
+
+    Empty counts as known: a row with no result is missing data, not a code.
+    """
+    normalised = normalize_result(raw)
+    return normalised is None or normalised in KNOWN_RESULTS
+
+
 def is_ok(raw) -> bool:
     """True when this row represents work the machine actually completed.
 
