@@ -642,6 +642,12 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=_handlers,
     )
+    # The realtime socket carries the service_role key in its URL and in every
+    # join frame; at INFO those libraries write it into store_puller.log. See
+    # realtime_liveness.quiet_transport_loggers. Imported here, like the
+    # subscription thread does, so the module stays importable without it.
+    import realtime_liveness
+    realtime_liveness.quiet_transport_loggers()
     try:
         store_id, dest_dir, conn, client = _load_runtime()
     except Exception as exc:

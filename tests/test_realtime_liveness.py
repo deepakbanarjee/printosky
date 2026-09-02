@@ -225,3 +225,66 @@ def test_every_poller_holds_its_loop_with_the_liveness_check(rel):
             f"{rel} line {node.lineno}: bare sleep loop — a dead socket would "
             "read as healthy again. Use realtime_liveness.hold()."
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The credential in the log
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestTheTransportLoggersAreQuiet:
+    """The realtime client logs its connect URL and every frame it sends, both
+    of which carry the service_role key — in `?apikey=` and in the phx_join
+    `access_token`. Under the root INFO level all three pollers set, that wrote
+    a full-privilege, RLS-bypassing credential into their log files at startup
+    and on every reconnect (observed on the PRIOFF DTP box, 2026-08-31)."""
+
+    def _levels(self, monkeypatch, **env):
+        import logging
+        for k, v in env.items():
+            monkeypatch.setenv(k, v)
+        for name in rl._TRANSPORT_LOGGERS:          # start from a clean slate
+            logging.getLogger(name).setLevel(logging.NOTSET)
+        rl.quiet_transport_loggers()
+        return {n: logging.getLogger(n).level for n in rl._TRANSPORT_LOGGERS}
+
+    def test_the_credential_carrying_loggers_are_raised_above_info(self, monkeypatch):
+        import logging
+        levels = self._levels(monkeypatch)
+        assert levels, "no transport loggers are being quietened"
+        for name, level in levels.items():
+            assert level >= logging.WARNING, f"{name} still logs at INFO"
+
+    def test_the_realtime_and_websocket_loggers_are_covered(self):
+        """These two are the ones that carry the key — the rest is noise."""
+        assert "realtime" in rl._TRANSPORT_LOGGERS
+        assert "websockets" in rl._TRANSPORT_LOGGERS
+
+    def test_failures_still_get_through(self, monkeypatch):
+        """WARNING, not CRITICAL: whatever these libraries say about a broken
+        socket must still reach the log."""
+        import logging
+        for level in self._levels(monkeypatch).values():
+            assert level <= logging.WARNING
+
+    def test_the_level_can_be_turned_back_up_for_debugging(self, monkeypatch):
+        import logging
+        levels = self._levels(monkeypatch, REALTIME_TRANSPORT_LOG_LEVEL="DEBUG")
+        assert set(levels.values()) == {logging.DEBUG}
+
+    def test_junk_in_the_knob_falls_back_to_warning(self, monkeypatch):
+        """A typo must not silently restore the leak by leaving NOTSET."""
+        import logging
+        levels = self._levels(monkeypatch, REALTIME_TRANSPORT_LOG_LEVEL="lowd")
+        assert set(levels.values()) == {logging.WARNING}
+
+
+@pytest.mark.parametrize("rel", POLLERS)
+def test_every_poller_quiets_its_transport_loggers(rel):
+    """Each poller opens its own socket, so each has to make this call — and
+    it has to be in the same file that sets the root level to INFO."""
+    src = (ROOT / rel).read_text(encoding="utf-8-sig")
+    assert "quiet_transport_loggers()" in src, (
+        f"{rel} sets a root INFO level and opens a realtime socket, so it must "
+        "call realtime_liveness.quiet_transport_loggers() or it logs the "
+        "service_role key on every connect"
+    )
