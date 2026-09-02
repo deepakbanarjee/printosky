@@ -6,10 +6,15 @@ That is the whole point: it exercises the same code path the counter uses, so a
 green result says something about this machine. Scaling elsewhere and carrying
 the PDFs over proves nothing.
 
-    python tools/scale_proof.py notes.pdf
-    python tools/scale_proof.py notes.pdf --only S3 S4
-    python tools/scale_proof.py notes.pdf --send                  # actually print
-    python tools/scale_proof.py notes.pdf --send --printer konica
+    python tools/scale_proof.py --make-source                     # no file needed
+    python tools/scale_proof.py --make-source --only S3 S4
+    python tools/scale_proof.py --make-source --only S3 S4 --send --printer konica
+    python tools/scale_proof.py yourfile.pdf --only S3 S4         # or bring your own
+
+The source must be A4 portrait with visible page numbers. `--make-source`
+builds exactly that, using the same numbered pages tools/nup_final_test.py has
+always built — so no one has to go hunting for a suitable PDF on a store PC
+before they can run the proof.
 
 Without ``--send`` nothing reaches a printer: the scaled PDFs are written to the
 output folder and what each should look like is printed, so the geometry can be
@@ -33,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import fitz  # noqa: E402  PyMuPDF
 import nup_imposer  # noqa: E402
+from tools.nup_final_test import build_source  # noqa: E402
 import pdf_scaler  # noqa: E402
 import print_planner  # noqa: E402
 
@@ -118,7 +124,9 @@ def build(test_id, source, mode, percent, orientation, sides, out_dir, paper):
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("source", help="source PDF — A4 portrait, with visible page numbers")
+    ap.add_argument("source", nargs="?",
+                    help="source PDF — A4 portrait, with visible page numbers. "
+                         "Omit it and one is generated (see --make-source).")
     ap.add_argument("--out", default=os.path.join(os.getcwd(), "scale_proof"),
                     help="folder for the scaled PDFs (default: ./scale_proof)")
     ap.add_argument("--paper", default="A4", help="paper size (default: A4)")
@@ -127,11 +135,31 @@ def main():
                     help="actually print each sheet. Without this, nothing is printed.")
     ap.add_argument("--printer", default="epson", choices=["epson", "konica"],
                     help="printer key (default: epson — Nattika has no Konica)")
+    ap.add_argument("--make-source", type=int, metavar="PAGES", nargs="?", const=4,
+                    help="generate a numbered A4 source of PAGES pages (default 4) "
+                         "instead of supplying one")
     args = ap.parse_args()
 
-    if not os.path.exists(args.source):
-        sys.exit(f"source PDF not found: {args.source}")
     os.makedirs(args.out, exist_ok=True)
+
+    # A source is REQUIRED to be a real A4 portrait PDF with visible page
+    # numbers, and hunting for one on a store PC is friction between a person
+    # and a proof they should be running. So the tool can make its own — the
+    # same numbered pages tools/nup_final_test.py has always built, which is
+    # what the rotation matrix was verified against.
+    if args.make_source or not args.source:
+        pages = args.make_source or 4
+        args.source = os.path.join(args.out, "_source.pdf")
+        build_source("SCALE PROOF", pages, args.source)
+        print(f"generated a {pages}-page A4 source: {args.source}\n")
+    elif not os.path.exists(args.source):
+        sys.exit(
+            f"source PDF not found: {args.source}\n"
+            "  Point it at any A4 portrait PDF with visible page numbers, or\n"
+            "  run it with no file at all and one is generated:\n"
+            f"    python {os.path.basename(__file__)} --make-source "
+            + " ".join(f"--only {t}" for t in ([" ".join(args.only)] if args.only else []))
+        )
 
     wanted = {t.upper() for t in args.only} if args.only else None
     combos = [c for c in COMBINATIONS if wanted is None or c[0] in wanted]
