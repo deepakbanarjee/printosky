@@ -663,6 +663,44 @@ jobs get a `service_kind IS NULL` filter. Per-store revenue reads the new
 counter-recorded against machine-counted copies — the gap is unbilled walk-in
 copying, knowable for the first time.
 
+> **Built 2026-09-02 (B-10).** The **Copy & Scan Reconciliation** panel in MIS,
+> per window, with the first reading it produced:
+>
+> | | machine | counter |
+> |---|---|---|
+> | Copy, since 2026-04-13 | 3,640 jobs · 19,837 pages | — |
+> | Scan, since 2026-04-13 |   811 jobs ·  7,612 pages | — |
+> | Photocopy sales, ever  | — | **2 jobs · 2 pages** |
+>
+> Building it turned up why nobody could have noticed sooner. `konica_jobs` has
+> had **two writers that never agreed**, and nothing ever compared them:
+>
+> | column | CSV importer (Feb–Mar) | SOAP fetcher (Apr →) |
+> |---|---|---|
+> | `job_type` | `Print` / `Copy` / `Scan` | `PRINT` / `COPY` / `SCAN` |
+> | `result` | `No Error` / `Canceled` | `OK` / `USERCANCEL` |
+> | `job_date` | `2026-03-16 09:46:14` | `2026/09/02 09:18:59` |
+>
+> MIS filtered `result=eq.No Error`, so from 2026-04-13 it matched **only the
+> 1,980 rows the retired importer wrote**: the Konica Job Details and Staff
+> Performance panels have been showing February–March data for five months,
+> looking entirely plausible. `/` (0x2F) sorts above `-` (0x2D), so all 12,864
+> slash-dated rows passed *every* `job_date=gte` filter — today, this week, this
+> month and this year were one query. And `renderKJPeriod()` bucketed on
+> `job_type === "Print"`, so those rows counted as neither a print nor a copy.
+>
+> Three divergences, each plausible alone, together freezing a panel while it
+> kept rendering numbers. `konica_normalize.py` is the fix — one shape, written
+> by both writers, tolerated at read time by the console, backfilled in the
+> cloud by `SCHEMA_v39` and on each store PC by the fetcher itself (nothing runs
+> `fix_db.py` for a counter).
+>
+> The reconciliation's own honesty rules: **pages, not jobs**, because one sale
+> routinely covers several machine jobs; and a window with no machine data
+> reports `blind`, never `0 unbilled` — as does a machine log over 24 h stale.
+> A reconciliation that has quietly stopped reconciling is the exact failure it
+> exists to catch, so it is the one clean state that still speaks.
+
 ### 4.12 Fail-loud
 
 | Condition | Alert |
@@ -792,7 +830,7 @@ by ₹180, never under.
 | B-7 ✅ | Per-store capabilities + `is_outsourced()` — built 2026-09-01, inert until B-8 | low |
 | B-8 ✅ | Inter-store transfer + revenue split + Nattika's incoming queue — built 2026-09-01 | medium |
 | B-9 | Online drop-off bookings + expiry sweep | medium |
-| B-10 | Konica copy/scan reconciliation panel | medium |
+| B-10 | ~~Konica copy/scan reconciliation panel~~ ✅ | medium |
 
 ---
 
@@ -845,3 +883,72 @@ orderable online as drop-off bookings · payment on collection below a threshold
 - No change to pouch/sheet lamination pricing (`LAMINATION_RATES` is untouched).
 - The unpriced-finishing fixes are deliberately **outside** this work's
   no-change guarantee — a separate, separately revertible PR (§4.12).
+
+
+---
+
+## 5. The New Job flow moved to order-v2 (2026-09-02)
+
+**Owner, on the consolidation shipped the day before:** *"I absolutely hated the
+dark version of the jobs platform. That is why we created the order v2 version.
+It is more clear and interactive. I just want you to add the missing features to
+v2 instead of taking me back to the previous version."*
+
+The 2026-09-01 change (#99) was right that the two consoles must not disagree,
+and wrong about which one to keep. Standardising on the dark modal was argued
+from how short the wiring was — it lived in the console, needed no page hop, and
+already spoke to `print_server` — and none of those is a reason that belongs to
+anyone at the counter.
+
+### What that mistake cost, concretely
+
+`order-ui.js:42` carried `scale: 'fit', // Custom % is staff-only, never emitted
+here`. Custom % was excluded from order-v2 back when v2 was customer-only. But
+v2 has had a full staff mode since `0f5f85c` (`?staff=1` → `/order/staff-create`),
+and that is the staff portal the owner actually uses. So Custom % was absent
+from **both** places he looked, and the two rounds of "I still don't see custom
+scale" were answered by fixing a label and a 404 in a console he does not work
+in. The lesson is the one from the first round, unlearned and relearned: find
+the failing path, do not answer from the code's intent.
+
+### What shipped
+
+| | |
+|---|---|
+| `+ New Job` | Both consoles open `order-v2.html?staff=1`. |
+| The dark modal | **Deleted** from both — 218 lines of markup and 257 of wizard JS each. Not hidden: an unreachable second implementation is exactly how these two drifted apart, and jobs.html had already carried one for months. |
+| Custom % | In order-v2, revealed by `syncStaffScale()` in staff mode only. `scaleBlock()` emits nothing for `fit`, nothing for a 100% custom (100% *is* unscaled), and nothing for a percentage that is not a number — so the "absent means unchanged" property holds. |
+| Services | A no-file mode in staff mode: the ten rate-card kinds, live quote, deposit, waiver-with-a-reason. |
+
+### Where services post, and why
+
+**Owner:** *"use the vercel api so staff can work off-site."*
+
+So `/order/service-quote`, `/order/staff-service` and `/order/staff-photocopy`
+on Vercel — not `print_server` on the shop LAN. A staff member at the other
+store, or at home, can book a lamination.
+
+That makes the cloud the **second** caller of the service logic, which is the
+whole reason `service_jobs.py` exists: the deposit threshold, the Queued/Draft
+rule, the meta parsing, the typed-amount override and the payment-mode fallback
+live there, both callers import them, and `tests/test_service_parity.py` asserts
+the two paths agree. A price or a status that depends on which machine the
+counter used is the konica_jobs split all over again.
+
+Three properties the cloud path preserves structurally rather than by policy:
+
+* **no `file_url`** — `store_puller` pulls only rows that have one, so a service
+  job can never be downloaded or auto-printed;
+* **no `printed_by`** — which is what keeps services out of the MIS printer and
+  staff panels;
+* **a photocopy gets no `service_kind`** — it is work the Konica actually did,
+  so it stays inside the printer counts that B-10's reconciliation compares
+  against. Giving it one would remove it from the comparison built to catch it.
+
+`override_reason`, `amount_partial` and `queued_at` exist only in the store PC's
+SQLite. PostgREST rejects the *whole* insert on one unknown column, so the cloud
+row maps them instead of carrying them: the waiver goes into `notes` (where the
+operator reads it), money taken is `amount_collected` below `amount_quoted`
+(which is what a deposit is), and `status` already says Queued. A test pins
+every written column against `config/schema_manifest.yaml`, because that class
+of bug is a 500 on every call.

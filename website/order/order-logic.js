@@ -34,11 +34,27 @@ const FINISHING_LABEL = { none:'No binding', staple:'Staple', spiral:'Spiral', w
 
 const ORIENTATION_LABEL = { auto:'Auto orientation', portrait:'Portrait', landscape:'Landscape' };
 
-// Customers get Fit and Actual; Custom % is staff-only (owner, 2026-08-30), so
-// this UI can never emit it. 'fit' is the default and is NOT sent — an absent
-// scale block means "leave it to the printer", which is what every order did
-// before scaling existed and what keeps those orders planning identically.
-const SCALE_LABEL = { fit:'Fit to page', actual:'Actual size' };
+// Customers get Fit and Actual; Custom % is staff-only (owner, 2026-08-30) and
+// the toggle is hidden outside ?staff=1, so a customer session cannot reach it.
+// 'fit' is the default and is NOT sent — an absent scale block means "leave it
+// to the printer", which is what every order did before scaling existed and
+// what keeps those orders planning identically.
+const SCALE_LABEL = { fit:'Fit to page', actual:'Actual size', custom:'Custom %' };
+
+// Mirrors pdf_scaler.MIN_PERCENT / MAX_PERCENT. Clamped rather than rejected,
+// so a typo prints something sane instead of failing the job.
+const SCALE_MIN_PERCENT = 25;
+const SCALE_MAX_PERCENT = 400;
+
+export function scaleBlock(s) {
+  if (s.scale === 'actual') return { scale: { mode: 'actual' } };
+  if (s.scale !== 'custom') return {};                 // 'fit' sends nothing
+  const n = Math.round(Number(s.scalePercent));
+  if (!Number.isFinite(n)) return {};                  // never guess a percentage
+  const pct = Math.max(SCALE_MIN_PERCENT, Math.min(SCALE_MAX_PERCENT, n));
+  if (pct === 100) return {};                          // 100% IS actual size, unscaled
+  return { scale: { mode: 'custom', percent: pct } };
+}
 
 export function buildPrintSpec(s) {
   const inc = includedList(s.included);
@@ -51,7 +67,7 @@ export function buildPrintSpec(s) {
     orientation: s.orientation || 'auto',
     nup_direction: s.direction || 'horizontal',   // 'horizontal' | 'vertical' (N-up fill order)
     binding: s.binding, sheet_count, amount_estimated: s.amountEstimated, price_exact: s.priceExact,
-    ...(s.scale === 'actual' ? { scale: { mode: 'actual' } } : {}),
+    ...scaleBlock(s),
   };
 }
 
@@ -72,6 +88,11 @@ export function buildOperatorNote(s) {
   parts.push(s.sides === 'duplex' ? 'Duplex' : 'Single-sided');
   if (s.orientation && s.orientation !== 'auto') parts.push(ORIENTATION_LABEL[s.orientation] || s.orientation);
   if (s.scale === 'actual') parts.push('ACTUAL SIZE (not resized to fit)');
+  if (s.scale === 'custom') {
+    const b = scaleBlock(s);
+    parts.push(b.scale ? `SCALED TO ${b.scale.percent}% of the original`
+                       : 'ACTUAL SIZE (custom 100% = unscaled)');
+  }
   parts.push(FINISHING_LABEL[s.binding] || s.binding);
   if (!s.priceExact) parts.push('(page count ESTIMATED — non-PDF; confirm before print)');
   return parts.join(' · ');

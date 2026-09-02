@@ -29,6 +29,12 @@ import shutil
 import logging
 from datetime import datetime
 
+from konica_normalize import (
+    normalize_job_type,
+    normalize_paper_size,
+    normalize_result,
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [konica_importer] %(message)s"
@@ -127,16 +133,18 @@ def import_csv(csv_path, db_path=DB_PATH):
 
             job_date      = parse_konica_date(row.get("Job Reception Date", ""))
             print_end     = parse_konica_date(row.get("Print End Date", ""))
-            job_type      = (row.get("Job Type", "") or "").strip()
+            # Same canonical shape the SOAP fetcher writes — the two used to
+            # disagree, and every console read only one of them.
+            job_type      = normalize_job_type(row.get("Job Type", ""))
             user_name     = (row.get("User Name", "") or "").strip() or None
             file_name     = (row.get("File Name", "") or "").strip() or None
-            result        = (row.get("Result", "") or "").strip()
+            result        = normalize_result(row.get("Result", ""))
             num_pages     = safe_int(row.get("Number of Pages", ""))
             pages_printed = safe_int(row.get("Number of Pages Printed", ""))
             mono_pages    = safe_int(row.get("Number of Monochrome Pages Printed", ""))
             color_pages   = safe_int(row.get("Number of Color Pages Printed", ""))
             copies        = safe_int(row.get("Number of Copies Printed", ""))
-            paper_size    = (row.get("Paper Size", "") or "").strip() or None
+            paper_size    = normalize_paper_size(row.get("Paper Size", ""))
             paper_type    = (row.get("Paper Type", "") or "").strip() or None
 
             conn.execute("""

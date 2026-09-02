@@ -26,6 +26,13 @@ import xml.etree.ElementTree as ET
 
 import requests
 
+from konica_normalize import (
+    backfill_sqlite,
+    normalize_job_date,
+    normalize_job_type,
+    normalize_paper_size,
+    normalize_result,
+)
 from store_config import get_store_config
 
 logger = logging.getLogger("konica_fetcher")
@@ -154,6 +161,14 @@ def _init_table(conn: sqlite3.Connection):
 
 
 def _insert_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> tuple[int, int]:
+    """Insert new history rows in the canonical field shape.
+
+    The SOAP API speaks `PRINT` / `OK` / `2026/09/02 09:18:59`; the retired CSV
+    importer spoke `Print` / `No Error` / `2026-09-02 09:18:59`, and every
+    console reads the second. Normalising here is what stops the two writers
+    from splitting the table in half again — see konica_normalize for what the
+    split cost.
+    """
     inserted = skipped = 0
     for j in jobs:
         try:
@@ -164,12 +179,14 @@ def _insert_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> tuple[int, int]:
                    job_date, print_end_date, paper_size, paper_type)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
-                j["job_number"], j["job_type"], j["user"], j["name"], j["result"],
+                j["job_number"], normalize_job_type(j["job_type"]), j["user"],
+                j["name"], normalize_result(j["result"]),
                 int(j["pages"] or 0), int(j["print_pages"] or 0),
                 int(j["mono_pages"] or 0), int(j["color_pages"] or 0),
                 int(j["copies"] or 1),
-                j["register_time"], j["print_time"],
-                j["media_size"], j["media_type"],
+                normalize_job_date(j["register_time"]),
+                normalize_job_date(j["print_time"]),
+                normalize_paper_size(j["media_size"]), j["media_type"],
             ))
             inserted += 1
         except sqlite3.IntegrityError:
@@ -191,6 +208,7 @@ def fetch_and_import(db_path: str) -> tuple[int, int, int] | None:
     try:
         conn = sqlite3.connect(db_path)
         _init_table(conn)
+        _normalise_once(conn)
 
         total_inserted = total_skipped = total_errors = 0
         start = 1
@@ -232,6 +250,29 @@ def fetch_and_import(db_path: str) -> tuple[int, int, int] | None:
     except Exception as e:
         logger.error(f"Konica fetch_and_import failed: {e}")
         return None
+
+
+# ── Legacy-row normalisation ──────────────────────────────────────────────────
+#
+# Store PCs update with PULL_UPDATE.bat + a watcher restart; nothing runs
+# fix_db.py for them (CLAUDE.md), so this migration applies itself on the one
+# path that needs it. It runs once per process and is idempotent, so a PC that
+# is already canonical pays one SELECT and says nothing.
+
+_normalised = False
+
+
+def _normalise_once(conn: sqlite3.Connection) -> None:
+    """Bring pre-existing rows into the canonical shape, once per process."""
+    global _normalised
+    if _normalised:
+        return
+    _normalised = True
+    changed = backfill_sqlite(conn)
+    moved = sum(changed.values())
+    if moved:
+        logger.info("konica_jobs backfilled to the canonical shape: %s",
+                    ", ".join(f"{k} {v}" for k, v in changed.items() if v))
 
 
 # ── Background thread ─────────────────────────────────────────────────────────
