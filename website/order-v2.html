@@ -179,6 +179,58 @@
   .ov2-scale-caption { font-size: 11px; color: #6b7280; line-height: 1.5; }
   .ov2-scale-caption b { color: #374151; }
   .ov2-scale-note { font-size: 10.5px; color: #9aa1ab; margin-top: 8px; }
+  .ov2-scale-custom { display: flex; align-items: center; gap: 8px; margin-top: 10px;
+    font-size: 12.5px; color: #374151; flex-wrap: wrap; }
+  .ov2-scale-custom label { font-weight: 600; }
+  .ov2-scale-custom input { width: 78px; padding: 6px 8px; border: 1px solid #d7dbe0;
+    border-radius: 6px; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .ov2-scale-custom input:focus { border-color: var(--blue); outline: none; }
+  .ov2-scale-pct-note { flex-basis: 100%; font-size: 11px; color: #9aa1ab; }
+  .ov2-scale-pct-note.warn { color: #c0392b; font-weight: 600; }
+
+  /* ── Staff services (no file) ─────────────────────────────────────────── */
+  .ov2-svc-switch { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+  .ov2-svc-tab { flex: 1 1 200px; padding: 12px 14px; border: 1.5px solid #d7dbe0;
+    background: #fff; border-radius: 10px; font: inherit; font-size: 14px; font-weight: 600;
+    color: #6b7280; cursor: pointer; transition: all .15s; }
+  .ov2-svc-tab:hover { border-color: var(--blue); color: #374151; }
+  .ov2-svc-tab.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+
+  .ov2-svc-panel .ov2-card input[type="text"],
+  .ov2-svc-panel .ov2-card input[type="tel"],
+  .ov2-svc-panel .ov2-card input[type="number"],
+  .ov2-svc-panel .ov2-card select {
+    width: 100%; box-sizing: border-box; padding: 9px 10px; font: inherit; font-size: 14px;
+    border: 1px solid #d7dbe0; border-radius: 8px; background: #fff; color: #111827; }
+  .ov2-svc-panel .ov2-card input:focus, .ov2-svc-panel .ov2-card select:focus {
+    border-color: var(--blue); outline: none; }
+  .ov2-svc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px; margin-bottom: 12px; }
+  .ov2-svc-opt { color: #9aa1ab; font-weight: 400; }
+
+  .ov2-svc-kinds { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ov2-svc-kind { padding: 9px 14px; border: 1.5px solid #d7dbe0; border-radius: 999px;
+    background: #fff; font: inherit; font-size: 13.5px; color: #374151; cursor: pointer;
+    transition: all .15s; }
+  .ov2-svc-kind:hover { border-color: var(--blue); }
+  .ov2-svc-kind.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+
+  .ov2-svc-check { display: inline-flex; align-items: center; gap: 7px; margin-right: 18px;
+    font-size: 13.5px; color: #374151; cursor: pointer; }
+
+  .ov2-svc-quote { background: #f4f7fb; border: 1px solid #dbe4f0; border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 14px; }
+  .ov2-svc-quote.manual { background: #fff8e6; border-color: #f0d9a0; }
+  .ov2-svc-quote-total { font-size: 26px; font-weight: 700; color: #111827;
+    font-variant-numeric: tabular-nums; }
+  .ov2-svc-quote-lines { font-size: 12px; color: #6b7280; margin-top: 5px; line-height: 1.65; }
+  .ov2-svc-quote-lines b { color: #374151; }
+
+  .ov2-svc-err { color: #c0392b; font-size: 13px; font-weight: 600; margin-bottom: 10px;
+    min-height: 18px; }
+  .ov2-svc-done { margin-top: 14px; font-size: 14px; color: #1b7f4b; font-weight: 600;
+    line-height: 1.7; }
+  .ov2-svc-done a { color: var(--blue); }
   .ov2-scale-warn { color: #c0392b; font-weight: 600; }
 
   .ov2-nup-row { display: flex; gap: 10px; align-items: flex-start; }
@@ -300,6 +352,132 @@
 
     <!-- ════════ STEP 1 ════════ -->
     <div id="ov2-step1">
+      <!-- Staff: work that never touches a printer. Hidden for customers, who
+           order prints; a lamination or a binding is booked at the counter.
+           Revealed by syncStaffServices() in ?staff=1. -->
+      <div id="ov2-svc-switch" class="ov2-svc-switch" style="display:none">
+        <button type="button" class="ov2-svc-tab active" id="ov2-svc-tab-print">🖨️ Print job</button>
+        <button type="button" class="ov2-svc-tab" id="ov2-svc-tab-service">✂️ Service / photocopy — no file</button>
+      </div>
+
+      <div id="ov2-svc-panel" class="ov2-svc-panel" style="display:none">
+        <div class="ov2-section-header"><div class="ov2-section-title">✂️ Post-press service</div><div class="ov2-section-line"></div></div>
+
+        <div class="ov2-card full">
+          <div class="ov2-card-label">What is it</div>
+          <div class="ov2-svc-kinds" id="ov2-svc-kinds"><!-- built by renderServiceKinds() --></div>
+        </div>
+
+        <div class="ov2-svc-grid">
+          <div class="ov2-card">
+            <div class="ov2-card-label" id="ov2-svc-qty-label">How many sheets</div>
+            <input type="number" id="ov2-svc-sheets" min="1" max="5000" value="1" inputmode="numeric">
+          </div>
+          <div class="ov2-card">
+            <div class="ov2-card-label">Paper size</div>
+            <select id="ov2-svc-size">
+              <option value="A4">A4</option>
+              <option value="A3">A3</option>
+              <option value="A5">A5</option>
+              <option value="Legal">Legal</option>
+            </select>
+          </div>
+          <div class="ov2-card" id="ov2-svc-copies-card">
+            <div class="ov2-card-label">Copies of each</div>
+            <input type="number" id="ov2-svc-copies" min="1" max="999" value="1" inputmode="numeric">
+          </div>
+        </div>
+
+        <!-- Kind-specific fields, shown only where they mean something -->
+        <div class="ov2-svc-grid">
+          <div class="ov2-card" id="ov2-svc-lam-card" style="display:none">
+            <div class="ov2-card-label">Lamination type</div>
+            <select id="ov2-svc-lam">
+              <option value="pouch">Pouch</option>
+              <option value="roll">Roll</option>
+              <option value="cover">Cover</option>
+              <option value="id">ID card</option>
+            </select>
+          </div>
+          <div class="ov2-card" id="ov2-svc-bind-card" style="display:none">
+            <div class="ov2-card-label">Binding</div>
+            <select id="ov2-svc-bind">
+              <option value="spiral">Spiral</option>
+              <option value="wiro">Wiro</option>
+              <option value="soft">Soft</option>
+              <option value="perfect">Perfect</option>
+              <option value="staple">Staple</option>
+              <option value="project">Project</option>
+              <option value="record">Record</option>
+              <option value="thesis">Thesis</option>
+            </select>
+          </div>
+          <div class="ov2-card" id="ov2-svc-colour-card" style="display:none">
+            <div class="ov2-card-label">Colour</div>
+            <select id="ov2-svc-colour">
+              <option value="bw">Black &amp; white</option>
+              <option value="col">Colour</option>
+            </select>
+          </div>
+          <div class="ov2-card" id="ov2-svc-sides-card" style="display:none">
+            <div class="ov2-card-label">Sides</div>
+            <select id="ov2-svc-sides">
+              <option value="ss">Single-sided</option>
+              <option value="ds">Double-sided</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="ov2-card full">
+          <label class="ov2-svc-check"><input type="checkbox" id="ov2-svc-student"> Student rate</label>
+          <label class="ov2-svc-check"><input type="checkbox" id="ov2-svc-urgent"> Urgent</label>
+        </div>
+
+        <!-- The quote, from the same rate card as everything else -->
+        <div class="ov2-svc-quote" id="ov2-svc-quote">
+          <div class="ov2-svc-quote-total" id="ov2-svc-total">—</div>
+          <div class="ov2-svc-quote-lines" id="ov2-svc-lines">Choose a service to see the price.</div>
+        </div>
+
+        <div class="ov2-svc-grid">
+          <div class="ov2-card">
+            <div class="ov2-card-label">Customer name <span class="ov2-svc-opt">(optional)</span></div>
+            <input type="text" id="ov2-svc-name" placeholder="Walk-in" autocomplete="off">
+          </div>
+          <div class="ov2-card">
+            <div class="ov2-card-label">Phone <span class="ov2-svc-opt">(optional)</span></div>
+            <input type="tel" id="ov2-svc-phone" placeholder="For the ready message" autocomplete="off">
+          </div>
+          <div class="ov2-card">
+            <div class="ov2-card-label">Taken now</div>
+            <input type="number" id="ov2-svc-paid" min="0" step="1" placeholder="0" inputmode="numeric">
+          </div>
+          <div class="ov2-card">
+            <div class="ov2-card-label">Payment</div>
+            <select id="ov2-svc-mode">
+              <option value="Cash">Cash</option>
+              <option value="UPI">UPI</option>
+              <option value="Online">Online</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="ov2-card full" id="ov2-svc-override-card" style="display:none">
+          <div class="ov2-card-label">Why is the deposit being waived?</div>
+          <input type="text" id="ov2-svc-override" placeholder="A waiver nobody can explain later is a job worked on and unpaid">
+        </div>
+
+        <div class="ov2-card full">
+          <div class="ov2-card-label">Notes <span class="ov2-svc-opt">(optional)</span></div>
+          <input type="text" id="ov2-svc-notes" placeholder="Anything the shop needs to know" autocomplete="off">
+        </div>
+
+        <div class="ov2-svc-err" id="ov2-svc-err"></div>
+        <button type="button" class="ov2-btn" id="ov2-svc-submit">Book this service</button>
+        <div class="ov2-svc-done" id="ov2-svc-done"></div>
+      </div>
+
+      <div id="ov2-print-panel">
       <!-- Upload -->
       <div class="ov2-section-header"><div class="ov2-section-title">📄 Your file</div><div class="ov2-section-line"></div></div>
       <label class="ov2-drop" id="ov2-drop">
@@ -418,6 +596,16 @@
             <div class="ov2-tog-group">
               <div class="ov2-tog active" data-scale="fit" id="ov2-sc-fit">Fit to page</div>
               <div class="ov2-tog" data-scale="actual" id="ov2-sc-actual">Actual size</div>
+              <!-- Staff only: a customer choosing a percentage is a customer
+                   guessing. Revealed by syncStaffScale() in ?staff=1. -->
+              <div class="ov2-tog" data-scale="custom" id="ov2-sc-custom" style="display:none">Custom %</div>
+            </div>
+            <div class="ov2-scale-custom" id="ov2-scale-custom-row" style="display:none">
+              <label for="ov2-scale-percent">Scale to</label>
+              <input type="number" id="ov2-scale-percent" min="25" max="400" step="1"
+                     value="100" inputmode="numeric">
+              <span>% of the original page size</span>
+              <div class="ov2-scale-pct-note" id="ov2-scale-pct-note"></div>
             </div>
             <div class="ov2-scale-stage">
               <div class="ov2-scale-sheet" id="ov2-scaleSheet">
@@ -477,6 +665,7 @@
           </button>
         </div>
       </div>
+      </div><!-- /ov2-print-panel -->
     </div>
 
     <!-- ════════ STEP 2 ════════ -->

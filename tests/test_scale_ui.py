@@ -202,8 +202,16 @@ class TestTheTrialPageIsRetired:
 
 class TestTheCustomerControl:
     """The customer gets Fit and Actual — two choices that are hard to get wrong.
-    Custom % is staff-only (owner, 2026-08-30), so it must not be reachable
-    from the order page at all."""
+    Custom % is staff-only (owner, 2026-08-30).
+
+    Updated 2026-09-02. This used to assert Custom % was *absent* from the order
+    page, because the only staff New Job flow was a separate console modal. The
+    owner rejected that flow ("I absolutely hated the dark version… add the
+    missing features to v2"), so order-v2 staff mode is now the one New Job
+    flow and Custom % lives there. The property being pinned is unchanged and is
+    what actually matters — **a customer never sees it** — but it is now
+    enforced by the staff gate rather than by the feature not existing.
+    """
 
     def order_v2(self):
         return open(os.path.join(ROOT, "website", "order-v2.html"), encoding="utf-8").read()
@@ -211,13 +219,39 @@ class TestTheCustomerControl:
     def order_ui(self):
         return open(os.path.join(ROOT, "website", "order", "order-ui.js"), encoding="utf-8").read()
 
-    def test_exactly_two_choices(self):
-        assert re.findall(r'data-scale="([a-z]+)"', self.order_v2()) == ["fit", "actual"]
+    def order_logic(self):
+        return open(os.path.join(ROOT, "website", "order", "order-logic.js"), encoding="utf-8").read()
 
-    def test_custom_is_not_offered_anywhere_on_the_order_page(self):
+    def test_the_customer_sees_exactly_two_choices(self):
+        """Custom % is in the markup but starts hidden, so the three toggles are
+        two until staff mode reveals the third."""
         page = self.order_v2()
-        assert 'data-scale="custom"' not in page
-        assert "Custom %" not in page
+        assert re.findall(r'data-scale="([a-z]+)"', page) == ["fit", "actual", "custom"]
+        custom = re.search(r'<div class="ov2-tog" data-scale="custom"[^>]*>', page).group(0)
+        assert 'style="display:none"' in custom, "Custom % must start hidden"
+
+    def test_the_percent_row_starts_hidden_too(self):
+        page = self.order_v2()
+        row = re.search(r'<div class="ov2-scale-custom" id="ov2-scale-custom-row"[^>]*>',
+                        page).group(0)
+        assert 'style="display:none"' in row
+
+    def test_only_staff_mode_reveals_custom(self):
+        js = self.order_ui()
+        assert "function syncStaffScale()" in js
+        reveal = re.search(r"function syncStaffScale\(\) \{(.*?)\n\}", js, re.S).group(1)
+        assert "if (!STAFF) return;" in reveal, "the reveal must be gated on STAFF"
+        # ...and the percent row is gated on STAFF every time it is shown.
+        assert "(mode === 'custom' && STAFF)" in js
+
+    def test_a_customer_session_cannot_emit_a_custom_scale(self):
+        """The gate is visual; this is the one that matters for what prints.
+        A customer's state never has scale === 'custom', and even if it somehow
+        did, 100% and junk both fall back to sending no scale block at all."""
+        logic = self.order_logic()
+        block = re.search(r"export function scaleBlock\(s\) \{(.*?)\n\}", logic, re.S).group(1)
+        assert "if (s.scale !== 'custom') return {};" in block
+        assert "Number.isFinite(n)" in block
 
     def test_fit_is_the_default(self):
         assert 'class="ov2-tog active" data-scale="fit"' in self.order_v2()

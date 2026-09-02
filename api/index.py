@@ -3148,7 +3148,10 @@ from api.handlers_order import (
     _handle_order_upload_sign,
     _handle_order_quote,
     _handle_order_create,
+    _handle_order_service_quote,
     _handle_order_staff_create,
+    _handle_order_staff_photocopy,
+    _handle_order_staff_service,
     _handle_order_reorder,
     _handle_order_convert_docx,
 )
@@ -3184,6 +3187,10 @@ class handler(BaseHTTPRequestHandler):
         # ── v4 job status poll ──────────────────────────────────────────────
         if self.path.startswith("/order/scale-rect"):
             _handle_order_scale_rect(self, self.path)
+            return
+
+        if self.path.startswith("/order/service-quote"):
+            _handle_order_service_quote(self, self.path)
             return
 
         if self.path.startswith("/project-builder/format-job-status"):
@@ -3702,6 +3709,12 @@ class handler(BaseHTTPRequestHandler):
             return
         if self.path == "/order/staff-create":
             _handle_order_staff_create(self, body)
+            return
+        if self.path == "/order/staff-service":
+            _handle_order_staff_service(self, body)
+            return
+        if self.path == "/order/staff-photocopy":
+            _handle_order_staff_photocopy(self, body)
             return
         if self.path == "/order/reorder":
             _handle_order_reorder(self, body)

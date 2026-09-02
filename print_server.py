@@ -374,6 +374,7 @@ def check_printer_reachable(ip: str | None, timeout=2) -> bool:
 
 import fitz  # PyMuPDF — page rendering for /scale-preview
 import pdf_scaler
+import service_jobs
 from db_migrations import ensure_job_service_columns
 
 from ops_watchdog import report as _report_health
@@ -1442,14 +1443,7 @@ def _photocopy_meta(body: dict) -> dict:
     same paper, same toner — so it goes through the one rate card rather than a
     second table that would drift from it.
     """
-    return {
-        "sheets":     max(1, int(body.get("pages") or 1)),
-        "copies":     max(1, int(body.get("copies") or 1)),
-        "colour":     body.get("colour", "bw"),
-        "sides":      body.get("sides", "ss"),
-        "paper_size": (body.get("paper_size") or "A4").upper(),
-        "is_student": bool(body.get("is_student", False)),
-    }
+    return service_jobs.photocopy_meta(body)
 
 
 def _photocopy_quote(meta: dict) -> tuple[float | None, list[str]]:
@@ -1574,17 +1568,17 @@ def handle_new_photocopy(body: dict) -> dict:
 #: Above this quote, a deposit is taken before the work starts (owner default,
 #: 2026-08-30 — plan open question N1; change these two numbers to change the
 #: policy). At or below it, services are paid on collection like everything else.
-SERVICE_DEPOSIT_THRESHOLD = 500.0
-SERVICE_DEPOSIT_FRACTION  = 0.5
+# These live in service_jobs so the cloud path (/order/staff-service, added
+# 2026-09-02 so staff can book services off-site) makes the identical decision.
+# A deposit, a status or a price that depends on which machine the counter used
+# is a split that takes months to notice — see konica_normalize for what that
+# costs. tests/test_service_parity.py asserts the two paths agree.
+SERVICE_DEPOSIT_THRESHOLD = service_jobs.SERVICE_DEPOSIT_THRESHOLD
+SERVICE_DEPOSIT_FRACTION  = service_jobs.SERVICE_DEPOSIT_FRACTION
 
-#: Query-string keys understood by /service-quote, by type. Anything else is
-#: ignored rather than passed through, so a typo cannot become a silent meta key
-#: that the rate card then defaults away.
-_SERVICE_META_INTS  = ("sheets", "copies", "passes", "qty", "pages")
-_SERVICE_META_BOOLS = ("is_student", "is_colour", "with_our_job", "urgent")
-_SERVICE_META_TEXTS = ("paper_size", "colour", "sides", "lam_type", "binding",
-                       "project_cover", "unit", "language", "description",
-                       "manual_price")
+_SERVICE_META_INTS  = service_jobs.META_INTS
+_SERVICE_META_BOOLS = service_jobs.META_BOOLS
+_SERVICE_META_TEXTS = service_jobs.META_TEXTS
 
 
 #: /service-quote runs on every keystroke in the modal, and ops_watchdog.report
@@ -1617,24 +1611,13 @@ def _amount_or_none(value) -> float | None:
 
 
 def _service_meta_from_qs(qs: dict) -> dict:
-    """Build a rate-card meta dict from a query string, typed and bounded."""
-    meta: dict = {}
-    for key in _SERVICE_META_INTS:
-        if key in qs:
-            raw = (qs[key][0] or "").strip()
-            value = _amount_or_none(raw)
-            if value is None:
-                # A quantity that is not a number is a UI bug. Quoting it as the
-                # default would bill the wrong number quietly.
-                raise ValueError(f"{key}={raw!r} is not a number")
-            meta[key] = int(value)
-    for key in _SERVICE_META_BOOLS:
-        if key in qs:
-            meta[key] = (qs[key][0] or "").strip().lower() in ("true", "1", "yes", "on")
-    for key in _SERVICE_META_TEXTS:
-        if key in qs:
-            meta[key] = qs[key][0]
-    return meta
+    """Build a rate-card meta dict from a query string, typed and bounded.
+
+    Still raises on a non-numeric quantity — a UI bug must not be quoted at the
+    default. The rule now lives in service_jobs so the cloud path enforces it
+    too, rather than silently accepting what this one refuses.
+    """
+    return service_jobs.meta_from_params(qs)
 
 
 def handle_service_quote(qs: dict) -> dict:
@@ -1686,13 +1669,7 @@ def handle_service_quote(qs: dict) -> dict:
 
 def _service_deposit_for(total: float) -> float:
     """Deposit due before the work starts, or 0 when payment is on collection."""
-    try:
-        total = float(total or 0)
-    except (TypeError, ValueError):
-        return 0.0
-    if total <= SERVICE_DEPOSIT_THRESHOLD:
-        return 0.0
-    return round(total * SERVICE_DEPOSIT_FRACTION, 2)
+    return service_jobs.deposit_for(total)
 
 
 def _next_job_id(conn, today_str: str | None = None) -> str:

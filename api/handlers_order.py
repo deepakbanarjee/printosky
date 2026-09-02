@@ -453,6 +453,292 @@ def _handle_order_staff_create(h, body: bytes) -> None:
     })
 
 
+# ── Post-press services, booked from order-v2 staff mode ─────────────────────
+#
+# Owner decision, 2026-09-02: staff book services through the Vercel API, not
+# the store PC's print_server, so they can work off-site. That makes this the
+# SECOND caller of the service logic, and the reason every decision it makes
+# lives in `service_jobs` rather than here — a price or a deposit that depends
+# on which machine the counter used is a split that takes months to notice.
+#
+# What a service job is (plan §4.2 B1, unchanged from the store-PC path): an
+# ordinary `jobs` row with `service_kind` set. Not a new table, so revenue,
+# payment, pickup codes, WhatsApp notify, the daily summary and MIS all keep
+# working without being taught anything.
+#
+# Two isolation properties this path must preserve, and does structurally:
+#   * NO file_url — store_puller pulls only rows with a non-empty file_url, so
+#     a service job can never be downloaded or auto-printed;
+#   * NO printed_by — which is what keeps services out of the MIS printer and
+#     staff panels (tests/test_service_ui.py).
+
+def _service_job_id() -> str:
+    """A counter-issued job id, cloud-side.
+
+    The store PC numbers today's jobs by counting its own rows; the cloud cannot
+    see a store's local sequence, so it uses the same id shape with a random
+    suffix — exactly what /order/staff-create already does for walk-in prints.
+    """
+    return f"OSKY-{datetime.now().strftime('%Y%m%d')}-{_uuid.uuid4().hex[:4]}"
+
+
+def _handle_order_service_quote(h, path: str) -> None:
+    """GET /order/service-quote?kind=laminate&sheets=6&lam_type=pouch
+
+    Price one post-press service. Writes nothing. Never raises: a quote the shop
+    cannot compute comes back as needs_manual_price with a reason, so the
+    counter types a price instead of watching a spinner.
+    """
+    import rate_card
+    import service_jobs
+
+    qs = parse_qs(urlparse(path).query)
+    kind = (qs.get("kind", [""])[0] or "").strip().lower()
+    if kind not in rate_card.SERVICE_KINDS:
+        _json_response(h, 400, {"error": f"Unknown service {kind!r}",
+                                "kinds": sorted(rate_card.SERVICE_KINDS)})
+        return
+    try:
+        meta = service_jobs.meta_from_params(qs)
+    except ValueError as exc:
+        # A non-numeric quantity is a UI bug. Quoting it at the default would
+        # bill the wrong number quietly, so it is refused out loud.
+        _json_response(h, 400, {"error": str(exc)})
+        return
+    try:
+        quote = rate_card.calculate_service_quote(kind, meta)
+    except Exception as exc:
+        logger.error("service-quote(%s) failed for %r: %r", kind, meta, str(exc))
+        _json_response(h, 200, {
+            "ok": False, "needs_manual_price": True, "total": 0,
+            "breakdown": [f"could not price this: {exc}"],
+            "label": kind, "kind": kind, "meta": meta,
+        })
+        return
+
+    _json_response(h, 200, {
+        "ok": True,
+        "kind": kind,
+        "meta": meta,
+        "total": quote["total"],
+        "label": quote["label"],
+        "breakdown": quote["breakdown"],
+        "needs_manual_price": quote["needs_manual_price"],
+        "deposit_due": service_jobs.deposit_for(quote["total"]),
+    })
+
+
+def _handle_order_staff_service(h, body: bytes) -> None:
+    """POST /order/staff-service — book a post-press service from staff mode.
+
+    Body: {kind, meta{}, store_id, customer_name?, phone?, notes?,
+           amount_quoted?, amount_collected?, amount_partial?, payment_mode?,
+           override_reason?}
+
+    Mirrors print_server.handle_new_service; every decision comes from
+    `service_jobs`, so the two agree by construction.
+    """
+    from api.index import _acad_auth_staff  # lazy — avoid load-time circular import
+    import rate_card
+    import service_jobs
+
+    if not _acad_auth_staff(h):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    kind = str(data.get("kind") or data.get("service_kind") or "").strip().lower()
+    if kind not in rate_card.SERVICE_KINDS:
+        _json_response(h, 400, {"error": f"Unknown service {kind!r}",
+                                "kinds": sorted(rate_card.SERVICE_KINDS)})
+        return
+
+    meta = data.get("meta") or {}
+    if not isinstance(meta, dict):
+        _json_response(h, 400, {"error": "meta must be an object"})
+        return
+
+    try:
+        quote = rate_card.calculate_service_quote(kind, meta)
+    except Exception as exc:
+        logger.error("staff-service(%s) could not price %r: %r", kind, meta, str(exc))
+        _json_response(h, 400, {"error": f"Could not price this service: {exc}"})
+        return
+
+    amount_quoted = service_jobs.amount_or_none(data.get("amount_quoted"))
+    if amount_quoted is None:
+        amount_quoted = float(quote["total"])
+    amount_collected = service_jobs.amount_or_none(data.get("amount_collected")) or 0.0
+    amount_partial   = service_jobs.amount_or_none(data.get("amount_partial")) or 0.0
+    override_reason  = str(data.get("override_reason") or "").strip()
+
+    status = service_jobs.service_status(
+        amount_quoted, amount_collected + amount_partial, override_reason)
+    mode = service_jobs.payment_mode(data.get("payment_mode"))
+
+    store_id = str(data.get("store_id") or "").strip().upper()
+    if store_id not in _STORE_LABEL:
+        store_id = _DEFAULT_STORE_ID
+
+    # The store PC's SQLite has `amount_partial`, `override_reason` and
+    # `queued_at`; the cloud `jobs` table has none of the three, and PostgREST
+    # rejects the WHOLE insert on an unknown column (the same trap documented on
+    # _persist_settings). Nothing is lost by mapping rather than migrating:
+    #   * money taken is money taken — a deposit IS amount_collected below
+    #     amount_quoted, which the schema already says;
+    #   * a waiver's whole purpose is being readable later, and `notes` is what
+    #     the operator actually reads;
+    #   * `status` already says Queued, and `received_at` is the same instant.
+    # tests/test_service_parity.py pins every column here against the manifest.
+    taken = amount_collected + amount_partial
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    job_id = _service_job_id()
+    label = quote["label"]
+
+    note = str(data.get("notes", "")).strip()
+    if override_reason:
+        note = (note + " | deposit waived: " + override_reason).strip(" |")
+    if amount_partial > 0 and amount_collected > 0:
+        note = (note + f" | part payment Rs.{amount_partial:.0f}").strip(" |")
+
+    row = {
+        "job_id":            job_id,
+        "received_at":       now,
+        "filename":          label,
+        "source":            str(data.get("source") or "Service"),
+        "sender":            _norm_phone(data.get("phone") or "") or None,
+        "customer_name":     str(data.get("customer_name", "")).strip() or None,
+        "service_type":      label,
+        "status":            status,
+        "amount_quoted":     amount_quoted,
+        "amount_collected":  taken if taken > 0 else None,
+        "payment_mode":      mode if taken > 0 else None,
+        "notes":             note or None,
+        "assigned_store_id": store_id,
+        "service_kind":      kind,
+        "service_meta":      meta,
+        # No file_url and no printed_by, deliberately — see the note above.
+    }
+
+    try:
+        from db_cloud import _client
+        _client().table("jobs").insert(row).execute()
+    except Exception as exc:
+        logger.error("staff-service db error %s: %r", type(exc).__name__, str(exc))
+        _json_response(h, 500, {"error": "could not create the service job"})
+        return
+
+    _json_response(h, 200, {
+        "ok": True, "job_id": job_id, "kind": kind, "label": label,
+        "status": status, "amount_quoted": amount_quoted,
+        "amount_collected": taken,
+        "deposit_due": service_jobs.deposit_for(amount_quoted),
+        "breakdown": quote["breakdown"],
+        "needs_manual_price": quote["needs_manual_price"],
+    })
+
+
+def _handle_order_staff_photocopy(h, body: bytes) -> None:
+    """POST /order/staff-photocopy — file a counter photocopy, already done.
+
+    Mirrors print_server.handle_new_photocopy, including the two things that
+    look like omissions and are not:
+
+    * **No `service_kind`.** A photocopy is work the Konica actually did, so it
+      stays inside the printer counts — which is what makes the B-10 copy/scan
+      reconciliation possible at all. Giving it a service_kind would remove it
+      from the very comparison that catches unbilled copying.
+    * **Refuses rather than filing ₹0.** A photocopy the shop cannot price is a
+      job someone has to price; a free one is a sale that silently vanished.
+    """
+    from api.index import _acad_auth_staff  # lazy — avoid load-time circular import
+    import rate_card
+    import service_jobs
+
+    if not _acad_auth_staff(h):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        data = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    meta = service_jobs.photocopy_meta(data)
+    try:
+        quote = rate_card.calculate_service_quote("copy", meta)
+        quoted = None if quote["needs_manual_price"] else float(quote["total"])
+        breakdown = quote["breakdown"]
+    except Exception as exc:
+        logger.error("staff-photocopy could not price %r: %r", meta, str(exc))
+        quoted, breakdown = None, [f"could not price this: {exc}"]
+
+    typed = service_jobs.amount_or_none(data.get("amount_collected"))
+    money = service_jobs.resolve_amount(quoted, typed)
+    if not money["billable"]:
+        _json_response(h, 200, {
+            "ok": False, "needs_manual_price": True,
+            "error": "Could not price this photocopy — enter the amount. "
+                     + "; ".join(breakdown),
+            "breakdown": breakdown,
+        })
+        return
+
+    mode = service_jobs.payment_mode(data.get("payment_mode"))
+    staff_id = str(data.get("staff_id", "")).strip()
+    store_id = str(data.get("store_id") or "").strip().upper()
+    if store_id not in _STORE_LABEL:
+        store_id = _DEFAULT_STORE_ID
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    job_id = _service_job_id()
+
+    note = f"Photocopy job created at {now} by {staff_id or 'staff'}"
+    if breakdown:
+        note += " | " + " | ".join(breakdown)
+    if money["overridden"]:
+        note += f" | staff set Rs.{money['amount']:.0f} over the quoted Rs.{quoted:.0f}"
+
+    row = {
+        "job_id":           job_id,
+        "received_at":      now,
+        "filename":         "Photocopy Job",
+        "source":           "Photocopy",
+        "sender":           _norm_phone(data.get("phone") or "") or None,
+        "customer_name":    str(data.get("customer_name", "")).strip() or None,
+        "service_type":     "Photocopy",
+        "page_count":       meta["sheets"],
+        "colour":           meta["colour"],
+        "copies":           meta["copies"],
+        "status":           "Completed",
+        "amount_collected": money["amount"],
+        "amount_quoted":    money["quoted"],
+        "payment_mode":     mode,
+        "completed_at":     now,
+        "printed_by":       staff_id or None,
+        "notes":            note,
+        "assigned_store_id": store_id,
+    }
+
+    try:
+        from db_cloud import _client
+        _client().table("jobs").insert(row).execute()
+    except Exception as exc:
+        logger.error("staff-photocopy db error %s: %r", type(exc).__name__, str(exc))
+        _json_response(h, 500, {"error": "could not file the photocopy"})
+        return
+
+    _json_response(h, 200, {
+        "ok": True, "job_id": job_id, "amount": money["amount"],
+        "amount_quoted": money["quoted"], "breakdown": breakdown,
+        "overridden": money["overridden"],
+    })
+
+
 def _handle_order_reorder(h, body: bytes) -> None:
     """POST /order/reorder — clone a past job into a new Pending order.
 

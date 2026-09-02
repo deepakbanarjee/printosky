@@ -39,7 +39,8 @@ const state = {
   paperSize: 'A4',
   sides: 'single',   // 'single' | 'duplex'
   orientation: 'auto', // 'auto' | 'portrait' | 'landscape'
-  scale: 'fit',      // 'fit' | 'actual' — Custom % is staff-only, never emitted here
+  scale: 'fit',      // 'fit' | 'actual' | 'custom' — Custom % is staff-only (see syncStaffScale)
+  scalePercent: 100, // only meaningful when scale === 'custom'
   direction: 'horizontal', // 'horizontal' | 'vertical' (N-up page fill order)
   binding: 'none',   // 'none' | 'staple' | 'spiral' | 'wiro' | 'soft' | 'perfect' | 'project' | 'record' | 'thesis'
   amountEstimated: 0,
@@ -417,8 +418,49 @@ function setScale(mode) {
   document.querySelectorAll('[data-scale]').forEach((el) => {
     el.classList.toggle('active', el.dataset.scale === mode);
   });
+  const row = $('ov2-scale-custom-row');
+  if (row) row.style.display = (mode === 'custom' && STAFF) ? 'flex' : 'none';
   renderScalePreview();
   updateSummary();
+}
+
+// Custom % bounds mirror pdf_scaler.MIN_PERCENT / MAX_PERCENT. Clamped, never
+// rejected — a typo should print something sane, not fail the job — and the
+// clamp is announced so nobody wonders why 900% came out as 400%.
+const SCALE_MIN_PERCENT = 25;
+const SCALE_MAX_PERCENT = 400;
+
+function setScalePercent(raw) {
+  const note = $('ov2-scale-pct-note');
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    // Keep the last good percentage rather than silently printing at 100%.
+    if (note) { note.className = 'ov2-scale-pct-note warn'; note.textContent = 'Enter a number between 25 and 400.'; }
+    return;
+  }
+  const clamped = Math.max(SCALE_MIN_PERCENT, Math.min(SCALE_MAX_PERCENT, Math.round(n)));
+  state.scalePercent = clamped;
+  if (note) {
+    if (clamped !== Math.round(n)) {
+      note.className = 'ov2-scale-pct-note warn';
+      note.textContent = `Scaling is limited to ${SCALE_MIN_PERCENT}–${SCALE_MAX_PERCENT}% — using ${clamped}%.`;
+    } else {
+      note.className = 'ov2-scale-pct-note';
+      note.textContent = clamped === 100 ? 'Same as the original size.'
+        : clamped < 100 ? `Shrunk to ${clamped}% of the original.`
+                        : `Enlarged to ${clamped}% of the original.`;
+    }
+  }
+  renderScalePreview();
+  updateSummary();
+}
+
+// Custom % is staff-only: a customer picking a percentage is a customer
+// guessing, and the shop takes the complaint. Staff mode reveals it.
+function syncStaffScale() {
+  if (!STAFF) return;
+  const tog = $('ov2-sc-custom');
+  if (tog) tog.style.display = '';
 }
 
 // Scaling is 1-up only: N-up already IS a fit, so the card hides rather than
@@ -443,6 +485,8 @@ async function renderScalePreview() {
   const seq = ++scaleRectSeq;
 
   // Fit is the default and never crops; describe it without a round trip.
+  // Custom always asks, because only the printer's own scale_rect() knows where
+  // an arbitrary percentage lands — a preview drawn by different code can lie.
   if (state.scale === 'fit' || !src) {
     page.className = 'ov2-scale-page';
     Object.assign(page.style, { left: '6%', top: '6%', width: '88%', height: '88%' });
@@ -453,8 +497,9 @@ async function renderScalePreview() {
   try {
     const p = new URLSearchParams({
       page_w: src.w.toFixed(2), page_h: src.h.toFixed(2),
-      sheet: state.paperSize, mode: 'actual',
+      sheet: state.paperSize, mode: state.scale,
     });
+    if (state.scale === 'custom') p.set('percent', String(state.scalePercent));
     const r = await fetch(`${API}/order/scale-rect?${p}`);
     if (!r.ok) throw new Error('scale-rect ' + r.status);
     const { scale } = await r.json();
@@ -1297,6 +1342,294 @@ function onStaffSuccess(jobId, total, paid, mode) {
 // store LAN, e.g. the office box) that PIN is missing, so we verify it against
 // the cloud (/staff/login → Supabase active staff) with no store-PC dependency.
 // Resolves immediately when a PIN is already present (e.g. opened from jobs.html).
+// ── Staff services — work that never touches a printer ───────────────────────
+//
+// Lamination, binding, scanning, photocopying, foiling, cutting, DTP. Booked
+// through the **Vercel API** (owner, 2026-09-02) rather than the store PC's
+// print_server, so staff can work off the shop LAN.
+//
+// The price is not computed here. /order/service-quote calls the same
+// rate_card.calculate_service_quote() the counter and the digest use — a second
+// implementation in JavaScript is how a shop starts quoting two different
+// prices for the same lamination.
+
+// Mirrors rate_card.SERVICE_KINDS. `manual` marks a kind the card cannot price
+// on its own, so the UI asks for an amount instead of pretending to know one.
+const SERVICE_KINDS = [
+  { id: 'copy',     label: '📄 Photocopy'   },
+  { id: 'scan',     label: '🖨️ Scanning'    },
+  { id: 'laminate', label: '✨ Lamination'  },
+  { id: 'bind',     label: '📚 Binding'     },
+  { id: 'foil',     label: '🥇 Foiling'     },
+  { id: 'cut',      label: '✂️ Cutting'     },
+  { id: 'punch',    label: '🕳️ Punching'    },
+  { id: 'photo',    label: '🖼️ Photo print' },
+  { id: 'dtp',      label: '⌨️ DTP / typing' },
+  { id: 'other',    label: '➕ Other', manual: true },
+];
+
+// Which extra fields each kind actually uses. A field that means nothing for
+// the chosen service is hidden, not disabled — an input nobody should fill is
+// one more thing to get wrong at a busy counter.
+const SERVICE_FIELDS = {
+  copy:     ['copies', 'colour', 'sides', 'student'],
+  scan:     [],
+  laminate: ['lam'],
+  bind:     ['bind'],
+  foil:     [],
+  cut:      [],
+  punch:    [],
+  photo:    [],
+  dtp:      [],
+  other:    [],
+};
+
+// What the quantity box is counting, per kind. "Sheets" is wrong for foiling.
+const SERVICE_QTY_LABEL = {
+  copy: 'How many sheets', scan: 'How many sheets', laminate: 'How many pieces',
+  bind: 'How many sheets', foil: 'How many pieces', cut: 'How many sheets',
+  punch: 'How many sheets', photo: 'How many prints', dtp: 'How many pages',
+  other: 'How many',
+};
+
+const svc = {
+  kind: null,
+  quote: null,        // last successful quote, or null
+  manual: false,      // the rate card could not price it
+  busy: false,
+  timer: null,
+};
+
+function renderServiceKinds() {
+  const host = $('ov2-svc-kinds');
+  if (!host) return;
+  host.innerHTML = SERVICE_KINDS.map((k) =>
+    `<button type="button" class="ov2-svc-kind" data-kind="${k.id}">${k.label}</button>`).join('');
+  host.querySelectorAll('[data-kind]').forEach((el) =>
+    el.addEventListener('click', () => setServiceKind(el.dataset.kind)));
+}
+
+function setServiceKind(kind) {
+  svc.kind = kind;
+  document.querySelectorAll('#ov2-svc-kinds [data-kind]').forEach((el) =>
+    el.classList.toggle('active', el.dataset.kind === kind));
+
+  const fields = SERVICE_FIELDS[kind] || [];
+  const show1 = (id, on) => { const el = $(id); if (el) el.style.display = on ? '' : 'none'; };
+  show1('ov2-svc-copies-card', fields.includes('copies'));
+  show1('ov2-svc-lam-card',    fields.includes('lam'));
+  show1('ov2-svc-bind-card',   fields.includes('bind'));
+  show1('ov2-svc-colour-card', fields.includes('colour'));
+  show1('ov2-svc-sides-card',  fields.includes('sides'));
+
+  const label = $('ov2-svc-qty-label');
+  if (label) label.textContent = SERVICE_QTY_LABEL[kind] || 'How many';
+  quoteService();
+}
+
+function serviceMeta() {
+  const num = (id, fallback) => {
+    const el = $(id);
+    const n = el ? Math.floor(Number(el.value)) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  };
+  const fields = SERVICE_FIELDS[svc.kind] || [];
+  const meta = {
+    sheets: num('ov2-svc-sheets', 1),
+    paper_size: ($('ov2-svc-size') || {}).value || 'A4',
+  };
+  if (fields.includes('copies')) meta.copies = num('ov2-svc-copies', 1);
+  if (fields.includes('lam'))    meta.lam_type = ($('ov2-svc-lam') || {}).value || 'pouch';
+  if (fields.includes('bind'))   meta.binding = ($('ov2-svc-bind') || {}).value || 'spiral';
+  if (fields.includes('colour')) meta.colour = ($('ov2-svc-colour') || {}).value || 'bw';
+  if (fields.includes('sides'))  meta.sides = ($('ov2-svc-sides') || {}).value || 'ss';
+  if (fields.includes('student') && ($('ov2-svc-student') || {}).checked) meta.is_student = true;
+  if (($('ov2-svc-urgent') || {}).checked) meta.urgent = true;
+  return meta;
+}
+
+// Debounced, because it runs while somebody is still typing a sheet count.
+function quoteServiceSoon() {
+  clearTimeout(svc.timer);
+  svc.timer = setTimeout(quoteService, 250);
+}
+
+async function quoteService() {
+  const total = $('ov2-svc-total');
+  const lines = $('ov2-svc-lines');
+  const box = $('ov2-svc-quote');
+  if (!total || !lines || !box) return;
+
+  if (!svc.kind) {
+    box.className = 'ov2-svc-quote';
+    total.textContent = '—';
+    lines.textContent = 'Choose a service to see the price.';
+    svc.quote = null; svc.manual = false;
+    syncServiceOverride();
+    return;
+  }
+
+  const meta = serviceMeta();
+  const p = new URLSearchParams({ kind: svc.kind });
+  Object.entries(meta).forEach(([k, v]) => p.set(k, String(v)));
+
+  try {
+    const r = await fetch(`${API}/order/service-quote?${p}`);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ('service-quote ' + r.status));
+
+    svc.quote = d;
+    svc.manual = !!d.needs_manual_price;
+    box.className = 'ov2-svc-quote' + (svc.manual ? ' manual' : '');
+    total.textContent = svc.manual ? 'Enter the price' : `₹${Math.round(d.total)}`;
+    const parts = (d.breakdown || []).map((b) => `<div>${escapeHtml(b)}</div>`).join('');
+    const dep = d.deposit_due > 0
+      ? `<div><b>₹${Math.round(d.deposit_due)} deposit</b> before the work starts.</div>` : '';
+    lines.innerHTML = (parts || '<div>No breakdown.</div>') + dep;
+  } catch (e) {
+    // Never show an invented price. Say the quote is unavailable and let staff
+    // type one — the same rule the store-PC modal follows.
+    svc.quote = null; svc.manual = true;
+    box.className = 'ov2-svc-quote manual';
+    total.textContent = 'Enter the price';
+    lines.innerHTML = '<div>Could not reach the rate card — type the amount taken.</div>';
+  }
+  syncServiceOverride();
+}
+
+// The waiver box appears only when there is a deposit to waive.
+function syncServiceOverride() {
+  const card = $('ov2-svc-override-card');
+  if (!card) return;
+  const due = (svc.quote && svc.quote.deposit_due) || 0;
+  const paid = Number(($('ov2-svc-paid') || {}).value || 0);
+  card.style.display = (due > 0 && paid < due) ? '' : 'none';
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function submitService() {
+  const err = $('ov2-svc-err');
+  const done = $('ov2-svc-done');
+  const btn = $('ov2-svc-submit');
+  if (!err || !btn) return;
+  err.textContent = '';
+
+  if (!svc.kind) { err.textContent = 'Pick a service first.'; return; }
+
+  const paid = Number(($('ov2-svc-paid') || {}).value || 0);
+  const typed = Number.isFinite(paid) && paid > 0 ? paid : null;
+  if (svc.manual && !typed) {
+    err.textContent = 'This one has no rate — enter the amount taken.';
+    return;
+  }
+
+  if (svc.busy) return;
+  svc.busy = true; btn.disabled = true; btn.textContent = 'Booking…';
+
+  const storeMap = { thriprayar: 'OSP', nattika: 'PRINTK' };
+  const body = {
+    kind: svc.kind,
+    meta: serviceMeta(),
+    store_id: storeMap[runtime.pickup_store] || 'OSP',
+    customer_name: ($('ov2-svc-name') || {}).value || '',
+    phone: ($('ov2-svc-phone') || {}).value || '',
+    notes: ($('ov2-svc-notes') || {}).value || '',
+    staff_id: sessionStorage.getItem('staff_id') || '',
+    payment_mode: ($('ov2-svc-mode') || {}).value || 'Cash',
+    amount_collected: typed || 0,
+    override_reason: ($('ov2-svc-override') || {}).value || '',
+  };
+  // A manually priced service is quoted at what was actually taken; there is no
+  // other number, and a Rs.0 quote would read as a free job rather than an
+  // unpriced one.
+  if (svc.manual && typed) body.amount_quoted = typed;
+
+  // A photocopy is work the Konica actually did, so it is filed as a completed
+  // photocopy rather than a service job — that is what keeps it inside the
+  // printer counts the copy/scan reconciliation compares against.
+  const isCopy = svc.kind === 'copy';
+  const url = isCopy ? '/order/staff-photocopy' : '/order/staff-service';
+  if (isCopy) {
+    const meta = serviceMeta();
+    Object.assign(body, {
+      pages: meta.sheets, copies: meta.copies || 1,
+      colour: meta.colour || 'bw', sides: meta.sides || 'ss',
+      paper_size: meta.paper_size, is_student: !!meta.is_student,
+    });
+  }
+
+  try {
+    const r = await fetch(API + url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '',
+      },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 403) throw new Error('Staff PIN not accepted — sign in again.');
+    if (!r.ok) throw new Error(d.error || ('Could not book this (' + r.status + ')'));
+    if (d.ok === false) throw new Error(d.error || 'Could not book this.');
+
+    if (done) {
+      const amount = d.amount != null ? d.amount : d.amount_quoted;
+      done.innerHTML =
+        `✅ <b>${escapeHtml(d.job_id)}</b> booked — ₹${Math.round(amount || 0)}` +
+        (d.status ? ` · ${escapeHtml(d.status)}` : '') +
+        '<br><span style="font-weight:400;color:#6b7280">It is in the console queue now.</span>';
+    }
+    ['ov2-svc-name', 'ov2-svc-phone', 'ov2-svc-notes', 'ov2-svc-paid',
+     'ov2-svc-override'].forEach((id) => { const el = $(id); if (el) el.value = ''; });
+  } catch (e) {
+    err.textContent = e.message || 'Could not book this.';
+  } finally {
+    svc.busy = false; btn.disabled = false; btn.textContent = 'Book this service';
+  }
+}
+
+function setServiceMode(on) {
+  const panel = $('ov2-svc-panel');
+  const print = $('ov2-print-panel');
+  if (panel) panel.style.display = on ? '' : 'none';
+  if (print) print.style.display = on ? 'none' : '';
+  const t1 = $('ov2-svc-tab-print');
+  const t2 = $('ov2-svc-tab-service');
+  if (t1) t1.classList.toggle('active', !on);
+  if (t2) t2.classList.toggle('active', on);
+}
+
+// Customers order prints; a lamination is booked at the counter. Staff mode is
+// what reveals any of this.
+function syncStaffServices() {
+  if (!STAFF) return;
+  const sw = $('ov2-svc-switch');
+  if (sw) sw.style.display = 'flex';
+  renderServiceKinds();
+
+  const t1 = $('ov2-svc-tab-print');
+  const t2 = $('ov2-svc-tab-service');
+  if (t1) t1.addEventListener('click', () => setServiceMode(false));
+  if (t2) t2.addEventListener('click', () => setServiceMode(true));
+
+  ['ov2-svc-sheets', 'ov2-svc-copies'].forEach((id) => {
+    const el = $(id); if (el) el.addEventListener('input', quoteServiceSoon);
+  });
+  ['ov2-svc-size', 'ov2-svc-lam', 'ov2-svc-bind', 'ov2-svc-colour',
+   'ov2-svc-sides', 'ov2-svc-student', 'ov2-svc-urgent'].forEach((id) => {
+    const el = $(id); if (el) el.addEventListener('change', quoteService);
+  });
+  const paid = $('ov2-svc-paid');
+  if (paid) paid.addEventListener('input', syncServiceOverride);
+  const submit = $('ov2-svc-submit');
+  if (submit) submit.addEventListener('click', submitService);
+}
+
+
 function ensureStaffAuth() {
   if (sessionStorage.getItem('staff_pin')) return Promise.resolve();
   return new Promise((resolve) => {
@@ -1389,6 +1722,10 @@ function wire() {
     el.addEventListener('click', () => setDirection(el.dataset.direction)));
   document.querySelectorAll('[data-scale]').forEach((el) =>
     el.addEventListener('click', () => setScale(el.dataset.scale)));
+  // order-ui.js is an ES module, so its functions are NOT global — an inline
+  // oninput="" in the HTML would silently never fire. Everything here binds.
+  const pctInput = $('ov2-scale-percent');
+  if (pctInput) pctInput.addEventListener('input', () => setScalePercent(pctInput.value));
   $('ov2-copiesMinus').addEventListener('click', () => changeCopies(-1));
   $('ov2-copiesPlus').addEventListener('click', () => changeCopies(1));
   $('ov2-paper').addEventListener('change', (e) => {
@@ -1418,6 +1755,10 @@ function wire() {
     // Gate the page behind a staff PIN when none is inherited from a prior login.
     // Verified in the cloud, so it works off the store LAN (e.g. the office box).
     ensureStaffAuth();
+    // Custom % — the one scaling mode customers never see.
+    syncStaffScale();
+    // Lamination, binding, scanning, photocopy — work with no file at all.
+    syncStaffServices();
     // Fulfilling store: staff choose it explicitly via the location picker,
     // which stays VISIBLE in staff mode (a roaming box can serve either store
     // and must never tag jobs with its own machine id). Default the picker to

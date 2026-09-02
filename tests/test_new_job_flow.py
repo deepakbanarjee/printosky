@@ -1,16 +1,35 @@
 """
-One New Job flow, and a scale you can set while the customer is still there.
+One New Job flow — order-v2 staff mode — and a scale you can set at intake.
 
-Two problems, reported from the counter on 2026-09-01 as "my admin and job panel
-are using 2 different systems":
+The history matters, because this file has now been rewritten once for a
+decision that was reversed, and the reversal is the more important record.
 
-  1. `admin.html`'s "+ New Job" opened its dark 4-step modal. `jobs.html`'s
-     opened `order-v2.html?staff=1` — the **customer** order page — even though
-     jobs.html already contained that same modal, byte-identical and completely
-     unreachable. Staff got a different system depending on which console they
-     happened to open.
-  2. Scaling could only be set after the job existed, by finding its row and
-     opening the panel. Custom % at intake did not exist anywhere.
+**2026-09-01.** Reported from the counter as "my admin and job panel are using
+2 different systems": `admin.html`'s "+ New Job" opened its dark 4-step modal,
+while `jobs.html`'s opened `order-v2.html?staff=1`, even though jobs.html
+contained that same modal, byte-identical and completely unreachable. Both
+consoles were pointed at the dark modal, and Custom % was added to it.
+
+**2026-09-02, and this is the version that stands.** The owner rejected that
+outright: *"I absolutely hated the dark version of the jobs platform. That is
+why we created the order v2 version. It is more clear and interactive. I just
+want you to add the missing features to v2."*
+
+The consolidation was right and the direction was wrong. Standardising on the
+dark modal was argued from how short the wiring was, which is not a reason that
+belongs to anyone at the counter. So:
+
+  * both consoles open **order-v2 staff mode**, the page staff actually use;
+  * the dark modal is **deleted** from both — 218 lines of markup and 257 of
+    wizard JS each — not left unreachable, because an unreachable second
+    implementation is exactly how these two drifted apart in the first place;
+  * order-v2 gains **Custom %**, staff-only. It had been excluded there on the
+    grounds that customers should not pick percentages, which is still true —
+    but v2 is also the staff page, so the exclusion had quietly made Custom %
+    unreachable from anywhere the owner looked. That is what "I still don't see
+    custom scale" was.
+  * services and photocopies post to the **Vercel API**, not the store PC, so
+    staff can book them off-site (owner, 2026-09-02).
 """
 
 import os
@@ -34,70 +53,101 @@ def html(name):
     return open(os.path.join(ROOT, "website", name), encoding="utf-8").read()
 
 
-# ── One flow ──────────────────────────────────────────────────────────────────
+def order_v2():
+    return open(os.path.join(ROOT, "website", "order-v2.html"), encoding="utf-8").read()
+
+
+def order_ui():
+    return open(os.path.join(ROOT, "website", "order", "order-ui.js"), encoding="utf-8").read()
+
+
+# ── One flow, and it is order-v2 ──────────────────────────────────────────────
 
 @pytest.mark.parametrize("name", CONSOLES)
-def test_new_job_opens_the_modal_in_both_consoles(name):
+def test_new_job_opens_order_v2_staff_mode(name):
     src = html(name)
     btn = re.search(r'<button class="nj-btn-new-job"[^>]*>', src).group(0)
-    assert 'onclick="openNewJobModal()"' in btn
+    assert 'onclick="openNewJob()"' in btn
+    shim = re.search(r"function openNewJob\(\) \{(.*?)\n\}", src, re.S).group(1)
+    assert "order-v2.html?staff=1" in shim
 
 
 @pytest.mark.parametrize("name", CONSOLES)
-def test_staff_are_no_longer_sent_to_the_customer_order_page(name):
-    """order-v2 is the customer's page. It has no Custom % and never will —
-    that is decision A10, not an oversight."""
-    assert "order-v2.html?staff=1" not in html(name)
+def test_both_consoles_open_the_same_thing(name):
+    """The original complaint. Whatever else changes, this must not come back."""
+    assert re.search(r"function openNewJob\(\) \{(.*?)\n\}",
+                     html("jobs.html"), re.S).group(1) == \
+           re.search(r"function openNewJob\(\) \{(.*?)\n\}",
+                     html("admin.html"), re.S).group(1)
 
-
-def test_the_two_modals_are_still_identical():
-    def block(name):
-        s = html(name)
-        i = s.index('<div class="modal-overlay" id="newjob-modal"')
-        return s[i:s.index("<!-- ── Service Modal", i)]
-    assert block("jobs.html") == block("admin.html")
-
-
-# ── Scale at intake ───────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("name", CONSOLES)
-def test_the_modal_offers_the_same_four_choices_as_the_panel(name):
+def test_the_dark_modal_is_gone_not_merely_unreachable(name):
+    """It was already unreachable in jobs.html once, and sat there rotting until
+    someone noticed the two consoles disagreed. Deleted means deleted."""
     src = html(name)
-    block = re.search(r'id="nj-scale-mode".*?</select>', src, re.S).group(0)
-    assert re.findall(r'<option value="([a-z]*)"', block) == ["", "fit", "actual", "custom"]
-    panel = re.search(r'id="jp-scale-mode".*?</select>', src, re.S).group(0)
-    assert (re.findall(r'<option value="([a-z]*)"', block)
-            == re.findall(r'<option value="([a-z]*)"', panel))
+    for symbol in ("newjob-modal", "openNewJobModal", "njSubmit", "njShowStep",
+                   "njSetScaleMode", "njSetScalePercent", "nj-scale-mode",
+                   "njCurrentStep", "njUploadedFile", "njQuotedAmount"):
+        assert symbol not in src, f"{name} still carries {symbol}"
 
 
 @pytest.mark.parametrize("name", CONSOLES)
-def test_the_modal_offers_the_same_presets_as_the_panel(name):
-    src = html(name)
-    nj = re.search(r'id="nj-scale-custom".*?</div>', src, re.S).group(0)
-    jp = re.search(r'id="jp-scale-custom".*?</div>', src, re.S).group(0)
-    assert ([int(p) for p in re.findall(r"njSetScalePercent\((\d+)\)", nj)]
-            == [int(p) for p in re.findall(r"setScalePercent\((\d+)\)", jp)]
-            == [50, 75, 90, 125, 150, 200])
+def test_no_orphaned_wizard_state_was_left_behind(name):
+    """Five `let nj…` declarations survived the first pass of this removal."""
+    assert not re.findall(r"\bnj[A-Z]\w*", html(name))
 
 
-@pytest.mark.parametrize("name", CONSOLES)
-def test_the_intake_percent_box_is_bounded_like_the_panels(name):
-    box = re.search(r'id="nj-scale-percent"[^>]*', html(name)).group(0)
-    assert 'min="25"' in box and 'max="400"' in box
+# ── Custom % now lives where staff can reach it ───────────────────────────────
+
+def test_order_v2_offers_all_three_scale_modes():
+    assert re.findall(r'data-scale="([a-z]+)"', order_v2()) == ["fit", "actual", "custom"]
 
 
-@pytest.mark.parametrize("name", CONSOLES)
-def test_intake_defaults_to_no_scaling(name):
-    """Opening the modal and saving must not start scaling anything."""
-    src = html(name)
-    assert 'let njScaleMode    = "";' in src
-    assert 'document.getElementById("nj-scale-mode").value = "";' in src
+def test_custom_is_hidden_until_staff_mode():
+    """Still staff-only (owner, 2026-08-30) — the gate moved, the rule did not."""
+    page = order_v2()
+    tog = re.search(r'<div class="ov2-tog" data-scale="custom"[^>]*>', page).group(0)
+    assert 'style="display:none"' in tog
+    assert "function syncStaffScale()" in order_ui()
 
 
-@pytest.mark.parametrize("name", CONSOLES)
-def test_a_percent_is_only_sent_for_custom(name):
-    src = html(name)
-    assert 'scale_percent:   njScaleMode === "custom" ? njScalePercent : null,' in src
+def test_the_percent_box_is_bounded_like_the_panels():
+    box = re.search(r'id="ov2-scale-percent"[^>]*', order_v2()).group(0)
+    assert f'min="{pdf_scaler.MIN_PERCENT}"' in box
+    assert f'max="{pdf_scaler.MAX_PERCENT}"' in box
+
+
+def test_the_console_bounds_match_pdf_scalers():
+    """Two copies of a bound is how they drift. If this fails, change both."""
+    js = order_ui()
+    assert f"const SCALE_MIN_PERCENT = {pdf_scaler.MIN_PERCENT};" in js
+    assert f"const SCALE_MAX_PERCENT = {pdf_scaler.MAX_PERCENT};" in js
+
+
+def test_a_percent_out_of_range_is_clamped_and_announced():
+    """Clamped, never rejected — a typo should print something sane. But the
+    clamp is said out loud, so nobody wonders why 900% came out as 400%."""
+    js = order_ui()
+    fn = re.search(r"function setScalePercent\(raw\) \{(.*?)\n\}", js, re.S).group(1)
+    assert "Math.max(SCALE_MIN_PERCENT, Math.min(SCALE_MAX_PERCENT" in fn
+    assert "Scaling is limited to" in fn
+
+
+def test_the_preview_asks_the_printer_for_custom_geometry():
+    """No JavaScript copy of the geometry — a preview drawn by different code
+    than the printer gets is a preview that can lie."""
+    js = order_ui()
+    assert "sheet: state.paperSize, mode: state.scale," in js
+    assert "if (state.scale === 'custom') p.set('percent'" in js
+
+
+def test_the_inline_handler_trap_is_avoided():
+    """order-ui.js is an ES module, so its functions are not global. An inline
+    oninput="" in the HTML would silently never fire — the exact class of
+    nothing-happens bug that made Custom % look absent before."""
+    assert 'oninput="setScalePercent' not in order_v2()
+    assert "pctInput.addEventListener('input'" in order_ui()
 
 
 # ── The server stores it on the print item ────────────────────────────────────
