@@ -2347,12 +2347,19 @@ def handle_finishing_send(body: dict) -> dict:
         split = _rc.split_amounts(row["amount_quoted"] or 0, 0, finishing)
 
     now = _now()
+    # finishing_sent_at is the instant the job LEFT, and it is what the 48h
+    # digest line ages from. Without it the age falls back to received_at,
+    # which measures a completely different interval: a job taken in three
+    # weeks ago and sent to the finisher this morning would read as ~500h
+    # overdue. store_digest's own rule is that a wrong age is worse than no
+    # age, so the column exists rather than the digest guessing.
     conn.execute("""
         UPDATE jobs SET finishing_store_id=?, finishing_status='sent',
+               finishing_sent_at=?,
                print_amount=?, finishing_amount=?, finishing_internal_amount=?,
                notes=COALESCE(notes||' | ','') || ?
         WHERE job_id=?
-    """, (to_store, split["print_amount"], split["finishing_amount"],
+    """, (to_store, now, split["print_amount"], split["finishing_amount"],
           split["finishing_internal_amount"],
           f"Sent to {to_store} for {finishing or 'finishing'} at {now} by {staff_id}",
           job_id))
