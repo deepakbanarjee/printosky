@@ -226,6 +226,10 @@
   .ov2-svc-quote-lines { font-size: 12px; color: #6b7280; margin-top: 5px; line-height: 1.65; }
   .ov2-svc-quote-lines b { color: #374151; }
 
+  .ov2-svc-dropoff { background: #eef4fd; border: 1px solid #cfe0f5; border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 12px; font-size: 12.5px; color: #374151;
+    line-height: 1.7; }
+  .ov2-svc-dropoff b { color: #1b3f8b; }
   .ov2-svc-err { color: #c0392b; font-size: 13px; font-weight: 600; margin-bottom: 10px;
     min-height: 18px; }
   .ov2-svc-done { margin-top: 14px; font-size: 14px; color: #1b7f4b; font-weight: 600;
@@ -448,11 +452,11 @@
             <div class="ov2-card-label">Phone <span class="ov2-svc-opt">(optional)</span></div>
             <input type="tel" id="ov2-svc-phone" placeholder="For the ready message" autocomplete="off">
           </div>
-          <div class="ov2-card">
+          <div class="ov2-card" id="ov2-svc-paid-card">
             <div class="ov2-card-label">Taken now</div>
             <input type="number" id="ov2-svc-paid" min="0" step="1" placeholder="0" inputmode="numeric">
           </div>
-          <div class="ov2-card">
+          <div class="ov2-card" id="ov2-svc-mode-card">
             <div class="ov2-card-label">Payment</div>
             <select id="ov2-svc-mode">
               <option value="Cash">Cash</option>
@@ -472,6 +476,13 @@
           <input type="text" id="ov2-svc-notes" placeholder="Anything the shop needs to know" autocomplete="off">
         </div>
 
+        <div class="ov2-svc-dropoff" id="ov2-svc-dropoff-note" style="display:none">
+          <b>How a booking works.</b> We hold your slot and the price above.
+          Bring your item to the shop and we start straight away — nothing is
+          charged until we have it in hand. If it has not reached us in
+          <b>3 days</b> the booking is cancelled automatically, and we will
+          WhatsApp you a reminder well before that.
+        </div>
         <div class="ov2-svc-err" id="ov2-svc-err"></div>
         <button type="button" class="ov2-btn" id="ov2-svc-submit">Book this service</button>
         <div class="ov2-svc-done" id="ov2-svc-done"></div>

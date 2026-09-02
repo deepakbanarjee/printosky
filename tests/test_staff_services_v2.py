@@ -120,10 +120,14 @@ def test_a_field_that_means_nothing_for_a_kind_is_hidden_not_disabled():
 def test_a_photocopy_goes_to_its_own_endpoint():
     """It is work the Konica actually did, so it is filed as a completed
     photocopy rather than a service job — which is what keeps it inside the
-    printer counts that the B-10 reconciliation compares against."""
+    printer counts that the B-10 reconciliation compares against.
+
+    Staff-only since B-9: a photocopy needs the machine and the paper at the
+    same moment, so it cannot be a drop-off booking.
+    """
     js = service_js()
-    assert "const isCopy = svc.kind === 'copy';" in js
-    assert "isCopy ? '/order/staff-photocopy' : '/order/staff-service'" in js
+    assert "const isCopy = STAFF && svc.kind === 'copy';" in js
+    assert "isCopy ? '/order/staff-photocopy'" in js
 
 
 def test_a_photocopy_sends_the_flat_body_that_endpoint_expects():
@@ -197,17 +201,28 @@ def test_the_whole_panel_starts_hidden():
         assert 'style="display:none"' in tag, el_id
 
 
-def test_only_staff_mode_reveals_it():
+def test_the_panel_is_open_to_customers_but_its_staff_parts_are_not():
+    """Changed by B-9. The panel itself is now a customer feature — an online
+    drop-off booking (plan §4.8) — so the gate moved from "staff see the panel"
+    to "staff see the payment fields, the photocopy kind and the override".
+    """
     js = service_js()
-    fn = re.search(r"function syncStaffServices\(\) \{(.*?)\n\}", js, re.S).group(1)
-    assert "if (!STAFF) return;" in fn
+    fn = re.search(r"function syncServices\(\) \{(.*?)\n\}", js, re.S).group(1)
+    assert "if (!STAFF) return;" not in fn
+    assert "if (!STAFF) {" in fn, "the staff-only parts must still be gated"
+    assert "'ov2-svc-paid-card', 'ov2-svc-mode-card'" in fn
 
 
-def test_it_is_wired_up_from_the_staff_init():
+def test_it_is_wired_up_for_everyone_and_the_scale_only_for_staff():
     js = order_ui()
-    init = js[js.index("  if (STAFF) {"):]
-    assert "syncStaffServices();" in init
-    assert "syncStaffScale();" in init
+    assert "  syncServices();" in js
+    # The staff-mode block, not just any `if (STAFF)` — there are several, and
+    # slicing from the first one swept in the whole file.
+    staff_block = js[js.index("// ── Staff mode: hide customer fields"):]
+    assert "syncStaffScale();" in staff_block, "Custom % is staff-only"
+    assert "syncServices();" not in staff_block, (
+        "the services panel is a customer feature too — calling it only from "
+        "the staff block would hide online drop-off bookings entirely")
 
 
 def test_switching_to_services_hides_the_print_flow():

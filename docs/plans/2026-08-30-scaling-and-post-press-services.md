@@ -613,6 +613,51 @@ The job exists before the item does, so:
 - A WhatsApp reminder goes out, and an un-received booking **auto-expires after 3 days** *(day count to confirm)* — cancelled with a reason, not silently deleted.
 - Above the payment threshold the booking takes **part payment upfront** *(threshold and deposit pending)*, which also makes an abandoned booking cost the customer rather than the shop.
 
+> **Built 2026-09-02 (B-9).** `item_received_at` is the whole distinction, and
+> it is set by *who booked it*, not by a flag anyone has to remember:
+>
+> | | |
+> |---|---|
+> | staff at the counter (`/order/staff-service`) | the customer is standing there holding the paper — `item_received_at` is **now**, and the booking never enters the sweep |
+> | online (`/order/book-service`, public, no PIN) | the item is in their bag — **NULL**, not work-ready, and the sweep counts down |
+>
+> One `_create_service_job()` builds both rows, so a price, a deposit or a
+> status cannot depend on which door the booking came in through.
+>
+> **The four rules `dropoff.py` will not bend:**
+>
+> 1. **A reminder always comes before a cancellation.** A booking a month old
+>    with no reminder sent is *reminded*, not cancelled — a missed cron run
+>    delays the cancellation rather than skipping the warning. This is why
+>    `dropoff_reminded_at` is a column (`SCHEMA_v41`) and not a derived age: a
+>    marker survives an outage, arithmetic does not. A failed WhatsApp send does
+>    **not** set it.
+> 2. **Money stops the sweep.** Anything collected and the booking goes to the
+>    owner instead of being auto-cancelled. Refunds, disputes and part payments
+>    are not a nightly script's call.
+> 3. **An arrived item is untouchable.** Once `item_received_at` is set this
+>    module has no opinion about the job at all.
+> 4. **Cancelling says why.** `Cancelled` plus a reason in `notes`, never a
+>    delete — a job that vanishes is one nobody can explain to the customer who
+>    asks next week.
+>
+> A booking with no phone number is **refused at creation**: it could not be
+> reminded, so it would be cancelled in three days with no warning, which rule 1
+> exists to prevent.
+>
+> The console disables **Notify Ready** while the item is missing — telling a
+> customer their own paper is waiting for them is the failure that gate is for —
+> and offers *"Item received — start work"*, which is idempotent: a second tap
+> reports the recorded time rather than restarting an expiry clock.
+>
+> Customers do not get `copy`, `dtp` or `other`: a photocopy needs the machine
+> and the paper at the same moment, so there is nothing to leave behind.
+>
+> **Not built:** taking the part payment online. The deposit is *computed* and
+> shown, and the status rule already applies, but no money changes hands on the
+> site — a booking is unpaid until the item arrives. Wiring Razorpay into the
+> booking flow is its own piece of work.
+
 ### 4.9 Withdrawals — things to remove, deliberately
 
 Thermal binding is **no longer offered**. Remove it from `BINDING_RATES`,
@@ -853,7 +898,7 @@ by ₹180, never under.
 | B-6 ✅ | Photocopy button quotes from the rate card (B6) — built 2026-09-01 | low — one live button |
 | B-7 ✅ | Per-store capabilities + `is_outsourced()` — built 2026-09-01, inert until B-8 | low |
 | B-8 ✅ | Inter-store transfer + revenue split + Nattika's incoming queue — built 2026-09-01 | medium |
-| B-9 | Online drop-off bookings + expiry sweep | medium |
+| B-9 | ~~Online drop-off bookings + expiry sweep~~ ✅ | medium |
 | B-10 | ~~Konica copy/scan reconciliation panel~~ ✅ | medium |
 
 ---

@@ -752,6 +752,18 @@
     text-transform: uppercase; letter-spacing: .1em; margin-bottom: .2rem;
   }
   .svc-panel-cell .v { font-family: var(--mono); font-size: .85rem; color: var(--text); }
+  .svc-awaiting {
+    background: #2a2410; border: 1px solid var(--amber); border-radius: 4px;
+    padding: .8rem 1rem; margin-bottom: .9rem; font-size: .78rem;
+    color: var(--amber); line-height: 1.6; }
+  .svc-awaiting b { color: var(--amber); }
+  .svc-awaiting .jp-btn.receive {
+    display: block; margin-top: .7rem; background: var(--amber); color: #000;
+    border: none; font-weight: 600; }
+  .svc-awaiting .jp-btn.receive:disabled { opacity: .55; cursor: default; }
+  .svc-item-ok {
+    font-family: var(--mono); font-size: .68rem; color: var(--green);
+    margin-bottom: .9rem; }
   .svc-noprint {
     font-family: var(--mono); font-size: .68rem; color: var(--muted);
     border-left: 2px solid var(--accent); padding: .4rem .7rem; margin-bottom: 1rem;
@@ -4717,12 +4729,86 @@ function servicePanelHTML(j) {
         <div class="svc-panel-cell"><span class="k">Collected</span>
           <span class="v">${j.amount_collected != null ? "Rs." + Math.ceil(j.amount_collected) : "—"}</span></div>
       </div>
+      ${awaitingItemHTML(j)}
       <div class="jp-action-bar">
-        <button class="jp-btn notify"  id="jp-btn-notify"  onclick="markReady()">Notify Customer Ready →</button>
+        <button class="jp-btn notify"  id="jp-btn-notify"  onclick="markReady()"
+                ${isAwaitingItem(j) ? "disabled" : ""}>Notify Customer Ready →</button>
         <button class="jp-btn collect" id="jp-btn-collect" onclick="openPaymentModal()">Collect Payment</button>
       </div>
     </div>
   </div>`;
+}
+
+// ── Drop-off bookings — a job that exists before the item does ────────────────
+//
+// A customer books lamination or binding online and brings the paper in after
+// (plan §4.8). `item_received_at` NULL means the booking is real but the work
+// is not startable: the thing to laminate is still in someone's bag. Marking it
+// Ready would tell the customer their own paper is waiting for them, which is
+// why that button is disabled rather than merely discouraged.
+//
+// The nightly sweep reminds after a day and cancels after three, reminder
+// always first. DROPOFF_EXPIRY_DAYS mirrors dropoff.py; a test pins the match.
+const DROPOFF_EXPIRY_DAYS = 3;
+
+function isAwaitingItem(j) {
+  return !!(j && j.service_kind) && !j.item_received_at;
+}
+
+// Work-ready is not the same as counted. A booking is a real commitment and
+// stays in the job counts; it just cannot be started yet.
+function isWorkReady(j) {
+  return !isAwaitingItem(j);
+}
+
+function awaitingItemHTML(j) {
+  if (!j || !j.service_kind) return "";
+  if (!isAwaitingItem(j)) {
+    return `<div class="svc-item-ok">✓ Item received ${esc(shortWhen(j.item_received_at))}</div>`;
+  }
+  const reminded = j.dropoff_reminded_at
+    ? `Reminder sent ${esc(shortWhen(j.dropoff_reminded_at))}.`
+    : "No reminder sent yet.";
+  return `<div class="svc-awaiting">
+    <b>Waiting for the customer's item.</b> Nothing to work on until it is here.
+    ${reminded} Cancels automatically ${DROPOFF_EXPIRY_DAYS} days after booking.
+    <button class="jp-btn receive" id="jp-btn-receive"
+            onclick="receiveItem('${esc(j.job_id)}')">Item received — start work</button>
+  </div>`;
+}
+
+function shortWhen(ts) {
+  if (!ts) return "";
+  try {
+    const d = new Date(String(ts).replace(" ", "T"));
+    return d.toLocaleString("en-IN", { day: "numeric", month: "short",
+                                       hour: "2-digit", minute: "2-digit" });
+  } catch (e) { return String(ts).slice(0, 16); }
+}
+
+async function receiveItem(jobId) {
+  const btn = document.getElementById("jp-btn-receive");
+  if (btn) { btn.disabled = true; btn.textContent = "Recording…"; }
+  try {
+    const r = await fetch(ACAD_API + "/order/receive-item", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Staff-Pin": sessionStorage.getItem("staff_pin") || "",
+      },
+      body: JSON.stringify({ job_id: jobId,
+                             staff_id: sessionStorage.getItem("staff_id") || "" }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.ok === false) throw new Error(d.error || ("HTTP " + r.status));
+    // Reload rather than patching the row optimistically: the recorded time is
+    // the server's, and an already-received item must show ITS time, not now.
+    if (btn) btn.textContent = d.already ? "Already received ✓" : "Item received ✓";
+    loadAll();
+  } catch (e) {
+    alert("Could not mark the item received: " + (e.message || e));
+    if (btn) { btn.disabled = false; btn.textContent = "Item received — start work"; }
+  }
 }
 
 const SERVICE_LABELS = {

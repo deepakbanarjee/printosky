@@ -88,7 +88,7 @@ def _has_service_columns(cursor) -> bool:
 #: wired up. Synced from SCHEMA_v40.
 _FINISHING_COLUMNS = ("finishing_store_id", "finishing_status", "finishing_sent_at",
                       "print_amount", "finishing_amount", "finishing_internal_amount",
-                      "item_received_at")
+                      "item_received_at", "dropoff_reminded_at")
 
 
 def _present_columns(cursor, wanted) -> tuple:

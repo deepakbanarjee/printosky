@@ -3006,6 +3006,113 @@ def _handle_cron_abandoned_carts(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_cron_dropoff_sweep(h) -> None:
+    """GET /cron/dropoff-sweep — nudge, then cancel, un-received drop-off bookings.
+
+    A drop-off booking is a service job whose item has not arrived yet
+    (`item_received_at IS NULL`, plan §4.8). The customer booked lamination or
+    binding online and is meant to bring the paper in. Some never do, and a
+    booking that sits open forever is a queue nobody trusts.
+
+    The decisions live in `dropoff.py` and are pure; this does the sending and
+    the writing. What it will not do, in order of how badly it would go wrong:
+
+      * cancel a booking the customer was never warned about — the reminder is
+        a promise, so a missed run delays the cancellation rather than skipping
+        the warning;
+      * auto-cancel a booking with money on it — that goes to the owner instead;
+      * touch a booking whose item has arrived.
+
+    Auth: `Authorization: Bearer ${CRON_SECRET}` when CRON_SECRET is set.
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected and h.headers.get("Authorization", "") != f"Bearer {expected}":
+        _json_response(h, 401, {"error": "Unauthorized"})
+        return
+
+    from datetime import datetime
+
+    import dropoff
+
+    try:
+        from db_cloud import _client
+        from whatsapp_notify import _send
+        c = _client()
+
+        rows = (c.table("jobs")
+                 .select("job_id,sender,service_kind,service_type,status,"
+                         "received_at,item_received_at,dropoff_reminded_at,"
+                         "amount_collected,notes")
+                 .not_.is_("service_kind", "null")
+                 .is_("item_received_at", "null")
+                 .execute().data) or []
+    except Exception as exc:
+        logger.error("dropoff-sweep read failed: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+        return
+
+    now = datetime.now()
+    plan = dropoff.sweep(rows, now)
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    reminded = cancelled = unreachable = 0
+
+    for row in plan[dropoff.REMIND]:
+        phone = str(row.get("sender") or "").strip()
+        if not phone:
+            # No number is not a reason to cancel later without warning: the
+            # marker is set so the clock still runs, and the owner is told,
+            # because a booking nobody can reach still owes the customer an
+            # answer at the counter.
+            unreachable += 1
+        else:
+            try:
+                _send(phone, dropoff.reminder_message(row, now))
+            except Exception as exc:
+                logger.error("dropoff reminder send failed for %s: %s",
+                             row.get("job_id"), exc)
+                continue        # try again next run rather than marking it sent
+        try:
+            c.table("jobs").update({"dropoff_reminded_at": now_str}) \
+                .eq("job_id", row["job_id"]).execute()
+            reminded += 1
+        except Exception as exc:
+            logger.error("dropoff reminder mark failed for %s: %s",
+                         row.get("job_id"), exc)
+
+    for row in plan[dropoff.EXPIRE]:
+        reason = dropoff.expiry_reason(row)
+        note = " | ".join(x for x in [row.get("notes"), reason] if x)
+        try:
+            c.table("jobs").update({"status": dropoff.CANCELLED, "notes": note}) \
+                .eq("job_id", row["job_id"]).execute()
+            cancelled += 1
+        except Exception as exc:
+            logger.error("dropoff cancel failed for %s: %s", row.get("job_id"), exc)
+            continue
+        phone = str(row.get("sender") or "").strip()
+        if phone:
+            try:
+                _send(phone, dropoff.expiry_message(row))
+            except Exception as exc:
+                logger.error("dropoff cancel notice failed for %s: %s",
+                             row.get("job_id"), exc)
+
+    # Paid bookings out of time are a person's call, never a script's.
+    needs_human = plan[dropoff.NEEDS_HUMAN]
+    if needs_human:
+        _alert_ops(f"{len(needs_human)} paid drop-off booking(s) need a decision",
+                   dropoff.format_needs_human(needs_human))
+    if unreachable:
+        logger.warning("dropoff-sweep: %d booking(s) have no phone to remind",
+                       unreachable)
+
+    _json_response(h, 200, {
+        "ok": True, "open": len(rows), "reminded": reminded,
+        "cancelled": cancelled, "needs_human": len(needs_human),
+        "unreachable": unreachable, "waiting": len(plan[dropoff.WAITING]),
+    })
+
+
 def _handle_cron_payment_review_reminders(h) -> None:
     """GET /cron/payment-review-reminders — re-surface payment screenshots that
     Anu hasn't verified yet, so orders don't strand in payment_review.
@@ -3181,6 +3288,8 @@ from api.handlers_order import (
     _handle_order_upload_sign,
     _handle_order_quote,
     _handle_order_create,
+    _handle_order_book_service,
+    _handle_order_receive_item,
     _handle_order_service_quote,
     _handle_order_staff_create,
     _handle_order_staff_photocopy,
@@ -3331,6 +3440,11 @@ class handler(BaseHTTPRequestHandler):
         # ── Abandoned book-cart reminders (GitHub Actions cron) ───────────────
         if self.path == "/cron/abandoned-carts" or self.path.startswith("/cron/abandoned-carts?"):
             _handle_cron_abandoned_carts(self)
+            return
+
+        # ── Drop-off bookings: remind, then cancel (GitHub Actions cron) ──────
+        if self.path == "/cron/dropoff-sweep" or self.path.startswith("/cron/dropoff-sweep?"):
+            _handle_cron_dropoff_sweep(self)
             return
 
         # ── Payment-review reminders to Anu (GitHub Actions cron) ─────────────
@@ -3742,6 +3856,12 @@ class handler(BaseHTTPRequestHandler):
             return
         if self.path == "/order/staff-create":
             _handle_order_staff_create(self, body)
+            return
+        if self.path == "/order/book-service":
+            _handle_order_book_service(self, body)
+            return
+        if self.path == "/order/receive-item":
+            _handle_order_receive_item(self, body)
             return
         if self.path == "/order/staff-service":
             _handle_order_staff_service(self, body)
