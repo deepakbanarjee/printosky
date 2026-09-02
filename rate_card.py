@@ -264,15 +264,20 @@ DELIVERY_CHARGE = 30
 # SECTION 4 — FINISHING TYPE METADATA (for UI dropdowns)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# NOTE (2026-08-30): these two lists are a whole-company answer to a per-store
-# question. Binding, roll lamination and foiling are done in house at Nattika
-# (PRINTK) and outsourced everywhere else, so "outsourced" is a property of the
-# store, not of the finishing. Backlog S13-12 replaces this with
-# is_outsourced(finishing, store_id) driven by store_config.json capabilities;
-# until then these stay as the no-store-context fallback.
+# These two lists are the **no-store-context fallback**. "Outsourced" is a
+# property of the store, not of the finishing — binding, roll lamination and
+# foiling are done in house at Nattika (PRINTK) and go out everywhere else — so
+# the real answer comes from is_outsourced(finishing, store_id), driven by
+# store_config.json capabilities (built 2026-09-01, S13-12).
+#
+# Soft binding joined FINISHING_OUTSOURCED on 2026-09-01: the owner confirmed it
+# is in-house at Nattika and outsourced at Oxygen. It had been in *neither* list,
+# which is why the consoles called it outsourced and the rate card called it
+# in-house — both were half right about a question that has two answers.
 FINISHING_INHOUSE    = ["none", "staple", "spiral", "wiro", "perfect",
                         "lam_sheet", "id_card"]
-FINISHING_OUTSOURCED = ["lam_roll", "lam_cover", "project", "record", "thesis"]
+FINISHING_OUTSOURCED = ["lam_roll", "lam_cover", "project", "record", "thesis",
+                        "soft"]
 
 #: Which store capability would bring an outsourced finishing in-house.
 #: Only the keys in FINISHING_OUTSOURCED appear here: a finishing we already do
@@ -285,6 +290,12 @@ FINISHING_CAPABILITY = {
     "project":   "binding",
     "record":    "binding",
     "thesis":    "binding",
+    # Soft binding is Nattika's, not Oxygen's (owner, 2026-09-01). Listing it
+    # here rather than hardcoding either answer is the point of the capability
+    # map: OSP claims no binding so it goes out, PRINTK claims binding so it
+    # stays in. Before this the consoles said "outsourced" and the rate card
+    # said "in-house", and both were half right.
+    "soft":      "binding",
 }
 FINISHING_URGENT_OK  = sorted(URGENT_ELIGIBLE)  # sorted: reaches the UI
 
