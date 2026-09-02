@@ -86,14 +86,26 @@ def test_every_store_config_still_parses():
 
 # ── is_outsourced ─────────────────────────────────────────────────────────────
 
-def test_without_store_context_nothing_changes():
-    """Every caller before 2026-09-01 passes no context and must see the old
-    answer, exactly."""
+def test_without_store_context_the_answer_is_the_safe_default():
+    """No context means outsourced for anything on the list, in-house for the
+    rest — the fallback every caller sees until it passes a store."""
     for finishing in FINISHING_OUTSOURCED:
         assert is_outsourced(finishing) is True
-    for finishing in ("none", "staple", "spiral", "wiro", "soft", "perfect",
+    for finishing in ("none", "staple", "spiral", "wiro", "perfect",
                       "lam_sheet", "id_card"):
         assert is_outsourced(finishing) is False
+
+
+def test_soft_binding_is_nattikas_not_oxygens():
+    """Owner, 2026-09-01: in-house at Nattika, outsourced at Oxygen.
+
+    This is the case the capability map exists for. Before it, soft was in
+    neither list — so the consoles said outsourced and the rate card said
+    in-house, and both were half right about a question with two answers.
+    """
+    assert is_outsourced("soft", capabilities={}) is True             # Oxygen
+    assert is_outsourced("soft", capabilities={"binding": True}) is False   # Nattika
+    assert is_outsourced("soft") is True    # no context -> the safe default
 
 
 def test_a_store_that_owns_the_machine_keeps_the_work():
@@ -165,20 +177,21 @@ def test_a_missing_config_is_not_an_answer(monkeypatch):
 
 # ── The known divergence, recorded rather than silently resolved ──────────────
 
-def test_the_consoles_still_disagree_with_the_rate_card_about_soft_binding():
-    """Both consoles hardcode soft binding as outsourced; the rate card does not.
-
-    Found 2026-09-01 while building B-7. Which one is right is a business
-    question for the owner, not a coin flip: making the consoles match the rate
-    card would remove the "Send to Vendor" button from soft binding, and making
-    the rate card match the consoles would change what `outsourced` means in
-    every quote. This test exists so the divergence cannot be quietly forgotten
-    — when the owner answers, one side changes and this test is replaced by one
-    asserting they agree.
+def test_the_consoles_and_the_rate_card_now_agree():
+    """Settled 2026-09-01. This test replaces the one that pinned the
+    divergence: both sides now list the same six finishings as outsourced by
+    default, and the per-store answer comes from capabilities rather than from
+    whichever file you happened to read.
     """
     js = open(os.path.join(ROOT, "website", "jobs.html"), encoding="utf-8").read()
     line = [l for l in js.splitlines() if "const OUTSOURCED_FINISHING" in l][0]
     console = set(x.strip(' "\'') for x in
                   line.split("[")[1].split("]")[0].split(","))
-    assert console - set(FINISHING_OUTSOURCED) == {"soft"}
-    assert not set(FINISHING_OUTSOURCED) - console
+    assert console == set(FINISHING_OUTSOURCED)
+
+
+def test_soft_is_not_claimed_in_house_by_the_other_list_as_well():
+    """FINISHING_INHOUSE and FINISHING_OUTSOURCED must not both claim it."""
+    from rate_card import FINISHING_INHOUSE
+    assert not set(FINISHING_INHOUSE) & set(FINISHING_OUTSOURCED)
+    assert "soft" not in FINISHING_INHOUSE
