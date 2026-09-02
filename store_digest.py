@@ -166,6 +166,83 @@ def format_monthly_log(rows: Sequence[Mapping]) -> str:
     )
 
 
+# ── Finishing sent to another store and not back (plan §4.12, B-8) ────────────
+#
+# A job at a finishing store is invisible: it is not in this shop's queue, not
+# on this shop's printer, and the customer is still expecting it. Nattika went
+# dark for a week in August 2026 because "locally reasonable" silences added up
+# (see ops_watchdog), and a job sitting at the other shop is exactly that shape.
+
+#: How long a transfer may sit before it earns a line in the digest.
+FINISHING_OVERDUE_HOURS = 48
+
+
+def overdue_finishing(rows: Iterable[Mapping], now: datetime | None = None,
+                      hours: int = FINISHING_OVERDUE_HOURS) -> list[dict]:
+    """Jobs sent out for finishing and not returned within `hours`.
+
+    A row needs `job_id`, `finishing_store_id`, `finishing_status` and a
+    `finishing_sent_at`-ish timestamp; rows missing any of it are skipped rather
+    than guessed at, because a wrong age is worse than no line.
+    """
+    now = now or datetime.now()
+    out: list[dict] = []
+    for row in rows or []:
+        status = str(row.get("finishing_status") or "").strip().lower()
+        if status not in ("sent", "at_finisher"):
+            continue
+        sent = _as_datetime(row.get("finishing_sent_at") or row.get("received_at"))
+        if sent is None:
+            continue
+        age = (now - sent).total_seconds() / 3600.0
+        if age < hours:
+            continue
+        out.append({
+            "job_id": row.get("job_id"),
+            "store": row.get("finishing_store_id") or "?",
+            "status": status,
+            "hours": int(age),
+        })
+    return sorted(out, key=lambda r: -r["hours"])
+
+
+def format_overdue_finishing(rows: Iterable[Mapping], now: datetime | None = None,
+                             hours: int = FINISHING_OVERDUE_HOURS) -> str:
+    """The digest section, or "" when there is nothing to say.
+
+    Empty means silence on purpose: a daily "0 jobs overdue" line is the kind
+    of green tick people stop reading, and this section only earns attention by
+    being rare.
+    """
+    late = overdue_finishing(rows, now, hours)
+    if not late:
+        return ""
+    head = (f"\u26a0\ufe0f {len(late)} job at a finishing store over {hours}h"
+            if len(late) == 1 else
+            f"\u26a0\ufe0f {len(late)} jobs at a finishing store over {hours}h")
+    lines = [f"  {r['job_id']} — {r['store']}, {r['status']}, {r['hours']}h"
+             for r in late]
+    return "\n".join([head, *lines])
+
+
+def _as_datetime(value) -> datetime | None:
+    """Parse the timestamp shapes this repo actually stores, or None."""
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    text = str(value).strip().replace("T", " ")
+    if text.endswith("Z"):
+        text = text[:-1]
+    text = text.split("+")[0].split(".")[0].strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
 # ── Composed messages ─────────────────────────────────────────────────────────
 def compose_opening_message(d: date | str) -> str:
     d = _as_date(d)
@@ -178,6 +255,7 @@ def compose_closing_message(
     weekly_rows: Sequence[Mapping] | None = None,
     monthly_rows: Sequence[Mapping] | None = None,
     clean: bool = True,
+    finishing_rows: Sequence[Mapping] | None = None,
 ) -> str:
     """Build the closing message.
 
@@ -193,6 +271,10 @@ def compose_closing_message(
         f"⚠️ Store PC went OFFLINE (no clean shutdown) — {d:%A, %d %b %Y}"
     )
     parts = [head, format_daily_log(daily)]
+    # Only when there is something late — see format_overdue_finishing.
+    overdue = format_overdue_finishing(finishing_rows or [])
+    if overdue:
+        parts.append(overdue)
     if weekly_rows is not None and is_last_working_day_of_week(d):
         parts.append(format_weekly_log(weekly_rows))
     if monthly_rows is not None and is_last_working_day_of_month(d):

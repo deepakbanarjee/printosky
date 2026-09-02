@@ -260,3 +260,77 @@ def test_the_vendor_path_is_a_separate_path():
     assert "job_vendor_steps" not in send
     assert "vendor_name" not in send
     assert "At Vendor" not in send
+
+
+# ── The queue at the counter ──────────────────────────────────────────────────
+#
+# The panel is deliberately hidden when the queue is empty. A panel that always
+# reads "0 jobs" is one people stop looking at, and this one only earns
+# attention by appearing.
+
+ROOT = os.path.join(os.path.dirname(__file__), "..")
+CONSOLES = ("jobs.html", "admin.html")
+
+
+def _html(name):
+    return open(os.path.join(ROOT, "website", name), encoding="utf-8").read()
+
+
+@pytest.mark.parametrize("name", CONSOLES)
+def test_the_queue_panel_starts_hidden(name):
+    src = _html(name)
+    panel = src[src.index('id="finishing-queue"'):][:200]
+    assert 'style="display:none"' in panel
+
+
+@pytest.mark.parametrize("name", CONSOLES)
+def test_an_empty_queue_hides_the_panel_rather_than_showing_zero(name):
+    src = _html(name)
+    fn = src[src.index("async function refreshFinishingQueue()"):
+             src.index("function _fqHours(")]
+    assert 'if (!data.ok || !(data.jobs || []).length) { panel.style.display = "none"; return; }' in fn
+
+
+@pytest.mark.parametrize("name", CONSOLES)
+def test_the_button_offers_only_the_next_legal_step(name):
+    """The store PC enforces forward-only; the console must not offer a jump."""
+    src = _html(name)
+    fn = src[src.index("async function refreshFinishingQueue()"):
+             src.index("function _fqHours(")]
+    assert 'j.finishing_status === "sent" ? "receive" : "return"' in fn
+
+
+@pytest.mark.parametrize("name", CONSOLES)
+def test_a_refused_step_shows_the_reason_the_store_pc_gave(name):
+    """That reason names the step it expected — the actionable half."""
+    src = _html(name)
+    fn = src[src.index("async function advanceFinishing("):]
+    assert 'alert("Failed: " + (data.error || "Unknown error"));' in fn
+
+
+@pytest.mark.parametrize("name", CONSOLES)
+def test_an_unparseable_age_shows_nothing_rather_than_a_wrong_number(name):
+    src = _html(name)
+    fn = src[src.index("function _fqHours("):src.index("async function advanceFinishing(")]
+    assert "if (isNaN(t)) return null;" in fn
+
+
+@pytest.mark.parametrize("name", CONSOLES)
+def test_the_overdue_threshold_matches_the_digest(name):
+    """One number, two places it is shown — they must agree."""
+    from store_digest import FINISHING_OVERDUE_HOURS
+    src = _html(name)
+    assert f"const FINISHING_OVERDUE_HOURS = {FINISHING_OVERDUE_HOURS};" in src
+
+
+@pytest.mark.parametrize("name", CONSOLES)
+def test_the_queue_refreshes_with_the_job_list(name):
+    assert "if (!isDemo) refreshFinishingQueue();" in _html(name)
+
+
+def test_the_queue_is_identical_in_both_consoles():
+    def block(name):
+        s = _html(name)
+        i = s.index("// ── Incoming finishing queue (B-8)")
+        return s[i:s.index("// ── Service Modal — post-press work", i)]
+    assert block("jobs.html") == block("admin.html")
