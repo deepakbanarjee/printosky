@@ -2276,6 +2276,209 @@ def handle_vendor_return(body: dict) -> dict:
 
 # ── A8: Quote calculator ──────────────────────────────────────────────────────
 
+# ── B-8: Inter-store finishing — a transfer, not a vendor job ─────────────────
+#
+# When OSP sells a record binding and Nattika binds it, no third party is
+# involved: one customer, one payment, two shops with one owner. The existing
+# /vendor-send path books it as an outside cost, which is wrong on both the
+# money and the tracking — so this is a parallel path, and the vendor path is
+# untouched.
+#
+# The status walks sent -> at_finisher -> returned, forward only. A job cannot
+# be marked returned before it was received: the queue at the other shop is the
+# only record that the work is physically there, and a status that can jump
+# makes that record a guess.
+
+def _finishing_row(conn, job_id: str):
+    """The transfer state of a job, or None. Tolerates a pre-v38 database."""
+    have = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    if "finishing_status" not in have:
+        return None
+    return conn.execute(
+        "SELECT job_id, finishing_store_id, finishing_status, finishing, "
+        "       amount_quoted, status FROM jobs WHERE job_id=?",
+        (job_id,),
+    ).fetchone()
+
+
+def _finishing_absent_reason(job_id: str) -> str:
+    """Why a job has no transfer state: no such job, or no such columns.
+
+    Telling a counter its job vanished when the truth is "this PC has not
+    restarted since the migration" sends them looking in the wrong place.
+    """
+    conn = _db()
+    try:
+        have = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+        if "finishing_status" not in have:
+            return ("this store PC has not applied the service migration yet — "
+                    "pull and restart the watcher")
+        exists = conn.execute(
+            "SELECT 1 FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        return f"Job {job_id} not found" if not exists else (
+            f"Job {job_id} has no finishing state")
+    finally:
+        conn.close()
+
+
+def handle_finishing_send(body: dict) -> dict:
+    """
+    POST /finishing-send  { job_id, finishing_store_id, staff_id,
+                            print_cost?, finishing_cost? }
+
+    Book a job out to another Printosky store for finishing, and split the
+    money at the same moment — because a split computed later is a split
+    computed from whatever the numbers have become since.
+    """
+    job_id   = (body.get("job_id") or "").strip()
+    to_store = (body.get("finishing_store_id") or "").strip().upper()
+    staff_id = body.get("staff_id", "")
+
+    if not job_id or not to_store:
+        return {"ok": False, "error": "job_id and finishing_store_id required"}
+
+    conn = _db()
+    ensure_job_service_columns(conn)
+    row = _finishing_row(conn, job_id)
+    if row is None:
+        conn.close()
+        return {"ok": False, "error": _finishing_absent_reason(job_id)}
+
+    here = get_store_config().store_id
+    if to_store == here.upper():
+        conn.close()
+        return {"ok": False,
+                "error": f"{to_store} is this store — a transfer needs another one"}
+
+    current = row["finishing_status"]
+    if not _rc.is_valid_finishing_move(current, "sent"):
+        conn.close()
+        _report_health(
+            "finishing.bad_transition", False,
+            f"{job_id} is already {current!r}; refusing to send it again. The "
+            f"walk is {' -> '.join(_rc.FINISHING_STATUSES)}, forward only.",
+        )
+        return {"ok": False, "error": f"{job_id} is already '{current}'",
+                "finishing_status": current}
+
+    finishing = row["finishing"] or ""
+    split = _rc.split_amounts(
+        body.get("print_cost", 0), body.get("finishing_cost", 0), finishing)
+    # No costs given: book the whole quote as printing rather than inventing a
+    # finishing charge nobody quoted.
+    if split["print_amount"] == 0 and split["finishing_amount"] == 0:
+        split = _rc.split_amounts(row["amount_quoted"] or 0, 0, finishing)
+
+    now = _now()
+    conn.execute("""
+        UPDATE jobs SET finishing_store_id=?, finishing_status='sent',
+               print_amount=?, finishing_amount=?, finishing_internal_amount=?,
+               notes=COALESCE(notes||' | ','') || ?
+        WHERE job_id=?
+    """, (to_store, split["print_amount"], split["finishing_amount"],
+          split["finishing_internal_amount"],
+          f"Sent to {to_store} for {finishing or 'finishing'} at {now} by {staff_id}",
+          job_id))
+    conn.commit()
+    conn.close()
+
+    logging.info("Job %s -> %s for finishing (print Rs.%.0f / finishing Rs.%.0f)",
+                 job_id, to_store, split["print_amount"], split["finishing_amount"])
+    _jt_log(DB_PATH, job_id, "finishing_sent",
+            from_status=None, to_status=None, staff_id=staff_id,
+            notes=f"to={to_store} finishing={finishing} "
+                  f"print={split['print_amount']} finishing={split['finishing_amount']} "
+                  f"internal={split['finishing_internal_amount']}")
+    return {"ok": True, "job_id": job_id, "finishing_store_id": to_store,
+            "finishing_status": "sent", **split}
+
+
+def handle_finishing_advance(body: dict) -> dict:
+    """
+    POST /finishing-receive  and  POST /finishing-return
+    Walk a transfer one step: sent -> at_finisher -> returned.
+    """
+    job_id   = (body.get("job_id") or "").strip()
+    target   = (body.get("to") or "").strip().lower()
+    staff_id = body.get("staff_id", "")
+
+    if not job_id or not target:
+        return {"ok": False, "error": "job_id and to required"}
+
+    conn = _db()
+    ensure_job_service_columns(conn)
+    row = _finishing_row(conn, job_id)
+    if row is None:
+        conn.close()
+        # Either the row is gone or this box could not apply the migration.
+        # db_migrations already alerted on the second, so say which is which
+        # rather than telling a counter its job vanished.
+        return {"ok": False, "error": _finishing_absent_reason(job_id)}
+
+    current = row["finishing_status"]
+    if not _rc.is_valid_finishing_move(current, target):
+        conn.close()
+        expected = _rc.next_finishing_status(current)
+        _report_health(
+            "finishing.bad_transition", False,
+            f"{job_id} is {current!r} and something asked for {target!r}. "
+            f"The only legal next step is {expected!r}. A status that can jump "
+            f"makes the other shop's queue a guess.",
+        )
+        return {"ok": False, "finishing_status": current, "expected": expected,
+                "error": f"{job_id} is '{current}' — the next step is '{expected}'"}
+
+    now = _now()
+    conn.execute("""
+        UPDATE jobs SET finishing_status=?,
+               notes=COALESCE(notes||' | ','') || ?
+        WHERE job_id=?
+    """, (target, f"Finishing {target} at {now} by {staff_id}", job_id))
+    conn.commit()
+    conn.close()
+
+    logging.info("Job %s finishing %s -> %s", job_id, current, target)
+    _jt_log(DB_PATH, job_id, f"finishing_{target}",
+            from_status=None, to_status=None, staff_id=staff_id,
+            notes=f"store={row['finishing_store_id']}")
+    return {"ok": True, "job_id": job_id, "finishing_status": target}
+
+
+def handle_finishing_incoming(qs: dict) -> dict:
+    """
+    GET /finishing-incoming?store_id=PRINTK
+    The finishing work another store has sent here and not had back.
+
+    Defaults to this machine's own store, because the queue that matters at a
+    counter is the one for the shop the counter is in.
+    """
+    store_id = (qs.get("store_id", [""])[0] or "").strip().upper()
+    if not store_id:
+        store_id = get_store_config().store_id.upper()
+
+    conn = _db()
+    ensure_job_service_columns(conn)
+    have = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    if "finishing_status" not in have:
+        conn.close()
+        # Pre-v38 database: an empty queue would read as "no work waiting",
+        # which is a different statement from "this box cannot answer".
+        return {"ok": False, "store_id": store_id, "jobs": [],
+                "error": "this store PC has not applied the service migration yet"}
+
+    rows = conn.execute("""
+        SELECT job_id, customer_name, sender, finishing, finishing_status,
+               finishing_amount, finishing_internal_amount, received_at, notes
+        FROM jobs
+        WHERE UPPER(COALESCE(finishing_store_id,'')) = ?
+          AND COALESCE(finishing_status,'') IN ('sent','at_finisher')
+        ORDER BY received_at
+    """, (store_id,)).fetchall()
+    conn.close()
+    return {"ok": True, "store_id": store_id,
+            "jobs": [dict(r) for r in rows], "count": len(rows)}
+
+
 def handle_quote(qs: dict) -> dict:
     """
     GET /quote?pages=34&paper_type=A4_BW&sides=ds&layout=1-up&copies=1&finishing=spiral
@@ -3135,6 +3338,9 @@ class PrintHandler(BaseHTTPRequestHandler):
             self._json(200, {"items": [dict(r) for r in rows]})
         elif path == "/quote":
             self._json(200, handle_quote(qs))
+        elif path == "/finishing-incoming":
+            result = handle_finishing_incoming(qs)
+            self._json(200 if result.get("ok") else 400, result)
         elif path == "/service-quote":
             result = handle_service_quote(qs)
             self._json(200 if result.get("ok") else 400, result)
@@ -3293,6 +3499,19 @@ class PrintHandler(BaseHTTPRequestHandler):
         if path == "/new-photocopy":
             body = self._read_body()
             self._json(200, handle_new_photocopy(body))
+            return
+
+        if path == "/finishing-send":
+            body = self._read_body()
+            result = handle_finishing_send(body)
+            self._json(200 if result.get("ok") else 400, result)
+            return
+
+        if path in ("/finishing-receive", "/finishing-return"):
+            body = dict(self._read_body())
+            body["to"] = "at_finisher" if path.endswith("receive") else "returned"
+            result = handle_finishing_advance(body)
+            self._json(200 if result.get("ok") else 400, result)
             return
 
         if path == "/new-service":

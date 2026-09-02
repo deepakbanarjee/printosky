@@ -688,6 +688,25 @@
     font-family: var(--mono); font-size: .78rem; padding: .5rem 1rem; cursor: pointer;
   }
 
+  /* ── Incoming finishing queue (B-8) ─────────────────── */
+  /* Hidden entirely when there is nothing waiting. A panel that always shows
+     "0 jobs" is a panel people stop reading. */
+  .fq-panel { border-top-color: var(--amber); margin-bottom: 1rem; }
+  .fq-row {
+    display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem;
+    border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: .72rem;
+  }
+  .fq-row:last-child { border-bottom: none; }
+  .fq-id { color: var(--accent); min-width: 8.5rem; }
+  .fq-what { color: var(--text); flex: 1; }
+  .fq-age { color: var(--muted); font-size: .66rem; }
+  .fq-age.late { color: var(--amber); font-weight: 600; }
+  .fq-btn {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    font-family: var(--mono); font-size: .66rem; padding: .25rem .5rem; cursor: pointer;
+  }
+  .fq-btn:hover { border-color: var(--green); color: var(--green); }
+
   /* ── Service Modal + Service Panel (post-press, no printing) ────── */
   .svc-modal-box {
     background: var(--surface); border: 1px solid var(--border);
@@ -1404,6 +1423,16 @@
           </tbody>
         </table>
       </div>
+    </div>
+
+    <!-- Incoming finishing work sent here by another store (B-8). Hidden
+         until there is some: an empty queue says nothing worth a panel. -->
+    <div class="panel fq-panel" id="finishing-queue" style="display:none">
+      <div class="panel-hdr">
+        <div class="panel-title">Finishing — sent here</div>
+        <span class="panel-badge" id="fq-count">—</span>
+      </div>
+      <div id="fq-rows"></div>
     </div>
 
     <!-- Jobs panel -->
@@ -2834,6 +2863,7 @@ async function loadAll() {
     // "Supabase answered" is not "the store is working" — check the store PC
     // and the freshness of what we just drew, and banner anything broken.
     if (!isDemo) refreshHealthBanner(printerViewStore(storeFilter));
+    if (!isDemo) refreshFinishingQueue();
   } catch (e) {
     setSyncState("err", e.message);
     renderHealthBanner([{ level: "error", title: "Could not load the console",
@@ -4593,6 +4623,72 @@ async function confirmPayment() {
     alert("Cannot reach print server:\n" + e.message);
     btn.disabled = false; btn.textContent = "Mark Complete";
   }
+}
+
+// ── Incoming finishing queue (B-8) ───────────────────────────────────────────
+//
+// Work another Printosky store has sent here and not had back. This is the only
+// record that the job is physically in this shop, so the two buttons walk the
+// same forward-only status the store PC enforces: Received, then Returned.
+
+const FINISHING_OVERDUE_HOURS = 48;
+
+async function refreshFinishingQueue() {
+  const panel = document.getElementById("finishing-queue");
+  if (!panel) return;
+  if (!STORE_PC_URL) { panel.style.display = "none"; return; }
+
+  let data;
+  try {
+    const r = await fetch(`${STORE_PC_URL}/finishing-incoming`);
+    data = await r.json();
+  } catch (e) {
+    panel.style.display = "none";       // the health banner owns "PC unreachable"
+    return;
+  }
+  if (!data.ok || !(data.jobs || []).length) { panel.style.display = "none"; return; }
+
+  document.getElementById("fq-count").textContent =
+    `${data.count} job${data.count !== 1 ? "s" : ""}`;
+  document.getElementById("fq-rows").innerHTML = data.jobs.map(j => {
+    const hours = _fqHours(j.received_at);
+    const late  = hours !== null && hours >= FINISHING_OVERDUE_HOURS;
+    const next  = j.finishing_status === "sent" ? "receive" : "return";
+    const label = next === "receive" ? "Mark Received" : "Mark Returned";
+    return `<div class="fq-row">
+      <span class="fq-id">${esc(j.job_id)}</span>
+      <span class="fq-what">${esc(j.finishing || "finishing")} · ${esc(j.customer_name || "walk-in")}</span>
+      <span class="fq-age ${late ? "late" : ""}">${hours === null ? "" : hours + "h"}</span>
+      <button class="fq-btn" onclick="advanceFinishing('${esc(j.job_id)}','${next}')">${label}</button>
+    </div>`;
+  }).join("");
+  panel.style.display = "";
+}
+
+function _fqHours(received) {
+  const t = Date.parse(String(received || "").replace(" ", "T"));
+  if (isNaN(t)) return null;            // no age beats a wrong age
+  return Math.floor((Date.now() - t) / 3600000);
+}
+
+async function advanceFinishing(jobId, step) {
+  if (!STORE_PC_URL) { alert("Print server not configured — click PC Setup"); return; }
+  try {
+    const r = await fetch(`${STORE_PC_URL}/finishing-${step}`, {
+      method: "POST", headers: storeHeaders(),
+      body: JSON.stringify({ job_id: jobId, staff_id: sessionStorage.getItem("staff_id") }),
+    });
+    const data = await r.json();
+    if (!data.ok) {
+      // The store PC refuses a jump and names the step it expected — show that
+      // rather than a generic failure, because it is the actionable half.
+      alert("Failed: " + (data.error || "Unknown error"));
+    }
+  } catch (e) {
+    alert("Cannot reach print server:\n" + e.message);
+  }
+  refreshFinishingQueue();
+  loadAll();
 }
 
 // ── Service Modal — post-press work with no printing (B-4) ────────────────────

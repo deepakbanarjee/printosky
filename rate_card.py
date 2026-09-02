@@ -1135,6 +1135,84 @@ def _min_line(what: str, size: str, asked: int, minimum: int, rate: int,
     return f"{what} {size.upper()}: {asked} x Rs.{rate} = Rs.{total:.0f}"
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 12 — INTER-STORE FINISHING (plan §4.7, B-8)
+#
+# A job OSP sells and Nattika finishes is an **internal transfer, not a vendor
+# job**. The money is one payment from one customer; what changes is how it is
+# booked between the two shops.
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: What the finishing store keeps, as a fraction of the finishing charge.
+#: **Seeded at 100 % on purpose** (plan §4.7): the owner has not set real
+#: internal rates, and nothing should block on numbers nobody has decided. At
+#: 1.0 the finishing store keeps the whole finishing charge, which is the
+#: honest default for two shops with one owner. Per-service overrides go here
+#: when there are real numbers to put in them.
+FINISHING_INTERNAL_RATE_DEFAULT = 1.0
+FINISHING_INTERNAL_RATES: dict[str, float] = {}
+
+#: How the transfer walks. A status may only move forward along this list.
+FINISHING_STATUSES = ("sent", "at_finisher", "returned")
+
+
+def get_internal_rate(finishing: str) -> float:
+    """The finishing store's share for this finishing, 0.0-1.0."""
+    rate = FINISHING_INTERNAL_RATES.get((finishing or "").strip().lower(),
+                                        FINISHING_INTERNAL_RATE_DEFAULT)
+    try:
+        rate = float(rate)
+    except (TypeError, ValueError):
+        return FINISHING_INTERNAL_RATE_DEFAULT
+    return min(1.0, max(0.0, rate))
+
+
+def split_amounts(print_cost: float, finishing_cost: float,
+                  finishing: str = "") -> dict:
+    """Book one customer payment across the selling and finishing stores.
+
+    Returns { print_amount, finishing_amount, finishing_internal_amount }.
+
+    * ``print_amount`` — the selling store's, for the printing it did.
+    * ``finishing_amount`` — what the customer paid for finishing.
+    * ``finishing_internal_amount`` — what the finishing store keeps of that.
+
+    The first two always add up to the quote. The third is a slice of the
+    second, never an addition to it: a split that invents money is worse than
+    no split at all, and a test pins the arithmetic.
+    """
+    print_amount = round(max(0.0, _as_amount(print_cost) or 0.0), 2)
+    finishing_amount = round(max(0.0, _as_amount(finishing_cost) or 0.0), 2)
+    rate = get_internal_rate(finishing)
+    return {
+        "print_amount": print_amount,
+        "finishing_amount": finishing_amount,
+        "finishing_internal_amount": round(finishing_amount * rate, 2),
+        "internal_rate": rate,
+    }
+
+
+def next_finishing_status(current: str | None) -> str | None:
+    """The status that legitimately follows `current`, or None at the end."""
+    cur = (current or "").strip().lower()
+    if not cur:
+        return FINISHING_STATUSES[0]
+    if cur not in FINISHING_STATUSES:
+        return None
+    i = FINISHING_STATUSES.index(cur)
+    return FINISHING_STATUSES[i + 1] if i + 1 < len(FINISHING_STATUSES) else None
+
+
+def is_valid_finishing_move(current: str | None, target: str) -> bool:
+    """Only forward, one step at a time, and never off the end.
+
+    A job cannot be marked returned before it was received: the queue at the
+    other shop is the only record that the work is physically there, and a
+    status that can jump makes that record a guess.
+    """
+    return next_finishing_status(current) == (target or "").strip().lower()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 10 — SELF-TEST (run: python rate_card.py)
 # ─────────────────────────────────────────────────────────────────────────────

@@ -173,4 +173,23 @@ def test_service_kind_has_exactly_two_writers():
     src = open(os.path.join(REPO, "print_server.py"), encoding="utf-8").read()
     assert src.count("SET service_kind") == 1
     assert src.count("           service_kind, service_meta)") == 1
-    assert src.count("ensure_job_service_columns(") == 2   # one per writer
+    # Counting ensure_job_service_columns() calls used to stand in for this, and
+    # stopped meaning it in B-8: the inter-store handlers call it to add the
+    # transfer columns without writing service_kind at all. Assert the writers
+    # themselves instead of a proxy that drifts.
+    import inspect
+    import types
+    writers = set()
+    for name, obj in vars(print_server).items():
+        if not isinstance(obj, types.FunctionType):
+            continue
+        if getattr(obj, "__module__", "") != "print_server":
+            continue
+        try:
+            body = inspect.getsource(obj)
+        except OSError:                       # pragma: no cover
+            continue
+        if "SET service_kind" in body or "service_kind, service_meta)" in body:
+            writers.add(name)
+    assert writers == {"handle_create_job", "handle_new_service"}, \
+        f"unexpected writers of service_kind: {sorted(writers)}"

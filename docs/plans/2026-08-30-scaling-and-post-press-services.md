@@ -674,6 +674,16 @@ copying, knowable for the first time.
 | A drop-off booking expiring | WhatsApp reminder first, then a cancellation with a reason |
 | A job sent to a finishing store and not returned in 48 h | daily digest line (`store_digest.py`) |
 
+> **Built 2026-09-01 (B-8).** Both the digest line and the console queue are
+> **silent when there is nothing to say** — no "0 jobs overdue" line, no empty
+> panel. A green tick shown every day is one people stop reading, which is the
+> failure mode `ops_watchdog` exists to prevent, not an example of it. The
+> threshold is one constant (`FINISHING_OVERDUE_HOURS = 48`) and a test asserts
+> the console's copy of it matches.
+>
+> A row with no usable timestamp is **skipped rather than aged by guesswork**,
+> in the digest and in the console alike: a wrong age is worse than no age.
+
 New code adds **zero** `except Exception: pass`.
 
 ### 4.13 Tests
@@ -780,7 +790,7 @@ by ₹180, never under.
 | B-5 ✅ | admin.html mirror + print-count exclusion — built 2026-09-01 | low |
 | B-6 ✅ | Photocopy button quotes from the rate card (B6) — built 2026-09-01 | low — one live button |
 | B-7 ✅ | Per-store capabilities + `is_outsourced()` — built 2026-09-01, inert until B-8 | low |
-| B-8 | Inter-store transfer + revenue split + Nattika's incoming queue | medium |
+| B-8 ✅ | Inter-store transfer + revenue split + Nattika's incoming queue — built 2026-09-01 | medium |
 | B-9 | Online drop-off bookings + expiry sweep | medium |
 | B-10 | Konica copy/scan reconciliation panel | medium |
 
