@@ -653,10 +653,32 @@ The job exists before the item does, so:
 > Customers do not get `copy`, `dtp` or `other`: a photocopy needs the machine
 > and the paper at the same moment, so there is nothing to leave behind.
 >
-> **Not built:** taking the part payment online. The deposit is *computed* and
-> shown, and the status rule already applies, but no money changes hands on the
-> site — a booking is unpaid until the item arrives. Wiring Razorpay into the
-> booking flow is its own piece of work.
+> **Built 2026-09-02 (N1).** Part payment online, so an abandoned booking costs
+> the customer rather than the shop — which was the point of asking for a
+> deposit at all. `POST /order/booking-payment` returns a Razorpay link; the
+> amount is read from the booking, never from the request, so a stale page
+> cannot ask for the wrong number and a customer cannot name their own price.
+>
+> Two things make this unlike every other payment here, and both are why the
+> arithmetic sits in `service_jobs.apply_payment()`:
+>
+> * **Payments accumulate.** A deposit and a balance are two payments against
+>   one job. `db_cloud.update_job_paid()` *overwrites* `amount_collected` —
+>   correct for a print job, and it would have silently eaten the deposit.
+> * **Paying does not make it `Paid`.** For a print job that status means "pull
+>   it and print it". A booking whose item has not arrived is not printable, so
+>   its payment state lives in the amounts and its work state stays `Queued`.
+>
+> The webhook branches on `service_kind` **before** `update_job_paid`, so the
+> print path is byte-identical. It dedupes on the **payment** id, not the event
+> id: Razorpay fires `payment_link.paid` *and* `payment.captured` for one
+> payment-link payment, which is harmless when the write is an overwrite and a
+> double count when it accumulates. A write that fails after the money arrived
+> alerts — that silence ends with a customer being asked to pay twice.
+>
+> Paying also changes what abandonment means: money on a booking makes it
+> `NEEDS_HUMAN` in the sweep rather than auto-cancelled, which is rule 2 doing
+> exactly what it was written for.
 
 ### 4.9 Withdrawals — things to remove, deliberately
 
@@ -924,7 +946,7 @@ nothing blocks B-0, B-1 or A-1.
 
 | # | Still needed | Blocks | Working default |
 |---|---|---|---|
-| N1 | **Upfront-payment threshold + deposit** for services (part payment above the limit) | B-3's payment gate | ₹500 threshold, 50 % deposit |
+| N1 | ~~**Upfront-payment threshold + deposit**~~ ✅ | B-3's payment gate | ₹500 threshold, 50 % deposit — **payable online since 2026-09-02** (§4.8) |
 | N2 | **Photo rates** for stamp / postcard / 4×6 (set of 5 ₹50 and full sheet ₹100 are set) | `photo` in B-1 | those two only; others quoted by hand |
 | N3 | **Drop-off expiry** — how many days before an un-received booking cancels | B-9 | 3 days, WhatsApp reminder first |
 | N4 | **OSP→Nattika internal rates** | nothing — deliberately configurable | 100 % (Nattika books the full finishing amount) |

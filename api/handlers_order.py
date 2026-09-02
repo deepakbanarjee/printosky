@@ -799,6 +799,105 @@ def _handle_order_staff_photocopy(h, body: bytes) -> None:
     })
 
 
+def _handle_order_booking_payment(h, body: bytes) -> None:
+    """POST /order/booking-payment — a Razorpay link for a booking's deposit.
+
+    N1: a service over the threshold takes half up front, and from 2026-09-02
+    that half can be paid online at booking time instead of only at the counter.
+    An abandoned booking then costs the customer rather than the shop, which is
+    the whole point of asking for it (plan §4.8).
+
+    Public, like /order/create: a customer paying their own booking is not a
+    staff action, and the link is useless to anyone who does not have the job id
+    and the customer's phone. Nothing here records a payment — Razorpay's
+    webhook does that, once the money actually arrives.
+
+    Body: { job_id, phone?, full? }   `full` asks for the whole amount instead
+                                      of just the deposit.
+    """
+    import service_jobs
+
+    try:
+        data = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        _json_response(h, 400, {"error": "invalid JSON"})
+        return
+
+    job_id = str(data.get("job_id") or "").strip()
+    if not job_id:
+        _json_response(h, 400, {"error": "job_id required"})
+        return
+
+    try:
+        from db_cloud import _client
+        rows = (_client().table("jobs")
+                .select("job_id,sender,service_kind,service_type,status,"
+                        "amount_quoted,amount_collected,override_reason")
+                .eq("job_id", job_id).limit(1).execute().data) or []
+    except Exception as exc:
+        logger.error("booking-payment lookup failed for %s: %r", job_id, str(exc))
+        _json_response(h, 500, {"error": "could not read the booking"})
+        return
+
+    if not rows:
+        _json_response(h, 404, {"error": f"No booking {job_id}"})
+        return
+    row = rows[0]
+
+    if not str(row.get("service_kind") or "").strip():
+        # Print jobs are paid through their own link, built at quote time with
+        # the full amount. Routing one through here would offer a "deposit" on
+        # something that has never had one.
+        _json_response(h, 400, {"error": f"{job_id} is not a service booking"})
+        return
+
+    if str(row.get("status") or "").strip().lower() in ("cancelled", "completed"):
+        _json_response(h, 400, {
+            "error": f"{job_id} is {row.get('status')} — nothing to pay."})
+        return
+
+    quoted = service_jobs.amount_or_none(row.get("amount_quoted")) or 0.0
+    amount = (round(max(0.0, quoted - (service_jobs.amount_or_none(
+                    row.get("amount_collected")) or 0.0)), 2)
+              if data.get("full") else service_jobs.payable_now(row))
+    if amount <= 0:
+        # A zero-rupee link is a dead end the customer has to be talked out of.
+        _json_response(h, 200, {"ok": True, "nothing_to_pay": True,
+                                "job_id": job_id, "amount": 0})
+        return
+
+    label = row.get("service_type") or row.get("service_kind") or "service"
+    is_deposit = amount < quoted
+    description = (f"{label} deposit — {job_id}" if is_deposit
+                   else f"{label} — {job_id}")
+    phone = _norm_phone(data.get("phone") or "") or str(row.get("sender") or "")
+
+    try:
+        from razorpay_integration import create_payment_link
+        link = create_payment_link(job_id, amount, description,
+                                   customer_phone=phone or None)
+    except Exception as exc:
+        logger.error("booking-payment link failed for %s: %r", job_id, str(exc))
+        _json_response(h, 502, {"error": "could not reach the payment provider"})
+        return
+
+    if not link or link.get("error"):
+        # Never hand back a broken link dressed as a working one: the counter
+        # can still take the money, and saying so beats a dead URL.
+        logger.error("booking-payment link error for %s: %s", job_id,
+                     (link or {}).get("error"))
+        _json_response(h, 502, {
+            "error": "Could not create the payment link — pay at the counter "
+                     "when you drop your item off."})
+        return
+
+    _json_response(h, 200, {
+        "ok": True, "job_id": job_id, "amount": amount,
+        "is_deposit": is_deposit, "balance": round(quoted - amount, 2),
+        "url": link.get("url") or link.get("full_url"),
+    })
+
+
 def _handle_order_receive_item(h, body: bytes) -> None:
     """POST /order/receive-item — the customer's item reached the counter.
 

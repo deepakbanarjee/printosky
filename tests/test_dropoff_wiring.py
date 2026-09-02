@@ -352,6 +352,10 @@ def test_the_customer_is_told_what_happens_next():
 
 
 def test_the_success_message_tells_a_customer_to_bring_the_item():
+    """The "nothing is charged" half was dropped when N1 landed: a booking over
+    the threshold now CAN be charged a deposit online, and a promise that has
+    stopped being true is worse than no promise."""
     js = _order_ui()
     assert "Now bring your item to the shop" in js
-    assert "nothing is charged until we have it" in js
+    assert "We will WhatsApp you a reminder" in js
+    assert "nothing is charged until we have it" not in js

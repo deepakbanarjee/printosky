@@ -1573,6 +1573,98 @@ def _process_meta_webhook(data: dict) -> None:
                         _handle_text(sender, reply_id, name=pushname)
 
 
+def _process_service_payment(job: dict, payment: dict) -> None:
+    """Record a part payment against a service booking (N1).
+
+    Payments ACCUMULATE here: a deposit and a balance are two payments against
+    one job, and the running total is what the counter bills from. The arithmetic
+    is service_jobs.apply_payment(), which the staff path uses too.
+
+    Deduped on the PAYMENT id, not the webhook event id. Razorpay fires both
+    `payment_link.paid` and `payment.captured` for one payment-link payment;
+    they are separate events with separate ids, so the caller's event-level guard
+    lets both through. For a print job that is harmless — the second write sets
+    the same values — but here it would count the money twice.
+    """
+    import service_jobs
+    from db_cloud import _client
+
+    job_id = job.get("job_id")
+    pay_id = payment.get("payment_id") or ""
+    if not _mark_webhook_processed(pay_id, "razorpay_service_payment"):
+        logger.info("Service payment %s for %s already recorded", pay_id, job_id)
+        return
+
+    result = service_jobs.apply_payment(job, payment.get("amount"))
+    if result["added"] <= 0:
+        logger.warning("Service payment for %s had no usable amount: %r",
+                       job_id, payment.get("amount"))
+        return
+
+    label = job.get("service_type") or job.get("service_kind") or "service"
+    note = " | ".join(x for x in [
+        job.get("notes"),
+        (f"Paid Rs.{result['added']:.0f} online via "
+         f"{payment.get('method', 'UPI')} ({pay_id})"
+         + ("" if result["fully_paid"]
+            else f"; Rs.{result['balance']:.0f} due on collection")),
+    ] if x)
+
+    try:
+        _client().table("jobs").update({
+            "amount_collected":    result["amount_collected"],
+            "status":              result["status"],
+            "payment_mode":        payment.get("method", "UPI"),
+            "razorpay_payment_id": pay_id,
+            "notes":               note,
+        }).eq("job_id", job_id).execute()
+    except Exception as exc:
+        # The money HAS arrived. A failure to record it is exactly the kind of
+        # silence that ends with a customer paying twice, so it alerts.
+        logger.error("service payment write failed for %s: %s", job_id, exc)
+        _alert_ops(f"Payment received for {job_id} but NOT recorded",
+                   f"Rs.{result['added']:.0f} came in for {job_id} ({label}) via "
+                   f"{payment.get('method', 'UPI')}, payment id {pay_id}, and the "
+                   f"database write failed: {exc}\n\n"
+                   "Record it by hand before the customer is asked again.")
+        return
+
+    phone = str(job.get("sender") or "").strip()
+    if phone:
+        try:
+            from whatsapp_notify import _send
+            if result["fully_paid"]:
+                body = (f"✅ Payment received — ₹{result['added']:.0f} for your "
+                        f"*{label}* ({job_id}). Paid in full, nothing due on "
+                        "collection. 🙏")
+            else:
+                body = (f"✅ Deposit received — ₹{result['added']:.0f} for your "
+                        f"*{label}* ({job_id}).\n\n"
+                        f"₹{result['balance']:.0f} is due when you collect. "
+                        "Bring your item in and we will get started.")
+            _send(phone, body)
+        except Exception as exc:
+            logger.warning("service payment confirmation to %s failed: %s",
+                           phone, exc)
+
+    try:
+        from whatsapp_notify import send_staff_alert
+        send_staff_alert(
+            f"💰 *Booking payment*\n\n"
+            f"📋 {job_id} — {label}\n"
+            f"💵 ₹{result['added']:.0f} received"
+            + ("" if result["fully_paid"]
+               else f" (₹{result['balance']:.0f} still due)")
+            + ("\n📦 Item not yet received." if not job.get("item_received_at") else "")
+        )
+    except Exception as exc:
+        logger.warning("staff alert (service payment %s) failed: %s", job_id, exc)
+
+    logger.info("Service payment: %s +Rs.%.0f -> Rs.%.0f/%s, status=%s",
+                job_id, result["added"], result["amount_collected"],
+                job.get("amount_quoted"), result["status"])
+
+
 def _process_razorpay_payment(data: dict) -> None:
     from razorpay_integration import parse_payment_webhook
     from whatsapp_notify import send_payment_confirmed
@@ -1626,6 +1718,20 @@ def _process_razorpay_payment(data: dict) -> None:
         except Exception as sa_exc:
             logger.warning("staff alert (paid batch %s) failed: %s", ref_id, sa_exc)
         logger.info(f"Batch {ref_id}: {len(job_ids)} jobs marked Paid")
+        return
+
+    # A service booking's deposit, not a print job's payment. Checked BEFORE
+    # update_job_paid because that function is right for a print job and wrong
+    # here in two ways: it OVERWRITES amount_collected (losing a deposit when
+    # the balance arrives) and it sets status Paid, which for a job with no file
+    # means "pull it and print it".
+    # One extra read per print payment, and worth it: the branch has to be taken
+    # before anything is written, and the read below this is a DIFFERENT one —
+    # it deliberately happens after update_job_paid so it sees the pickup code
+    # that call claims.
+    booking = get_job(ref_id) or {}
+    if str(booking.get("service_kind") or "").strip():
+        _process_service_payment(booking, payment)
         return
 
     # Single job
@@ -3289,6 +3395,7 @@ from api.handlers_order import (
     _handle_order_quote,
     _handle_order_create,
     _handle_order_book_service,
+    _handle_order_booking_payment,
     _handle_order_receive_item,
     _handle_order_service_quote,
     _handle_order_staff_create,
@@ -3859,6 +3966,9 @@ class handler(BaseHTTPRequestHandler):
             return
         if self.path == "/order/book-service":
             _handle_order_book_service(self, body)
+            return
+        if self.path == "/order/booking-payment":
+            _handle_order_booking_payment(self, body)
             return
         if self.path == "/order/receive-item":
             _handle_order_receive_item(self, body)

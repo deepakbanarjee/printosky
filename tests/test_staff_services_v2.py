@@ -239,12 +239,20 @@ def test_switching_to_services_hides_the_print_flow():
 
 def test_every_element_the_panel_touches_exists():
     """A typo'd id is a silent no-op — the control simply does nothing, with no
-    error anywhere. Cheaper to catch here than at the counter."""
+    error anywhere. Cheaper to catch here than at the counter.
+
+    An id counts as existing if it is in the static markup OR rendered by this
+    module itself (the N1 deposit button is built into the success message, so
+    it exists by the time anything looks it up). A typo still fails: it would
+    appear in neither.
+    """
     page = order_v2()
+    js = order_ui()
     ids = sorted(set(re.findall(r"\$\('([^']+)'\)", service_js())))
     assert ids, "the extraction is wrong, not the code"
     for el_id in ids:
-        assert f'id="{el_id}"' in page, f"$('{el_id}') has no element"
+        assert f'id="{el_id}"' in page or f'id="{el_id}"' in js, (
+            f"$('{el_id}') matches no element, static or rendered")
 
 
 def test_no_inline_handlers_because_this_is_a_module():

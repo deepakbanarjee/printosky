@@ -1610,7 +1610,9 @@ async function submitService() {
           '<br><span style="font-weight:400;color:#374151">Now bring your item to the shop' +
           (d.expires_in_days
             ? ` within ${d.expires_in_days} days` : '') +
-          '. We will WhatsApp you a reminder, and nothing is charged until we have it.</span>';
+          '. We will WhatsApp you a reminder.</span>'
+          + bookingPayHTML(d);
+      if (!STAFF && d.deposit_due > 0) wireBookingPay(d.job_id);
     }
     ['ov2-svc-name', 'ov2-svc-phone', 'ov2-svc-notes', 'ov2-svc-paid',
      'ov2-svc-override'].forEach((id) => { const el = $(id); if (el) el.value = ''; });
@@ -1619,6 +1621,69 @@ async function submitService() {
   } finally {
     svc.busy = false; btn.disabled = false; btn.textContent = 'Book this service';
   }
+}
+
+// ── Paying a booking's deposit online (N1) ───────────────────────────────────
+//
+// A service over the threshold takes half up front. Paying it here rather than
+// only at the counter is what makes an abandoned booking cost the customer
+// instead of the shop (plan §4.8).
+//
+// The amount is NOT computed here — /order/booking-payment reads the booking
+// and works out what is actually payable, so a stale page cannot ask for the
+// wrong number, and a booking already paid gets told so rather than being
+// offered a second link.
+
+function bookingPayHTML(d) {
+  if (STAFF || !(d.deposit_due > 0)) return '';
+  return `<div class="ov2-svc-pay" id="ov2-svc-pay">
+    <div><b>₹${Math.round(d.deposit_due)} deposit</b> secures your slot —
+    the rest (₹${Math.round((d.amount_quoted || 0) - d.deposit_due)}) is due on collection.</div>
+    <button type="button" class="ov2-btn" id="ov2-svc-pay-btn">Pay ₹${Math.round(d.deposit_due)} now</button>
+    <div class="ov2-svc-pay-note" id="ov2-svc-pay-note">
+      Or pay the whole amount at the counter when you drop your item off.</div>
+  </div>`;
+}
+
+function wireBookingPay(jobId) {
+  const btn = $('ov2-svc-pay-btn');
+  const note = $('ov2-svc-pay-note');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Opening payment…';
+    try {
+      const r = await fetch(API + '/order/booking-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: jobId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status));
+      if (d.nothing_to_pay) {
+        if (note) note.textContent = 'This booking is already paid — nothing due.';
+        btn.style.display = 'none';
+        return;
+      }
+      if (!d.url) throw new Error('No payment link came back.');
+      // A new tab, not a redirect: the booking id on this page is the only
+      // record the customer has until the WhatsApp confirmation arrives.
+      window.open(d.url, '_blank', 'noopener');
+      btn.textContent = 'Payment opened in a new tab';
+      if (note) {
+        note.textContent = 'Finished paying? We will WhatsApp you a confirmation. '
+                         + 'You can close that tab when it is done.';
+      }
+    } catch (e) {
+      // The counter can still take the money. Saying so beats a dead button.
+      btn.disabled = false;
+      btn.textContent = `Pay now`;
+      if (note) {
+        note.className = 'ov2-svc-pay-note warn';
+        note.textContent = 'Could not open the payment page — you can pay at the '
+                         + 'counter when you drop your item off. (' + (e.message || e) + ')';
+      }
+    }
+  });
 }
 
 function setServiceMode(on) {
