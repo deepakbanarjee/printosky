@@ -1091,6 +1091,10 @@ tables:
         default: null
         nullable: true
         type: timestamp with time zone
+      dropoff_reminded_at:
+        default: null
+        nullable: true
+        type: text
       dtp_pages:
         default: '0'
         nullable: true

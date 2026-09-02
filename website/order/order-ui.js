@@ -1400,10 +1400,17 @@ const svc = {
   timer: null,
 };
 
+//: Kinds a customer cannot book as a drop-off. A photocopy needs the machine
+//: and the paper at the same moment, so there is nothing to leave behind; DTP
+//: needs a conversation about what to type.
+const STAFF_ONLY_KINDS = new Set(['copy', 'dtp', 'other']);
+
 function renderServiceKinds() {
   const host = $('ov2-svc-kinds');
   if (!host) return;
-  host.innerHTML = SERVICE_KINDS.map((k) =>
+  const kinds = STAFF ? SERVICE_KINDS
+                      : SERVICE_KINDS.filter((k) => !STAFF_ONLY_KINDS.has(k.id));
+  host.innerHTML = kinds.map((k) =>
     `<button type="button" class="ov2-svc-kind" data-kind="${k.id}">${k.label}</button>`).join('');
   host.querySelectorAll('[data-kind]').forEach((el) =>
     el.addEventListener('click', () => setServiceKind(el.dataset.kind)));
@@ -1530,6 +1537,15 @@ async function submitService() {
   if (svc.busy) return;
   svc.busy = true; btn.disabled = true; btn.textContent = 'Booking…';
 
+  // A customer booking is a DROP-OFF: the item is still in their bag, so the
+  // job is created not-work-ready and the nightly sweep counts down on it
+  // (plan §4.8). Staff booking at the counter have the item in hand.
+  if (!STAFF && !String(($('ov2-svc-phone') || {}).value || '').trim()) {
+    err.textContent = 'Please give a WhatsApp number — it is how we remind you '
+                    + 'to bring your item in before the booking expires.';
+    return;
+  }
+
   const storeMap = { thriprayar: 'OSP', nattika: 'PRINTK' };
   const body = {
     kind: svc.kind,
@@ -1538,11 +1554,15 @@ async function submitService() {
     customer_name: ($('ov2-svc-name') || {}).value || '',
     phone: ($('ov2-svc-phone') || {}).value || '',
     notes: ($('ov2-svc-notes') || {}).value || '',
-    staff_id: sessionStorage.getItem('staff_id') || '',
-    payment_mode: ($('ov2-svc-mode') || {}).value || 'Cash',
-    amount_collected: typed || 0,
-    override_reason: ($('ov2-svc-override') || {}).value || '',
   };
+  if (STAFF) {
+    Object.assign(body, {
+      staff_id: sessionStorage.getItem('staff_id') || '',
+      payment_mode: ($('ov2-svc-mode') || {}).value || 'Cash',
+      amount_collected: typed || 0,
+      override_reason: ($('ov2-svc-override') || {}).value || '',
+    });
+  }
   // A manually priced service is quoted at what was actually taken; there is no
   // other number, and a Rs.0 quote would read as a free job rather than an
   // unpriced one.
@@ -1551,8 +1571,10 @@ async function submitService() {
   // A photocopy is work the Konica actually did, so it is filed as a completed
   // photocopy rather than a service job — that is what keeps it inside the
   // printer counts the copy/scan reconciliation compares against.
-  const isCopy = svc.kind === 'copy';
-  const url = isCopy ? '/order/staff-photocopy' : '/order/staff-service';
+  const isCopy = STAFF && svc.kind === 'copy';
+  const url = !STAFF ? '/order/book-service'
+            : isCopy ? '/order/staff-photocopy'
+                     : '/order/staff-service';
   if (isCopy) {
     const meta = serviceMeta();
     Object.assign(body, {
@@ -1565,10 +1587,10 @@ async function submitService() {
   try {
     const r = await fetch(API + url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '',
-      },
+      headers: STAFF
+        ? { 'Content-Type': 'application/json',
+            'X-Staff-Pin': sessionStorage.getItem('staff_pin') || '' }
+        : { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const d = await r.json().catch(() => ({}));
@@ -1578,10 +1600,19 @@ async function submitService() {
 
     if (done) {
       const amount = d.amount != null ? d.amount : d.amount_quoted;
-      done.innerHTML =
-        `✅ <b>${escapeHtml(d.job_id)}</b> booked — ₹${Math.round(amount || 0)}` +
-        (d.status ? ` · ${escapeHtml(d.status)}` : '') +
-        '<br><span style="font-weight:400;color:#6b7280">It is in the console queue now.</span>';
+      const head = `✅ <b>${escapeHtml(d.job_id)}</b> booked — ₹${Math.round(amount || 0)}`;
+      // The customer's next action is the whole point of a drop-off, so it is
+      // the message — not a queue status they cannot see and cannot act on.
+      done.innerHTML = STAFF
+        ? head + (d.status ? ` · ${escapeHtml(d.status)}` : '') +
+          '<br><span style="font-weight:400;color:#6b7280">It is in the console queue now.</span>'
+        : head +
+          '<br><span style="font-weight:400;color:#374151">Now bring your item to the shop' +
+          (d.expires_in_days
+            ? ` within ${d.expires_in_days} days` : '') +
+          '. We will WhatsApp you a reminder.</span>'
+          + bookingPayHTML(d);
+      if (!STAFF && d.deposit_due > 0) wireBookingPay(d.job_id);
     }
     ['ov2-svc-name', 'ov2-svc-phone', 'ov2-svc-notes', 'ov2-svc-paid',
      'ov2-svc-override'].forEach((id) => { const el = $(id); if (el) el.value = ''; });
@@ -1590,6 +1621,69 @@ async function submitService() {
   } finally {
     svc.busy = false; btn.disabled = false; btn.textContent = 'Book this service';
   }
+}
+
+// ── Paying a booking's deposit online (N1) ───────────────────────────────────
+//
+// A service over the threshold takes half up front. Paying it here rather than
+// only at the counter is what makes an abandoned booking cost the customer
+// instead of the shop (plan §4.8).
+//
+// The amount is NOT computed here — /order/booking-payment reads the booking
+// and works out what is actually payable, so a stale page cannot ask for the
+// wrong number, and a booking already paid gets told so rather than being
+// offered a second link.
+
+function bookingPayHTML(d) {
+  if (STAFF || !(d.deposit_due > 0)) return '';
+  return `<div class="ov2-svc-pay" id="ov2-svc-pay">
+    <div><b>₹${Math.round(d.deposit_due)} deposit</b> secures your slot —
+    the rest (₹${Math.round((d.amount_quoted || 0) - d.deposit_due)}) is due on collection.</div>
+    <button type="button" class="ov2-btn" id="ov2-svc-pay-btn">Pay ₹${Math.round(d.deposit_due)} now</button>
+    <div class="ov2-svc-pay-note" id="ov2-svc-pay-note">
+      Or pay the whole amount at the counter when you drop your item off.</div>
+  </div>`;
+}
+
+function wireBookingPay(jobId) {
+  const btn = $('ov2-svc-pay-btn');
+  const note = $('ov2-svc-pay-note');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Opening payment…';
+    try {
+      const r = await fetch(API + '/order/booking-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: jobId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status));
+      if (d.nothing_to_pay) {
+        if (note) note.textContent = 'This booking is already paid — nothing due.';
+        btn.style.display = 'none';
+        return;
+      }
+      if (!d.url) throw new Error('No payment link came back.');
+      // A new tab, not a redirect: the booking id on this page is the only
+      // record the customer has until the WhatsApp confirmation arrives.
+      window.open(d.url, '_blank', 'noopener');
+      btn.textContent = 'Payment opened in a new tab';
+      if (note) {
+        note.textContent = 'Finished paying? We will WhatsApp you a confirmation. '
+                         + 'You can close that tab when it is done.';
+      }
+    } catch (e) {
+      // The counter can still take the money. Saying so beats a dead button.
+      btn.disabled = false;
+      btn.textContent = `Pay now`;
+      if (note) {
+        note.className = 'ov2-svc-pay-note warn';
+        note.textContent = 'Could not open the payment page — you can pay at the '
+                         + 'counter when you drop your item off. (' + (e.message || e) + ')';
+      }
+    }
+  });
 }
 
 function setServiceMode(on) {
@@ -1603,13 +1697,36 @@ function setServiceMode(on) {
   if (t2) t2.classList.toggle('active', on);
 }
 
-// Customers order prints; a lamination is booked at the counter. Staff mode is
-// what reveals any of this.
-function syncStaffServices() {
-  if (!STAFF) return;
+// Both audiences get this panel, and the difference between them is the whole
+// of plan §4.8:
+//
+//   staff (?staff=1)  the customer is at the counter with the item. Payment
+//                     fields, photocopy, the manual-price override.
+//   customer          a DROP-OFF booking. The item is still in their bag, so
+//                     nothing is charged, no photocopy (that needs the machine
+//                     and the paper), and the booking expires if the item never
+//                     arrives — after a reminder, never before one.
+function syncServices() {
   const sw = $('ov2-svc-switch');
   if (sw) sw.style.display = 'flex';
+  const tab = $('ov2-svc-tab-service');
+  if (tab && !STAFF) tab.textContent = '✂️ Book a service — bring your item in';
   renderServiceKinds();
+
+  if (!STAFF) {
+    // Money is not taken on the site. Showing a "Taken now" box a customer
+    // cannot pay into is worse than not showing it.
+    ['ov2-svc-paid-card', 'ov2-svc-mode-card',
+     'ov2-svc-override-card'].forEach((id) => {
+      const el = $(id); if (el) el.style.display = 'none';
+    });
+    const phone = $('ov2-svc-phone');
+    if (phone) phone.placeholder = 'WhatsApp number (for your reminder)';
+    const submit = $('ov2-svc-submit');
+    if (submit) submit.textContent = 'Book it — I will bring my item in';
+    const note = $('ov2-svc-dropoff-note');
+    if (note) note.style.display = '';
+  }
 
   const t1 = $('ov2-svc-tab-print');
   const t2 = $('ov2-svc-tab-service');
@@ -1625,8 +1742,8 @@ function syncStaffServices() {
   });
   const paid = $('ov2-svc-paid');
   if (paid) paid.addEventListener('input', syncServiceOverride);
-  const submit = $('ov2-svc-submit');
-  if (submit) submit.addEventListener('click', submitService);
+  const submitBtn = $('ov2-svc-submit');
+  if (submitBtn) submitBtn.addEventListener('click', submitService);
 }
 
 
@@ -1722,6 +1839,10 @@ function wire() {
     el.addEventListener('click', () => setDirection(el.dataset.direction)));
   document.querySelectorAll('[data-scale]').forEach((el) =>
     el.addEventListener('click', () => setScale(el.dataset.scale)));
+  // Services are for everyone; syncServices() itself decides what each audience
+  // sees. Outside the STAFF block on purpose — a drop-off booking IS a customer
+  // feature (plan §4.8).
+  syncServices();
   // order-ui.js is an ES module, so its functions are NOT global — an inline
   // oninput="" in the HTML would silently never fire. Everything here binds.
   const pctInput = $('ov2-scale-percent');
@@ -1758,7 +1879,7 @@ function wire() {
     // Custom % — the one scaling mode customers never see.
     syncStaffScale();
     // Lamination, binding, scanning, photocopy — work with no file at all.
-    syncStaffServices();
+    // (syncServices() itself runs for customers too — see the init below.)
     // Fulfilling store: staff choose it explicitly via the location picker,
     // which stays VISIBLE in staff mode (a roaming box can serve either store
     // and must never tag jobs with its own machine id). Default the picker to

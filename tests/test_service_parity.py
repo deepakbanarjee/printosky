@@ -60,7 +60,7 @@ def test_the_cloud_handlers_make_no_decision_of_their_own():
     """Every branch that decides money or status must call service_jobs."""
     src = _source(HANDLERS)
     for name, calls in (
-        ("_handle_order_staff_service",
+        ("_create_service_job",
          ["service_jobs.amount_or_none", "service_jobs.service_status",
           "service_jobs.payment_mode", "service_jobs.deposit_for"]),
         ("_handle_order_staff_photocopy",
@@ -138,7 +138,7 @@ def test_both_paths_quote_a_service_identically():
     assert once["total"] == twice["total"]
     # ...and both handlers ask rate_card rather than pricing anything themselves.
     cloud = ast.get_source_segment(_source(HANDLERS),
-                                   _fn(_source(HANDLERS), "_handle_order_staff_service"))
+                                   _fn(_source(HANDLERS), "_create_service_job"))
     assert "rate_card.calculate_service_quote" in cloud
 
 
@@ -161,8 +161,14 @@ def _written_columns(fn_name: str) -> set:
     raise AssertionError(f"{fn_name} has no `row = {{...}}` literal")
 
 
-@pytest.mark.parametrize("handler", ["_handle_order_staff_service",
-                                     "_handle_order_staff_photocopy"])
+#: The functions that build a `jobs` row for the cloud. `_create_service_job`
+#: took over from `_handle_order_staff_service` in B-9, when the customer
+#: booking path became a second caller of the same row — which is exactly why
+#: it is shared rather than copied.
+ROW_BUILDERS = ["_create_service_job", "_handle_order_staff_photocopy"]
+
+
+@pytest.mark.parametrize("handler", ROW_BUILDERS)
 def test_every_column_written_to_the_cloud_exists(handler):
     """PostgREST rejects the WHOLE insert on one unknown column, so a stray key
     means the endpoint 500s on every call. `override_reason`, `amount_partial`
@@ -174,7 +180,7 @@ def test_every_column_written_to_the_cloud_exists(handler):
 @pytest.mark.parametrize("column", ["override_reason", "amount_partial", "queued_at"])
 def test_the_local_only_columns_stay_local(column):
     assert column not in _manifest_jobs_columns()
-    for handler in ("_handle_order_staff_service", "_handle_order_staff_photocopy"):
+    for handler in ROW_BUILDERS:
         assert column not in _written_columns(handler)
 
 
@@ -182,14 +188,14 @@ def test_a_waived_deposit_still_leaves_a_readable_reason():
     """override_reason has no cloud column, so it goes where the operator looks.
     Dropping it would make a waiver unauditable, which is the point of asking."""
     body = ast.get_source_segment(_source(HANDLERS),
-                                  _fn(_source(HANDLERS), "_handle_order_staff_service"))
+                                  _fn(_source(HANDLERS), "_create_service_job"))
     assert "deposit waived: " in body
     assert '"notes":' in body
 
 
 # ── The isolation properties, on the cloud path too ───────────────────────────
 
-@pytest.mark.parametrize("handler", ["_handle_order_staff_service"])
+@pytest.mark.parametrize("handler", ["_create_service_job"])
 def test_a_cloud_service_job_never_gets_a_file_url(handler):
     """store_puller pulls only rows with a non-empty file_url. No file_url is
     what makes it structurally impossible for a service job to be auto-printed."""
@@ -199,7 +205,7 @@ def test_a_cloud_service_job_never_gets_a_file_url(handler):
 def test_a_cloud_service_job_never_gets_printed_by():
     """printed_by is what keeps services out of the MIS printer and staff panels
     (tests/test_service_ui.py). Setting it here would undo that from the cloud."""
-    assert "printed_by" not in _written_columns("_handle_order_staff_service")
+    assert "printed_by" not in _written_columns("_create_service_job")
 
 
 def test_a_photocopy_is_still_not_a_service_job():

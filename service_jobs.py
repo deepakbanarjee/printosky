@@ -181,6 +181,77 @@ def resolve_amount(quoted: float | None, typed: float | None) -> dict:
             "billable": True}
 
 
+# ── Part payment on a booking (N1) ────────────────────────────────────────────
+#
+# A service over SERVICE_DEPOSIT_THRESHOLD takes half up front, and from
+# 2026-09-02 that half can be paid online at booking time rather than only at
+# the counter. Two things make this different from every other payment in the
+# system, and both are why the accounting lives here rather than in the webhook:
+#
+#   * **Payments accumulate.** A deposit then a balance is two payments against
+#     one job. `db_cloud.update_job_paid()` OVERWRITES `amount_collected`, which
+#     is correct for a print job (one payment, in full) and would silently lose
+#     the deposit here.
+#   * **Paying does not make it `Paid`.** For a print job `Paid` means "pull it
+#     and print it". A booking whose item has not arrived is not printable, not
+#     startable and not finished; its payment state lives in the amounts, and
+#     its work state stays `Queued`. Setting `Paid` would put a job with no file
+#     into the puller's own vocabulary.
+
+
+def apply_payment(row: dict, incoming) -> dict:
+    """What a booking looks like after `incoming` rupees arrive.
+
+    Pure. Returns the fields to write plus what the customer should be told:
+
+        amount_collected  the new running total, never a replacement
+        status            Queued once the deposit is met, else unchanged
+        balance           what is still owed on collection
+        deposit_met       whether work can start
+        fully_paid        nothing left to pay
+
+    A payment that is not a positive number changes nothing — a webhook with a
+    junk amount must not zero a booking that was already paid.
+    """
+    already = amount_or_none(row.get("amount_collected")) or 0.0
+    quoted = amount_or_none(row.get("amount_quoted")) or 0.0
+    add = amount_or_none(incoming) or 0.0
+    if add <= 0:
+        add = 0.0
+
+    total = round(already + add, 2)
+    due = deposit_for(quoted)
+    status = service_status(quoted, total, row.get("override_reason") or "")
+
+    return {
+        "amount_collected": total,
+        "status": status,
+        "balance": round(max(0.0, quoted - total), 2),
+        "deposit_due": due,
+        "deposit_met": total >= due,
+        "fully_paid": quoted > 0 and total >= quoted,
+        "added": add,
+    }
+
+
+def payable_now(row: dict) -> float:
+    """What a customer can usefully pay against this booking right now.
+
+    The deposit if one is owed and unpaid, otherwise the outstanding balance.
+    Zero means there is nothing to collect and no link should be made — an
+    empty payment link is a dead end the customer has to be talked out of.
+    """
+    quoted = amount_or_none(row.get("amount_quoted")) or 0.0
+    paid = amount_or_none(row.get("amount_collected")) or 0.0
+    outstanding = round(max(0.0, quoted - paid), 2)
+    if outstanding <= 0:
+        return 0.0
+    due = deposit_for(quoted)
+    if due > 0 and paid < due:
+        return round(due - paid, 2)
+    return outstanding
+
+
 def service_meta_json(meta: dict) -> str:
     """`service_meta` as stored. Sorted so two identical bookings compare equal."""
     return json.dumps(meta or {}, sort_keys=True)

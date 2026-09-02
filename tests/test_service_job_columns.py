@@ -40,6 +40,7 @@ MIGRATION_SQL = os.path.join(REPO, "api", "migrations", "SCHEMA_v38_service_jobs
 MIGRATION_SQLS = [
     MIGRATION_SQL,
     os.path.join(REPO, "api", "migrations", "SCHEMA_v40_finishing_sent_at.sql"),
+    os.path.join(REPO, "api", "migrations", "SCHEMA_v41_dropoff_reminded_at.sql"),
 ]
 
 # A `jobs` table as it stood before this change — the shape an old store PC has.
@@ -235,7 +236,10 @@ def test_cloud_migration_is_additive_only(path):
     assert statements
     for stmt in statements:
         upper = " ".join(stmt.split()).upper()
-        assert "DROP" not in upper
+        # \b, not a substring: `dropoff_reminded_at` contains "DROP", and a
+        # guard that fires on a column's NAME rather than on the keyword is a
+        # guard people learn to route around.
+        assert not re.search(r"\bDROP\b", upper), upper
         assert "NOT NULL" not in upper
         assert "SET DEFAULT" not in upper
         assert "ADD COLUMN IF NOT EXISTS" in upper
@@ -262,7 +266,7 @@ def test_schema_manifest_carries_every_v38_column():
     expected = {
         "service_kind": "text", "service_meta": "jsonb",
         "finishing_store_id": "text", "finishing_status": "text",
-        "finishing_sent_at": "text",
+        "finishing_sent_at": "text", "dropoff_reminded_at": "text",
         "print_amount": "real", "finishing_amount": "real",
         "finishing_internal_amount": "real",
         "item_received_at": "timestamp with time zone",

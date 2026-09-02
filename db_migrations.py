@@ -56,6 +56,7 @@ SERVICE_JOB_COLUMNS: tuple[tuple[str, str], ...] = (
     ("finishing_internal_amount", "REAL"),   # ₹ split: what the finisher store keeps
     # Drop-off bookings (plan §4.8)
     ("item_received_at",          "TEXT"),   # when the physical item reached the counter
+    ("dropoff_reminded_at",       "TEXT"),   # when the "bring your item in" nudge went
 )
 
 

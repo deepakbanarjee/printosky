@@ -1,0 +1,32 @@
+name: Printosky drop-off booking sweep
+
+# Once-daily nudge-then-cancel for drop-off bookings whose item never arrived
+# (plan §4.8). Calls /cron/dropoff-sweep, which reminds a booking a day in and
+# cancels it after three (owner N3) — reminder ALWAYS first, and never
+# auto-cancels a booking with money on it.
+#
+# Daily rather than hourly on purpose: this messages customers, and the clock it
+# reads is measured in days. An hourly run would send nothing extra (the
+# reminder marker makes it idempotent) but would burn API calls to say so.
+#
+# Vercel Hobby caps crons at once-per-day, so this lives in GitHub Actions like
+# the other Printosky crons (see daily-activity-cron.yml).
+on:
+  schedule:
+    - cron: "0 5 * * *"   # 05:00 UTC = 10:30 IST — mid-morning, shop is open
+  workflow_dispatch: {}        # allow manual run from the Actions tab
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Drop-off booking sweep
+        run: |
+          echo "Calling drop-off sweep..."
+          code=$(curl -s -o /tmp/dropoff.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://printosky.vercel.app/cron/dropoff-sweep")
+          echo "HTTP $code"; cat /tmp/dropoff.json || true
+          exit 0
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
