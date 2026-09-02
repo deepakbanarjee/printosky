@@ -7,6 +7,12 @@
     "epson_ip": "192.168.1.250"
   },
   "poll_printers": true,
+  "_capabilities_readme": "What Nattika finishes in-house. Absent or false = outsourced, so a new store never silently claims work it has no machine for (plan §4.7, decision B9).",
+  "capabilities": {
+    "binding": true,
+    "foiling": true,
+    "roll_lam": true
+  },
   "hot_folder": "C:\\Printosky\\Jobs\\Incoming",
   "db_path": "C:\\Printosky\\Data\\jobs.db",
   "agent_secret": null,

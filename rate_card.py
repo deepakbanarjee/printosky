@@ -273,6 +273,19 @@ DELIVERY_CHARGE = 30
 FINISHING_INHOUSE    = ["none", "staple", "spiral", "wiro", "perfect",
                         "lam_sheet", "id_card"]
 FINISHING_OUTSOURCED = ["lam_roll", "lam_cover", "project", "record", "thesis"]
+
+#: Which store capability would bring an outsourced finishing in-house.
+#: Only the keys in FINISHING_OUTSOURCED appear here: a finishing we already do
+#: ourselves everywhere (spiral, wiro, staple, pouch lamination, ID cards) is
+#: not capability-gated, because making it one would let a store lose work it
+#: has always done by not listing a capability.
+FINISHING_CAPABILITY = {
+    "lam_roll":  "roll_lam",
+    "lam_cover": "roll_lam",   # same roll machine
+    "project":   "binding",
+    "record":    "binding",
+    "thesis":    "binding",
+}
 FINISHING_URGENT_OK  = sorted(URGENT_ELIGIBLE)  # sorted: reaches the UI
 
 FINISHING_DISPLAY = {
@@ -482,6 +495,61 @@ def calculate_item_cost(pages: int, paper_type: str, sides: str,
 
     return {"sheets": sheets, "rate": rate, "print_cost": cost,
             "breakdown_line": breakdown}
+
+
+
+def is_outsourced(finishing: str, store_id: str | None = None,
+                  capabilities: dict | None = None) -> bool:
+    """Does `finishing` have to leave this store?
+
+    The default answer is the one FINISHING_OUTSOURCED has always given, so a
+    caller with no store context — every caller before 2026-09-01 — gets exactly
+    today's behaviour.
+
+    With a store's capabilities in hand, a store that owns the machine keeps the
+    work: PRINTK (Nattika) binds and laminates on the roll, so a record binding
+    booked there is in-house, while the same job at OSP still goes out.
+
+    **Absent or false means outsourced** (plan §4.7, decision B9). A new store
+    claims nothing until someone writes the claim down, because the claim is
+    what decides whether a customer is promised today or next week.
+
+    `capabilities` is for callers that already hold a store's config; otherwise
+    the active store's config is read, and only when `store_id` names it — asking
+    about another store without passing its capabilities cannot be answered from
+    here, so it falls back to the default rather than guessing.
+    """
+    key = (finishing or "").strip().lower()
+    if key not in FINISHING_OUTSOURCED:
+        return False                      # never outsourced, whatever the store
+
+    caps = capabilities
+    if caps is None:
+        caps = _active_store_capabilities(store_id)
+    if not caps:
+        return True                       # nothing claimed -> outsourced
+
+    needed = FINISHING_CAPABILITY.get(key)
+    if needed is None:
+        return True                       # outsourced with no capability to own it
+    return not bool(caps.get(needed, False))
+
+
+def _active_store_capabilities(store_id: str | None) -> dict | None:
+    """This machine's capabilities, but only if it is the store being asked about.
+
+    Returns None when the question cannot be answered locally — a different
+    store, or no config — so `is_outsourced` falls back to the safe default
+    instead of answering with the wrong store's machines.
+    """
+    try:
+        from store_config import get_store_config
+        cfg = get_store_config()
+    except Exception:
+        return None
+    if store_id and str(store_id).strip().upper() != cfg.store_id.upper():
+        return None
+    return dict(cfg.capabilities)
 
 
 def calculate_finishing_cost(finishing: str, sheets: int,
