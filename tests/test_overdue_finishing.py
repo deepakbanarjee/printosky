@@ -65,11 +65,59 @@ def test_a_row_with_no_usable_timestamp_is_skipped_not_guessed():
     assert overdue_finishing(rows, now=NOW) == []
 
 
-def test_it_falls_back_to_received_at_when_there_is_no_sent_timestamp():
+def test_received_at_is_never_used_as_the_send_time():
+    """Rewritten 2026-09-02, and the reason is the bug it used to enshrine.
+
+    This asserted that a row with no `finishing_sent_at` was aged from
+    `received_at` instead. Those measure different intervals: `received_at` is
+    when the customer handed the job over, `finishing_sent_at` is when it left
+    for the finisher. Nothing ever wrote the latter — it was read by
+    overdue_finishing and written by no code path at all — so the fallback was
+    the ONLY branch that ever ran, and it reported the wrong number every time.
+
+    A job taken in a month ago and sent to Nattika an hour ago is not 720 hours
+    late. The module's own docstring already said a wrong age is worse than no
+    age; now the code agrees with it.
+    """
+    a_month_ago = (NOW - timedelta(hours=720)).strftime("%Y-%m-%d %H:%M:%S")
+    an_hour_ago = (NOW - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = [{"job_id": "OSP-4", "finishing_status": "sent",
+             "finishing_store_id": "PRINTK",
+             "received_at": a_month_ago,
+             "finishing_sent_at": an_hour_ago}]
+    assert overdue_finishing(rows, now=NOW) == []
+
+
+def test_a_row_with_no_send_time_is_not_aged_at_all():
     rows = [{"job_id": "OSP-4", "finishing_status": "sent",
              "finishing_store_id": "PRINTK",
              "received_at": (NOW - timedelta(hours=96)).strftime("%Y-%m-%d %H:%M:%S")}]
-    assert overdue_finishing(rows, now=NOW)[0]["hours"] == 96
+    assert overdue_finishing(rows, now=NOW) == []
+
+
+def test_but_it_is_still_reported_rather_than_dropped():
+    """Only a store PC that has not restarted since SCHEMA_v40 makes these.
+    Silently discarding them would hide a job sitting at another shop, which is
+    the exact failure the section exists for."""
+    from store_digest import UNDATEABLE, undateable_finishing
+    rows = [{"job_id": "OSP-4", "finishing_status": "sent",
+             "finishing_store_id": "PRINTK",
+             "received_at": (NOW - timedelta(hours=96)).strftime("%Y-%m-%d %H:%M:%S")}]
+    out = undateable_finishing(rows)
+    assert [r["job_id"] for r in out] == ["OSP-4"]
+    assert out[0]["store"] == "PRINTK" and out[0]["hours"] == UNDATEABLE
+
+    text = format_overdue_finishing(rows, now=NOW)
+    assert "no send time" in text and "OSP-4" in text
+
+
+def test_a_returned_job_with_no_send_time_says_nothing():
+    """It is home. Undateable is about jobs still out."""
+    rows = [{"job_id": "OSP-5", "finishing_status": "returned",
+             "finishing_store_id": "PRINTK"}]
+    from store_digest import undateable_finishing
+    assert undateable_finishing(rows) == []
+    assert format_overdue_finishing(rows, now=NOW) == ""
 
 
 def test_the_longest_wait_is_listed_first():

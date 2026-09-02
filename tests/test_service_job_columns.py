@@ -33,6 +33,15 @@ from db_migrations import (
 REPO = os.path.join(os.path.dirname(__file__), "..")
 MIGRATION_SQL = os.path.join(REPO, "api", "migrations", "SCHEMA_v38_service_jobs.sql")
 
+#: Every migration that adds one of these columns to the cloud. v38 shipped the
+#: first eight; v40 added finishing_sent_at once it turned out nothing was
+#: writing a send time and the digest was aging jobs from `received_at`, which
+#: measures a different interval entirely.
+MIGRATION_SQLS = [
+    MIGRATION_SQL,
+    os.path.join(REPO, "api", "migrations", "SCHEMA_v40_finishing_sent_at.sql"),
+]
+
 # A `jobs` table as it stood before this change — the shape an old store PC has.
 LEGACY_JOBS_DDL = """
     CREATE TABLE jobs (
@@ -208,16 +217,20 @@ def _without_comments(sql: str) -> str:
 
 
 def test_cloud_migration_covers_the_same_columns():
-    sql = open(MIGRATION_SQL, encoding="utf-8").read()
+    """A column a store PC writes and the cloud has not got is a sync that
+    fails on every push. Checked across every migration, not just v38."""
+    sql = "\n".join(open(f, encoding="utf-8").read() for f in MIGRATION_SQLS)
     for col in COLUMN_NAMES:
         assert re.search(rf"ADD COLUMN IF NOT EXISTS {col}\b", sql), (
-            f"{col} is in SQLite but not in SCHEMA_v38_service_jobs.sql"
+            f"{col} is in SQLite but in none of: "
+            + ", ".join(os.path.basename(f) for f in MIGRATION_SQLS)
         )
 
 
-def test_cloud_migration_is_additive_only():
+@pytest.mark.parametrize("path", MIGRATION_SQLS, ids=os.path.basename)
+def test_cloud_migration_is_additive_only(path):
     """No DROP, no NOT NULL, no default — nothing that could break a live row."""
-    sql = _without_comments(open(MIGRATION_SQL, encoding="utf-8").read())
+    sql = _without_comments(open(path, encoding="utf-8").read())
     statements = [s for s in sql.split(";") if "ALTER TABLE" in s.upper()]
     assert statements
     for stmt in statements:
@@ -249,6 +262,7 @@ def test_schema_manifest_carries_every_v38_column():
     expected = {
         "service_kind": "text", "service_meta": "jsonb",
         "finishing_store_id": "text", "finishing_status": "text",
+        "finishing_sent_at": "text",
         "print_amount": "real", "finishing_amount": "real",
         "finishing_internal_amount": "real",
         "item_received_at": "timestamp with time zone",

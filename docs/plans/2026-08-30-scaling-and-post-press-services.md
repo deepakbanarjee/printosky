@@ -719,6 +719,30 @@ copying, knowable for the first time.
 > threshold is one constant (`FINISHING_OVERDUE_HOURS = 48`) and a test asserts
 > the console's copy of it matches.
 >
+> **Repaired 2026-09-02.** The digest line was dead from the day it shipped, in
+> three independent ways — and being *silent by design* is exactly what hid a
+> section that was silent on every day:
+>
+> 1. `supabase_sync.collect_jobs()` never selected the finishing columns, so a
+>    job sent to Nattika for binding was invisible in the cloud.
+> 2. `finishing_sent_at` was read by `overdue_finishing()` and **written by
+>    nothing**. The age fell back to `received_at`, which measures a different
+>    interval — a job taken in a month ago and sent to the finisher an hour ago
+>    read as 720 h late. The fallback was the only branch that ever ran, so the
+>    number would have been wrong every single time.
+> 3. The cron called `compose_closing_message()` without `finishing_rows`.
+>
+> All three fixed: the columns sync (defensively — a PC that has not restarted
+> does not have them, and a `SELECT` naming a missing column takes the whole
+> sync down), `/finishing-send` writes the send time (`SCHEMA_v40`, self-applying
+> on the store PC), and the cron fetches the open transfers and passes them.
+>
+> The `received_at` fallback is **gone**, not repaired. A row with no send time
+> is not aged at all — but it is not dropped either: it is reported as *"out for
+> finishing, age unknown, that PC has not restarted"*. Silently discarding it
+> would hide a job sitting at another shop, which is the one thing the section
+> exists for.
+>
 > A row with no usable timestamp is **skipped rather than aged by guesswork**,
 > in the digest and in the console alike: a wrong age is worse than no age.
 

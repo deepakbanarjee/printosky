@@ -1135,6 +1135,10 @@ tables:
         default: null
         nullable: true
         type: real
+      finishing_sent_at:
+        default: null
+        nullable: true
+        type: text
       finishing_status:
         default: null
         nullable: true

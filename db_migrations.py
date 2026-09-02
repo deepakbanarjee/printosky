@@ -50,6 +50,7 @@ SERVICE_JOB_COLUMNS: tuple[tuple[str, str], ...] = (
     # Inter-store finishing (plan §4.7)
     ("finishing_store_id",        "TEXT"),   # store that does the finishing
     ("finishing_status",          "TEXT"),   # sent | at_finisher | returned
+    ("finishing_sent_at",         "TEXT"),   # when it LEFT for the finisher
     ("print_amount",              "REAL"),   # ₹ split: printing part
     ("finishing_amount",          "REAL"),   # ₹ split: finishing part (customer)
     ("finishing_internal_amount", "REAL"),   # ₹ split: what the finisher store keeps

@@ -2596,6 +2596,33 @@ def _sd_summary_from_jobs(c, store_id, start_str, end_str):
     return sd.summarize_jobs(rows, store_id)
 
 
+def _sd_open_finishing(c, store_id):
+    """Jobs this store has sent out for finishing and not got back.
+
+    Only `sent` and `at_finisher` — a `returned` job is home and owes nobody an
+    explanation.
+
+    Scoped on `store_id`, which supabase_sync stamps with the PC that pushed the
+    row: the sending store. That is the right one — the shop still holding the
+    customer's promise is the shop that needs the reminder, not the one doing
+    the binding (`finishing_store_id`, which has its own console queue).
+
+    Returns [] on any failure rather than raising: a digest that does not send
+    because one query broke is worse than a digest missing one section, and the
+    failure is logged where the pipeline checks already look.
+    """
+    try:
+        return (c.table("jobs")
+                 .select("job_id,finishing_store_id,finishing_status,"
+                         "finishing_sent_at,received_at")
+                 .eq("store_id", store_id)
+                 .in_("finishing_status", ["sent", "at_finisher"])
+                 .execute().data) or []
+    except Exception as exc:
+        logger.warning("open-finishing lookup failed for %s: %s", store_id, exc)
+        return []
+
+
 def _sd_summary_row(c, store_id, date_str):
     got = _sd_summary_from_jobs(c, store_id, date_str, date_str).get(date_str)
     return got or {"store_id": store_id, "date": date_str, "total_jobs": 0,
@@ -2806,7 +2833,13 @@ def _store_pc_check_one(c, sd, store_id, now_ist, now_iso, digest: bool) -> dict
                       if sd.is_last_working_day_of_week(close_d) else None)
             monthly = (_sd_summary_range(c, store_id, close_str[:7] + "-01", close_str)
                        if sd.is_last_working_day_of_month(close_d) else None)
-            msg = sd.compose_closing_message(close_d, daily, weekly, monthly, clean=clean)
+            # finishing_rows was added to compose_closing_message by B-8 and
+            # never passed by anyone, so the over-48h line has been dead since
+            # it shipped. It is silent on a normal day by design, which is
+            # exactly why nobody noticed.
+            finishing = _sd_open_finishing(c, store_id)
+            msg = sd.compose_closing_message(close_d, daily, weekly, monthly,
+                                             clean=clean, finishing_rows=finishing)
             if _alert_ops(f"Store closed {close_str} — daily summary ready", msg):
                 sent.append("closing")
     else:

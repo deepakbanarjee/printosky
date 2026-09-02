@@ -81,6 +81,27 @@ def _has_service_columns(cursor) -> bool:
     return "service_kind" in have and "service_meta" in have
 
 
+#: The inter-store finishing columns (B-8) plus the drop-off marker. These were
+#: written at the counter from 2026-09-01 and pushed nowhere: collect_jobs never
+#: selected them, so a job sent to Nattika for binding was invisible in the
+#: cloud, and the over-48h digest line had nothing to find even once it was
+#: wired up. Synced from SCHEMA_v40.
+_FINISHING_COLUMNS = ("finishing_store_id", "finishing_status", "finishing_sent_at",
+                      "print_amount", "finishing_amount", "finishing_internal_amount",
+                      "item_received_at")
+
+
+def _present_columns(cursor, wanted) -> tuple:
+    """Those of `wanted` this store PC actually has.
+
+    Selected defensively because a PC that has not restarted since the migration
+    does not have them, and a SELECT naming a missing column takes the whole
+    sync down.
+    """
+    have = {row[1] for row in cursor.execute("PRAGMA table_info(jobs)")}
+    return tuple(c for c in wanted if c in have)
+
+
 def _as_json_object(raw, job_id=None):
     """Parse a stored service_meta string into an object for the jsonb column.
 
@@ -112,6 +133,9 @@ def collect_jobs(db_path):
         # B-2 does not have them locally either.
         service_cols = _has_service_columns(c)
         extra = ", service_kind, service_meta" if service_cols else ""
+        finishing = _present_columns(c, _FINISHING_COLUMNS)
+        if finishing:
+            extra += ", " + ", ".join(finishing)
         c.execute(f"""
             SELECT job_id, received_at, filename, file_extension, file_size_kb,
                    source, sender, status, customer_name, service_type,

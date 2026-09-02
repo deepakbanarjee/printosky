@@ -177,13 +177,26 @@ def format_monthly_log(rows: Sequence[Mapping]) -> str:
 FINISHING_OVERDUE_HOURS = 48
 
 
+#: A job out for finishing with no send timestamp. It cannot be aged, so it is
+#: never reported as overdue — but it is counted, because a job at another shop
+#: that this cannot see is the failure mode the section exists for.
+UNDATEABLE = "undateable"
+
+
 def overdue_finishing(rows: Iterable[Mapping], now: datetime | None = None,
                       hours: int = FINISHING_OVERDUE_HOURS) -> list[dict]:
     """Jobs sent out for finishing and not returned within `hours`.
 
-    A row needs `job_id`, `finishing_store_id`, `finishing_status` and a
-    `finishing_sent_at`-ish timestamp; rows missing any of it are skipped rather
-    than guessed at, because a wrong age is worse than no line.
+    A row needs `job_id`, `finishing_store_id`, `finishing_status` and
+    `finishing_sent_at`; one missing the timestamp is not aged, and comes back
+    through `undateable_finishing` instead.
+
+    **The received_at fallback was removed 2026-09-02.** It measured the wrong
+    interval entirely: `received_at` is when the customer handed the job over,
+    not when it left for the finisher, so a job taken in three weeks ago and
+    sent this morning read as ~500h overdue. That is exactly the wrong age this
+    docstring already called worse than none. `finishing_sent_at` is now written
+    by /finishing-send (SCHEMA_v40) and is the only source.
     """
     now = now or datetime.now()
     out: list[dict] = []
@@ -191,7 +204,7 @@ def overdue_finishing(rows: Iterable[Mapping], now: datetime | None = None,
         status = str(row.get("finishing_status") or "").strip().lower()
         if status not in ("sent", "at_finisher"):
             continue
-        sent = _as_datetime(row.get("finishing_sent_at") or row.get("received_at"))
+        sent = _as_datetime(row.get("finishing_sent_at"))
         if sent is None:
             continue
         age = (now - sent).total_seconds() / 3600.0
@@ -206,6 +219,29 @@ def overdue_finishing(rows: Iterable[Mapping], now: datetime | None = None,
     return sorted(out, key=lambda r: -r["hours"])
 
 
+def undateable_finishing(rows: Iterable[Mapping]) -> list[dict]:
+    """Jobs out for finishing that carry no send timestamp.
+
+    Only a store PC that has not restarted since SCHEMA_v40 produces these. The
+    honest report is "N jobs are out and I cannot tell you how long" — silently
+    dropping them would hide the one thing this section is for.
+    """
+    out: list[dict] = []
+    for row in rows or []:
+        status = str(row.get("finishing_status") or "").strip().lower()
+        if status not in ("sent", "at_finisher"):
+            continue
+        if _as_datetime(row.get("finishing_sent_at")) is not None:
+            continue
+        out.append({
+            "job_id": row.get("job_id"),
+            "store": row.get("finishing_store_id") or "?",
+            "status": status,
+            "hours": UNDATEABLE,
+        })
+    return out
+
+
 def format_overdue_finishing(rows: Iterable[Mapping], now: datetime | None = None,
                              hours: int = FINISHING_OVERDUE_HOURS) -> str:
     """The digest section, or "" when there is nothing to say.
@@ -214,15 +250,27 @@ def format_overdue_finishing(rows: Iterable[Mapping], now: datetime | None = Non
     of green tick people stop reading, and this section only earns attention by
     being rare.
     """
+    rows = list(rows or [])
     late = overdue_finishing(rows, now, hours)
-    if not late:
+    blind = undateable_finishing(rows)
+    if not late and not blind:
         return ""
-    head = (f"\u26a0\ufe0f {len(late)} job at a finishing store over {hours}h"
+
+    parts: list[str] = []
+    if late:
+        parts.append(
+            f"\u26a0\ufe0f {len(late)} job at a finishing store over {hours}h"
             if len(late) == 1 else
             f"\u26a0\ufe0f {len(late)} jobs at a finishing store over {hours}h")
-    lines = [f"  {r['job_id']} — {r['store']}, {r['status']}, {r['hours']}h"
-             for r in late]
-    return "\n".join([head, *lines])
+        parts += [f"  {r['job_id']} \u2014 {r['store']}, {r['status']}, {r['hours']}h"
+                  for r in late]
+    if blind:
+        parts.append(
+            f"\u26a0\ufe0f {len(blind)} job{'s' if len(blind) != 1 else ''} out for "
+            f"finishing with no send time \u2014 that store PC has not restarted "
+            f"since the update, so how long they have been gone is unknown:")
+        parts += [f"  {r['job_id']} \u2014 {r['store']}, {r['status']}" for r in blind]
+    return "\n".join(parts)
 
 
 def _as_datetime(value) -> datetime | None:

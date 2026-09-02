@@ -96,6 +96,7 @@ Single print-job records. Primary key for everything print-related.
 | `service_meta` | jsonb | YES | — | v38 — per-kind quantities priced by `rate_card.calculate_service_quote()` |
 | `finishing_store_id` | text | YES | — | v38 — store doing the finishing, when not the selling store |
 | `finishing_status` | text | YES | — | v38 — `sent` / `at_finisher` / `returned` |
+| `finishing_sent_at` | text | YES | — | v40 — when the job LEFT for the finisher. What the 48h digest line ages from; NULL = out, age unknown. **Not** `received_at`, which is when the customer handed it over |
 | `print_amount` | real | YES | — | v38 — ₹ split of `amount_quoted`: printing |
 | `finishing_amount` | real | YES | — | v38 — ₹ split of `amount_quoted`: finishing, as charged |
 | `finishing_internal_amount` | real | YES | — | v38 — ₹ the finishing store keeps on an inter-store job |
