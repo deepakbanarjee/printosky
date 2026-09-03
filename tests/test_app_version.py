@@ -36,7 +36,7 @@ class TestDirtyFlag:
         monkeypatch.setattr(app_version, "_git", lambda *a: {
             ("rev-parse", "--short", "HEAD"): "a1b2c3d",
             ("rev-parse", "--abbrev-ref", "HEAD"): "main",
-            ("status", "--porcelain"): " M watcher.py",
+            ("status", "--porcelain", "--untracked-files=no"): " M watcher.py",
         }.get(a))
         assert app_version._compute() == "main@a1b2c3d+dirty"
 
@@ -44,7 +44,7 @@ class TestDirtyFlag:
         monkeypatch.setattr(app_version, "_git", lambda *a: {
             ("rev-parse", "--short", "HEAD"): "a1b2c3d",
             ("rev-parse", "--abbrev-ref", "HEAD"): "main",
-            ("status", "--porcelain"): "",
+            ("status", "--porcelain", "--untracked-files=no"): "",
         }.get(a))
         assert app_version._compute() == "main@a1b2c3d"
 
@@ -54,17 +54,19 @@ class TestDirtyFlag:
         monkeypatch.setattr(app_version, "_git", lambda *a: {
             ("rev-parse", "--short", "HEAD"): "a1b2c3d",
             ("rev-parse", "--abbrev-ref", "HEAD"): "HEAD",
-            ("status", "--porcelain"): "",
+            ("status", "--porcelain", "--untracked-files=no"): "",
         }.get(a))
         assert app_version._compute() == "a1b2c3d"
 
 
 class TestDegradedEnvironments:
     def test_no_git_binary_falls_back_to_reading_dot_git(self, monkeypatch):
-        """A store PC without git on PATH should still name its commit."""
+        """A store PC without git on PATH should still name its commit — and
+        say that it cannot vouch for the tree, because .git/HEAD gives a sha
+        and nothing at all about local edits."""
         monkeypatch.setattr(app_version, "_git", lambda *a: None)
         monkeypatch.setattr(app_version, "_read_head_fallback", lambda: "deadbee")
-        assert app_version._compute() == "deadbee"
+        assert app_version._compute() == "deadbee+unknown"
 
     def test_unknown_when_nothing_can_be_read(self, monkeypatch):
         """Never invent a version — an unreadable checkout must say so."""
@@ -74,14 +76,20 @@ class TestDegradedEnvironments:
 
     def test_undeterminable_dirtiness_is_not_reported_as_clean(self, monkeypatch):
         """_git returns None on failure and "" on a clean tree. Conflating the
-        two would silently label an unknown state as clean."""
+        two labels an unknown state as clean.
+
+        This test used to assert `main@a1b2c3d` — which IS the clean rendering,
+        so it accepted exactly the conflation its name and docstring warn
+        about. A guard that passes on the bug it describes is worse than no
+        guard: it makes the next person believe the case is covered.
+        """
         monkeypatch.setattr(app_version, "_git", lambda *a: {
             ("rev-parse", "--short", "HEAD"): "a1b2c3d",
             ("rev-parse", "--abbrev-ref", "HEAD"): "main",
-            ("status", "--porcelain"): None,      # could not tell
+            ("status", "--porcelain", "--untracked-files=no"): None,   # could not tell
         }.get(a))
-        assert app_version._compute() == "main@a1b2c3d", \
-            "an undeterminable tree state must not be flagged +dirty"
+        assert app_version._compute() == "main@a1b2c3d+unknown", \
+            "an undeterminable tree state must not be rendered as a clean one"
 
     def test_git_failure_never_raises(self, monkeypatch):
         """A version lookup must not be able to take down the agent that
@@ -121,3 +129,51 @@ class TestGeneratedFilesDoNotFakeDirtiness:
             "so app_version will report every properly-configured box as +dirty "
             "and the flag becomes meaningless. Add it to .gitignore."
         )
+
+
+class TestUntrackedFilesDoNotFakeDirtiness:
+    """`+dirty` means someone hand-patched this box's code. `git status
+    --porcelain` also lists UNTRACKED files, so without --untracked-files=no
+    one stray download says the same thing — and `tools/scale_proof.py` writes
+    ./scale_proof into the repo by default, so running the Phase 2 proof marks
+    that box dirty for good.
+
+    TestGeneratedFilesDoNotFakeDirtiness gitignores the generated files we know
+    about. This closes the case for the ones we do not.
+    """
+
+    def test_untracked_files_are_not_counted(self, monkeypatch):
+        seen = []
+
+        def fake_git(*a):
+            seen.append(a)
+            return {("rev-parse", "--short", "HEAD"): "a1b2c3d",
+                    ("rev-parse", "--abbrev-ref", "HEAD"): "main",
+                    ("status", "--porcelain", "--untracked-files=no"): ""}.get(a)
+
+        monkeypatch.setattr(app_version, "_git", fake_git)
+        assert app_version._compute() == "main@a1b2c3d"
+        assert ("status", "--porcelain", "--untracked-files=no") in seen, (
+            "status was asked without --untracked-files=no, so an untracked "
+            "file will report this box as hand-patched")
+
+    def test_a_real_edit_to_a_tracked_file_still_shows(self, monkeypatch):
+        """The flag has to keep working for the case it exists for."""
+        monkeypatch.setattr(app_version, "_git", lambda *a: {
+            ("rev-parse", "--short", "HEAD"): "a1b2c3d",
+            ("rev-parse", "--abbrev-ref", "HEAD"): "main",
+            ("status", "--porcelain", "--untracked-files=no"): " M print_server.py",
+        }.get(a))
+        assert app_version._compute() == "main@a1b2c3d+dirty"
+
+    def test_the_three_states_are_all_distinguishable(self, monkeypatch):
+        """clean, hand-patched, and unreadable must not render alike."""
+        def at(status):
+            monkeypatch.setattr(app_version, "_git", lambda *a: {
+                ("rev-parse", "--short", "HEAD"): "a1b2c3d",
+                ("rev-parse", "--abbrev-ref", "HEAD"): "main",
+                ("status", "--porcelain", "--untracked-files=no"): status,
+            }.get(a))
+            return app_version._compute()
+
+        assert len({at(""), at(" M watcher.py"), at(None)}) == 3
