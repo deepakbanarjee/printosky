@@ -246,6 +246,15 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                     "Original" if scale_mode == "actual" else "Auto-Fit")
                 scale_applied = True
 
+                # Actual size on a landscape sheet is only achievable while the
+                # turned page still fits: an A4 source is 297mm wide once turned
+                # and the slot is 210mm. The imposer fits it rather than letting
+                # content run off the paper, and says so here — silently
+                # printing a smaller sheet than "Actual size" promised is the
+                # kind of quiet wrong answer docs/FAIL_LOUD.md exists to stop.
+                downgraded = []
+                impose_kwargs["on_downgrade"] = downgraded.append
+
             imposed_stream = nup_imposer.perform_nup(
                 pdf_bytes, cols=cols, rows=rows,
                 paper_size=paper_size or "A4",
@@ -255,6 +264,18 @@ def plan_print_job(job_id: str, pdf_path: str, spec: dict | None, dest_dir: str)
                 **impose_kwargs
             )
             
+            if impose_kwargs.get("on_downgrade") and downgraded:
+                first = downgraded[0]
+                _report("print_planner.scale_actual_landscape", False,
+                        f"job {job_id}: Actual size does not fit a 1-up "
+                        f"landscape {paper_size or 'A4'} sheet — the page is "
+                        f"{first['page_w']:.0f}x{first['page_h']:.0f}pt turned "
+                        f"and the slot is {first['slot_w']:.0f}x"
+                        f"{first['slot_h']:.0f}pt. Printed fitted at "
+                        f"{first['scale'] * 100:.0f}% instead of losing the "
+                        f"edges ({len(downgraded)} page(s)). Use Fit, or "
+                        f"portrait, if true size matters.")
+
             imposed_path = os.path.join(temp_dir, "imposed.pdf")
             with open(imposed_path, "wb") as f:
                 f.write(imposed_stream.getvalue())

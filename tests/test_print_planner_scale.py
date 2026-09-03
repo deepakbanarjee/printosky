@@ -185,9 +185,12 @@ class TestScaleIsBaked:
             print_planner.cleanup_temp_dir(temp)
 
     def test_landscape_1up_goes_through_the_imposer(self, pdf, tmp_path, reports):
+        """A small page fits a landscape A4 slot, so Actual is honoured whole
+        and silently. Note A5 does NOT fit: turned sideways it is 210mm wide
+        against a 196mm slot. See TestActualThatCannotFit."""
         spec = {"sides": "simplex", "colour_mode": "bw", "nup": 1,
                 "orientation": "landscape", "scale": {"mode": "actual"}}
-        actions, temp = plan(pdf(), spec, tmp_path)
+        actions, temp = plan(pdf(sizes=((300, 400),) * 4), spec, tmp_path)
         try:
             assert actions[0]["scale_applied"] is True
             assert os.path.exists(os.path.join(temp, "imposed.pdf"))
@@ -195,6 +198,89 @@ class TestScaleIsBaked:
             assert reports == []
         finally:
             print_planner.cleanup_temp_dir(temp)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Actual size on a sheet that cannot hold it
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Found in the 2026-09-03 acceptance run, Phase 2 (S7). "Actual" on a 1-up
+# LANDSCAPE job placed the page at true size in a slot too small for it: an A4
+# source is 297mm wide once turned and the slot is 210mm, so 43mm ran off each
+# edge and the title and footer left the paper. Nothing was said.
+#
+# It was also a Rule 1 break. The same job with NO scale key fits correctly,
+# and "actual" is supposed to MEAN no scaling — so adding the key changed a
+# job that worked.
+
+class TestActualThatCannotFit:
+
+    def _ink_within_page(self, path):
+        doc = fitz.open(path)
+        try:
+            for page in doc:
+                boxes = [fitz.Rect(d["rect"]) for d in page.get_drawings()]
+                boxes += [fitz.Rect(b[:4]) for b in page.get_text("blocks")]
+                for b in boxes:
+                    if (b.x0 < -1 or b.y0 < -1
+                            or b.x1 > page.rect.width + 1
+                            or b.y1 > page.rect.height + 1):
+                        return False
+            return True
+        finally:
+            doc.close()
+
+    def test_no_content_leaves_the_paper(self, pdf, tmp_path, reports):
+        spec = {"sides": "simplex", "colour_mode": "bw", "nup": 1,
+                "orientation": "landscape", "scale": {"mode": "actual"}}
+        actions, temp = plan(pdf(), spec, tmp_path)
+        try:
+            assert self._ink_within_page(actions[0]["pdf_path"]), (
+                "content is being drawn outside the sheet")
+        finally:
+            print_planner.cleanup_temp_dir(temp)
+
+    def test_it_says_so_rather_than_quietly_shrinking(self, pdf, tmp_path, reports):
+        """Printing smaller than "Actual size" promised is a wrong answer. It
+        is the better wrong answer than losing the edges, but it is not one to
+        give silently."""
+        spec = {"sides": "simplex", "colour_mode": "bw", "nup": 1,
+                "orientation": "landscape", "scale": {"mode": "actual"}}
+        actions, temp = plan(pdf(), spec, tmp_path)
+        try:
+            fired = [d for c, ok, d in reports
+                     if c == "print_planner.scale_actual_landscape" and ok is False]
+            assert fired, "the page was shrunk with nothing said"
+            assert "Use Fit" in fired[0]
+        finally:
+            print_planner.cleanup_temp_dir(temp)
+
+    def test_a_page_that_does_fit_is_left_at_true_size(self, pdf, tmp_path, reports):
+        """The fix must not turn every landscape Actual into a Fit. A page
+        small enough to sit in the turned slot is exactly what Actual size is
+        for, and it must still come out at true size."""
+        spec = {"sides": "simplex", "colour_mode": "bw", "nup": 1,
+                "orientation": "landscape", "scale": {"mode": "actual"}}
+        actions, temp = plan(pdf(sizes=((300, 400),) * 2), spec, tmp_path)
+        try:
+            assert [c for c, _, _ in reports
+                    if c == "print_planner.scale_actual_landscape"] == []
+        finally:
+            print_planner.cleanup_temp_dir(temp)
+
+    def test_absent_and_actual_now_agree_again(self, pdf, tmp_path, reports):
+        """Rule 1. "actual" means no scaling, so it must land where a job with
+        no scale key lands — which is what broke."""
+        base = {"sides": "simplex", "colour_mode": "bw", "nup": 1,
+                "orientation": "landscape"}
+        src = pdf()
+        a, t1 = plan(src, base, tmp_path)
+        b, t2 = plan(src, {**base, "scale": {"mode": "actual"}}, tmp_path)
+        try:
+            assert sheets(a[0]["pdf_path"]) == sheets(b[0]["pdf_path"])
+        finally:
+            print_planner.cleanup_temp_dir(t1)
+            print_planner.cleanup_temp_dir(t2)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

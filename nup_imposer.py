@@ -252,7 +252,7 @@ def perform_nup(
     is_duplex: bool = False, scale_behavior: str = "Auto-Fit", maintain_aspect: bool = True, is_centered: bool = True,
     custom_scale_width: float = 200.0, custom_scale_height: float = 200.0,
     n_repeat: int = 1, is_collate: bool = False, draw_crop_marks: bool = False,
-    layout_direction: str = "horizontal"
+    layout_direction: str = "horizontal", on_downgrade=None
 ) -> io.BytesIO:
     """Perform N-up imposition on input PDF bytes.
 
@@ -356,7 +356,23 @@ def perform_nup(
                 # 4 & 5. Scaling & Centering Logic
                 target_w, target_h = slot_width, slot_height
                 if scale_behavior == "Original":
-                    target_w, target_h = eff_w, eff_h
+                    # "Original" means true size, which is only possible while
+                    # the page still fits its slot. A page turned 90 onto a
+                    # portrait sheet does not: an A4 source becomes 297mm wide
+                    # in a 210mm slot, and drawing it anyway pushed 43mm off
+                    # each edge — the title and footer left the paper with
+                    # nothing said. Content never leaves its slot, so this
+                    # falls back to Auto-Fit and tells the caller it did.
+                    if eff_w > slot_width or eff_h > slot_height:
+                        scale = min(slot_width / eff_w, slot_height / eff_h)
+                        target_w, target_h = eff_w * scale, eff_h * scale
+                        if on_downgrade is not None:
+                            on_downgrade({"page": in_pg_idx + 1,
+                                          "page_w": eff_w, "page_h": eff_h,
+                                          "slot_w": slot_width, "slot_h": slot_height,
+                                          "scale": scale})
+                    else:
+                        target_w, target_h = eff_w, eff_h
                 elif scale_behavior == "Custom":
                     target_w, target_h = custom_scale_width, custom_scale_height
                 elif scale_behavior == "Auto-Fit" and maintain_aspect:

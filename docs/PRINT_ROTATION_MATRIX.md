@@ -30,8 +30,18 @@ _Generated from the code. Regenerate with `python tools/nup_matrix.py --markdown
 > | 4 | **A5** doc on A4, **Fit** | enlarged to fill the A4 — visibly bigger than #3 |
 > | 5 | A4 doc, **Custom 75 %** | three-quarter-size, centred, nothing cut |
 > | 6 | A4 doc, **Custom 150 %** | enlarged, edges cropped evenly on all four sides |
-> | 7 | A4 doc, 1-up **landscape**, **Actual** | true size, rotated per the matrix below |
+> | 7 | A4 doc, 1-up **landscape**, **Actual** | fitted, rotated per the matrix below — and an alert, because true size does not fit (see below) |
 > | 8 | Any of the above, **duplex** | backs register with fronts, per the matrix below |
+>
+> **Check 7 cannot be "true size", and this row used to claim it could.** A
+> page turned 90 degrees onto a portrait sheet is as wide as the sheet is tall:
+> an A4 source becomes 297 mm across a 210 mm sheet, and even A5 becomes 210 mm
+> across a 196 mm slot. Only a page whose LONG side is under ~196 mm fits at
+> true size on a landscape A4. Asked for Actual anyway, the imposer fits the
+> page rather than letting the edges run off the paper, and `print_planner`
+> raises `scale_actual_landscape` so nobody is told "actual size" and handed
+> something smaller without explanation. Found on 2026-09-03: before that it
+> drew the page oversized and the title and footer simply left the sheet.
 >
 > Checks 3 and 4 are the ones that matter most: they are the only pair where
 > Fit and Actual differ visibly, and they are what the customer preview promises.
