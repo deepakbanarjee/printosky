@@ -437,11 +437,42 @@
               <option value="ds">Double-sided</option>
             </select>
           </div>
+          <!-- Cutting and punching are charged per machine pass, not per sheet.
+               Without this box the sheet count above is the only thing on
+               screen and it does not reach the price at all. -->
+          <div class="ov2-card" id="ov2-svc-passes-card" style="display:none">
+            <div class="ov2-card-label">Machine passes</div>
+            <input type="number" id="ov2-svc-passes" min="1" max="999" value="1" inputmode="numeric">
+          </div>
+          <div class="ov2-card" id="ov2-svc-unit-card" style="display:none">
+            <div class="ov2-card-label">Photo size</div>
+            <select id="ov2-svc-unit">
+              <option value="set5">Set of 5</option>
+              <option value="sheet">Full sheet</option>
+              <option value="stamp">Stamp</option>
+              <option value="postcard">Postcard</option>
+              <option value="4x6">4x6</option>
+            </select>
+          </div>
+          <div class="ov2-card" id="ov2-svc-lang-card" style="display:none">
+            <div class="ov2-card-label">Language</div>
+            <select id="ov2-svc-lang">
+              <option value="english">English</option>
+              <option value="malayalam">Malayalam</option>
+              <option value="hindi">Hindi</option>
+            </select>
+          </div>
+          <div class="ov2-card full" id="ov2-svc-desc-card" style="display:none">
+            <div class="ov2-card-label">What is the job</div>
+            <input type="text" id="ov2-svc-desc" maxlength="120" placeholder="e.g. mount 3 photos on foam board">
+          </div>
         </div>
 
         <div class="ov2-card full">
           <label class="ov2-svc-check"><input type="checkbox" id="ov2-svc-student"> Student rate</label>
           <label class="ov2-svc-check"><input type="checkbox" id="ov2-svc-urgent"> Urgent</label>
+          <label class="ov2-svc-check" id="ov2-svc-ourjob-wrap" style="display:none"><input type="checkbox" id="ov2-svc-ourjob"> Part of a job we printed or bound (free)</label>
+          <label class="ov2-svc-check" id="ov2-svc-lamcol-wrap" style="display:none"><input type="checkbox" id="ov2-svc-lamcol"> Colour pouch</label>
         </div>
 
         <!-- The quote, from the same rate card as everything else -->

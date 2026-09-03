@@ -1377,18 +1377,34 @@ const SERVICE_FIELDS = {
   laminate: ['lam'],
   bind:     ['bind'],
   foil:     [],
-  cut:      [],
-  punch:    [],
-  photo:    [],
-  dtp:      [],
-  other:    [],
+  // Charged per machine pass, and free when the item is one we printed or
+  // bound. Both live in the rate card (get_handwork_cost) and both were
+  // missing here, so every cut and punch priced at the Rs.100 minimum and the
+  // waiver could not be reached at all.
+  cut:      ['passes', 'ourjob'],
+  punch:    ['passes', 'ourjob'],
+  photo:    ['unit'],
+  dtp:      ['lang'],
+  other:    ['desc'],
+};
+
+// Which meta key the one quantity box fills, per kind. The rate card counts a
+// photo job in `qty` and a DTP job in `pages`, and reads neither from `sheets`
+// — so a box labelled "How many pages" that posted `sheets` was quietly priced
+// as one page. test_staff_services_v2 pins this against the rate card itself.
+const SERVICE_QTY_KEY = {
+  copy: 'sheets', scan: 'sheets', laminate: 'sheets', bind: 'sheets',
+  foil: 'sheets', cut: 'sheets', punch: 'sheets', other: 'sheets',
+  photo: 'qty', dtp: 'pages',
 };
 
 // What the quantity box is counting, per kind. "Sheets" is wrong for foiling.
 const SERVICE_QTY_LABEL = {
   copy: 'How many sheets', scan: 'How many sheets', laminate: 'How many pieces',
-  bind: 'How many sheets', foil: 'How many pieces', cut: 'How many sheets',
-  punch: 'How many sheets', photo: 'How many prints', dtp: 'How many pages',
+  bind: 'How many sheets', foil: 'How many pieces',
+  // Recorded on the job, but the PASSES box below is what is charged.
+  cut: 'How many sheets in the stack', punch: 'How many sheets in the stack',
+  photo: 'How many prints', dtp: 'How many pages',
   other: 'How many',
 };
 
@@ -1428,10 +1444,30 @@ function setServiceKind(kind) {
   show1('ov2-svc-bind-card',   fields.includes('bind'));
   show1('ov2-svc-colour-card', fields.includes('colour'));
   show1('ov2-svc-sides-card',  fields.includes('sides'));
+  show1('ov2-svc-passes-card', fields.includes('passes'));
+  show1('ov2-svc-ourjob-wrap', fields.includes('ourjob'));
+  show1('ov2-svc-unit-card',   fields.includes('unit'));
+  show1('ov2-svc-lang-card',   fields.includes('lang'));
+  show1('ov2-svc-desc-card',   fields.includes('desc'));
+  syncLamColour();
 
   const label = $('ov2-svc-qty-label');
   if (label) label.textContent = SERVICE_QTY_LABEL[kind] || 'How many';
   quoteService();
+}
+
+// The colour pouch rate exists only for A3 (get_pouch_lam_rate takes the flat
+// A4 rate for everything at or below A4), so the box appears only where ticking
+// it changes the price. A control that visibly does nothing is the fault this
+// whole panel was just fixed for.
+function syncLamColour() {
+  const wrap = $('ov2-svc-lamcol-wrap');
+  if (!wrap) return;
+  const on = svc.kind === 'laminate'
+    && (($('ov2-svc-lam') || {}).value || 'pouch') === 'pouch'
+    && (($('ov2-svc-size') || {}).value || 'A4').toUpperCase() === 'A3';
+  wrap.style.display = on ? '' : 'none';
+  if (!on) { const box = $('ov2-svc-lamcol'); if (box) box.checked = false; }
 }
 
 function serviceMeta() {
@@ -1441,15 +1477,24 @@ function serviceMeta() {
     return Number.isFinite(n) && n > 0 ? n : fallback;
   };
   const fields = SERVICE_FIELDS[svc.kind] || [];
-  const meta = {
-    sheets: num('ov2-svc-sheets', 1),
-    paper_size: ($('ov2-svc-size') || {}).value || 'A4',
-  };
+  // `sheets` stays on every job as the recorded quantity, and the key the rate
+  // card actually counts is set from the SAME box, so the two can never
+  // disagree.
+  const qty = num('ov2-svc-sheets', 1);
+  const meta = { sheets: qty, paper_size: ($('ov2-svc-size') || {}).value || 'A4' };
+  const qtyKey = SERVICE_QTY_KEY[svc.kind];
+  if (qtyKey && qtyKey !== 'sheets') meta[qtyKey] = qty;
   if (fields.includes('copies')) meta.copies = num('ov2-svc-copies', 1);
   if (fields.includes('lam'))    meta.lam_type = ($('ov2-svc-lam') || {}).value || 'pouch';
   if (fields.includes('bind'))   meta.binding = ($('ov2-svc-bind') || {}).value || 'spiral';
   if (fields.includes('colour')) meta.colour = ($('ov2-svc-colour') || {}).value || 'bw';
   if (fields.includes('sides'))  meta.sides = ($('ov2-svc-sides') || {}).value || 'ss';
+  if (fields.includes('passes')) meta.passes = num('ov2-svc-passes', 1);
+  if (fields.includes('ourjob') && ($('ov2-svc-ourjob') || {}).checked) meta.with_our_job = true;
+  if (fields.includes('unit'))   meta.unit = ($('ov2-svc-unit') || {}).value || 'set5';
+  if (fields.includes('lang'))   meta.language = ($('ov2-svc-lang') || {}).value || 'english';
+  if (fields.includes('desc'))   meta.description = (($('ov2-svc-desc') || {}).value || '').trim();
+  if (fields.includes('lam') && ($('ov2-svc-lamcol') || {}).checked) meta.is_colour = true;
   if (fields.includes('student') && ($('ov2-svc-student') || {}).checked) meta.is_student = true;
   if (($('ov2-svc-urgent') || {}).checked) meta.urgent = true;
   return meta;
@@ -1733,12 +1778,17 @@ function syncServices() {
   if (t1) t1.addEventListener('click', () => setServiceMode(false));
   if (t2) t2.addEventListener('click', () => setServiceMode(true));
 
-  ['ov2-svc-sheets', 'ov2-svc-copies'].forEach((id) => {
+  ['ov2-svc-sheets', 'ov2-svc-copies', 'ov2-svc-passes',
+   'ov2-svc-desc'].forEach((id) => {
     const el = $(id); if (el) el.addEventListener('input', quoteServiceSoon);
   });
   ['ov2-svc-size', 'ov2-svc-lam', 'ov2-svc-bind', 'ov2-svc-colour',
-   'ov2-svc-sides', 'ov2-svc-student', 'ov2-svc-urgent'].forEach((id) => {
+   'ov2-svc-sides', 'ov2-svc-student', 'ov2-svc-urgent',
+   'ov2-svc-ourjob', 'ov2-svc-unit', 'ov2-svc-lang', 'ov2-svc-lamcol'].forEach((id) => {
     const el = $(id); if (el) el.addEventListener('change', quoteService);
+  });
+  ['ov2-svc-size', 'ov2-svc-lam'].forEach((id) => {
+    const el = $(id); if (el) el.addEventListener('change', syncLamColour);
   });
   const paid = $('ov2-svc-paid');
   if (paid) paid.addEventListener('input', syncServiceOverride);
