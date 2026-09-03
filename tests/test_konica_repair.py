@@ -108,6 +108,89 @@ def test_a_shifted_row_is_quarantined_even_though_it_has_a_print_end():
     assert [r[0] for r in p[repair.QUARANTINED]] == [2]
 
 
+# ── Checking print_end rather than trusting it ────────────────────────────────
+#
+# Most of the surviving print_end values on the real rows sit within minutes of
+# 13:00 across a dozen different days — the shape of a scheduled export, not of
+# a print finishing. So a recorded time is evidence, not an answer: it is only
+# used where the bracket agrees with it.
+
+def test_a_print_end_that_contradicts_the_neighbours_is_left_alone():
+    """Two sources, two answers. Neither is worth writing."""
+    conn = db([dated(1, "2026-03-14 10:00:00"), dated(3, "2026-03-14 10:10:00"),
+               undated(2, print_end="2026-02-27 13:00:11")])
+    p = repair.plan(conn)
+    assert p[repair.PRINT_END] == [] and p[repair.BRACKETED] == []
+    assert [r[0] for r in p["conflict"]] == [2]
+    assert "2026-02-27" in p["conflict"][0][3] and "2026-03-14" in p["conflict"][0][3]
+
+
+def test_a_corroborated_print_end_says_so_on_the_row():
+    conn = db([dated(1, "2026-03-14 09:00:00"), dated(3, "2026-03-14 14:00:00"),
+               undated(2, print_end="2026-03-14 13:00:11")])
+    p = repair.plan(conn)
+    assert p[repair.PRINT_END][0][3] == repair.CORROBORATED
+
+
+def test_a_print_end_inside_a_midnight_straddle_settles_it():
+    """Bracketing alone gives up here; the recorded time picks one of the two
+    candidate days, which is not a guess."""
+    conn = db([dated(1, "2026-03-15 23:58:00"), dated(3, "2026-03-16 00:03:00"),
+               undated(2, print_end="2026-03-16 00:01:00")])
+    p = repair.plan(conn)
+    assert p["ambiguous"] == []
+    assert [r[0] for r in p[repair.PRINT_END]] == [2]
+    assert p[repair.PRINT_END][0][3] == repair.SETTLES_RANGE
+
+
+def test_a_print_end_outside_a_midnight_straddle_is_still_a_conflict():
+    conn = db([dated(1, "2026-03-15 23:58:00"), dated(3, "2026-03-16 00:03:00"),
+               undated(2, print_end="2026-03-11 13:00:04")])
+    p = repair.plan(conn)
+    assert [r[0] for r in p["conflict"]] == [2]
+
+
+def test_an_unchecked_print_end_is_used_but_flagged_as_unchecked():
+    """No dated neighbour exists, so nothing can corroborate it. It is still
+    the only recorded evidence of the day — but the row says it went unchecked
+    so a reader is never told more than we know."""
+    conn = db([undated(2, print_end="2026-03-14 13:00:11")])
+    p = repair.plan(conn)
+    assert [r[0] for r in p[repair.PRINT_END]] == [2]
+    assert p[repair.PRINT_END][0][3] == repair.UNCORROBORATED
+
+
+def test_no_print_end_falls_back_to_bracketing_not_to_giving_up():
+    conn = db([dated(1, "2026-03-14 10:00:00"), dated(3, "2026-03-14 10:10:00"),
+               undated(2, print_end="2026-03-14 13:00:11")])
+    p = repair.plan(conn, use_print_end=False)
+    assert p[repair.PRINT_END] == []
+    assert p[repair.BRACKETED][0][1] == "2026-03-14 10:05:00"
+
+
+def test_no_print_end_leaves_an_uncheckable_row_alone_rather_than_dating_it():
+    conn = db([undated(2, print_end="2026-03-14 13:00:11")])
+    p = repair.plan(conn, use_print_end=False)
+    assert p[repair.PRINT_END] == []
+    assert [r[0] for r in p["unbracketable"]] == [2]
+
+
+# ── Does print_end_date mean what it looks like it means? ─────────────────────
+
+def test_agreement_is_measured_from_the_rows_that_kept_both():
+    conn = db([dated(1, "2026-03-14 10:00:00"), dated(2, "2026-03-15 10:00:00"),
+               (3, "Print", "ok.pdf", "No Error", 5, "2026-03-16 23:50:00",
+                "2026-03-17 00:10:00")])          # a job that ran past midnight
+    assert repair.print_end_agreement(conn) == {"agree": 2, "total": 3}
+
+
+def test_agreement_declines_to_answer_when_nothing_kept_both():
+    """A reassuring 100% computed from zero rows is the lie the check exists
+    to prevent."""
+    conn = db([(1, "Print", "ok.pdf", "No Error", 5, "2026-03-14 10:00:00", None)])
+    assert repair.print_end_agreement(conn) == {"agree": 0, "total": 0}
+
+
 # ── Applying it ───────────────────────────────────────────────────────────────
 
 def _apply(conn):
