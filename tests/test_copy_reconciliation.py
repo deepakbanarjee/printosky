@@ -121,7 +121,10 @@ def test_print_jobs_are_excluded():
     """A print job arrives through the queue and is already accounted for by
     jobs.printed_by. Counting it here would invent a gap the size of the shop."""
     totals = cr.machine_totals([M("PRINT", pages=9999)])
-    assert totals == {"Copy": {"jobs": 0, "pages": 0}, "Scan": {"jobs": 0, "pages": 0}}
+    for job_type in cr.RECONCILED_TYPES:
+        assert totals[job_type]["jobs"] == 0
+        assert totals[job_type]["pages"] == 0
+        assert totals[job_type]["unknown_jobs"] == 0
 
 
 def test_a_cancelled_copy_consumed_no_paper_and_owes_no_money():
@@ -138,7 +141,8 @@ def test_both_writers_row_shapes_are_counted_together():
         M("COPY", pages=10, result="OK"),
         {"job_type": "Copy", "result": "No Error", "pages_printed": 10},
     ])
-    assert totals["Copy"] == {"jobs": 2, "pages": 20}
+    assert totals["Copy"]["jobs"] == 2
+    assert totals["Copy"]["pages"] == 20
 
 
 def test_a_row_with_no_result_column_is_counted():
@@ -296,3 +300,95 @@ def test_the_console_no_longer_filters_on_the_retired_result_vocabulary():
     assert queries, "the konica_jobs fetches are missing"
     assert not any("result=eq" in q for q in queries), queries
     assert "function kjOk(" in mis
+
+
+# ── A result code this build does not understand ──────────────────────────────
+#
+# Added 2026-09-02, after the OSP printer emitted `X2` and the fail-loud alert
+# caught it. The alert was working; the COUNTING was not. An unmapped result was
+# being excluded exactly the way a cancellation is excluded, which quietly
+# shrinks the machine side of the comparison — a gap that reads smaller than it
+# is, which is the failure shape this module exists to catch.
+
+def test_an_unknown_result_is_not_treated_as_a_cancellation():
+    """A cancelled job is known work that did not happen. An unmapped code is
+    work of unknown status. Excluding both the same way loses the difference."""
+    r = cr.reconcile([M("COPY", pages=300, result="X2")], [])
+    assert r["types"]["Copy"]["machine_pages"] == 0     # not counted as done
+    assert r["unknown_jobs"] == 1                       # ...but not lost either
+    assert r["unknown_pages"] == 300
+
+
+def test_a_known_cancellation_is_not_reported_as_unknown():
+    r = cr.reconcile([M("COPY", pages=300, result="USERCANCEL")], [])
+    assert r["unknown_jobs"] == 0
+
+
+def test_unknown_pages_are_in_neither_column():
+    """Not billed, not counted as machine work — the honest place for them."""
+    r = cr.reconcile([M("COPY", pages=1000), M("COPY", pages=300, result="X2")],
+                     [C_service("copy", sheets=900)])
+    assert r["machine_pages"] == 1000
+    assert r["counter_pages"] == 900
+    assert r["gap_pages"] == 100
+    assert r["unknown_pages"] == 300
+
+
+def test_an_unknown_result_speaks_even_when_the_rest_reconciles():
+    """Silence here would be indistinguishable from agreement."""
+    r = cr.reconcile([M("COPY", pages=1000), M("COPY", pages=300, result="X2")],
+                     [C_service("copy", sheets=1000)])
+    assert r["status"] == "ok"
+    text = cr.format_reconciliation(r)
+    assert "does not understand" in text
+    assert "incomplete" in text
+
+
+def test_it_is_reported_alongside_a_real_gap_too():
+    r = cr.reconcile([M("COPY", pages=1000), M("SCAN", pages=40, result="X9")],
+                     [C_service("copy", sheets=10)])
+    text = cr.format_reconciliation(r)
+    assert "Unbilled copying" in text
+    assert "does not understand" in text
+
+
+def test_the_unknown_line_is_grammatical_either_way():
+    one = cr.format_reconciliation(cr.reconcile([M("COPY", pages=5, result="X2")], []))
+    assert "1 machine job" in one and "carries" in one
+    many = cr.format_reconciliation(
+        cr.reconcile([M("COPY", pages=5, result="X2"),
+                      M("COPY", pages=5, result="X9")], []))
+    assert "2 machine jobs" in many and "carry" in many
+
+
+def test_nothing_unknown_says_nothing():
+    r = cr.reconcile([M("COPY", pages=1000)], [C_service("copy", sheets=1000)])
+    assert r["unknown_jobs"] == 0
+    assert cr.format_reconciliation(r) == ""
+
+
+def test_the_console_knows_the_same_vocabulary():
+    """Two lists of known results is how they drift."""
+    import konica_normalize as kn
+    mis = _mis()
+    js_set = re.search(r"const KJ_RESULT_KNOWN = new Set\(\[(.*?)\]\)", mis, re.S).group(1)
+    for alias in kn.RESULT_ALIASES:
+        assert f'"{alias}"' in js_set, alias
+
+
+def test_the_console_reports_unknown_rows_too():
+    mis = _mis()
+    assert "kjKnownResult(r)" in mis
+    assert "unknown_jobs" in mis and "rc-unknown" in mis
+    assert "does not understand" in mis
+
+
+def test_only_unknown_rows_is_not_reported_as_a_dead_fetcher():
+    """The worst misdiagnosis available: the printer DID send rows, this build
+    could not read their result codes, and blaming the fetcher would send
+    someone to check a machine that is working fine."""
+    r = cr.reconcile([M("COPY", pages=5, result="X2")], [])
+    text = cr.format_reconciliation(r, "today")
+    assert "fetcher has not reached the printer" not in text
+    assert "Nothing could be classified" in text
+    assert "does not understand" in text

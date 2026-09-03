@@ -35,7 +35,12 @@ import json
 import logging
 from collections.abc import Iterable, Mapping
 
-from konica_normalize import PAPERLESS_JOB_TYPES, is_ok, normalize_job_type
+from konica_normalize import (
+    PAPERLESS_JOB_TYPES,
+    is_known_result,
+    is_ok,
+    normalize_job_type,
+)
 
 log = logging.getLogger("copy_reconciliation")
 
@@ -137,11 +142,23 @@ def machine_totals(rows: Iterable[Mapping]) -> dict:
     Only completed rows count: a cancelled copy consumed no paper and owes no
     money. `is_ok` tolerates either writer's vocabulary, so this is correct on
     rows the backfill has not reached yet.
+
+    Rows whose result this build does NOT understand are counted separately as
+    `unknown`, not silently dropped. Discovered on 2026-09-02, when the printer
+    turned out to emit a code (`X2`) nothing had mapped: excluding it the same
+    way a cancellation is excluded would shrink the machine side of the
+    comparison, and a gap that reads smaller than it is, is worse than no gap
+    at all — this module exists to catch exactly that shape of quiet.
     """
-    out = {t: {"jobs": 0, "pages": 0} for t in RECONCILED_TYPES}
+    out = {t: {"jobs": 0, "pages": 0, "unknown_jobs": 0, "unknown_pages": 0}
+           for t in RECONCILED_TYPES}
     for row in rows or []:
         job_type = normalize_job_type(row.get("job_type"))
         if job_type not in out:
+            continue
+        if "result" in row and not is_known_result(row.get("result")):
+            out[job_type]["unknown_jobs"] += 1
+            out[job_type]["unknown_pages"] += machine_pages(row)
             continue
         if "result" in row and not is_ok(row.get("result")):
             continue
@@ -194,13 +211,15 @@ def reconcile(machine_rows: Iterable[Mapping],
         else:
             status = "ok"
         per_type[job_type] = {
-            "machine_jobs":  m["jobs"],
-            "machine_pages": m["pages"],
-            "counter_jobs":  c["jobs"],
-            "counter_pages": c["pages"],
-            "gap_pages":     gap,
-            "gap_fraction":  (gap / m["pages"]) if m["pages"] else 0.0,
-            "status":        status,
+            "machine_jobs":   m["jobs"],
+            "machine_pages":  m["pages"],
+            "counter_jobs":   c["jobs"],
+            "counter_pages":  c["pages"],
+            "gap_pages":      gap,
+            "gap_fraction":   (gap / m["pages"]) if m["pages"] else 0.0,
+            "unknown_jobs":   m["unknown_jobs"],
+            "unknown_pages":  m["unknown_pages"],
+            "status":         status,
         }
 
     total_machine = sum(v["machine_pages"] for v in per_type.values())
@@ -212,12 +231,19 @@ def reconcile(machine_rows: Iterable[Mapping],
                "quiet" if "quiet" in statuses else
                "blind")
 
+    unknown_jobs = sum(v["unknown_jobs"] for v in per_type.values())
+    unknown_pages = sum(v["unknown_pages"] for v in per_type.values())
+
     return {
         "types":         per_type,
         "machine_pages": total_machine,
         "counter_pages": total_counter,
         "gap_pages":     total_gap,
         "gap_fraction":  (total_gap / total_machine) if total_machine else 0.0,
+        # Neither billed nor counted as machine work: the comparison could not
+        # place these at all, and says so rather than rounding them away.
+        "unknown_jobs":  unknown_jobs,
+        "unknown_pages": unknown_pages,
         "status":        overall,
     }
 
@@ -233,13 +259,37 @@ def format_reconciliation(result: Mapping, window: str = "today") -> str:
     """
     status = result.get("status")
 
+    unknown = int(result.get("unknown_jobs") or 0)
+    unknown_pages = int(result.get("unknown_pages") or 0)
+    if unknown == 1:
+        unknown_line = (f"\u26a0\ufe0f 1 machine job ({unknown_pages} pages) carries a "
+                        "result code this build does not understand — it is in "
+                        "neither column, so this comparison is incomplete by at "
+                        "least that much.")
+    elif unknown:
+        unknown_line = (f"\u26a0\ufe0f {unknown} machine jobs ({unknown_pages} pages) carry "
+                        "result codes this build does not understand — they are in "
+                        "neither column, so this comparison is incomplete by at "
+                        "least that much.")
+    else:
+        unknown_line = ""
+
     if status == "blind":
+        if unknown_line:
+            # NOT the same as no data. The printer sent rows; this build could
+            # not read their result codes. Reporting "the fetcher has not
+            # reached the printer" here would point the reader at the wrong
+            # cause entirely — a misdiagnosis is worse than a bare unknown.
+            return ("⚠️ Nothing could be classified for " + window +
+                    " — copy/scan billing cannot be checked.\n" + unknown_line)
         return ("⚠️ No Konica job log for " + window +
                 " — copy/scan billing cannot be checked. The job fetcher has not "
                 "reached the printer.")
 
     if status != "gap":
-        return ""
+        # An unclassifiable row is worth saying even when the rest reconciles:
+        # the silence would otherwise be indistinguishable from agreement.
+        return unknown_line
 
     lines = [f"⚠️ Unbilled copying {window}: "
              f"{result['gap_pages']} of {result['machine_pages']} machine pages "
@@ -251,4 +301,6 @@ def format_reconciliation(result: Mapping, window: str = "today") -> str:
         lines.append(f"  {job_type}: machine {t['machine_pages']} pages "
                      f"({t['machine_jobs']} jobs) · counter {t['counter_pages']} pages "
                      f"({t['counter_jobs']} jobs)")
+    if unknown_line:
+        lines.append(unknown_line)
     return "\n".join(lines)
