@@ -566,12 +566,37 @@ def _create_service_job(h, data: dict, *, item_in_hand: bool) -> None:
         _json_response(h, 400, {"error": f"Could not price this service: {exc}"})
         return
 
-    amount_quoted = service_jobs.amount_or_none(data.get("amount_quoted"))
-    if amount_quoted is None:
-        amount_quoted = float(quote["total"])
     amount_collected = service_jobs.amount_or_none(data.get("amount_collected")) or 0.0
     amount_partial   = service_jobs.amount_or_none(data.get("amount_partial")) or 0.0
     override_reason  = str(data.get("override_reason") or "").strip()
+
+    # A service the card cannot price has total 0, and writing that as the quote
+    # files a Rs.0 job that `service_status` then calls Queued — a deposit of
+    # nothing is always met. It reads as an ordinary booking on every screen,
+    # which is how a sale disappears. So a zero from an unpriced quote is never
+    # written as if it were a price. See docs/FAIL_LOUD.md.
+    unpriced = bool(quote["needs_manual_price"]) and not (amount_collected + amount_partial)
+
+    amount_quoted = service_jobs.amount_or_none(data.get("amount_quoted"))
+    if amount_quoted is None:
+        if unpriced and item_in_hand:
+            # At the counter the customer is standing there and money should be
+            # changing hands now, so this is refused outright — the same answer
+            # order-v2 already gives in the browser, and the same one the
+            # photocopy path below gives.
+            _json_response(h, 200, {
+                "ok": False, "needs_manual_price": True,
+                "error": "This one has no rate — enter the amount taken. "
+                         + "; ".join(quote["breakdown"]),
+                "breakdown": quote["breakdown"],
+                "label": quote["label"],
+            })
+            return
+        # An online booking charges nothing and the item is not here yet, so
+        # there is nobody to ask for a price. Refusing would lose the booking.
+        # It is taken, with the quote left NULL rather than zero, and the reason
+        # written where a human actually reads it.
+        amount_quoted = None if unpriced else float(quote["total"])
 
     status = service_jobs.service_status(
         amount_quoted, amount_collected + amount_partial, override_reason)
@@ -597,6 +622,8 @@ def _create_service_job(h, data: dict, *, item_in_hand: bool) -> None:
     label = quote["label"]
 
     note = str(data.get("notes", "")).strip()
+    if unpriced:
+        note = (note + " | NO RATE — price this before starting work").strip(" |")
     if override_reason:
         note = (note + " | deposit waived: " + override_reason).strip(" |")
     if amount_partial > 0 and amount_collected > 0:

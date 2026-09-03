@@ -268,3 +268,93 @@ def test_the_output_is_escaped():
     js = service_js()
     assert "function escapeHtml(" in js
     assert "escapeHtml(b)" in js and "escapeHtml(d.job_id)" in js
+
+
+# ── The panel must send what the rate card reads ──────────────────────────────
+#
+# Found during the 2026-09-03 acceptance run, Phase 1. Five of the ten kinds
+# were posting a quantity the rate card never looks at:
+#
+#   cut / punch  charged per `passes`; the panel sent only `sheets`, so every
+#                job priced at the Rs.100 minimum however much work it was, and
+#                `with_our_job` (free on our own jobs) could not be reached.
+#   photo        counted in `qty`; a box reading "How many prints" sent
+#                `sheets`, so five prints billed as one.
+#   dtp          counted in `pages`; "How many pages" sent `sheets`, so a
+#                five-page job billed Rs.40 instead of Rs.200.
+#   other        the typed description never reached the job.
+#   laminate     the colour pouch rate was unreachable.
+#
+# Each one is a number somebody typed that changed nothing on screen. One test
+# per kind would have caught these five and missed the sixth, so this derives
+# the answer from the rate card instead: whatever `calculate_service_quote`
+# reads for a kind, the panel has to send.
+
+def _keys_the_card_reads():
+    """{kind: {meta keys calculate_service_quote actually reads}}"""
+    import inspect
+    src = inspect.getsource(rate_card.calculate_service_quote)
+    src = src.split("# A manual price, once the operator")[0]   # the shared tail
+    parts = re.split(r"\n    (?:el)?if kind (?:==|in) ([^:]+):", src)
+    reads = {}
+    for cond, body in zip(parts[1::2], parts[2::2]):
+        keys = set(re.findall(r"""meta\.get\(["']([a-z_]+)["']""", body))
+        for kind in re.findall(r'"([a-z]+)"', cond):
+            reads[kind] = keys
+    return reads
+
+
+#: Read by the card but deliberately not a panel control.
+#:   manual_price  is the amount box, not a meta field — it has its own flow.
+#:   project_cover has no picker in either console; a project binding is quoted
+#:                 on the white cover and adjusted by hand if it is not.
+#:   urgent        is a checkbox on the panel, not a per-kind field.
+NOT_PANEL_FIELDS = {"manual_price", "project_cover", "urgent"}
+
+
+def _keys_the_panel_sends(kind):
+    """{meta keys order-v2 posts for this kind}, read out of serviceMeta()."""
+    js = service_js()
+    fields = re.search(rf"\n  {kind}:\s*\[([^\]]*)\]", js).group(1)
+    fields = set(re.findall(r"'([a-z]+)'", fields))
+    body = re.search(r"function serviceMeta\(\) \{(.*?)\n\}", js, re.S).group(1)
+
+    sends = set(re.findall(r"\bmeta = \{ ([a-z_]+):", body))   # always sent
+    sends.add("paper_size")
+    qty_key = re.search(rf"\n  .*\b{kind}: '([a-z_]+)'", js)
+    if qty_key:
+        sends.add(qty_key.group(1))
+    for line in body.splitlines():
+        m = re.search(r"fields\.includes\('([a-z]+)'\).*?meta[.\[]([a-z_]+)", line)
+        if m and m.group(1) in fields:
+            sends.add(m.group(2))
+    return sends
+
+
+@pytest.mark.parametrize("kind", sorted(rate_card.SERVICE_KINDS))
+def test_the_panel_sends_every_meta_key_its_price_depends_on(kind):
+    wanted = _keys_the_card_reads().get(kind, set()) - NOT_PANEL_FIELDS
+    missing = wanted - _keys_the_panel_sends(kind)
+    assert not missing, (
+        f"order-v2 prices a {kind} job without sending {sorted(missing)} — "
+        f"the rate card reads it, so whatever the operator types for it is "
+        f"ignored and the job is billed at the default")
+
+
+def test_the_quantity_box_fills_the_key_that_kind_is_counted_in():
+    """A photo job is counted in `qty` and a DTP job in `pages`. One box, and
+    it has to land in the right field or the label on it is a lie."""
+    js = service_js()
+    block = re.search(r"const SERVICE_QTY_KEY = \{(.*?)\};", js, re.S).group(1)
+    for kind in rate_card.SERVICE_KINDS:
+        assert re.search(rf"\b{kind}: '", block), f"{kind} has no quantity key"
+    assert "photo: 'qty'" in block and "dtp: 'pages'" in block
+
+
+def test_the_recorded_quantity_and_the_priced_one_come_from_one_box():
+    """Two boxes that must agree is two boxes that will not."""
+    js = service_js()
+    body = re.search(r"function serviceMeta\(\) \{(.*?)\n\}", js, re.S).group(1)
+    assert "const qty = num('ov2-svc-sheets', 1)" in body
+    assert "meta = { sheets: qty," in body
+    assert "meta[qtyKey] = qty" in body

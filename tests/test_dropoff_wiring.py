@@ -359,3 +359,57 @@ def test_the_success_message_tells_a_customer_to_bring_the_item():
     assert "Now bring your item to the shop" in js
     assert "We will WhatsApp you a reminder" in js
     assert "nothing is charged until we have it" not in js
+
+
+# ── A service with no rate is never filed at Rs.0 ─────────────────────────────
+#
+# Found in the 2026-09-03 acceptance run, Phase 1 (P1-18). order-v2 refuses this
+# in the browser, but the endpoint took it: an unpriced quote has total 0, and
+# `service_status` calls a Rs.0 job Queued because a deposit of nothing is
+# always met. The result reads as an ordinary booking on every screen — which is
+# how a sale disappears (docs/FAIL_LOUD.md).
+#
+# The counter and the site need different answers. At the counter the customer
+# is standing there, so it is refused. Online nothing is charged and there is
+# nobody to ask, so the booking is taken with the price left NULL rather than
+# zero, and the reason written where a human reads it.
+
+NO_RATE = {"kind": "laminate", "meta": {"sheets": 3, "lam_type": "id"}}
+
+
+def test_the_counter_refuses_a_service_it_cannot_price(api):
+    call, ho = api
+    got, rows, _ = call(ho._handle_order_staff_service,
+                        {**NO_RATE, "store_id": "OSP"})
+    assert got["data"]["ok"] is False
+    assert got["data"]["needs_manual_price"] is True
+    assert "enter the amount taken" in got["data"]["error"]
+    assert rows == [], "a job was created for a service with no price"
+
+
+def test_the_counter_takes_it_once_an_amount_is_typed(api):
+    call, ho = api
+    got, rows, _ = call(ho._handle_order_staff_service,
+                        {**NO_RATE, "store_id": "OSP", "amount_collected": 150})
+    assert got["data"]["ok"] is True
+    assert rows[0]["amount_collected"] == 150
+
+
+def test_an_online_booking_of_an_unpriced_service_is_still_taken(api):
+    """Refusing would lose the booking for a service the shop does do."""
+    call, ho = api
+    got, rows, _ = call(ho._handle_order_book_service,
+                        {**NO_RATE, "phone": "9495706405"})
+    assert got["data"]["ok"] is True
+    assert rows[0]["amount_quoted"] is None, "NULL means unpriced; 0 means free"
+    assert "NO RATE" in (rows[0]["notes"] or "")
+
+
+def test_a_priced_service_is_untouched_by_any_of_this(api):
+    """Rule 1: a booking that worked before must behave identically."""
+    call, ho = api
+    got, rows, _ = call(ho._handle_order_staff_service,
+                        {**LAM, "store_id": "OSP"})
+    assert got["data"]["ok"] is True
+    assert rows[0]["amount_quoted"] == 420.0
+    assert "NO RATE" not in (rows[0]["notes"] or "")
