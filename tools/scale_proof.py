@@ -57,7 +57,10 @@ COMBINATIONS = [
     ("S6", "src", "custom", 150, "portrait", "ss",
      "enlarged, edges cropped EVENLY on all four sides"),
     ("S7", "src", "actual", None, "landscape", "ss",
-     "true size, turned per the rotation matrix — page 1 at the bottom"),
+     "the WHOLE page turned, border unbroken on all four sides, page 1 at the "
+     "bottom. An A4 page cannot be turned onto A4 at true size, so this is "
+     "fitted and an alert says so — if any edge runs off the paper, that is "
+     "the 2026-09-03 fault back again"),
     ("S8", "src", "fit", None, "portrait", "ds",
      "duplex: backs must register with fronts, exactly as an unscaled job does"),
 ]
