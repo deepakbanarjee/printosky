@@ -5,8 +5,10 @@ A store PC keeps running whatever it last pulled (see docs/AUTO_UPDATE.md), so
 getting to that PC. This module names the running version so each box can report
 it to Supabase (`store_devices.app_version`) and the answer is one query away.
 
-Format: ``main@a1b2c3d``, plus ``+dirty`` when the working tree has local edits
-(a box someone hand-patched, which is worth seeing before you debug it).
+Format: ``main@a1b2c3d``, plus ``+dirty`` when TRACKED files have local edits
+(a box someone hand-patched, which is worth seeing before you debug it), or
+``+unknown`` when the tree state could not be read at all. Untracked files are
+deliberately not counted — see ``_compute``.
 
 **Captured once, at import — deliberately.** ``git reset`` rewrites files on
 disk, but a running Python process keeps the modules it already imported in
@@ -66,10 +68,21 @@ def _compute() -> str:
     branch = _git("rev-parse", "--abbrev-ref", "HEAD")
     version = f"{branch}@{sha}" if branch and branch != "HEAD" else sha
 
-    # `git status --porcelain` is empty on a clean tree. A None here means we
-    # could not tell, which must not be reported as clean.
-    dirty = _git("status", "--porcelain")
-    if dirty:
+    # `--untracked-files=no` is load-bearing. Plain `--porcelain` also lists
+    # UNTRACKED files, so one stray download — or `tools/scale_proof.py`, which
+    # writes ./scale_proof by default — marks a box "+dirty" forever, and the
+    # flag stops meaning what it says it means: that someone hand-patched this
+    # box's code. It has bitten once already (boot_delay.vbs at Nattika, see
+    # tests/TestGeneratedFilesDoNotFakeDirtiness), and gitignoring each new
+    # generated file one at a time only ever fixes the instance. A file nobody
+    # tracks is not a patch to the running code.
+    dirty = _git("status", "--porcelain", "--untracked-files=no")
+    if dirty is None:
+        # "" is a clean tree; None is "could not tell". Rendering both as a
+        # bare version says CLEAN about a box we know nothing about, which is
+        # the wrong answer rather than a missing one. Say so instead.
+        version += "+unknown"
+    elif dirty:
         version += "+dirty"
     return version
 
