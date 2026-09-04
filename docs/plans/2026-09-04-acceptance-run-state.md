@@ -119,46 +119,69 @@ duplex/simplex overrides in both directions, and the dual-queue workaround is
 what makes it work. If it fails, say so **before anything is changed** — a
 confident fix has already gone wrong here once.
 
-### Before the paper: OSP has a duplex queue and no simplex one
+### Before the paper: which queue simplex uses, and how OSP is wired
 
-`jobs.printer` records the Windows queue a job actually went to, after
-`_konica_queue_for_sides()` has had its say — so the table already says which
-half of the workaround is installed. Every Konica row ever written:
+**Decided (2026-09-04): OSP's simplex queue is the original
+`KONICA MINOLTA 1100 PS`.** Only duplex got a second Windows queue,
+`KONICA MINOLTA 1100 PS (Duplex)`. The jobs are wired to that:
+
+```json
+"printer_queue_names": {
+  "konica_duplex":  "KONICA MINOLTA 1100 PS (Duplex)",
+  "konica_simplex": "KONICA MINOLTA 1100 PS"
+}
+```
+
+That is a valid wiring, not a half-installed one. `_konica_queue_for_sides()`
+only asks whether `PRINTERS[variant]` is set, never whether the two names
+differ, so mapping `konica_simplex` back to the original queue routes simplex
+there deliberately. `config/stores/OSP.store_config.json` now carries it — it
+did not before, so a rebuild from the template would have dropped the duplex
+queue in silence.
+
+Say it explicitly even though leaving `konica_simplex` unset routes to exactly
+the same queue: a fall-through is indistinguishable from nobody having
+configured anything, which is precisely the confusion recorded below.
+
+`jobs.printer` stores the queue a job actually reached, after
+`_konica_queue_for_sides()` has chosen. Every Konica row ever written:
 
 | Queue | Jobs | First | Last |
 |---|---|---|---|
 | `KONICA MINOLTA 1100 PS (Duplex)` | 3 | 2026-08-30 | 2026-09-04 09:24 |
 | `KONICA MINOLTA 1100 PS` | 53 | 2026-08-11 | 2026-09-04 09:26 |
-| `KONICA MINOLTA 1100 PS (Simplex)` | **0 — never** | — | — |
+| `KONICA MINOLTA 1100 PS (Simplex)` | 0 — the name is not in use | — | — |
 
-The first `(Duplex)` row is dated the day the fix went in, so the duplex half is
-real and routing works. The simplex half is not there: with
-`printer_queue_names.konica_simplex` unset, `_konica_queue_for_sides("ss")`
-returns `None` and the job prints on the plain `konica` queue. Two of this
-morning's web jobs went down exactly those two paths, back to back —
-`OSKY-20260904-5f9f-a669` (`sides: duplex`) to `(Duplex)`,
-`OSKY-20260904-ea6d-41de` (`sides: single`) to the plain queue.
+The first `(Duplex)` row is dated the day the fix went in, so duplex routing is
+real and working. Two of this morning's web jobs went down both paths back to
+back — `OSKY-20260904-5f9f-a669` (`sides: duplex`) to `(Duplex)`,
+`OSKY-20260904-ea6d-41de` (`sides: single`) to the original queue.
 
-That is not broken. It is correct **as long as the plain queue's Windows
-Printing Preferences default is 1-sided** — which is a setting nobody can see
-from the code, the database or a console, and a preference silently moving is
-the exact fault this workaround was built to survive. Half the fix is a queue;
-the other half is a checkbox on one PC.
+**This table cannot tell you how the store is wired, and an earlier revision of
+this file said it could.** A simplex job lands on `KONICA MINOLTA 1100 PS`
+whether `konica_simplex` names that queue or is unset entirely — same row,
+either way — so "`(Simplex)` never appears" was read as "the simplex half was
+never installed" when it supports no such conclusion. One more green light
+computed over nothing, this time in the file that warns about them. What does
+distinguish the two, on the box:
 
-**Check first, it costs nothing:** on the OSP box open
-`http://localhost:3005/status` and read `printers`.
+* `http://localhost:3005/status` → `printers` — is there a `konica_simplex` key?
+* the print_server log: `routing to konica_simplex queue for sides=...` is
+  written only when the variant resolves. No line, no wiring.
 
-* Both `konica_duplex` and `konica_simplex` listed → routing is symmetric. Run
-  P3-4 as written.
-* Only `konica_duplex` (what the job history predicts) → P3-4 is testing that
-  invisible default as well as the routing. Run it anyway; that is the honest
-  test of what the store actually has. If the simplex sheet comes out 2-sided,
-  the fix is **not** to touch `_konica_queue_for_sides()` — it is to add the
-  second queue per `install/INSTALL.md` ("Konica prints the wrong side mode").
+What the wiring cannot settle either way is the **queue's persisted Printing
+Preferences default**. The original queue serves simplex only while its default
+is 1-sided; a preference silently moving is the exact fault the dual-queue
+workaround exists to survive, and it is visible from no code, database or
+console. It also means a job that names no sides at all lands on the same queue
+and so comes out 1-sided. P3-4 is the test of that checkbox as much as of the
+routing.
 
-After the pair is sent, `jobs.printer` proves where each one was *routed*. Only
-the sheet proves how many sides came out. Do not let the first stand in for the
-second — that is the green-light-over-nothing pattern above.
+After the pair is sent, `jobs.printer` proves where each was *routed*. Only the
+sheet proves how many sides came out. Do not let the first stand in for the
+second. If the simplex sheet comes out 2-sided, the fix is **not** to touch
+`_konica_queue_for_sides()` — it is that queue's default, or a separate
+`(Simplex)` queue per `install/INSTALL.md`.
 
 ### Baseline, taken 10:22 IST before P3-4
 

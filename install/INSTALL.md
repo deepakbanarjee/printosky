@@ -263,9 +263,26 @@ printer queues, each with its own persisted default, then point
 3. Add both queue names to `printer_queue_names` as shown above.
    Restart `print_server.py`.
 
+You only need to *add* one queue. The existing `KONICA MINOLTA 1100 PS`
+already has a persisted default, so if that default is 1-sided you can
+add the duplex queue alone and point `konica_simplex` back at the
+original — which is what OSP does:
+```json
+"printer_queue_names": {
+  "konica_duplex":  "KONICA MINOLTA 1100 PS (Duplex)",
+  "konica_simplex": "KONICA MINOLTA 1100 PS"
+}
+```
+Nothing requires the two names to differ. Name `konica_simplex` even
+so: leaving it unset routes simplex to the same queue, but then the
+config cannot be told apart from one nobody ever finished, and the
+log line below stops being written. What makes either arrangement work
+is each queue's persisted default — check both in Printing
+preferences, and check them again after any driver reinstall.
+
 `print_server._konica_queue_for_sides()` then routes each job to
 whichever queue matches its `sides` value instead of relying on a
-per-job override. Until both keys are configured, this is a no-op and
+per-job override. Until a key is configured, that side is a no-op and
 Printosky behaves exactly as before (single `konica` queue). Re-verify
 with `python tools/nup_final_test.py --simplex --send --printer konica`
 and a duplex combo — check `logs/print_server.log` for `routing to

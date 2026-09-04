@@ -6,6 +6,11 @@
     "konica_ip": "192.168.55.110",
     "epson_ip": "192.168.55.214"
   },
+  "_readme_printer_queue_names": "The Konica driver ignores SumatraPDF's per-job duplex/simplex override in both directions, so print_server picks the QUEUE instead (print_server._konica_queue_for_sides). OSP runs a second Windows queue defaulted to 2-sided for duplex, and keeps the original queue — defaulted to 1-sided — as the simplex one. Said out loud rather than left to fall through: an unset konica_simplex routes to the same queue, but reads as 'nobody configured this'. What makes it work is each queue's persisted Printing Preferences default, not this file. See install/INSTALL.md.",
+  "printer_queue_names": {
+    "konica_duplex": "KONICA MINOLTA 1100 PS (Duplex)",
+    "konica_simplex": "KONICA MINOLTA 1100 PS"
+  },
   "poll_printers": true,
   "hot_folder": "C:\\Printosky\\Jobs\\Incoming",
   "db_path": "C:\\Printosky\\Data\\jobs.db",

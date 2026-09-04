@@ -81,6 +81,15 @@ confirm twice before modifying any of this:**
   1-page simplex job can't distinguish simplex from duplex, don't shrink it
   back down
 
+**OSP's queues (decided 2026-09-04):** duplex has its own second Windows queue,
+`KONICA MINOLTA 1100 PS (Duplex)`; simplex uses the **original**
+`KONICA MINOLTA 1100 PS`, whose persisted default is 1-sided. Both are named in
+`config/stores/OSP.store_config.json`. Nothing requires the two queue names to
+differ — `_konica_queue_for_sides()` only checks that the key is set. There is
+no `(Simplex)` queue at OSP and its absence from `jobs.printer` is not a fault.
+What the config cannot state, and nothing can see from here, is each queue's
+Printing Preferences default — that checkbox is the other half of the fix.
+
 ## Key REPL Commands (`watcher.py`)
 ```
 pending                              → list pending jobs
