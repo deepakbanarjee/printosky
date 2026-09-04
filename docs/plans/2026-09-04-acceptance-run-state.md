@@ -166,6 +166,9 @@ computed over nothing, this time in the file that warns about them. What does
 distinguish the two, on the box:
 
 * `http://localhost:3005/status` → `printers` — is there a `konica_simplex` key?
+  **Checked on the box, 2026-09-04: it is there.** The wiring is what this
+  section describes, and `config/stores/OSP.store_config.json` now matches the
+  machine.
 * the print_server log: `routing to konica_simplex queue for sides=...` is
   written only when the variant resolves. No line, no wiring.
 
@@ -238,6 +241,27 @@ sheet on paper, but as confirmation rather than an open question.
   corroborates each `print_end` against the bracketing evidence, so its output
   decides the 13 `print_end` rows rather than a judgement call. Run it, read
   the split, then `--apply`.
+* **`jobs.received_at` is written in two different timezones.** Found while
+  waiting on the P3-4 pair, 2026-09-04. Both writers call naive
+  `datetime.now()` — `watcher.py:574` on the store PC, so IST, and
+  `db_cloud.insert_job_from_webhook()` (`db_cloud.py:356`) on Vercel, so UTC.
+  Same column, no offset stored; `SCHEMA.md` calls it "ISO-8601 string (legacy
+  from SQLite)" and names no zone. Today's rows show it: the walk-in reads
+  `09:22:52` and the two web jobs `03:54`/`03:56`, minutes apart in reality and
+  5½ hours apart in the column. One row currently reads **1h16m in the future**
+  against UTC now, which is the cheap way to see it.
+  * **Affects P3-1**, whose job arrives through the WhatsApp webhook: expect
+    its `received_at` to read ~5½ hours behind the counter clock. The quote,
+    the pickup code and the print are unaffected — this is the timestamp only.
+  * **Affects Phase 8.** `_sd_jobs_range()` (`api/index.py:2694-2701`) bounds
+    that column with plain string comparison and no normalisation. For
+    shop-hours jobs the date still lands right and only the clock reads wrong;
+    a cloud-written job received between 00:00 and 05:30 IST is stamped the
+    previous day and counted there. Some already exist.
+  * **Do not fix during the run.** It is shared code on the payment/job path,
+    and Phase 3 exists to prove that path unchanged. Note it, finish the run,
+    fix it in its own PR — and decide the column's zone once, rather than
+    patching whichever caller is in front of you.
 * Intermittent lease timeouts on all boxes (Phase 0 finding, unaddressed).
 * PRIOFF is configured with OSP's `konica_ip` (192.168.55.110).
 * Supabase Realtime not delivering to `store_puller` — jobs can wait up to 15
