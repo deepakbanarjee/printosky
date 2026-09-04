@@ -16,22 +16,36 @@
 
 _Generated from the code. Regenerate with `python tools/nup_matrix.py --markdown`._
 
-> **⏳ NOT YET ON PAPER — page scaling (Fit / Actual size / Custom %), 2026-08-30.**
-> Scaling ships baked into the PDF (`pdf_scaler.apply_scale`), exactly like
-> imposition, and the code is covered by tests — but **no scaled sheet has been
-> printed yet**. Before the control is used in anger at the counter, run on the
-> OSP Konica and record the result here:
+> **✅ VERIFIED ON PAPER — page scaling (Fit / Actual size / Custom %),
+> OSP Konica, 2026-09-04.** All eight combinations printed and checked. Checks 3
+> and 4 — the A5 page at Actual against the same at Fit — came off the printer
+> visibly different, which is the pair the whole thing turns on: they are the
+> only case where the two modes differ to the eye, and they are what the
+> customer preview promises.
 >
-> | # | Combination | Expect |
-> |---|---|---|
-> | 1 | A4 doc, 1-up portrait, **Fit** | fills the page, ~20pt border, nothing cut |
-> | 2 | A4 doc, 1-up portrait, **Actual** | no-op — identical to a normal print |
-> | 3 | **A5** doc on A4, **Actual** | A5-sized block centred on the A4 sheet |
-> | 4 | **A5** doc on A4, **Fit** | enlarged to fill the A4 — visibly bigger than #3 |
-> | 5 | A4 doc, **Custom 75 %** | three-quarter-size, centred, nothing cut |
-> | 6 | A4 doc, **Custom 150 %** | enlarged, edges cropped evenly on all four sides |
-> | 7 | A4 doc, 1-up **landscape**, **Actual** | fitted, rotated per the matrix below — and an alert, because true size does not fit (see below) |
-> | 8 | Any of the above, **duplex** | backs register with fronts, per the matrix below |
+> Scaling ships baked into the PDF (`pdf_scaler.apply_scale`), exactly like
+> imposition. The run that verified it:
+>
+> ```
+> python tools/scale_proof.py --make-source --only S3 S4 --send --printer konica
+> python tools/scale_proof.py --make-source 2 --duplex --send --printer konica
+> ```
+>
+> The tool checks the geometry of every PDF before a sheet is committed, and
+> refuses to print when a check fails — `--duplex` halves the paper, and each
+> sheet is stamped with its test id, because eight variations of one document
+> are otherwise impossible to tell apart in the tray.
+>
+> | # | Combination | Expect | Paper |
+> |---|---|---|---|
+> | 1 | A4 doc, 1-up portrait, **Fit** | fills the page, ~20pt border, nothing cut | ✅ |
+> | 2 | A4 doc, 1-up portrait, **Actual** | no-op — identical to a normal print | ✅ |
+> | 3 | **A5** doc on A4, **Actual** | A5-sized block centred on the A4 sheet | ✅ |
+> | 4 | **A5** doc on A4, **Fit** | enlarged to fill the A4 — visibly bigger than #3 | ✅ |
+> | 5 | A4 doc, **Custom 75 %** | three-quarter-size, centred, nothing cut | ✅ |
+> | 6 | A4 doc, **Custom 150 %** | enlarged, edges cropped evenly on all four sides | ✅ |
+> | 7 | A4 doc, 1-up **landscape**, **Actual** | fitted, rotated per the matrix below — and an alert, because true size does not fit (see below) | ✅ |
+> | 8 | Any of the above, **duplex** | backs register with fronts, per the matrix below | ✅ |
 >
 > **Check 7 cannot be "true size", and this row used to claim it could.** A
 > page turned 90 degrees onto a portrait sheet is as wide as the sheet is tall:

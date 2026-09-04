@@ -146,3 +146,131 @@ def test_a_blank_sheet_is_a_failure(tmp_path):
     r["path"] = str(tmp_path / "blank.pdf")
     verdicts, failed = scale_proof.verify([r], "A4")
     assert failed and "blank" in failed[0][2]
+
+
+# ── Telling one sheet from another ────────────────────────────────────────────
+
+class TestSheetsAreLabelled:
+    """Eight variations of the same document print eight sheets carrying the
+    same words and the same page numbers. Off the printer at OSP (2026-09-04)
+    they could not be told apart, which is most of the value of printing eight
+    of them gone.
+    """
+
+    def _run(self, tmp_path, extra=()):
+        import types
+        sent = []
+        printer = types.ModuleType("print_server")
+        printer.send_to_printer = lambda **k: (sent.append(k), (True, "ok"))[1]
+        sys.modules["print_server"] = printer
+        argv = ["scale_proof", "--make-source", "2", "--only", "S3", "S6",
+                "--send", "--printer", "konica", "--out", str(tmp_path)]
+        old = sys.argv
+        sys.argv = argv + list(extra)
+        try:
+            scale_proof.main()
+        finally:
+            sys.argv = old
+            del sys.modules["print_server"]
+        return sent
+
+    def _text(self, path):
+        doc = fitz.open(path)
+        try:
+            return "\n".join(p.get_text() for p in doc)
+        finally:
+            doc.close()
+
+    def test_each_sheet_names_the_test_it_came_from(self, tmp_path):
+        sent = self._run(tmp_path)
+        assert sent, "nothing was sent"
+        for job in sent:
+            body = self._text(job["filepath"])
+            test_id = job["job_id"].removeprefix("SCALEPROOF-")
+            assert test_id in body, f"{test_id}'s sheet does not say which test it is"
+
+    def test_the_settings_are_on_the_sheet_too(self, tmp_path):
+        """"S6" alone still needs looking up. The mode is the thing being
+        judged, so it belongs where the judging happens."""
+        self._run(tmp_path)
+        body = self._text(tmp_path / "labelled" / "S6_custom150_portrait.pdf")
+        assert "custom 150%" in body and "portrait" in body and "simplex" in body
+
+    def test_what_gets_printed_is_the_labelled_copy(self, tmp_path):
+        sent = self._run(tmp_path)
+        assert all("labelled" in job["filepath"] for job in sent)
+
+    def test_the_measured_originals_are_left_unstamped(self, tmp_path):
+        """The stamp sits at the edge of the sheet, so stamping before the
+        check would widen the ink box and move the very ratios the check
+        depends on. The originals are the artefact under test."""
+        self._run(tmp_path)
+        original = tmp_path / "S6_custom150_portrait.pdf"
+        assert original.exists(), "the unstamped original was not kept"
+        assert "S6" not in self._text(original), (
+            "the file the geometry check measured has been written on")
+
+    def test_no_labels_prints_the_originals(self, tmp_path):
+        """S2's whole claim is that it looks like an ordinary print, and a
+        stamp in the corner is not ordinary."""
+        sent = self._run(tmp_path, extra=["--no-labels"])
+        assert sent and all("labelled" not in job["filepath"] for job in sent)
+
+
+class TestDuplexHalvesThePaper:
+    """"Print everything duplex, don't want to waste paper" — OSP, 2026-09-04.
+    The full proof is eight variations of the same document, so a re-run after
+    any change costs a stack of sheets."""
+
+    def _combos(self, tmp_path, extra=()):
+        import types
+        sent = []
+        printer = types.ModuleType("print_server")
+        printer.send_to_printer = lambda **k: (sent.append(k), (True, "ok"))[1]
+        sys.modules["print_server"] = printer
+        old = sys.argv
+        sys.argv = ["scale_proof", "--make-source", "2", "--send",
+                    "--printer", "konica", "--out", str(tmp_path)] + list(extra)
+        try:
+            scale_proof.main()
+        finally:
+            sys.argv = old
+            del sys.modules["print_server"]
+        return sent
+
+    def test_every_test_goes_double_sided(self, tmp_path):
+        sent = self._combos(tmp_path, extra=["--duplex"])
+        assert sent
+        assert all(job["sides"] == "ds" for job in sent), (
+            "a sheet was still sent simplex under --duplex")
+
+    def test_it_really_is_half_the_paper(self, tmp_path):
+        """The saving has to be real, not just a flag that was accepted.
+
+        It is NOT visible in the PDFs: a duplex job has the same pages as a
+        simplex one, and the halving happens at the printer, which puts two of
+        them on one sheet. So paper is counted the way the Konica spends it.
+        """
+        simplex = self._combos(tmp_path / "s")
+        duplex = self._combos(tmp_path / "d", extra=["--duplex"])
+
+        def paper(jobs):
+            total = 0
+            for job in jobs:
+                doc = fitz.open(job["filepath"])
+                pages = len(doc)
+                doc.close()
+                total += -(-pages // 2) if job["sides"] == "ds" else pages
+            return total
+
+        spent_simplex, spent_duplex = paper(simplex), paper(duplex)
+        assert spent_duplex < spent_simplex, (
+            f"--duplex spent {spent_duplex} sheets against {spent_simplex}")
+
+    def test_without_the_flag_each_test_keeps_the_sides_it_specifies(self, tmp_path):
+        """S8 is the duplex test; the rest are simplex on purpose. The flag is
+        opt-in so the proof still runs exactly as documented by default."""
+        sent = self._combos(tmp_path)
+        by_id = {j["job_id"].removeprefix("SCALEPROOF-"): j["sides"] for j in sent}
+        assert by_id["S8"] == "ds"
+        assert by_id["S1"] == "ss" and by_id["S3"] == "ss"

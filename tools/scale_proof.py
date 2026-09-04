@@ -218,6 +218,46 @@ def verify(results, paper):
     return verdicts, [v for v in verdicts if not v[1]]
 
 
+def label_sheets(results, combos, out_dir):
+    """Stamp each sheet with the test it came from, into a `labelled/` copy.
+
+    Every sheet in this proof carries the same words and the same page numbers,
+    so a stack of them off the printer cannot be told apart — which is most of
+    the value of printing eight variations gone (OSP, 2026-09-04). The stamp
+    names the test and its settings so a sheet can be picked out of the tray.
+
+    The ORIGINALS are left untouched and it is those the geometry check
+    measured. A stamp sits at the edge of the sheet, so stamping first would
+    widen the ink box and quietly move the S3/S4 and S5/S6 ratios the check
+    depends on — the labelled copies exist to be printed, not to be measured.
+    """
+    spec = {c[0]: c for c in combos}
+    lab_dir = os.path.join(out_dir, "labelled")
+    os.makedirs(lab_dir, exist_ok=True)
+
+    for r in results:
+        _, _, mode, percent, orientation, sides, _ = spec[r["id"]]
+        text = (f"{r['id']}   {mode}{f' {percent}%' if percent else ''}   "
+                f"{orientation}   {'duplex' if sides == 'ds' else 'simplex'}")
+        doc = fitz.open(r["path"])
+        try:
+            for n, page in enumerate(doc, 1):
+                line = f"{text}   sheet {n} of {len(doc)}"
+                # A white plate behind it: S6 is a 150% enlargement whose
+                # content runs to the paper's edge, and a label you cannot read
+                # on the one sheet that crops is a label that failed.
+                page.draw_rect(fitz.Rect(14, 12, 14 + 4.4 * len(line), 27),
+                               color=None, fill=(1, 1, 1))
+                page.insert_text(fitz.Point(18, 22), line,
+                                 fontsize=8, fontname="helv", color=(0, 0, 0))
+            path = os.path.join(lab_dir, os.path.basename(r["path"]))
+            doc.save(path)
+        finally:
+            doc.close()
+        r["path"] = path        # print the labelled copy, keep the original
+    return lab_dir
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -230,6 +270,13 @@ def main():
     ap.add_argument("--only", nargs="+", metavar="ID", help="run only these IDs, e.g. --only S3 S4")
     ap.add_argument("--send", action="store_true",
                     help="actually print each sheet. Without this, nothing is printed.")
+    ap.add_argument("--duplex", action="store_true",
+                    help="print every sheet double-sided, halving the paper. "
+                         "The scaling being tested is baked into the PDF, so "
+                         "this does not change what a portrait test proves.")
+    ap.add_argument("--no-labels", action="store_true",
+                    help="print the sheets unstamped. Only worth it for S2, "
+                         "whose whole claim is looking like an ordinary print.")
     ap.add_argument("--send-anyway", action="store_true",
                     help="print even though the geometry check failed. Only with a "
                          "reason — a failed check means the PDF is already wrong.")
@@ -266,6 +313,16 @@ def main():
     if not combos:
         sys.exit(f"no test IDs matched {args.only}")
 
+    if args.duplex:
+        # Scaling is baked into the PDF, so which side of a sheet it lands on
+        # does not change the geometry a portrait test is judging — it just
+        # halves the paper. The one test this DOES change is the landscape one:
+        # a landscape back page is turned a rigid 180 degrees (see
+        # docs/PRINT_ROTATION_MATRIX.md), so its second side reads upside down
+        # against its first. That is the matrix, not a fault, and it is said
+        # out loud below rather than left to be reported as one.
+        combos = [(c[0], c[1], c[2], c[3], c[4], "ds", c[6]) for c in combos]
+
     a5_source = derive_a5(args.source, args.out) if any(c[1] == "a5" for c in combos) else None
 
     print("Printosky scaling proof")
@@ -273,7 +330,12 @@ def main():
     print(f"  output : {args.out}")
     print(f"  paper  : {args.paper}")
     print("  Every sheet leaves as PORTRAIT. Scaling is baked into the PDF —")
-    print("  if a sheet is wrong, the PDF in the output folder is wrong too.\n")
+    print("  if a sheet is wrong, the PDF in the output folder is wrong too.")
+    if args.duplex:
+        print("  DUPLEX forced on every test — half the paper. On a LANDSCAPE")
+        print("  test the back is turned a rigid 180 and so reads upside down")
+        print("  against the front: that is the rotation matrix, not a fault.")
+    print()
 
     results = []
     unbuilt = []
@@ -348,6 +410,11 @@ def main():
 
     if not results:
         sys.exit("nothing was built, so there is nothing to send.")
+
+    if not args.no_labels:
+        lab_dir = label_sheets(results, combos, args.out)
+        print(f"Each sheet stamped with its test id -> {lab_dir}")
+        print("(the unstamped originals are what the geometry check measured)\n")
 
     print(f"Sending {len(results)} jobs to '{args.printer}' …")
     for r in results:
