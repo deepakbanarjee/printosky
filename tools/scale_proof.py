@@ -124,6 +124,100 @@ def build(test_id, source, mode, percent, orientation, sides, out_dir, paper):
             "sides": action["sides"], "orientation": action["orientation"]}
 
 
+def ink_box(page):
+    """The bounding box of everything drawn on a page, or None if it is blank.
+
+    Text blocks alone are not enough: on a page whose content has run off the
+    sheet, most of the text is already gone and what is left looks innocent.
+    The drawn border is what gives it away, so drawings, text and images are
+    all unioned.
+    """
+    boxes = [fitz.Rect(d["rect"]) for d in page.get_drawings()]
+    boxes += [fitz.Rect(b[:4]) for b in page.get_text("blocks")]
+    for img in page.get_images(full=True):
+        boxes += list(page.get_image_rects(img[0]))
+    if not boxes:
+        return None
+    box = boxes[0]
+    for b in boxes[1:]:
+        box |= b
+    return box
+
+
+def measure(path):
+    """Per-sheet geometry: the page box, the ink box, and whether ink escaped."""
+    doc = fitz.open(path)
+    try:
+        out = []
+        for page in doc:
+            box = ink_box(page)
+            escaped = bool(box) and (
+                box.x0 < -1 or box.y0 < -1
+                or box.x1 > page.rect.width + 1
+                or box.y1 > page.rect.height + 1)
+            out.append({"page": page.rect, "ink": box, "escaped": escaped})
+        return out
+    finally:
+        doc.close()
+
+
+def verify(results, paper):
+    """Check the PDFs on disk before any paper is committed.
+
+    This exists because the tool used to report `baked: yes` for S7 while the
+    page ran 43mm off each edge and the title and footer left the sheet — a
+    green line about a sheet nobody would accept. "It was applied" is not the
+    same claim as "it is right", and only the second one is worth printing.
+
+    Returns (verdicts, failed) where a verdict is (id, ok, note).
+    """
+    sheet_w, sheet_h = nup_imposer.portrait_sheet(paper)
+    by_id = {r["id"]: r for r in results}
+    verdicts = []
+
+    for r in results:
+        problems = []
+        for i, m in enumerate(measure(r["path"]), 1):
+            if m["ink"] is None:
+                problems.append(f"sheet {i} is blank")
+                continue
+            if m["escaped"]:
+                problems.append(f"sheet {i} draws outside the paper")
+            if (abs(m["page"].width - sheet_w) > 1
+                    or abs(m["page"].height - sheet_h) > 1):
+                problems.append(f"sheet {i} is not portrait {paper}")
+        verdicts.append((r["id"], not problems, "; ".join(problems) or "geometry sane"))
+
+    # S6 is the one combination that is SUPPOSED to lose content at the edges,
+    # so an escape there is the expected answer, not a fault.
+    verdicts = [(i, True, "enlarged past the edges, as asked") if i == "S6" and not ok
+                else (i, ok, note) for i, ok, note in verdicts]
+
+    # The pair the whole proof turns on. Same content, two modes: if they match,
+    # scaling did nothing and the other six sheets are wasted paper.
+    if "S3" in by_id and "S4" in by_id:
+        a, b = measure(by_id["S3"]["path"])[0]["ink"], measure(by_id["S4"]["path"])[0]["ink"]
+        if a and b and a.width > 0:
+            ratio = b.width / a.width
+            ok = ratio > 1.15
+            verdicts.append(("S3 vs S4", ok,
+                             f"Fit is {ratio:.2f}x Actual"
+                             + ("" if ok else " — TOO CLOSE, scaling is not being applied")))
+
+    # A percentage that does not move the ink by that percentage is not applied.
+    if "S2" in by_id:
+        base = measure(by_id["S2"]["path"])[0]["ink"]
+        for test_id, want in (("S5", 0.75), ("S6", 1.50)):
+            if test_id in by_id and base and base.width > 0:
+                got = measure(by_id[test_id]["path"])[0]["ink"]
+                ratio = got.width / base.width
+                ok = abs(ratio - want) < 0.06
+                verdicts.append((f"{test_id} vs S2", ok,
+                                 f"{ratio:.2f}x, wanted {want:.2f}x"))
+
+    return verdicts, [v for v in verdicts if not v[1]]
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -136,6 +230,9 @@ def main():
     ap.add_argument("--only", nargs="+", metavar="ID", help="run only these IDs, e.g. --only S3 S4")
     ap.add_argument("--send", action="store_true",
                     help="actually print each sheet. Without this, nothing is printed.")
+    ap.add_argument("--send-anyway", action="store_true",
+                    help="print even though the geometry check failed. Only with a "
+                         "reason — a failed check means the PDF is already wrong.")
     ap.add_argument("--printer", default="epson", choices=["epson", "konica"],
                     help="printer key (default: epson — Nattika has no Konica)")
     ap.add_argument("--make-source", type=int, metavar="PAGES", nargs="?", const=4,
@@ -201,8 +298,24 @@ def main():
         print(f"!! nothing was baked for: {', '.join(not_baked)} — old code still "
               f"loaded? check `git log --oneline -1` and restart Printosky\n")
 
+    verdicts, failed = verify(results, args.paper)
+    print("GEOMETRY CHECK — the PDFs on disk, before any paper")
+    for test_id, ok, note in verdicts:
+        print(f"  {'PASS' if ok else 'FAIL'}  {test_id:<10} {note}")
+    print()
+
+    if failed:
+        print(f"!! {len(failed)} check(s) FAILED. Do not send this to the printer — "
+              f"the PDFs in {args.out} are already wrong, so the paper will be too.")
+        if args.send and not args.send_anyway:
+            sys.exit("refusing to print. Re-run without --send to inspect, or "
+                     "pass --send-anyway if you know why this is expected.")
+    else:
+        print("Every check passed. The geometry is right in the file; what "
+              "reaches the paper is now the printer's half of the job.")
+
     if not args.send:
-        print(f"{len(results)} PDFs written. Nothing printed — open them, then re-run "
+        print(f"\n{len(results)} PDFs written. Nothing printed — open them, then re-run "
               f"with --send.")
         return
 
