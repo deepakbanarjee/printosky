@@ -276,12 +276,19 @@ def main():
     print("  if a sheet is wrong, the PDF in the output folder is wrong too.\n")
 
     results = []
+    unbuilt = []
     for test_id, which, mode, percent, orientation, sides, expect in combos:
         src = a5_source if which == "a5" else args.source
         try:
             r = build(test_id, src, mode, percent, orientation, sides, args.out, args.paper)
         except Exception as exc:                       # noqa: BLE001 — report and carry on
-            print(f"{test_id}  FAILED: {exc}\n")
+            hint = ""
+            if isinstance(exc, PermissionError):
+                # The usual cause: the previous run's PDF is still open in a
+                # viewer, and Windows will not let it be overwritten.
+                hint = " — close the PDF if it is open in a viewer, then re-run"
+            print(f"{test_id}  FAILED: {exc}{hint}\n")
+            unbuilt.append((test_id, f"{type(exc).__name__}: {exc}"))
             continue
         results.append(r)
         label = f"{mode} {percent}%" if percent else mode
@@ -299,10 +306,27 @@ def main():
               f"loaded? check `git log --oneline -1` and restart Printosky\n")
 
     verdicts, failed = verify(results, args.paper)
+
+    # A sheet that never got written cannot be checked, and silence about it
+    # reads exactly like a sheet that passed. This tool printed "Every check
+    # passed" over two failed builds once (2026-09-04) and then offered to
+    # send zero jobs, which is the reassuring-green-over-nothing failure it
+    # exists to catch in the PDFs.
+    verdicts = [(t, False, f"NOT BUILT — {why}") for t, why in unbuilt] + verdicts
+    failed = [v for v in verdicts if not v[1]]
+
     print("GEOMETRY CHECK — the PDFs on disk, before any paper")
     for test_id, ok, note in verdicts:
         print(f"  {'PASS' if ok else 'FAIL'}  {test_id:<10} {note}")
     print()
+
+    # Checked before anything else, and whether or not --send was given: a run
+    # that produced no sheet has proved nothing, and exiting 0 on it tells the
+    # shell — and the next person reading the tail of the output — that all is
+    # well.
+    if not results:
+        sys.exit("no sheet was built, so nothing was checked. There is nothing "
+                 "to print and nothing to conclude.")
 
     if failed:
         print(f"!! {len(failed)} check(s) FAILED. Do not send this to the printer — "
@@ -311,8 +335,9 @@ def main():
             sys.exit("refusing to print. Re-run without --send to inspect, or "
                      "pass --send-anyway if you know why this is expected.")
     else:
-        print("Every check passed. The geometry is right in the file; what "
-              "reaches the paper is now the printer's half of the job.")
+        print(f"Every check passed, over {len(results)} of {len(combos)} sheets. "
+              "The geometry is right in the file; what reaches the paper is now "
+              "the printer's half of the job.")
 
     if not args.send:
         print(f"\n{len(results)} PDFs written. Nothing printed — open them, then re-run "
@@ -320,6 +345,9 @@ def main():
         return
 
     import print_server                                # noqa: PLC0415
+
+    if not results:
+        sys.exit("nothing was built, so there is nothing to send.")
 
     print(f"Sending {len(results)} jobs to '{args.printer}' …")
     for r in results:
