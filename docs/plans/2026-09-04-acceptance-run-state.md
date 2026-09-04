@@ -47,10 +47,17 @@ decline to answer rather than reassure.
 
 | Store | Host | Version | Notes |
 |---|---|---|---|
-| OSP · Thriprayar | DESKTOP-3NJM40G | `main@1d68526`, **clean** | restarted 09:18, ready |
+| OSP · Thriprayar | DESKTOP-3NJM40G | `main@efb42b1`, **clean** | live, both leases held, ready |
 | PRINTK · Nattika | DESKTOP-MMGVTNI | `main@126d2ff+dirty` | offline since ~18:20 on 09-03 |
 | PRIOFF · Office | DESKTOP-SFO6ES9 | `main@126d2ff+dirty` | offline since ~18:20 on 09-03 |
 
+* Read live from `store_devices` at 10:22 IST on 09-04. OSP renewed both
+  `store_role_leases` (`poll_printers`, `fetch_epson_log`) minutes before, so it
+  is polling, not merely up.
+* OSP is one commit behind `main` (`f32ff7f`, #116). That commit touches only
+  `docs/`, `tests/` and `tools/scale_proof.py` — **no runtime code** — so it does
+  not change what Phase 3 exercises. Pull and restart anyway so the run is
+  recorded against the tip rather than one short of it.
 * PRINTK and PRIOFF need pull + restart when switched on. **PRINTK is required
   for Phases 4 and 6.**
 * A fourth `store_devices` row (PRINTK / DESKTOP-SFO6ES9, last seen 19 Aug) is
@@ -111,6 +118,53 @@ Costs paper. Run at OSP.
 duplex/simplex overrides in both directions, and the dual-queue workaround is
 what makes it work. If it fails, say so **before anything is changed** — a
 confident fix has already gone wrong here once.
+
+### Before the paper: OSP has a duplex queue and no simplex one
+
+`jobs.printer` records the Windows queue a job actually went to, after
+`_konica_queue_for_sides()` has had its say — so the table already says which
+half of the workaround is installed. Every Konica row ever written:
+
+| Queue | Jobs | First | Last |
+|---|---|---|---|
+| `KONICA MINOLTA 1100 PS (Duplex)` | 3 | 2026-08-30 | 2026-09-04 09:24 |
+| `KONICA MINOLTA 1100 PS` | 53 | 2026-08-11 | 2026-09-04 09:26 |
+| `KONICA MINOLTA 1100 PS (Simplex)` | **0 — never** | — | — |
+
+The first `(Duplex)` row is dated the day the fix went in, so the duplex half is
+real and routing works. The simplex half is not there: with
+`printer_queue_names.konica_simplex` unset, `_konica_queue_for_sides("ss")`
+returns `None` and the job prints on the plain `konica` queue. Two of this
+morning's web jobs went down exactly those two paths, back to back —
+`OSKY-20260904-5f9f-a669` (`sides: duplex`) to `(Duplex)`,
+`OSKY-20260904-ea6d-41de` (`sides: single`) to the plain queue.
+
+That is not broken. It is correct **as long as the plain queue's Windows
+Printing Preferences default is 1-sided** — which is a setting nobody can see
+from the code, the database or a console, and a preference silently moving is
+the exact fault this workaround was built to survive. Half the fix is a queue;
+the other half is a checkbox on one PC.
+
+**Check first, it costs nothing:** on the OSP box open
+`http://localhost:3005/status` and read `printers`.
+
+* Both `konica_duplex` and `konica_simplex` listed → routing is symmetric. Run
+  P3-4 as written.
+* Only `konica_duplex` (what the job history predicts) → P3-4 is testing that
+  invisible default as well as the routing. Run it anyway; that is the honest
+  test of what the store actually has. If the simplex sheet comes out 2-sided,
+  the fix is **not** to touch `_konica_queue_for_sides()` — it is to add the
+  second queue per `install/INSTALL.md` ("Konica prints the wrong side mode").
+
+After the pair is sent, `jobs.printer` proves where each one was *routed*. Only
+the sheet proves how many sides came out. Do not let the first stand in for the
+second — that is the green-light-over-nothing pattern above.
+
+### Baseline, taken 10:22 IST before P3-4
+
+486 jobs all time · 3 today · ₹9 collected today · 1 service job ever
+(`OSKY-20260903-1688`, `other`, ₹499, still `Queued` — created during this run,
+and one for Phase 9 to cancel rather than delete).
 
 ### P3-3 is pre-settled in code
 
