@@ -119,6 +119,41 @@ duplex/simplex overrides in both directions, and the dual-queue workaround is
 what makes it work. If it fails, say so **before anything is changed** — a
 confident fix has already gone wrong here once.
 
+### Where P3-4 stands: attempted 2026-09-04 evening, NOT verified
+
+A duplex/simplex pair was sent at the counter around 19:15 IST, just after OSP
+closed. **Nothing about it reached the cloud and nothing has been confirmed.**
+Start here tomorrow; do not record P3-4 as run.
+
+* `jobs` still holds exactly **486** rows — the same count taken before the
+  pair was sent — and the newest `received_at` is still the 09:22 walk-in.
+* OSP stopped renewing at 13:26 UTC (18:56 IST): heartbeat stale, and both
+  `store_role_leases` past their 3-minute TTL. That is closing time, not the
+  intermittent lease fault in the open items below. Do not let this evening's
+  expiry be read as evidence for that bug.
+* A job created through the web / order-v2 path is written by the Vercel API
+  and appears in `jobs` whatever the store PC is doing — that is how this
+  morning's two web jobs got there. Nothing appeared, so the pair was created
+  **locally**. If it printed, its rows are in `C:\Printosky\Data\jobs.db` and
+  will push when the watcher next starts.
+
+**Do not mistake the morning pair for this one.** `OSKY-20260904-5f9f-a669`
+(`duplex` → `(Duplex)`) and `OSKY-20260904-ea6d-41de` (`single` → plain queue)
+sit at the top of the table and read as a clean P3-4 result. They are ordinary
+web jobs from 09:24 and 09:26, hours before P3-4 was attempted. They show the
+routing works; they are not the test.
+
+Tomorrow, in this order:
+
+1. Start the box. `PULL_UPDATE.bat` then `RESTART_WATCHER.bat` — pending local
+   rows survive the restart and push on start.
+2. `logs/print_server.log` — `routing to konica_duplex queue` and `routing to
+   konica_simplex queue`, one line each. Written by the function under test at
+   the moment it decides, so this is better evidence than `jobs.printer`, and
+   it needs no cloud. No lines means the pair never printed; re-send it.
+3. The two sheets, if they are still by the printer. Sides are settled on
+   paper and nowhere else.
+
 ### Before the paper: which queue simplex uses, and how OSP is wired
 
 **Decided (2026-09-04): OSP's simplex queue is the original
