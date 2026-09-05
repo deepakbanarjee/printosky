@@ -573,10 +573,18 @@ def _handle_wa_otp_verify(h, body: bytes) -> None:
 def _gen_note_code() -> str:
     """Generate NOTE-YYYYMMDD-XXXX.
 
-    Inlined here (mirrors handlers_notes._gen_note_code) so the web upload path
-    has ZERO dependency on the handlers_notes sibling module — @vercel/python
-    does not reliably bundle lazily-imported siblings, which made reserve throw
-    ModuleNotFoundError in production.
+    Inlined here (mirrors handlers_notes._gen_note_code) to keep the web upload
+    path independent of the sibling module.
+
+    The ModuleNotFoundError this was written to dodge was NOT a bundling
+    problem, and the original note here said it was. `api/*.py` is listed in
+    vercel.json's includeFiles and the six `from api.handlers_* import` lines
+    below load fine in the same function: the file was always deployed. The two
+    notes imports were simply spelled `from handlers_notes import ...` while
+    every other handler is spelled `from api.handlers_... import ...`, and only
+    the repo ROOT is on sys.path (see the top of this file) — so the bare name
+    could never resolve. Fixed 2026-09-05; `tests/test_api_imports.py` now
+    fails on any api/ sibling imported without the `api.` prefix.
     """
     import random as _r, string as _s
     from datetime import timezone as _tz
@@ -1048,7 +1056,7 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     # 2) "print note NOTE-XXXX" — look up note, send info + signed download URL
     notes_replies = None
     try:
-        from handlers_notes import maybe_handle_notes, is_print_note_trigger
+        from api.handlers_notes import maybe_handle_notes, is_print_note_trigger
         notes_replies = maybe_handle_notes(sender, text, name=name or "")
         if notes_replies is None:
             note_code = is_print_note_trigger(text)
@@ -1240,7 +1248,7 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
             from db_cloud import get_session as _gs_notes
             _note_sess = _gs_notes(sender) or {}
             if _note_sess.get("step") == "note_await_pdf":
-                from handlers_notes import handle_notes_pdf
+                from api.handlers_notes import handle_notes_pdf
                 from whatsapp_notify import _send as _wa_send
                 _pdf_bytes = _download_meta_media(media_id)
                 if _pdf_bytes is not None:
