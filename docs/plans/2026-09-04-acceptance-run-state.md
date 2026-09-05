@@ -119,40 +119,47 @@ duplex/simplex overrides in both directions, and the dual-queue workaround is
 what makes it work. If it fails, say so **before anything is changed** — a
 confident fix has already gone wrong here once.
 
-### Where P3-4 stands: attempted 2026-09-04 evening, NOT verified
+### Where P3-4 stands: routing VERIFIED 2026-09-05, paper outstanding
 
-A duplex/simplex pair was sent at the counter around 19:15 IST, just after OSP
-closed. **Nothing about it reached the cloud and nothing has been confirmed.**
-Start here tomorrow; do not record P3-4 as run.
+The 2026-09-04 evening attempt never happened — no cloud rows, no local rows
+(`collect_jobs()` pushes every local job unfiltered), and no `routing to konica`
+line in `logs/print_server.log` after 09:54 that morning. Three signals, one
+answer: it never reached `send_to_printer`. Re-run at 09:31 on 09-05, on
+`main@f32ff7f`, as `scale_proof --only S7 S8 --send --printer konica`.
 
-* `jobs` still holds exactly **486** rows — the same count taken before the
-  pair was sent — and the newest `received_at` is still the 09:22 walk-in.
-* OSP stopped renewing at 13:26 UTC (18:56 IST): heartbeat stale, and both
-  `store_role_leases` past their 3-minute TTL. That is closing time, not the
-  intermittent lease fault in the open items below. Do not let this evening's
-  expiry be read as evidence for that bug.
-* A job created through the web / order-v2 path is written by the Vercel API
-  and appears in `jobs` whatever the store PC is doing — that is how this
-  morning's two web jobs got there. Nothing appeared, so the pair was created
-  **locally**. If it printed, its rows are in `C:\Printosky\Data\jobs.db` and
-  will push when the watcher next starts.
+**The routing half is settled, by the print command itself:**
+
+```
+S7  routing to konica_simplex queue for sides='ss'
+    -print-to KONICA MINOLTA 1100 PS           -print-settings ...,simplex,...
+S8  routing to konica_duplex queue for sides='ds'
+    -print-to KONICA MINOLTA 1100 PS (Duplex)  -print-settings ...,duplexlong,...
+```
+
+Better evidence than `jobs.printer`, which records the same fact after the
+event: this is the queue name and the sides setting in the argv actually handed
+to SumatraPDF. The same run printed the resolved map —
+`PRINTERS overridden by store_config: {'konica_duplex': 'KONICA MINOLTA 1100 PS
+(Duplex)', 'konica_simplex': 'KONICA MINOLTA 1100 PS'}` — which confirms
+`config/stores/OSP.store_config.json` against the machine rather than against a
+description of it.
+
+**The paper half is still open.** Both jobs are the same 4-page source:
+
+| | Asked for | Must come off as |
+|---|---|---|
+| S7 | simplex | **4 sheets**, one side each |
+| S8 | duplex | **2 sheets**, both sides, backs registering with fronts |
+
+Sides are settled on paper and nowhere else. Until those sheets are counted,
+P3-4 is half done — the routing is proved, the driver's obedience is not, and
+the driver is the thing this whole workaround exists to distrust.
 
 **Do not mistake the morning pair for this one.** `OSKY-20260904-5f9f-a669`
 (`duplex` → `(Duplex)`) and `OSKY-20260904-ea6d-41de` (`single` → plain queue)
-sit at the top of the table and read as a clean P3-4 result. They are ordinary
-web jobs from 09:24 and 09:26, hours before P3-4 was attempted. They show the
-routing works; they are not the test.
-
-Tomorrow, in this order:
-
-1. Start the box. `PULL_UPDATE.bat` then `RESTART_WATCHER.bat` — pending local
-   rows survive the restart and push on start.
-2. `logs/print_server.log` — `routing to konica_duplex queue` and `routing to
-   konica_simplex queue`, one line each. Written by the function under test at
-   the moment it decides, so this is better evidence than `jobs.printer`, and
-   it needs no cloud. No lines means the pair never printed; re-send it.
-3. The two sheets, if they are still by the printer. Sides are settled on
-   paper and nowhere else.
+sit at the top of the jobs table and read as a clean P3-4 result. They are
+ordinary web jobs from 09:24 and 09:26 on 09-04. They show the routing works;
+they are not the test.
 
 ### Before the paper: which queue simplex uses, and how OSP is wired
 
@@ -297,6 +304,33 @@ sheet on paper, but as confirmation rather than an open question.
     and Phase 3 exists to prove that path unchanged. Note it, finish the run,
     fix it in its own PR — and decide the column's zone once, rather than
     patching whichever caller is in front of you.
+* **`print_planner.scale_actual_landscape` can go red but never green.**
+  Found 2026-09-05 during the P3-4 re-run, which raised it:
+  *"STILL FAILING — 24.0 h"*. The alert itself is correct and by design — S7
+  asks for Actual size on a landscape A4 sheet, which cannot fit, so the
+  imposer fits it at 66% and says so rather than shrinking the customer's job
+  in silence. The defect is the mechanism, not the message:
+  * `print_planner.py:269` is the **only** call site for that check name, and
+    it always passes `ok=False`. `ops_watchdog.report()` clears a check only on
+    an explicit `ok=True` (`ops_watchdog.py:314`). So the check latches on the
+    first landscape-Actual job the store ever prints and stays red for good,
+    re-alerting every 6 hours.
+  * Both console health banners, `/status` and `/health` therefore read
+    unhealthy for a store where nothing is wrong. **That is a live risk to the
+    rest of this run**: a genuine alert raised during P3-1…P3-6 arrives on a
+    banner that is already red, and nobody looks twice at a light that has been
+    on for a day. It is the mirror of the green-light-over-nothing pattern at
+    the top of this file, and it corrodes the alerting just as fast.
+  * The tests pin that it fires on a downgrade and stays quiet on a page that
+    fits (`tests/test_print_planner_scale.py:243-268`). Neither pins recovery,
+    so the latch is unintended rather than decided.
+  * Diagnosis: a **per-job event modelled as a system health state**. Nothing a
+    later job does can repair "that job got downgraded", so no future report can
+    ever clear it. It belongs against the job — its notes, its console row — or
+    as a one-shot notice, not in the latching health set.
+  * **Not fixed during the run**: `print_planner` is the path Phase 3 exists to
+    prove unchanged. Same rule as `received_at` above. Note which checks are
+    already red (`/health`) before starting P3-1, so a new one can be told apart.
 * Intermittent lease timeouts on all boxes (Phase 0 finding, unaddressed).
 * PRIOFF is configured with OSP's `konica_ip` (192.168.55.110).
 * Supabase Realtime not delivering to `store_puller` — jobs can wait up to 15
