@@ -166,6 +166,43 @@ sit at the top of the jobs table and read as a clean P3-4 result. They are
 ordinary web jobs from 09:24 and 09:26 on 09-04. They show the routing works;
 they are not the test.
 
+### P3-1 met, P3-2 FAILED — the puller cannot see a WhatsApp job
+
+`OSKY-20260905-2033-1326-e8974b`, 2026-09-05. P3-1 passed: quote ₹3 (the A4 B&W
+rate), pickup code `P-KK46`, paid by Razorpay (`pay_TYE8IRvTBEAiG5`). P3-2 did
+not: 40 minutes after payment the job was still `Paid` with `printer`,
+`completed_at`, `printed_by` and `pickup_ready_at` all null, well past the
+15-minute poll fallback.
+
+**The Konica's own log is the independent proof.** `konica_jobs` was current to
+10:06 IST and holds nothing with that filename anywhere after 09:25. Not a
+sync artefact, not a lag: the sheet was never printed. The same log corroborates
+P3-4 from the machine's side — `SCALEPROOF-S7` and `-S8`, 4 pages each, `No
+Error`, seconds apart.
+
+Two separate blockers, and they are not the same age:
+
+1. **`assigned_store_id` is NULL** — on this job and on **both** WhatsApp
+   Razorpay jobs from 25 July. `store_puller.fetch_assigned_paid()` filters
+   `.eq("assigned_store_id", store_id)` (`store_puller.py:149`) and a NULL
+   never matches, so the puller has never been able to see a job on this path.
+   Both July customers paid (₹3 and ₹10), both got pickup codes, and both rows
+   still sit at `Paid` with nothing printed. **Six weeks old, not a regression**
+   — Rule 1 holds, nothing this week broke it. It has simply never worked and
+   was never watched closely enough to notice.
+2. **`file_url` is an empty string** (length 0) on today's job. The two July
+   rows carry real 132- and 143-character Storage URLs, so this one is
+   *different from* the old fault, not another instance of it. `select_pullable`
+   requires a non-empty `file_url` too, so the job is blocked twice over — and
+   more to the point, **the customer was quoted, charged ₹3 and given a pickup
+   code for a file the cloud never stored.** Whether the store PC's hot folder
+   got its own copy is not visible from here; the puller reads this row, and
+   this row has nothing.
+
+Not fixed during the run — `store_puller` and the webhook are the path Phase 3
+exists to hold still. But (2) is a paying customer with no file, which is a
+different clock from the run's.
+
 ### Before the paper: which queue simplex uses, and how OSP is wired
 
 **Decided (2026-09-04): OSP's simplex queue is the original
