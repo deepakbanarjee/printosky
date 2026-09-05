@@ -110,7 +110,7 @@ Costs paper. Run at OSP.
 | P3-1 | Send a normal PDF through WhatsApp, as a customer | Job in console, quote as before, pickup code issued |
 | P3-2 | Pay it, let the store puller take it | Paid → pulled → auto-printed, no manual step |
 | P3-3 | Compare the sheet with one printed before this week | Identical. No scaling applied to a job that never asked |
-| **P3-4** | **Konica duplex job, then simplex, back to back** | **Each on the sides it asked for** |
+| ~~**P3-4**~~ ✅ | **Konica duplex job, then simplex, back to back** | **VERIFIED on paper 09-05** — S7 simplex 4 sheets one side, S8 duplex 2 sheets both sides |
 | P3-5 | Counter job from the counter PC (local print) | Prints without going to the cloud at all |
 | P3-6 | A 2-up and a 4-up job | Imposed correctly, portrait sheet, page order right |
 
@@ -119,7 +119,7 @@ duplex/simplex overrides in both directions, and the dual-queue workaround is
 what makes it work. If it fails, say so **before anything is changed** — a
 confident fix has already gone wrong here once.
 
-### Where P3-4 stands: routing VERIFIED 2026-09-05, paper outstanding
+### P3-4 — VERIFIED on paper, OSP Konica, 2026-09-05
 
 The 2026-09-04 evening attempt never happened — no cloud rows, no local rows
 (`collect_jobs()` pushes every local job unfiltered), and no `routing to konica`
@@ -144,16 +144,21 @@ to SumatraPDF. The same run printed the resolved map —
 `config/stores/OSP.store_config.json` against the machine rather than against a
 description of it.
 
-**The paper half is still open.** Both jobs are the same 4-page source:
+**The paper agrees.** Both jobs are the same 4-page source, sent seconds apart:
 
-| | Asked for | Must come off as |
-|---|---|---|
-| S7 | simplex | **4 sheets**, one side each |
-| S8 | duplex | **2 sheets**, both sides, backs registering with fronts |
+| | Asked for | Expected | Came off as |
+|---|---|---|---|
+| S7 | simplex | 4 sheets, one side each | **4 sheets, one side** ✅ |
+| S8 | duplex | 2 sheets, both sides | **2 sheets, both sides** ✅ |
 
-Sides are settled on paper and nowhere else. Until those sheets are counted,
-P3-4 is half done — the routing is proved, the driver's obedience is not, and
-the driver is the thing this whole workaround exists to distrust.
+That is P3-4 met: a duplex job and a simplex job, back to back on the same
+Konica, each on the sides it asked for. The driver is the thing this whole
+workaround exists to distrust, and the sheet counts are the only place its
+obedience can be read. Counted, not inferred.
+
+The one thing the counts do not speak to is S8's backs registering with its
+fronts — that is S8's *scaling* criterion, checked in Phase 2 on 09-04, not a
+sides question. Recorded so nobody later reads this pass as covering it.
 
 **Do not mistake the morning pair for this one.** `OSKY-20260904-5f9f-a669`
 (`duplex` → `(Duplex)`) and `OSKY-20260904-ea6d-41de` (`single` → plain queue)

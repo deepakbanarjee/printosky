@@ -89,6 +89,10 @@ differ — `_konica_queue_for_sides()` only checks that the key is set. There is
 no `(Simplex)` queue at OSP and its absence from `jobs.printer` is not a fault.
 What the config cannot state, and nothing can see from here, is each queue's
 Printing Preferences default — that checkbox is the other half of the fix.
+**Re-verified on paper 2026-09-05** under this wiring: a simplex and a duplex
+job sent seconds apart came off as 4 sheets one side and 2 sheets both sides.
+Sheet counts are the only place the driver's obedience can be read — count
+them, do not infer them from the routing log.
 
 ## Key REPL Commands (`watcher.py`)
 ```
