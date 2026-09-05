@@ -203,6 +203,51 @@ Not fixed during the run — `store_puller` and the webhook are the path Phase 3
 exists to hold still. But (2) is a paying customer with no file, which is a
 different clock from the run's.
 
+### Why `file_url` was empty: three silent failures in a row
+
+Diagnosed 2026-09-05. The WhatsApp media path is deliberately two-phase
+(`api/index.py:1266-1299`): insert the job with `file_url=""` and answer the
+customer immediately, then download from Meta, compress, upload to Storage and
+upsert the real URL. An empty `file_url` means phase two did not finish.
+
+**It did not finish, and nothing said so.** Every step on that path swallows its
+own failure:
+
+1. `_download_meta_media()` (`api/index.py:98-119`) — any exception, or a
+   missing download URL: `logger.error(...)` then `return None`. A log line is
+   not an alert; CLAUDE.md says so in as many words.
+2. `upload_file()` (`db_cloud.py:423-437`) — any exception: `logger.error(...)`
+   then **`return ""`**. It hands the caller an empty string where a URL
+   belongs, so a failed upload is indistinguishable from a successful one. This
+   is the same shape as the ₹0 rate-card bugs in the BILLING FIX section:
+   *failing to the cheapest thing instead of failing loud*.
+3. The call site writes that value into the row **without checking it**, so
+   `""` overwrites the placeholder and the job looks finished.
+
+And the order compounds it: the receipt and the first quote question go out in
+**phase one**, before the file is fetched. So the bot quotes, takes ₹3 and
+issues a pickup code for a file the system may never obtain — which is exactly
+what happened.
+
+**What the evidence supports.** `storage.objects` holds nothing under the
+`918943232033_20260905_*` prefix: the upload never happened. The same document
+is in the bucket from **21 July at 13.8 MB**, so the file is large, and large is
+the obvious suspect against the 55-second download timeout — but Vercel's Hobby
+plan refused the log query for that window (`ExceedsBillingLimitError`), so
+**which** of the three fired is not recoverable. Naming one would be a guess.
+
+**Fix direction, after the run:**
+
+* `upload_file()` must not return `""` on failure — raise, or return `None`, so
+  a caller cannot mistake failure for a URL.
+* Both handlers report through `ops_watchdog` instead of `logger.error`.
+* Structural: a job with no `file_url` must not be quotable or payable. An
+  instant receipt is fine; the *quote* is what should wait on the file. That is
+  the change that stops a customer paying for a file that does not exist.
+
+**For this customer, now:** ask them to resend, or use the 21 July copy of the
+same document already in the bucket.
+
 ### Before the paper: which queue simplex uses, and how OSP is wired
 
 **Decided (2026-09-04): OSP's simplex queue is the original
