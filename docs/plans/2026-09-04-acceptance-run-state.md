@@ -59,9 +59,18 @@ but PRINTK and PRIOFF were two commits behind and `+dirty` at the time.
 * Read live from `store_devices`. The `+dirty` markers cleared on all three
   once each box pulled — the dirtiness was untracked stray files, as #113 said,
   not hand-patched code on three separate machines.
-* A fourth `store_devices` row (PRINTK / DESKTOP-SFO6ES9, last seen 19 Aug) is
-  the office box's **old identity** — it was reconfigured from PRINTK to
-  PRIOFF. Stale row, not a missing machine. Safe to delete.
+* ~~A fourth `store_devices` row (PRINTK / DESKTOP-SFO6ES9, last seen 19 Aug)~~
+  **deleted 2026-09-05.** It was the office box's old identity, not a missing
+  machine: same `device_id` (`DESKTOP-SFO6ES9-5bead75e`), and the timestamps
+  show the handover — the PRINTK identity ran 17:36 to 17:52 on 19 Aug and the
+  PRIOFF one on the same machine began at 17:56, four minutes later. Nothing
+  referenced it: the only leases naming that device are PRIOFF's, both live.
+  `store_devices` is now three rows, one per box.
+  *Noted on the way past:* the deleted row's `app_version_since` (29 Aug) was
+  **later than its `last_seen`** (19 Aug) — something advanced that column for a
+  device that had not reported in ten days. Harmless here, but if the heartbeat
+  upsert can move `app_version_since` without `last_seen`, the "version since"
+  reading is not trustworthy on any row.
 * OSP's `+dirty` cleared after #113, which confirms the dirtiness was untracked
   stray files, not hand-patched code.
 
