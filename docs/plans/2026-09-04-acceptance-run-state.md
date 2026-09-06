@@ -47,19 +47,18 @@ decline to answer rather than reassure.
 
 | Store | Host | Version | Notes |
 |---|---|---|---|
-| OSP · Thriprayar | DESKTOP-3NJM40G | `main@efb42b1`, **clean** | live, both leases held, ready |
-| PRINTK · Nattika | DESKTOP-MMGVTNI | `main@126d2ff+dirty` | offline since ~18:20 on 09-03 |
-| PRIOFF · Office | DESKTOP-SFO6ES9 | `main@126d2ff+dirty` | offline since ~18:20 on 09-03 |
+| OSP · Thriprayar | DESKTOP-3NJM40G | `main@f32ff7f`, **clean** | live |
+| PRINTK · Nattika | DESKTOP-MMGVTNI | `main@f32ff7f`, **clean** | live |
+| PRIOFF · Office | DESKTOP-SFO6ES9 | `main@f32ff7f`, **clean** | live |
 
-* Read live from `store_devices` at 10:22 IST on 09-04. OSP renewed both
-  `store_role_leases` (`poll_printers`, `fetch_epson_log`) minutes before, so it
-  is polling, not merely up.
-* OSP is one commit behind `main` (`f32ff7f`, #116). That commit touches only
-  `docs/`, `tests/` and `tools/scale_proof.py` — **no runtime code** — so it does
-  not change what Phase 3 exercises. Pull and restart anyway so the run is
-  recorded against the tip rather than one short of it.
-* PRINTK and PRIOFF need pull + restart when switched on. **PRINTK is required
-  for Phases 4 and 6.**
+**2026-09-05: all three boxes on the tip, all clean, all heartbeating within
+three minutes.** First time in the run this has been true — Phase 0 claimed it,
+but PRINTK and PRIOFF were two commits behind and `+dirty` at the time.
+**Phases 4 and 6 are unblocked.**
+
+* Read live from `store_devices`. The `+dirty` markers cleared on all three
+  once each box pulled — the dirtiness was untracked stray files, as #113 said,
+  not hand-patched code on three separate machines.
 * A fourth `store_devices` row (PRINTK / DESKTOP-SFO6ES9, last seen 19 Aug) is
   the office box's **old identity** — it was reconfigured from PRINTK to
   PRIOFF. Stale row, not a missing machine. Safe to delete.
