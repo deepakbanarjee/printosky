@@ -305,10 +305,52 @@ and simplex routing was correct); their provenance was wrong.
 Likewise today's three jobs, recorded above as P3-6 evidence: the imposition
 result stands, but they reached the printer through the cloud, not the counter.
 
-**Root cause not yet known.** The file is written, so the failure is inside
-`handle_create_job`. What distinguishes 09-04 09:22, which worked, from the five
-that did not is not visible from the cloud. `logs/print_server.log` around
-12:53:38 and 12:55:17 on 09-06 is where the answer is.
+**Root cause: the counter job fails locally exactly when the customer pays.**
+
+`website/order/order-ui.js:956-962` builds the `/local-print` body with
+
+```js
+amount_collected: 0,                       // always
+override_reason: mode === 'hold' ? 'Counter job — payment on collection' : '',
+```
+
+and `handle_create_job` (`print_server.py:1935-1937`) guards with
+
+```python
+paid = amount_collected > 0 or amount_partial > 0
+if not paid and not override_reason:
+    return {"ok": False, "error": "Payment or override reason required"}
+```
+
+`amount_collected` is hardcoded to `0`, and `override_reason` is set **only**
+for `hold`. So choosing **Cash or UPI** — the operator saying money changed
+hands — sends "paid by Cash, amount zero, no reason", the guard correctly
+refuses it, and the job falls back to the cloud. Choosing **hold** sets an
+override reason and the local print succeeds.
+
+Backwards: the counter path works only when payment is *deferred*, and breaks
+whenever it is *taken*. That matches the six attempts — 09-04 09:22 succeeded
+(booked on hold), the five that took payment did not. It also explains why the
+fault reads as intermittent: it tracks which button the operator pressed.
+
+**Falsifiable, in one minute:** a counter job on *hold* must print locally and
+write a `Walk-in` row with a filepath and no `file_url`; the same job with
+*Cash* must leave a file in `Jobs\Local\` and a `web` row with a `file_url`.
+
+Three things kept it invisible, and each is worth fixing on its own:
+
+1. `amount_collected: 0` is sent alongside `payment_mode: 'Cash'` — the client
+   already knows the quote, since it sends it as `amount_quoted`.
+2. `order-ui.js:970` throws `new Error('no job id')` and **discards
+   `data.error`**, so even the browser console never shows the server's reason.
+3. Nothing on that server path logs. `print_server.log` holds the 10:53:54
+   startup banner and nothing since — not a logging fault (the `basicConfig`
+   placement CLAUDE.md protects is correct and the override line proves it ran),
+   but a path that reports a refusal to nobody.
+
+And the two paths disagree: the cloud fallback has no such guard, so the
+identical unpaid-looking job succeeds through the cloud. One of them is wrong
+about what a counter job must carry.
 
 ### Before the paper: which queue simplex uses, and how OSP is wired
 
