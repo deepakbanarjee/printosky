@@ -119,8 +119,8 @@ Costs paper. Run at OSP.
 | P3-2 | Pay it, let the store puller take it | Paid → pulled → auto-printed, no manual step |
 | P3-3 | Compare the sheet with one printed before this week | Identical. No scaling applied to a job that never asked |
 | ~~**P3-4**~~ ✅ | **Konica duplex job, then simplex, back to back** | **VERIFIED on paper 09-05** — S7 simplex 4 sheets one side, S8 duplex 2 sheets both sides |
-| P3-5 | Counter job from the counter PC (local print) | Prints without going to the cloud at all |
-| P3-6 | A 2-up and a 4-up job | Imposed correctly, portrait sheet, page order right |
+| **P3-5** ❌ | **Counter job from the counter PC (local print)** | **FAILS — 5 of 6 attempts fell back to the cloud, silently** |
+| P3-6 ✅ | A 2-up and a 4-up job | Imposed and printed correctly — but via the cloud, having fallen back (see P3-5) |
 
 **Do P3-4 first.** It is the locked area: the driver silently ignores per-job
 duplex/simplex overrides in both directions, and the dual-queue workaround is
@@ -255,6 +255,60 @@ plan refused the log query for that window (`ExceedsBillingLimitError`), so
 
 **For this customer, now:** ask them to resend, or use the 21 July copy of the
 same document already in the bucket.
+
+### P3-5 FAILS — the counter path falls back to the cloud, silently
+
+Five of six `/local-print` attempts across 09-04 and 09-06 did not print
+locally. They fell back to the cloud round trip the feature exists to remove,
+and nothing anywhere said so.
+
+`C:\Printosky\Jobs\Local\` — written by `handle_local_print` and by nothing
+else — holds six files. Each cloud row lands 2-5 seconds after its file:
+
+| File (IST) | Outcome |
+|---|---|
+| 09-04 09:22:52 | ✅ **local** — `OSKY-20260904-0001`, `Walk-in`, filepath set, no `file_url` |
+| 09-04 09:24:44 | ❌ fell back → `…5f9f-a669`, `web`, `file_url` set, filepath null |
+| 09-04 09:26:35 | ❌ fell back → `…ea6d-41de` |
+| 09-06 12:53:38 | ❌ fell back → `…e855-69a9` |
+| 09-06 12:55:17 | ❌ fell back → `…082a-7cb9` |
+| 09-06 12:55:44 | ❌ fell back → `…bcac-8c61` |
+
+The mechanism is `website/order/order-ui.js:973-977`:
+
+```js
+} catch (e) {
+  // Never block a counter job on the local path — fall back to the cloud.
+  console.warn('local print unavailable, falling back to upload:', e);
+  return null;
+}
+```
+
+The file is written first, so `handle_local_print` was entered and got past auth
+every time; then `handle_create_job` returned without a `job_id`, the JS threw
+on `if (!data.job_id)`, and the job became an ordinary cloud upload. **The
+operator cannot tell.** The only trace is a `console.warn` in a browser console
+nobody has open — not `print_server.log`, not `ops_watchdog`, not the job row.
+The orphaned file stays in `Jobs\Local\` as the sole physical evidence.
+
+So CLAUDE.md's "a counter job prints from the counter PC without going to the
+cloud at all" inverts itself under failure, and the fallback comment says why in
+its own words: *never block a counter job on the local path*. Not blocking was
+right. Not saying anything was not.
+
+**Corrects the record.** On 09-05 this file called `OSKY-20260904-5f9f-a669` and
+`…ea6d-41de` "ordinary web jobs from 09:24 and 09:26" and warned against
+mistaking them for the P3-4 pair. They were not ordinary web jobs — they were
+failed counter jobs. The P3-4 point drawn from them still stands (their duplex
+and simplex routing was correct); their provenance was wrong.
+
+Likewise today's three jobs, recorded above as P3-6 evidence: the imposition
+result stands, but they reached the printer through the cloud, not the counter.
+
+**Root cause not yet known.** The file is written, so the failure is inside
+`handle_create_job`. What distinguishes 09-04 09:22, which worked, from the five
+that did not is not visible from the cloud. `logs/print_server.log` around
+12:53:38 and 12:55:17 on 09-06 is where the answer is.
 
 ### Before the paper: which queue simplex uses, and how OSP is wired
 
