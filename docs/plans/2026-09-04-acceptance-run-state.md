@@ -333,9 +333,31 @@ whenever it is *taken*. That matches the six attempts — 09-04 09:22 succeeded
 (booked on hold), the five that took payment did not. It also explains why the
 fault reads as intermittent: it tracks which button the operator pressed.
 
-**Falsifiable, in one minute:** a counter job on *hold* must print locally and
-write a `Walk-in` row with a filepath and no `file_url`; the same job with
-*Cash* must leave a file in `Jobs\Local\` and a `web` row with a `file_url`.
+**Predicted, then tested 2026-09-06 13:22. Confirmed, both ways:**
+
+| | Job | Source | `file_url` | `filepath` | Route |
+|---|---|---|---|---|---|
+| **hold** | `OSKY-20260906-0001` | `Walk-in` | none | `…\Jobs\Local\132232_option 5.pdf` | **local** ✅ |
+| **cash** | `OSKY-20260906-4805-5175` | `web` | set | null | **fell back** ✅ |
+
+Thirty-one seconds apart, same operator, same counter, opposite paths — and
+both printed, which is why nobody ever noticed. The id shape alone gives it
+away: `_next_job_id()` issues a 4-digit daily sequence for a counter job, while
+a cloud job carries a hex suffix.
+
+The earlier three jobs all read `payment_mode: cash` with `amount_collected: 3`,
+confirming they were Cash counter jobs that fell back too — 5 of 6, as the file
+timestamps said.
+
+One thing the test settles beyond the diagnosis: **the cloud fallback records
+the money correctly** (`amount_collected: 3`, `payment_mode: cash`) while the
+local hold job carries `amount_collected: null`. So the fix must send the real
+amount, not merely satisfy the guard — otherwise a working local cash job would
+file every counter sale at ₹0 and under-report the till.
+
+*And on the same screen, the timezone split in one glance:* the local row reads
+`13:22:32` (store PC, IST) and the cloud row `07:53:03` (Vercel, UTC). Thirty-one
+seconds apart in the shop, five and a half hours apart in the column.
 
 Three things kept it invisible, and each is worth fixing on its own:
 
