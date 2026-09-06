@@ -959,14 +959,7 @@ async function tryLocalPrint(rec, cust, bytes) {
         phone: cust.phone,
         source: 'Walk-in',
         payment_mode: mode === 'upi' ? 'UPI' : 'Cash',
-        // Send what was actually taken. This was a hardcoded 0 next to a 'Cash'
-        // payment_mode, which handle_create_job correctly refuses ("Payment or
-        // override reason required") — so every counter job where money DID
-        // change hands failed the local path and fell back to the cloud, while
-        // 'hold' passed on its override reason. Backwards, and invisible,
-        // because the fallback prints too. A zero here would also file the sale
-        // at ₹0 once the guard passed, under-reporting the till.
-        amount_collected: mode === 'hold' ? 0 : (spec.amount_estimated || 0),
+        amount_collected: 0,
         override_reason: mode === 'hold' ? 'Counter job — payment on collection' : '',
         staff_id: sessionStorage.getItem('staff_id') || 'counter',
         operator_note: buildOperatorNote(rec.spec),
@@ -974,11 +967,7 @@ async function tryLocalPrint(rec, cust, bytes) {
     });
     if (!res.ok) throw new Error('local-print http ' + res.status);
     const data = await res.json();
-    // Carry the store PC's own reason. Throwing a bare 'no job id' discarded
-    // data.error, so the one place the refusal was ever stated — the response
-    // body — was dropped on the floor, and the console warning below said
-    // nothing useful about why the counter had silently gone back to the cloud.
-    if (!data.job_id) throw new Error('local-print refused: ' + (data.error || 'no job id'));
+    if (!data.job_id) throw new Error('no job id');
     return { job_id: data.job_id, total: data.amount_quoted || 0,
              paid: mode !== 'hold', mode: mode, local: true, printed: !!data.printed };
   } catch (e) {
