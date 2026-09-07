@@ -19,6 +19,22 @@ from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger("db_cloud")
 
+
+def _report(check: str, ok: bool, detail: str = "") -> None:
+    """Alert, never a bare log — CLAUDE.md's hard rule, in the module that
+    stands between a customer's file and the store that has to print it.
+
+    Imported lazily and guarded for the same reason the rest of this file's
+    imports are: db_cloud runs on Vercel and on three store PCs, and a missing
+    or broken ops_watchdog must not take the database layer down with it.
+    """
+    try:
+        from ops_watchdog import report
+        report(check, ok, detail)
+    except Exception as exc:
+        logger.warning("ops_watchdog report failed (%s): %s", check, exc)
+
+
 # ── Supabase client (lazy singleton) ─────────────────────────────────────────
 
 _sb = None
@@ -420,10 +436,24 @@ def get_pending_review(phone: str) -> dict | None:
 INCOMING_BUCKET = "incoming-files"
 
 
-def upload_file(filename: str, content: bytes, mime_type: str) -> str:
+def upload_file(filename: str, content: bytes, mime_type: str) -> str | None:
     """
     Upload a customer file to Supabase Storage.
-    Returns the public URL (store PC polls Supabase and downloads from here).
+    Returns the public URL (store PC polls Supabase and downloads from here),
+    or **None** if the upload failed.
+
+    It used to return `""` on failure — an empty string where a URL belongs, so
+    a caller could not tell a lost file from a stored one and `jobs.file_url`
+    was written empty without anyone checking. That is how a customer was
+    quoted ₹3, charged, and given pickup code P-KK46 on 2026-09-05 for a file
+    the bucket never received: nothing raised, nothing alerted, and the row
+    looked finished. Same shape as the ₹0 rate-card bugs — failing to the
+    cheapest thing instead of failing loud.
+
+    `None` is deliberate rather than an exception: `handlers_pb` already guards
+    with `if not url`, so it keeps working unchanged, while a caller that
+    concatenates or stores the result now breaks loudly instead of quietly
+    writing an empty string.
     """
     try:
         _client().storage.from_(INCOMING_BUCKET).upload(
@@ -431,10 +461,22 @@ def upload_file(filename: str, content: bytes, mime_type: str) -> str:
             file=content,
             file_options={"content-type": mime_type, "upsert": "true"},
         )
-        return _client().storage.from_(INCOMING_BUCKET).get_public_url(filename)
+        url = _client().storage.from_(INCOMING_BUCKET).get_public_url(filename)
     except Exception as e:
         logger.error(f"upload_file error for {filename}: {e}")
-        return ""
+        _report("storage.upload", False,
+                f"{filename} ({len(content)} bytes) did not reach {INCOMING_BUCKET}: "
+                f"{type(e).__name__}: {e} — the customer's file is not stored")
+        return None
+
+    if not url:
+        _report("storage.upload", False,
+                f"{filename} uploaded but Storage returned no public URL — "
+                "the file cannot be fetched by any store PC")
+        return None
+
+    _report("storage.upload", True, f"{filename} stored")
+    return url
 
 
 # ── conversation_log ──────────────────────────────────────────────────────────

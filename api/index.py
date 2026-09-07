@@ -1290,15 +1290,77 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
         logger.error(f"Session save error for {sender}: {e}")
 
     # ── Step 3: download + upload to Supabase Storage (slow — runs last) ────
+    #
+    # Steps 1 and 2 have already sent the customer a receipt and the first quote
+    # question, which is the point of the two-phase design: answer fast, fetch
+    # slowly. The cost is that if THIS step fails, the conversation carries on
+    # quoting and taking money for a file nobody has. It did, on 2026-09-05:
+    # a customer was quoted ₹3, paid, and given pickup code P-KK46 for a file
+    # the bucket never received, and the only trace was a logger.error nobody
+    # reads. So a failure here now stops the flow and says so — to the customer,
+    # who can resend, and to ops_watchdog, which is the rule this path ignored.
     content = _download_meta_media(media_id)
     if content is None:
         logger.error(f"Failed to download {media_id} from {sender}")
+        _abandon_unfetched_job(job_id, sender, base_name,
+                               "could not be downloaded from WhatsApp")
         return None
     content  = _compress_lossless(content, mime_type or "")
     file_url = upload_file(dest_name, content, mime_type or "application/octet-stream")
+    if not file_url:
+        # upload_file has already alerted; this is the customer's half.
+        logger.error(f"Upload failed for {dest_name} from {sender}")
+        _abandon_unfetched_job(job_id, sender, base_name,
+                               "could not be saved to storage")
+        return None
     insert_job_from_webhook(job_id, sender, base_name, file_url)
     logger.info(f"Uploaded {dest_name} ({len(content)} bytes) → {file_url}")
     return dest_name  # storage path — callers store this in media_url column
+
+
+def _abandon_unfetched_job(job_id: str, sender: str, filename: str,
+                           why: str) -> None:
+    """A file we never got must not become a job we quote for.
+
+    The job row already exists with an empty `file_url` (step 1 creates it that
+    way on purpose, so the customer gets an instant receipt), and the bot
+    session is sitting at step=size waiting for an answer that would lead to a
+    quote and a payment link. Left alone, the customer pays for a file the
+    store does not have — which is exactly what happened on 2026-09-05.
+
+    So: clear the session so the flow cannot advance to a quote, tell the
+    customer to send it again, and alert. Deliberately does NOT delete the job
+    row — a deleted job is one nobody can explain later, the same rule the
+    drop-off sweep follows. It stays with an empty `file_url`, which is both
+    honest and unpullable.
+    """
+    try:
+        from db_cloud import clear_session
+        clear_session("supabase", sender)
+    except Exception as e:
+        logger.error(f"could not clear session for {sender}: {e}")
+
+    try:
+        # _send(phone, message) takes plain TEXT and builds the Meta payload
+        # itself. Handing it a dict puts the dict in the message body, which is
+        # what the notes flow above does — see the note in the commit; that path
+        # has never run in production, so it has never shown.
+        from whatsapp_notify import _send as _wa_send
+        _wa_send(sender, (
+            f"Sorry — we couldn't receive {filename}. Nothing has been charged. "
+            "Please send the file again."
+        ))
+    except Exception as e:
+        logger.error(f"could not tell {sender} their file was lost: {e}")
+
+    try:
+        from ops_watchdog import report as _ops_report
+        _ops_report("whatsapp.file_never_stored", False,
+                    f"{job_id} from {sender}: {filename} {why}. The job row has "
+                    "an empty file_url and cannot be printed; the customer has "
+                    "been asked to resend.")
+    except Exception as e:
+        logger.error(f"ops_watchdog report failed for {job_id}: {e}")
 
 
 def _store_media_only(sender: str, media_id: str, mime_type: str,
