@@ -84,8 +84,19 @@ def main():
         sys.exit(1)
 
     if not short_token:
-        fallback_token = "EAAXdiZBjUuxgBSR1R0LRiwhFIuQzsy8kX7r54FZBZCVCAtJQZAcrbKyMdwuYfrTurkpiTZCBlzPhJgdIWm5Nn3Eo7F5zT8xmJ4IJJQadrJRY75oEPbyEnKdG28u4FwrQxMYzQnbGTRGZCkdfEtTMiQpu3H4nc3ZBZA8mUjJKzXnuz1Lu19Rtz8WDgsumrrWDz9OlM0JtsBzuZAFaKbc4CHEkrbQyXVPW8ftn2w5ZCZC"
-        short_token = fallback_token
+        # Never hardcode this. A short-lived token committed here reached a
+        # public repo on 2026-09-07; it is a credential like any other, and a
+        # literal in a tracked file is a leak the moment it is pushed. Prompt
+        # for it exactly as the App Secret above is prompted for.
+        print("")
+        print("No META_SHORT_TOKEN found in .env.")
+        print("Generate one in Graph API Explorer and paste it below "
+              "(input will be hidden):")
+        short_token = getpass.getpass("Short-lived token: ").strip()
+
+    if not short_token:
+        print("Error: a short-lived token is required.")
+        sys.exit(1)
 
     print("\n[1/3] Exchanging short-lived token for 60-day Long-Lived User Token...")
     url = (
