@@ -31,6 +31,11 @@ store_config.json
 logs/
 *.log
 
+# Marketing bot runtime state (comment-to-DM dedup ledger). Rewritten every
+# time instagram_comment_bot.py polls on the store PC, so tracking it turns
+# every poll into a dirty working tree.
+marketing/data/
+
 # Uploads / received files
 uploads/
 data/uploads/
