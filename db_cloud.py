@@ -266,6 +266,28 @@ def update_job_paid(job_id: str, amount: float, method: str, pay_id: str) -> Non
         client.table("jobs").update(update_payload).eq("job_id", job_id).execute()
     except Exception as e:
         logger.error(f"update_job_paid error for {job_id}: {e}")
+        return
+
+    # A paid job with no fulfilling store is money taken for something no
+    # puller can ever collect: store_puller filters on
+    # assigned_store_id = <its store>, and NULL matches nothing. That is how
+    # 104 WhatsApp jobs reached "Paid" over six weeks without one of them
+    # printing, and no console showed anything wrong — a paid job simply sat.
+    # Say so, once, at the moment it becomes true.
+    try:
+        row = (client.table("jobs").select("assigned_store_id")
+               .eq("job_id", job_id).limit(1).execute().data or [{}])[0]
+        assigned = (row.get("assigned_store_id") or "").strip()
+        from ops_watchdog import report as _ops_report
+        _ops_report(
+            "jobs.paid_without_store", bool(assigned),
+            f"{job_id} is Paid with no assigned_store_id — no store puller can "
+            f"see it, so it will never print. Set the fulfilling store on the "
+            f"job." if not assigned else f"{job_id} paid and assigned to {assigned}",
+        )
+    except Exception as e:
+        # The alert failing must not unrecord a payment that succeeded above.
+        logger.error(f"update_job_paid: assignment check failed for {job_id}: {e}")
 
 
 # Statuses at or past "paid" — a manual mark-paid must not clobber these (esp.
@@ -343,9 +365,29 @@ def update_jobs_payment_link(job_ids: list, link_id: str, link_sent_at: str) -> 
         logger.error(f"update_jobs_payment_link error: {e}")
 
 
+#: Where a job printed unless someone says otherwise. A WhatsApp customer never
+#: picks a store, so theirs is always this one; order-v2 asks, and passes its own
+#: answer, and an admin can move a job afterwards.
+DEFAULT_FULFILLING_STORE = "OSP"
+
+
 def insert_job_from_webhook(job_id: str, sender: str, filename: str,
                             file_url: str) -> None:
-    """Insert a new Pending job row when a file arrives via WhatsApp webhook."""
+    """Insert a new Pending job row when a file arrives via WhatsApp webhook.
+
+    `assigned_store_id` is stamped here, the way `handlers_order.py` stamps it
+    for a web order. It used to be written for a WhatsApp job in exactly one
+    other place — the routing block in `update_job_paid()`, behind
+    `MULTISTORE_ROUTING_ENABLED` — and that flag has never been on: the block
+    records every decision it makes and `routing_decisions` is empty. So a paid
+    WhatsApp job never got a store, and `store_puller.fetch_assigned_paid()`
+    filters on `assigned_store_id = <this store>`, where NULL matches nothing.
+    104 jobs arrived on this path and not one was ever auto-printed.
+
+    Setting it at creation removes that dependency: routing can be off, on, or
+    absent, and the job is still printable. When routing IS enabled it runs at
+    payment as before and overwrites this with its own choice.
+    """
     try:
         _client().table("jobs").upsert({
             "job_id":      job_id,
@@ -353,6 +395,7 @@ def insert_job_from_webhook(job_id: str, sender: str, filename: str,
             "filename":    filename,
             "file_url":    file_url,
             "status":      "Pending",
+            "assigned_store_id": DEFAULT_FULFILLING_STORE,
             "received_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }, on_conflict="job_id").execute()
     except Exception as e:

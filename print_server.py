@@ -1672,21 +1672,64 @@ def _service_deposit_for(total: float) -> float:
     return service_jobs.deposit_for(total)
 
 
+#: Prefixes a counter job may already carry in an existing database. The daily
+#: sequence spans all of them, so a store that has just been corrected does not
+#: restart at 0001 beside yesterday's numbers.
+_LEGACY_JOB_PREFIXES = ("OSKY", "OSP")
+
+
+def _counter_job_prefix() -> str:
+    """The prefix a job created AT THIS COUNTER carries: the store's own id.
+
+    A job made at the counter is that store's job and reads as one — OSP at
+    Oxygen, PRINTK at Nattika. `OSKY` belongs to the web path, where the
+    customer chooses a collection store and the job is not yet any counter's.
+
+    This drifted. `OSKY` was adopted for web jobs on 2026-08-13, and on 08-19
+    commit 6ba2ace ("feat(store_puller): trigger job pickup via Supabase
+    Realtime") swept the counter generator along with it, hardcoding `OSKY`
+    here. No counter job was created between 08-13 and 09-03, so the three that
+    followed are the only ones carrying the wrong prefix. Nothing parses a job
+    id — there is no startswith or split on one anywhere outside tests — so the
+    prefix is for people to read, which is exactly why it should be right.
+    """
+    try:
+        store_id = (getattr(get_store_config(), "store_id", "") or "").strip().upper()
+    except Exception as exc:                      # never block a counter sale
+        logging.warning("could not read store_id for the job prefix: %s", exc)
+        return "OSP"
+    return store_id or "OSP"
+
+
 def _next_job_id(conn, today_str: str | None = None) -> str:
-    """Next counter-issued job id for today (OSKY-YYYYMMDD-NNNN).
+    """Next counter-issued job id for today (<STORE>-YYYYMMDD-NNNN).
 
     Extracted unchanged from /new-photocopy and /create-job, which computed it
     identically; /new-service is the third caller and a third copy is one too
-    many. The OSP- prefix is in the LIKE because both prefixes share the daily
-    sequence.
+    many. Every legacy prefix is in the LIKE because they all share the daily
+    sequence — the number must not collide with one already issued today under
+    a previous prefix.
     """
     today_str = today_str or datetime.now().strftime("%Y%m%d")
-    row = conn.execute(
-        "SELECT job_id FROM jobs WHERE (job_id LIKE ? OR job_id LIKE ?) ORDER BY job_id DESC LIMIT 1",
-        (f"OSKY-{today_str}-%", f"OSP-{today_str}-%")
-    ).fetchone()
-    seq = (int(row["job_id"].split("-")[-1]) + 1) if row else 1
-    return f"OSKY-{today_str}-{seq:04d}"
+    prefix = _counter_job_prefix()
+    wanted = list(dict.fromkeys((prefix,) + _LEGACY_JOB_PREFIXES))
+
+    # GLOB the exact counter shape, not LIKE '<prefix>-<date>-%'. That pattern
+    # also matches a CLOUD id — 'OSKY-20260906-bcac-8c61' — and the old code
+    # then ran int('8c61'), which raises and takes counter job creation down
+    # with it. It has not fired only because cloud rows rarely reach a store
+    # PC's SQLite; widening the prefix list without this would make it likelier.
+    clause = " OR ".join("job_id GLOB ?" for _ in wanted)
+    rows = conn.execute(
+        f"SELECT job_id FROM jobs WHERE {clause}",
+        tuple(f"{p}-{today_str}-[0-9][0-9][0-9][0-9]" for p in wanted)
+    ).fetchall()
+
+    # Max over the sequence itself. Ordering by job_id would compare the whole
+    # string, so 'OSP-…-0002' sorts above 'OSKY-…-0009' on the P alone and the
+    # day would reissue 0003 over a number already given out.
+    seq = max((int(r["job_id"].rsplit("-", 1)[-1]) for r in rows), default=0) + 1
+    return f"{prefix}-{today_str}-{seq:04d}"
 
 
 def handle_new_service(body: dict) -> dict:
