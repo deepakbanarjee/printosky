@@ -1416,6 +1416,41 @@ def _mark_webhook_processed(event_id: str, handler: str) -> bool:
         return True  # fail-open: don't drop real events on a DB hiccup
 
 
+def _record_ad_click(sender: str, wamid: str, referral: dict) -> None:
+    """Persist a click-to-WhatsApp arrival, and alert loudly if it cannot be.
+
+    Meta attaches `referral` to the first message after an ad click and never
+    sends it again -- there is no backfill and no second chance. A click lost
+    here is an ad we paid for whose outcome can never be traced, so this is one
+    of the few places in the webhook where failure must reach a human rather
+    than a log line (docs/FAIL_LOUD.md).
+
+    Never raises: an attribution problem must not cost us the customer's actual
+    message, which is handled by the dispatch immediately below the call site.
+    """
+    source_id = (referral or {}).get("source_id") or "unknown"
+    try:
+        from db_cloud import record_ad_click
+        if record_ad_click(sender, wamid, referral):
+            logger.info("Ad click recorded: %s from ad %s", sender, source_id)
+            return
+        detail = "recorder declined the payload"
+    except Exception as exc:
+        detail = str(exc)
+
+    logger.error("Ad click NOT recorded for %s (ad %s): %s", sender, source_id, detail)
+    try:
+        _alert_ops(
+            f"Ad click not recorded ({sender})",
+            f"\u26a0\ufe0f A click-to-WhatsApp ad click from {sender} (ad {source_id}) "
+            f"could not be recorded in full: {detail}\n\n"
+            f"Meta does not resend this -- attribution for this click is lost. "
+            f"Check SUPABASE keys and that SCHEMA_v42 has been applied.",
+        )
+    except Exception as exc:
+        logger.error("ad-click alert itself failed for %s: %s", sender, exc)
+
+
 def _process_meta_webhook(data: dict) -> None:
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
@@ -1448,6 +1483,14 @@ def _process_meta_webhook(data: dict) -> None:
                 sender   = msg.get("from", "")
                 msg_type = msg.get("type", "")
                 logger.info(f"Meta message from {sender}: type={msg_type}")
+
+                # Click-to-WhatsApp ad arrival. Meta hangs `referral` off the
+                # first message after the tap, whatever that message turns out
+                # to be, so this sits above the type dispatch: an ad click that
+                # opens with a photo or a button tap is worth exactly as much as
+                # one that opens with "Hi".
+                if msg.get("referral"):
+                    _record_ad_click(sender, msg.get("id", ""), msg["referral"])
 
                 if msg_type == "text":
                     text = (msg.get("text") or {}).get("body", "").strip()

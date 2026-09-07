@@ -536,6 +536,66 @@ def record_wa_message_cost(wamid: str, recipient: str | None, status: str | None
         logger.warning("record_wa_message_cost error for %s: %s", wamid, exc)
 
 
+
+def record_ad_click(phone: str, wamid: str, referral: dict,
+                    channel: str = "whatsapp") -> bool:
+    """Store a click-to-WhatsApp arrival and stamp first touch on the contact.
+
+    Meta attaches `referral` to the first message after someone taps a
+    click-to-WhatsApp ad. It carries the ad id (`source_id`) and the click id
+    (`ctwa_clid`) -- the only link between money spent on an ad and anything
+    that customer later buys. Meta sends it once and never resends it.
+
+    Unlike the best-effort recorders around it, this one lets the caller know it
+    failed: errors propagate and api/index.py alerts on them. A cost row can be
+    reconstructed from Meta's own billing later; a dropped referral cannot be
+    reconstructed from anywhere.
+
+    Returns True when the click was stored.
+    """
+    if not phone or not referral:
+        return False
+
+    row = {
+        "phone":       phone,
+        "channel":     channel,
+        "wamid":       wamid or None,
+        "source_type": referral.get("source_type"),
+        "source_id":   referral.get("source_id"),
+        "source_url":  referral.get("source_url"),
+        "ctwa_clid":   referral.get("ctwa_clid"),
+        "headline":    referral.get("headline"),
+        "body":        referral.get("body"),
+    }
+    client = _client()
+
+    # The webhook's wamid guard already drops Meta's retries, so this upsert is
+    # a second line of defence rather than the primary one -- and the reason
+    # wamid is UNIQUE. A referral with no wamid still gets recorded: an
+    # unattributed duplicate beats a lost click.
+    if wamid:
+        client.table("ad_clicks").upsert(row, on_conflict="wamid").execute()
+    else:
+        client.table("ad_clicks").insert(row).execute()
+
+    # Ensure the contact row exists before stamping it. Sending only `phone`
+    # cannot clear a name already stored by upsert_contact().
+    client.table("whatsapp_contacts").upsert(
+        {"phone": phone}, on_conflict="phone"
+    ).execute()
+
+    # is_("first_ad_at", "null") makes this a no-op on every later click, so the
+    # ad that actually won the customer keeps the credit -- and it does so in
+    # one statement, with no read-then-write race against a second click.
+    client.table("whatsapp_contacts").update({
+        "first_ad_source_id": row["source_id"],
+        "first_ctwa_clid":    row["ctwa_clid"],
+        "first_ad_at":        datetime.now(timezone.utc).isoformat(),
+    }).eq("phone", phone).is_("first_ad_at", "null").execute()
+
+    return True
+
+
 # The webhook logs the bot's auto-reply a few hundred ms BEFORE the inbound that
 # triggered it (clock skew between Meta's inbound timestamp and the server's
 # outbound send time). A strict "outbound after inbound" check therefore flags

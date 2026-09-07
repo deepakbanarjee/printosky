@@ -20,7 +20,7 @@ This document is the canonical schema reference for the shared Supabase database
 
 | | |
 |---|---|
-| Tables | 34 |
+| Tables | 35 |
 | Views | 2 (`epson_daily`, `konica_daily`) |
 | Foreign keys | **1** (`referral_credits.referrer_code → referrers.code`) |
 | Tables without RLS | **2** (both 18 Aug incident backups) — see [Security gaps](#security-gaps) |
@@ -318,6 +318,32 @@ Phone → name map, last-seen timestamp.
 | `name` | text | YES | — | from Meta profile.name |
 | `last_seen_at` | timestamptz | YES | — | last inbound message time |
 | `created_at` | timestamptz | NO | `now()` | |
+| `first_ad_source_id` | text | YES | — | **v42** — Meta ad id of the ad that first brought them in |
+| `first_ctwa_clid` | text | YES | — | v42 — click id of that first ad click |
+| `first_ad_at` | timestamptz | YES | — | v42 — when it happened. NULL = never arrived from an ad. Written once, never overwritten |
+
+#### `ad_clicks` 🟦
+Click-to-WhatsApp ad arrivals — the join between Meta ad spend and revenue.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | bigserial | NO | sequence | **PK** |
+| `phone` | text | NO | — | WhatsApp number, or IG-scoped sender id |
+| `channel` | text | NO | `'whatsapp'` | `whatsapp` / `instagram` — only WhatsApp is wired up |
+| `wamid` | text | YES | — | **unique** — the message that carried the referral |
+| `source_type` | text | YES | — | `ad` / `post` |
+| `source_id` | text | YES | — | Meta ad id — groups clicks per ad |
+| `source_url` | text | YES | — | |
+| `ctwa_clid` | text | YES | — | click id; the only handle the Conversions API accepts |
+| `headline` / `body` | text | YES | — | ad copy as served to this person |
+| `clicked_at` | timestamptz | NO | `now()` | |
+
+Written by `_process_meta_webhook` from the `referral` object Meta attaches to
+the first message after an ad click. Meta sends it **once** and never resends
+it, so a failed write alerts rather than logging — see
+[FAIL_LOUD.md](FAIL_LOUD.md). Migration:
+[`api/migrations/SCHEMA_v42_ad_attribution.sql`](../api/migrations/SCHEMA_v42_ad_attribution.sql).
+Store PCs never read this table; it is cloud-only.
 
 #### `customer_profiles` 🟦
 Last-used selections per phone — pre-fills bot prompts.

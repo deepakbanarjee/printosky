@@ -15,10 +15,10 @@
 # DO NOT hand-edit to silence drift errors -- fix the migration or the code,
 # not the manifest.
 
-version: 29
-description: Live schema after SCHEMA_v29 (processed_webhooks RLS) plus the DTP
-  transcription tables. 48 tables, all RLS-enabled
-  (excluding two ignored incident backups, which are not).
+version: 42
+description: Live schema after SCHEMA_v42 (click-to-WhatsApp ad attribution),
+  built on the v29 snapshot plus the DTP transcription tables. 49 tables, all
+  RLS-enabled (excluding two ignored incident backups, which are not).
 
 # Tables with RLS DISABLED -- flagged for security review. As of 2026-06-08
 # every public table has RLS enabled (TASK-023 + TASK-024 closed the last gaps),
@@ -184,6 +184,53 @@ tables:
       phone:
         default: null
         nullable: false
+        type: text
+    rls: true
+  ad_clicks:
+    columns:
+      body:
+        default: null
+        nullable: true
+        type: text
+      channel:
+        default: '''whatsapp''::text'
+        nullable: false
+        type: text
+      clicked_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      ctwa_clid:
+        default: null
+        nullable: true
+        type: text
+      headline:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('ad_clicks_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      phone:
+        default: null
+        nullable: false
+        type: text
+      source_id:
+        default: null
+        nullable: true
+        type: text
+      source_type:
+        default: null
+        nullable: true
+        type: text
+      source_url:
+        default: null
+        nullable: true
+        type: text
+      wamid:
+        default: null
+        nullable: true
         type: text
     rls: true
   b2b_clients:
@@ -2484,6 +2531,18 @@ tables:
         default: now()
         nullable: false
         type: timestamp with time zone
+      first_ad_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      first_ad_source_id:
+        default: null
+        nullable: true
+        type: text
+      first_ctwa_clid:
+        default: null
+        nullable: true
+        type: text
       last_seen_at:
         default: null
         nullable: true
