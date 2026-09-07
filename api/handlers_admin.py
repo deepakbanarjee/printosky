@@ -893,6 +893,33 @@ def _handle_admin_divya_ledger(h) -> None:
         _json_response(h, 500, {"error": str(exc)})
 
 
+def _handle_admin_ads_report(h) -> None:
+    """GET /admin/ads/report[?days=90] — per-ad clicks and attributed revenue.
+
+    Admin-password auth rather than staff PIN: this is the only place revenue
+    is broken out per marketing spend, which is owner-level, not counter-level.
+
+    Spend is not in the response because it is not in this database -- Meta
+    bills us and never sends it. The console shows revenue per click next to a
+    reminder to divide by cost per result from Ads Manager.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
+    try:
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(h.path).query)
+        try:
+            days = max(1, min(365, int((qs.get("days") or ["90"])[0])))
+        except ValueError:
+            days = 90
+        from db_cloud import ad_report
+        _json_response(h, 200, ad_report(days=days))
+    except Exception as exc:
+        logger.error("ads-report error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
 def _handle_admin_dispatch_sheet(h) -> None:
     """GET /admin/book-orders/dispatch-sheet — printable pick list + packing slips.
 
