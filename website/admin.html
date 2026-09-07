@@ -852,6 +852,21 @@
   #referrals-tab th.sortable.sort-desc .arr { opacity:1; color:var(--accent); }
   #referrals-tab .ctrl-btn { padding:6px 14px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; cursor:pointer; font-size:.7rem; margin-left:6px; }
   #referrals-tab .ctrl-btn.active { background:var(--accent); color:#001a2e; border-color:var(--accent); }
+
+  #ads-tab { display:none; padding:12px 16px; }
+  #ads-tab table { width:100%; border-collapse:collapse; font-family:var(--mono); font-size:.78rem; }
+  #ads-tab th { text-align:left; padding:10px 8px; border-bottom:1px solid var(--border); color:var(--muted); font-weight:500; text-transform:uppercase; letter-spacing:.04em; font-size:.62rem; }
+  #ads-tab td { padding:10px 8px; border-bottom:1px solid #14202a; }
+  #ads-tab tr:hover { background:#0f1820; }
+  #ads-tab .ref-stat { display:inline-block; padding:8px 14px; background:var(--card); border:1px solid var(--border); border-radius:6px; margin-right:10px; }
+  #ads-tab .ref-stat .v { font-size:1.2rem; color:var(--accent); font-weight:600; display:block; }
+  #ads-tab .ref-stat .l { font-size:.65rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  #ads-tab .money { color:var(--green); font-weight:600; }
+  #ads-tab .zero { color:var(--muted); }
+  #ads-tab .ctrl-btn { padding:6px 14px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; cursor:pointer; font-size:.7rem; margin-left:6px; }
+  #ads-tab .ctrl-btn.active { background:var(--accent); color:#001a2e; border-color:var(--accent); }
+  #ads-tab .note { color:var(--muted); font-size:.68rem; margin-top:14px; line-height:1.5; }
+  #ads-tab .headline { color:var(--muted); font-size:.68rem; display:block; margin-top:2px; }
   #referrer-detail { margin-top:18px; padding:16px; background:var(--card); border:1px solid var(--border); border-radius:8px; display:none; }
   #referrer-detail h3 { color:var(--accent); font-family:var(--mono); font-size:.95rem; margin:0 0 8px; }
   #referrer-detail .meta { color:var(--muted); font-size:.7rem; margin-bottom:12px; }
@@ -1340,6 +1355,7 @@
     <button class="conv-tab-btn"        id="tab-referrals" onclick="switchTab('referrals')">Referrals</button>
     <button class="conv-tab-btn"        id="tab-pb-orders" onclick="switchTab('pb-orders')">Project Orders</button>
     <button class="conv-tab-btn"        id="tab-book-orders" onclick="switchTab('book-orders')">Book Orders</button>
+    <button class="conv-tab-btn"        id="tab-ads"       onclick="switchTab('ads')">Ads</button>
   </div>
 
   <main>
@@ -1620,6 +1636,53 @@
   </div>
 
   <!-- Referrals Tab Panel -->
+  <div id="ads-tab">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div id="ads-stats">
+        <span class="ref-stat"><span class="v" id="ads-stat-clicks">0</span><span class="l">Ad clicks</span></span>
+        <span class="ref-stat"><span class="v" id="ads-stat-customers">0</span><span class="l">People</span></span>
+        <span class="ref-stat"><span class="v" id="ads-stat-converted">0</span><span class="l">Ordered</span></span>
+        <span class="ref-stat"><span class="v" id="ads-stat-revenue">Rs.0</span><span class="l">Revenue</span></span>
+      </div>
+      <div>
+        <button class="ctrl-btn" onclick="loadAdsReport(30)">30d</button>
+        <button class="ctrl-btn active" id="ads-win-90" onclick="loadAdsReport(90)">90d</button>
+        <button class="ctrl-btn" onclick="loadAdsReport(365)">1y</button>
+        <button class="ctrl-btn" onclick="loadAdsReport(_adsDays)">&#8635; Refresh</button>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Ad</th>
+          <th style="text-align:right">Clicks</th>
+          <th style="text-align:right">People</th>
+          <th style="text-align:right">Ordered</th>
+          <th style="text-align:right">Print</th>
+          <th style="text-align:right">Books</th>
+          <th style="text-align:right">Revenue</th>
+          <th style="text-align:right">Per click</th>
+          <th>Last click</th>
+        </tr>
+      </thead>
+      <tbody id="ads-tbody">
+        <tr><td colspan="9" style="padding:24px;color:var(--muted);text-align:center">Loading&#8230;</td></tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <b>Per click</b> is revenue attributed so far, not profit. Meta bills us and
+      never sends spend to this database, so compare it against <b>cost per result</b>
+      in Ads Manager yourself &#8212; an ad is paying for itself only when per-click
+      revenue clears that number.<br>
+      Revenue is credited to the <b>first</b> ad a customer ever clicked, and only
+      counts orders placed <b>after</b> that click, so an existing customer who taps
+      an ad does not hand it their whole history. Anything they spent beforehand is
+      excluded from every total.<br>
+      Only click-to-WhatsApp arrivals are recorded. Instagram DMs reach a different
+      webhook and are not counted here yet.
+    </div>
+  </div>
+
   <div id="referrals-tab">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <div id="ref-stats">
@@ -5648,6 +5711,7 @@ async function switchTab(tab) {
   document.getElementById("conv-panel").style.display     = tab === "conv"       ? "block" : "none";
   document.getElementById("academic-tab").style.display   = tab === "academic"   ? "block" : "none";
   document.getElementById("referrals-tab").style.display  = tab === "referrals"  ? "block" : "none";
+  document.getElementById("ads-tab").style.display        = tab === "ads"        ? "block" : "none";
   document.getElementById("pb-orders-tab").style.display  = tab === "pb-orders"  ? "block" : "none";
   document.getElementById("opq-tab").style.display        = tab === "opq"        ? "block" : "none";
   document.getElementById("book-orders-tab").style.display = tab === "book-orders" ? "block" : "none";
@@ -5655,6 +5719,7 @@ async function switchTab(tab) {
   document.getElementById("tab-conv").classList.toggle("active",       tab === "conv");
   document.getElementById("tab-academic").classList.toggle("active",   tab === "academic");
   document.getElementById("tab-referrals").classList.toggle("active",  tab === "referrals");
+  document.getElementById("tab-ads").classList.toggle("active",        tab === "ads");
   document.getElementById("tab-pb-orders").classList.toggle("active",  tab === "pb-orders");
   document.getElementById("tab-opq").classList.toggle("active",        tab === "opq");
   document.getElementById("tab-book-orders").classList.toggle("active", tab === "book-orders");
@@ -5673,6 +5738,7 @@ async function switchTab(tab) {
 
   if (tab === "academic")   { loadAcademicOrders(); }
   if (tab === "referrals")  { loadReferralsLeaderboard(); }
+  if (tab === "ads")        { loadAdsReport(_adsDays); }
   if (tab === "pb-orders")  { loadPBOrders(); }
   if (tab === "opq")        { loadOperatorQueue(); }
   if (tab === "book-orders"){ loadBookOrders(); }
@@ -5683,6 +5749,63 @@ let _refRowsRaw = [];           // unfiltered rows from server
 let _refSortKey = "balance_inr"; // current sort column
 let _refSortDir = "desc";        // "asc" | "desc"
 let _refHideTest = true;         // default ON
+
+let _adsDays = 90;
+
+async function loadAdsReport(days) {
+  _adsDays = days || 90;
+  document.querySelectorAll("#ads-tab .ctrl-btn").forEach(b => b.classList.remove("active"));
+  const winBtn = document.getElementById("ads-win-" + _adsDays);
+  if (winBtn) winBtn.classList.add("active");
+
+  const tbody = document.getElementById("ads-tbody");
+  tbody.innerHTML = '<tr><td colspan="9" style="padding:24px;color:var(--muted);text-align:center">Loading&#8230;</td></tr>';
+  try {
+    const r = await fetch(`${ACAD_API}/admin/ads/report?days=${_adsDays}`, {
+      headers: { 'X-Admin-Password': _convPw() }
+    });
+    if (!r.ok) {
+      tbody.innerHTML = `<tr><td colspan="9" style="padding:24px;color:var(--red);text-align:center">${r.status === 403 ? "Admin password required" : "Failed to load (HTTP " + r.status + ")"}</td></tr>`;
+      return;
+    }
+    const d = await r.json();
+    const t = d.totals || {};
+    document.getElementById("ads-stat-clicks").textContent    = t.clicks || 0;
+    document.getElementById("ads-stat-customers").textContent = t.customers || 0;
+    document.getElementById("ads-stat-converted").textContent = t.converted || 0;
+    document.getElementById("ads-stat-revenue").textContent   = "Rs." + Math.round(t.revenue || 0);
+
+    // A failed fetch inside ad_report returns empty totals plus _error. Say so
+    // rather than rendering "no ad clicks yet", which reads as a working
+    // pipeline with nothing in it -- the exact silence the fail-loud rule bans.
+    if (d._error) {
+      tbody.innerHTML = `<tr><td colspan="9" style="padding:24px;color:var(--red);text-align:center">Report failed: ${escHtml(d._error)}</td></tr>`;
+      return;
+    }
+    const ads = d.ads || [];
+    if (!ads.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="padding:24px;color:var(--muted);text-align:center">No ad clicks recorded in this window. Capture started 7 Sep 2026 &#8212; clicks before that were never recorded.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = ads.map(a => {
+      const rev = a.revenue || 0;
+      const pre = a.pre_click_revenue || 0;
+      return `<tr>
+        <td>${escHtml(a.source_id || "unknown")}${a.headline ? `<span class="headline">${escHtml(a.headline)}</span>` : ""}</td>
+        <td style="text-align:right">${a.clicks}</td>
+        <td style="text-align:right">${a.customers}</td>
+        <td style="text-align:right" class="${a.converted ? "" : "zero"}">${a.converted}</td>
+        <td style="text-align:right" class="${a.print_revenue ? "" : "zero"}">Rs.${Math.round(a.print_revenue || 0)}<span class="headline">${a.print_jobs} job${a.print_jobs === 1 ? "" : "s"}</span></td>
+        <td style="text-align:right" class="${a.book_revenue ? "" : "zero"}">Rs.${Math.round(a.book_revenue || 0)}<span class="headline">${a.book_orders} order${a.book_orders === 1 ? "" : "s"}</span></td>
+        <td style="text-align:right" class="${rev ? "money" : "zero"}">Rs.${Math.round(rev)}${pre ? `<span class="headline">+Rs.${Math.round(pre)} before click, excluded</span>` : ""}</td>
+        <td style="text-align:right" class="${rev ? "money" : "zero"}">Rs.${(a.revenue_per_click || 0).toFixed(2)}</td>
+        <td>${a.last_click ? escHtml(String(a.last_click).slice(0, 16).replace("T", " ")) : "&#8212;"}</td>
+      </tr>`;
+    }).join("");
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="9" style="padding:24px;color:var(--red);text-align:center">Network error: ${escHtml(e.message)}</td></tr>`;
+  }
+}
 
 async function loadReferralsLeaderboard() {
   const tbody = document.getElementById("ref-tbody");

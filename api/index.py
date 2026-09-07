@@ -2322,6 +2322,7 @@ from api.handlers_admin import (  # noqa: E402
     _handle_admin_contact_pin,
     _handle_admin_conversations,
     _handle_admin_divya_ledger,
+    _handle_admin_ads_report,
     _handle_admin_format_fixer,
     _handle_admin_health_models,
     _handle_admin_operator_queue_claim,
@@ -3563,6 +3564,10 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # Divya teacher settlement statement (admin-only).
+        if self.path == "/admin/ads/report" or self.path.startswith("/admin/ads/report?"):
+            _handle_admin_ads_report(self)
+            return
+
         if self.path == "/admin/book-orders/divya-ledger" or self.path.startswith("/admin/book-orders/divya-ledger?"):
             _handle_admin_divya_ledger(self)
             return

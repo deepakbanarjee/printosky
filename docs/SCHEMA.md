@@ -345,6 +345,13 @@ it, so a failed write alerts rather than logging — see
 [`api/migrations/SCHEMA_v42_ad_attribution.sql`](../api/migrations/SCHEMA_v42_ad_attribution.sql).
 Store PCs never read this table; it is cloud-only.
 
+Read back by `db_cloud.ad_report()` behind `GET /admin/ads/report?days=N`
+(admin-password auth), which powers the **Ads** tab on the admin console.
+Revenue is credited first-touch and only forwards — a customer belongs to the
+first ad they ever clicked, and only orders dated at or after that click count,
+so an existing customer who taps an ad cannot hand it their order history.
+Spend is deliberately absent: Meta never sends it to this database.
+
 #### `customer_profiles` 🟦
 Last-used selections per phone — pre-fills bot prompts.
 

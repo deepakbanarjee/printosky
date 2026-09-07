@@ -1846,6 +1846,184 @@ def create_replacement_order(order_code: str, parent_order_code: str,
 DIVYA_LEDGER_STATUSES = ("confirmed", "dispatched", "delivered")
 
 
+# ── Ad attribution report (SCHEMA v42) ───────────────────────────────────────
+# Statuses that mean a book order is real money, reused by the ad report.
+AD_REPORT_SOLD_STATUSES = DIVYA_LEDGER_STATUSES
+
+
+def _ad_parse(ts) -> "datetime | None":
+    """Parse the three timestamp shapes this schema carries into aware UTC.
+
+    ad_clicks.clicked_at and book_orders.created_at are timestamptz;
+    jobs.received_at is an ISO string left over from SQLite and is sometimes
+    naive. A naive value is read as UTC rather than dropped -- excluding a job
+    would silently understate an ad, which is the error that matters here.
+    """
+    if not ts:
+        return None
+    try:
+        d = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def _compute_ad_report(clicks: list, jobs: list, book_orders: list) -> dict:
+    """Aggregate ad clicks into per-ad revenue. Pure: no DB, no clock.
+
+    ATTRIBUTION IS FIRST TOUCH, AND ONLY FORWARDS.
+    A customer is credited to the FIRST ad they ever clicked, and only revenue
+    dated at or after that click counts. Both halves matter:
+
+      * First touch, because the ad that introduced someone earns the customer;
+        crediting the most recent click would let a cheap remarketing ad harvest
+        a customer an expensive prospecting ad actually won.
+      * Only forwards, because a long-standing customer who happens to tap an ad
+        would otherwise hand that ad their entire order history on day one and
+        make a useless ad look like the best one we run.
+
+    Revenue that predates the click is still returned as `pre_click_revenue`,
+    per ad -- not added to any total, but visible, so a suspiciously quiet ad
+    can be told apart from one whose audience were already customers.
+    """
+    first: dict = {}          # phone -> (clicked_at, source_id)
+    ads: dict = {}            # source_id -> accumulator
+
+    for c in sorted(clicks, key=lambda r: str(r.get("clicked_at") or "")):
+        phone = (c.get("phone") or "").strip()
+        when = _ad_parse(c.get("clicked_at"))
+        if not phone or when is None:
+            continue
+        sid = c.get("source_id") or "unknown"
+        ad = ads.setdefault(sid, {
+            "source_id": sid,
+            "headline": c.get("headline"),
+            "channel": c.get("channel") or "whatsapp",
+            "clicks": 0, "customers": set(), "converted": set(),
+            "print_jobs": 0, "print_revenue": 0.0,
+            "book_orders": 0, "book_revenue": 0.0,
+            "pre_click_revenue": 0.0,
+            "first_click": None, "last_click": None,
+        })
+        ad["clicks"] += 1
+        ad["customers"].add(phone)
+        if ad["first_click"] is None:
+            ad["first_click"] = when
+        ad["last_click"] = when
+        if phone not in first:
+            first[phone] = (when, sid)
+
+    def _credit(phone, when, amount, kind):
+        """Add one order's money to whichever ad first brought `phone` in."""
+        entry = first.get(phone)
+        if entry is None or when is None or amount <= 0:
+            return
+        clicked_at, sid = entry
+        ad = ads[sid]
+        if when < clicked_at:
+            ad["pre_click_revenue"] += amount
+            return
+        ad[f"{kind}_revenue"] += amount
+        ad["print_jobs" if kind == "print" else "book_orders"] += 1
+        ad["converted"].add(phone)
+
+    for j in jobs:
+        _credit((j.get("sender") or "").strip(),
+                _ad_parse(j.get("received_at")),
+                float(j.get("amount_collected") or 0), "print")
+
+    for b in book_orders:
+        if (b.get("status") or "") not in AD_REPORT_SOLD_STATUSES:
+            continue
+        _credit((b.get("phone") or "").strip(),
+                _ad_parse(b.get("created_at")),
+                float(b.get("grand_total") or 0), "book")
+
+    out = []
+    for ad in ads.values():
+        revenue = round(ad["print_revenue"] + ad["book_revenue"], 2)
+        customers = len(ad["customers"])
+        out.append({
+            "source_id": ad["source_id"],
+            "headline": ad["headline"],
+            "channel": ad["channel"],
+            "clicks": ad["clicks"],
+            "customers": customers,
+            "converted": len(ad["converted"]),
+            "print_jobs": ad["print_jobs"],
+            "print_revenue": round(ad["print_revenue"], 2),
+            "book_orders": ad["book_orders"],
+            "book_revenue": round(ad["book_revenue"], 2),
+            "revenue": revenue,
+            "pre_click_revenue": round(ad["pre_click_revenue"], 2),
+            # What one click has been worth so far. Compare against cost per
+            # result in Ads Manager: Meta bills us, so spend is not in this DB
+            # and this deliberately does not pretend to know it.
+            "revenue_per_click": round(revenue / ad["clicks"], 2) if ad["clicks"] else 0.0,
+            "first_click": ad["first_click"].isoformat() if ad["first_click"] else None,
+            "last_click": ad["last_click"].isoformat() if ad["last_click"] else None,
+        })
+    out.sort(key=lambda a: (-a["revenue"], -a["clicks"], a["source_id"]))
+
+    return {
+        "ads": out,
+        "totals": {
+            "ads": len(out),
+            "clicks": sum(a["clicks"] for a in out),
+            "customers": len(first),
+            "converted": sum(a["converted"] for a in out),
+            "print_jobs": sum(a["print_jobs"] for a in out),
+            "book_orders": sum(a["book_orders"] for a in out),
+            "revenue": round(sum(a["revenue"] for a in out), 2),
+        },
+    }
+
+
+def ad_report(days: int = 90) -> dict:
+    """Per-ad clicks and attributed revenue for the last `days` of ad clicks.
+
+    Spend is NOT here: Meta bills us and never sends it to this database, so
+    cost per order is a division the reader does against Ads Manager. Returning
+    a made-up spend would be worse than returning none.
+    """
+    empty = {"ads": [], "totals": {"ads": 0, "clicks": 0, "customers": 0,
+                                   "converted": 0, "print_jobs": 0,
+                                   "book_orders": 0, "revenue": 0.0},
+             "window_days": days, "generated_at": None}
+    try:
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        sb = _client()
+        clicks = (sb.table("ad_clicks")
+                    .select("phone,channel,source_id,headline,clicked_at")
+                    .gte("clicked_at", since)
+                    .order("clicked_at").execute().data or [])
+        if not clicks:
+            return {**empty, "generated_at": datetime.now(timezone.utc).isoformat()}
+
+        # Only the clickers' own rows: the customer set is tiny next to the
+        # jobs table, so filter server-side rather than pulling every job.
+        phones = sorted({(c.get("phone") or "").strip() for c in clicks if c.get("phone")})
+        # in_() with an empty list builds `sender=in.()`, which PostgREST rejects.
+        # Clicks with no phone are unattributable anyway, so there is nothing to
+        # look up -- go straight to the aggregation with no orders.
+        jobs, books = [], []
+        if phones:
+            jobs = (sb.table("jobs")
+                      .select("sender,amount_collected,received_at")
+                      .in_("sender", phones).execute().data or [])
+            books = (sb.table("book_orders")
+                       .select("phone,grand_total,status,created_at")
+                       .in_("phone", phones).execute().data or [])
+
+        report = _compute_ad_report(clicks, jobs, books)
+        report["window_days"] = days
+        report["generated_at"] = datetime.now(timezone.utc).isoformat()
+        return report
+    except Exception as exc:
+        logger.error("ad_report error: %s", exc)
+        return {**empty, "_error": str(exc)}
+
+
 def divya_ledger(include_settled: bool = False,
                  date_from: str | None = None,
                  date_to: str | None = None) -> dict:
