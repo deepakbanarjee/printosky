@@ -402,6 +402,35 @@ And the two paths disagree: the cloud fallback has no such guard, so the
 identical unpaid-looking job succeeds through the cloud. One of them is wrong
 about what a counter job must carry.
 
+### Backfill: the three paid WhatsApp jobs assigned to OSP
+
+Done 2026-09-08 01:51 IST, on the owner's instruction and with the consequence
+stated first. `assigned_store_id` set to `OSP` on the only three paid jobs that
+had none:
+
+| Job | Received | Paid | Pickup | Has a file? |
+|---|---|---|---|---|
+| `OSP-20260725-3907-3022-a51d62` | 25 Jul | ₹10 | `P-ZCCK` | yes |
+| `OSP-20260725-3907-0058-e918fc` | 25 Jul | ₹3 | `P-3PSU` | yes |
+| `OSKY-20260905-2033-1326-e8974b` | 05 Sep | ₹3 | `P-KK46` | **no — empty `file_url`** |
+
+Scoped on `razorpay_payment_id IS NOT NULL AND assigned_store_id IS NULL AND
+status='Paid' AND store_id='OSP'`, so it could not reach an unpaid job or
+another store's. **`paid_without_store` is now 0.**
+
+**This doubles as the end-to-end proof of P3-2.** If the two July jobs print
+when OSP next starts, `assigned_store_id` was the whole blocker and the
+diagnosis is confirmed on paper rather than by reading code. If they do not,
+something else is wrong and this run is not finished with the puller.
+
+They will not print tonight: OSP was last seen **364 minutes ago** with no live
+lease — the shop is closed. Expect two sheets shortly after the box comes up,
+for customers who paid in July. Worth a word to whoever opens.
+
+The third cannot print whatever happens: its `file_url` is empty, which is the
+separate webhook fault recorded above. It needs the customer to resend, or the
+21 July copy of the same document already in the bucket.
+
 ### Before the paper: which queue simplex uses, and how OSP is wired
 
 **Decided (2026-09-04): OSP's simplex queue is the original
