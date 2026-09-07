@@ -190,14 +190,42 @@ Error`, seconds apart.
 
 Two separate blockers, and they are not the same age:
 
-1. **`assigned_store_id` is NULL** — on this job and on **both** WhatsApp
-   Razorpay jobs from 25 July. `store_puller.fetch_assigned_paid()` filters
-   `.eq("assigned_store_id", store_id)` (`store_puller.py:149`) and a NULL
-   never matches, so the puller has never been able to see a job on this path.
-   Both July customers paid (₹3 and ₹10), both got pickup codes, and both rows
-   still sit at `Paid` with nothing printed. **Six weeks old, not a regression**
-   — Rule 1 holds, nothing this week broke it. It has simply never worked and
-   was never watched closely enough to notice.
+1. **`assigned_store_id` is NULL — because it is set behind a feature flag that
+   has never been on.** `store_puller.fetch_assigned_paid()` filters
+   `.eq("assigned_store_id", store_id)` (`store_puller.py:149`) and a NULL never
+   matches, so the puller has never been able to see a job on this path.
+
+   The only writer for a WhatsApp job is `db_cloud.update_job_paid()`
+   (`db_cloud.py:203-218`), inside
+
+   ```python
+   if os.environ.get("MULTISTORE_ROUTING_ENABLED", "").lower() in ("1","true","yes"):
+       ...
+       if decision.chosen_store_id:
+           update_payload["assigned_store_id"] = decision.chosen_store_id
+   ```
+
+   **It has never executed.** `_routing_record()` is called unconditionally
+   inside that block, before a store is chosen, and `routing_decisions` holds
+   **0 rows**. The flag is off on Vercel, and with it off a paid WhatsApp job
+   never becomes printable.
+
+   The order-v2 path does not use the flag at all — `handlers_order.py` stamps
+   `assigned_store_id` **directly at creation** (lines 135, 331, 427, 645, 811),
+   with the comment at line 187 saying so: *"we stamp assigned_store_id directly
+   (no distance/capacity engine)"*. That is the whole difference:
+
+   | Path | `assigned_store_id` | Jobs | Printed |
+   |---|---|---|---|
+   | `web` → OSP | stamped at creation | 72 | 62 |
+   | `web` → PRINTK | stamped at creation | 40 | 33 |
+   | WhatsApp webhook | flag-gated, never set | 104 | **0** |
+
+   Most of those 104 were never paid, so were never eligible anyway — but of
+   the three that *were* paid, none could be pulled, and none was. **Six weeks
+   old, not a regression** — Rule 1 holds, nothing this week broke it. A flag
+   added as a revert switch quietly took one customer path's printability with
+   it, and the flag being off is indistinguishable from the feature working.
 2. **`file_url` is an empty string** (length 0) on today's job. The two July
    rows carry real 132- and 143-character Storage URLs, so this one is
    *different from* the old fault, not another instance of it. `select_pullable`
