@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Printosky — Campus Delivery Poster</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Syne:wght@700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0F172A;
+    --orange: #F0571E;
+    --amber: #FFB703;
+    --paper: #FFFFFF;
+    --light-gray: #F1F5F9;
+    --mid: #475569;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: #e2e8f0; font-family: 'Plus Jakarta Sans', sans-serif; }
+
+  .page {
+    width: 1240px;
+    height: 1754px;
+    position: relative;
+    overflow: hidden;
+    background: #FFFFFF;
+    padding: 80px 70px 60px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  /* Top & Bottom Accent Bars */
+  .top-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 16px;
+    background: linear-gradient(90deg, var(--orange) 0%, #E63946 50%, var(--amber) 100%);
+  }
+
+  /* Header Section */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid var(--light-gray);
+    padding-bottom: 28px;
+  }
+  .logo-text {
+    font-family: 'Syne', sans-serif;
+    font-weight: 900;
+    font-size: 44px;
+    color: var(--ink);
+    letter-spacing: -1.5px;
+  }
+  .logo-text span { color: var(--orange); }
+  .tagline-badge {
+    background: var(--light-gray);
+    color: var(--mid);
+    padding: 8px 18px;
+    border-radius: 100px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* Hero Headline */
+  .hero {
+    margin-top: 40px;
+    text-align: center;
+  }
+  .kicker {
+    display: inline-block;
+    background: #FFFBEB;
+    color: #B45309;
+    border: 2px solid #FDE68A;
+    padding: 8px 24px;
+    border-radius: 100px;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 24px;
+  }
+  .headline {
+    font-family: 'Syne', sans-serif;
+    font-weight: 900;
+    font-size: 78px;
+    line-height: 1.04;
+    letter-spacing: -3px;
+    color: var(--ink);
+  }
+  .headline em {
+    font-style: normal;
+    color: var(--orange);
+  }
+  .subhead {
+    margin-top: 24px;
+    font-size: 26px;
+    color: var(--mid);
+    line-height: 1.4;
+    max-width: 960px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* Core Value Grid */
+  .features-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 40px 0;
+  }
+  .feature-card {
+    background: var(--light-gray);
+    border: 2px solid #E2E8F0;
+    border-radius: 20px;
+    padding: 26px 28px;
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+  }
+  .feature-icon {
+    font-size: 38px;
+    line-height: 1;
+    background: #FFFFFF;
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid #CBD5E1;
+    flex-shrink: 0;
+  }
+  .feature-content h4 {
+    font-family: 'Syne', sans-serif;
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+  .feature-content p {
+    font-size: 18px;
+    color: var(--mid);
+    line-height: 1.35;
+  }
+
+  /* QR Action Banner */
+  .action-box {
+    background: #0F172A;
+    border-radius: 28px;
+    padding: 36px 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.18);
+  }
+  .action-text {
+    color: #FFFFFF;
+    max-width: 620px;
+  }
+  .action-text .step-badge {
+    display: inline-block;
+    background: var(--orange);
+    color: #FFFFFF;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 6px 16px;
+    border-radius: 6px;
+    margin-bottom: 14px;
+  }
+  .action-text h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 40px;
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 12px;
+  }
+  .action-text p {
+    font-size: 20px;
+    color: #94A3B8;
+    line-height: 1.4;
+  }
+  .action-text .wa-number {
+    display: inline-block;
+    margin-top: 14px;
+    font-size: 26px;
+    font-weight: 800;
+    color: #38BDF8;
+  }
+
+  .qr-frame {
+    background: #FFFFFF;
+    padding: 16px;
+    border-radius: 22px;
+    border: 4px solid var(--amber);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    flex-shrink: 0;
+  }
+  .qr-frame img {
+    display: block;
+    width: 250px;
+    height: 250px;
+  }
+  .qr-caption {
+    text-align: center;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--ink);
+    margin-top: 8px;
+  }
+
+  /* Footer */
+  .footer {
+    border-top: 2px solid var(--light-gray);
+    padding-top: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 19px;
+    color: var(--mid);
+    font-weight: 600;
+  }
+  .footer-left strong {
+    color: var(--ink);
+  }
+  .footer-right {
+    color: var(--orange);
+    font-weight: 800;
+    font-size: 22px;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="top-bar"></div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo-text">Print<span>osky</span></div>
+    <div class="tagline-badge">30 km Campus Network &bull; Kerala</div>
+  </div>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="kicker">30 KM Radius Campus Service</div>
+    <h1 class="headline">Skip the Xerox <em>Shop Queue</em>.</h1>
+    <p class="subhead">Send your files on WhatsApp or Web. We print, bind and deliver to your college or hostel across Thrissur.</p>
+  </div>
+
+  <!-- Feature Cards -->
+  <div class="features-grid">
+    
+    <div class="feature-card">
+      <div class="feature-icon">⚡</div>
+      <div class="feature-content">
+        <h4>Skip the Xerox Line</h4>
+        <p>Upload PDF from your hostel bed or classroom. No standing in crowded lines.</p>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📖</div>
+      <div class="feature-content">
+        <h4>Certified Hard Binding</h4>
+        <p>KTU & Calicut Univ spec golden foil embossing, soft binding, and spiral packs.</p>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🛵</div>
+      <div class="feature-content">
+        <h4>Campus & Hostel Drops</h4>
+        <p>Orders pooled to ₹150 get FREE scheduled delivery right to your college/hostel.</p>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🎁</div>
+      <div class="feature-content">
+        <h4>₹20 Credit on Every Invite</h4>
+        <p>Share with classmates and get your own prints covered completely free.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- QR Action Box -->
+  <div class="action-box">
+    <div class="action-text">
+      <div class="step-badge">Instant Quote & Print</div>
+      <h3>Send Your File on WhatsApp</h3>
+      <p>Send your PDF & requirements to get an automated instant quote and same-day campus drop.</p>
+      <div class="wa-number">&bull; WhatsApp: +91 94957 06405</div>
+    </div>
+    <div class="qr-frame">
+      <img src="data:image/png;base64,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" alt="Scan QR Code">
+      <div class="qr-caption">Scan to WhatsApp</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-left">
+      <strong>Hubs:</strong> Thriprayar (Oxygen Students Paradise) &bull; Nattika (Opp. SN College)
+    </div>
+    <div class="footer-right">
+      printosky.com
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Printosky — Free Thesis Referral Poster</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Syne:wght@700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0F172A;
+    --orange: #F0571E;
+    --amber: #FFB703;
+    --paper: #FFFFFF;
+    --light-gray: #F1F5F9;
+    --mid: #475569;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: #e2e8f0; font-family: 'Plus Jakarta Sans', sans-serif; }
+
+  .page {
+    width: 1240px;
+    height: 1754px;
+    position: relative;
+    overflow: hidden;
+    background: #FFFFFF;
+    padding: 80px 70px 60px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  /* Top & Bottom Accent Bars */
+  .top-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 16px;
+    background: linear-gradient(90deg, var(--orange) 0%, #E63946 50%, var(--amber) 100%);
+  }
+
+  /* Header Section */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid var(--light-gray);
+    padding-bottom: 28px;
+  }
+  .logo-text {
+    font-family: 'Syne', sans-serif;
+    font-weight: 900;
+    font-size: 44px;
+    color: var(--ink);
+    letter-spacing: -1.5px;
+  }
+  .logo-text span { color: var(--orange); }
+  .tagline-badge {
+    background: var(--light-gray);
+    color: var(--mid);
+    padding: 8px 18px;
+    border-radius: 100px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* Hero Headline */
+  .hero {
+    margin-top: 40px;
+    text-align: center;
+  }
+  .kicker {
+    display: inline-block;
+    background: #FFFBEB;
+    color: #B45309;
+    border: 2px solid #FDE68A;
+    padding: 8px 24px;
+    border-radius: 100px;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 24px;
+  }
+  .headline {
+    font-family: 'Syne', sans-serif;
+    font-weight: 900;
+    font-size: 78px;
+    line-height: 1.04;
+    letter-spacing: -3px;
+    color: var(--ink);
+  }
+  .headline em {
+    font-style: normal;
+    color: var(--orange);
+  }
+  .subhead {
+    margin-top: 24px;
+    font-size: 26px;
+    color: var(--mid);
+    line-height: 1.4;
+    max-width: 960px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* Core Value Grid */
+  .features-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 40px 0;
+  }
+  .feature-card {
+    background: var(--light-gray);
+    border: 2px solid #E2E8F0;
+    border-radius: 20px;
+    padding: 26px 28px;
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+  }
+  .feature-icon {
+    font-size: 38px;
+    line-height: 1;
+    background: #FFFFFF;
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid #CBD5E1;
+    flex-shrink: 0;
+  }
+  .feature-content h4 {
+    font-family: 'Syne', sans-serif;
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+  .feature-content p {
+    font-size: 18px;
+    color: var(--mid);
+    line-height: 1.35;
+  }
+
+  /* QR Action Banner */
+  .action-box {
+    background: #0F172A;
+    border-radius: 28px;
+    padding: 36px 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.18);
+  }
+  .action-text {
+    color: #FFFFFF;
+    max-width: 620px;
+  }
+  .action-text .step-badge {
+    display: inline-block;
+    background: var(--orange);
+    color: #FFFFFF;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 6px 16px;
+    border-radius: 6px;
+    margin-bottom: 14px;
+  }
+  .action-text h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 40px;
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 12px;
+  }
+  .action-text p {
+    font-size: 20px;
+    color: #94A3B8;
+    line-height: 1.4;
+  }
+  .action-text .wa-number {
+    display: inline-block;
+    margin-top: 14px;
+    font-size: 26px;
+    font-weight: 800;
+    color: #38BDF8;
+  }
+
+  .qr-frame {
+    background: #FFFFFF;
+    padding: 16px;
+    border-radius: 22px;
+    border: 4px solid var(--amber);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    flex-shrink: 0;
+  }
+  .qr-frame img {
+    display: block;
+    width: 250px;
+    height: 250px;
+  }
+  .qr-caption {
+    text-align: center;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--ink);
+    margin-top: 8px;
+  }
+
+  /* Footer */
+  .footer {
+    border-top: 2px solid var(--light-gray);
+    padding-top: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 19px;
+    color: var(--mid);
+    font-weight: 600;
+  }
+  .footer-left strong {
+    color: var(--ink);
+  }
+  .footer-right {
+    color: var(--orange);
+    font-weight: 800;
+    font-size: 22px;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="top-bar"></div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo-text">Print<span>osky</span></div>
+    <div class="tagline-badge">30 km Campus Network &bull; Kerala</div>
+  </div>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="kicker">100% Store Credit Rewards</div>
+    <h1 class="headline">Print your Thesis for <em>₹0</em>.</h1>
+    <p class="subhead">Earn ₹20 store credit every time a classmate prints with Printosky. Share your link & unlock 100% free semester printing!</p>
+  </div>
+
+  <!-- Feature Cards -->
+  <div class="features-grid">
+    
+    <div class="feature-card">
+      <div class="feature-icon">💰</div>
+      <div class="feature-content">
+        <h4>₹20 Per Classmate</h4>
+        <p>Earn ₹20 store credit on every friend who places an order using your link.</p>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🎓</div>
+      <div class="feature-content">
+        <h4>100% Free Project Printing</h4>
+        <p>Refer 15-20 classmates and cover your entire semester notes and final thesis for ₹0!</p>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🎨</div>
+      <div class="feature-content">
+        <h4>Smart Color Slicing</h4>
+        <p>Pay color rates only on color pages. Never pay full color for mixed documents.</p>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🛵</div>
+      <div class="feature-content">
+        <h4>Direct Campus Delivery</h4>
+        <p>Daily batch delivery to college gates & hostels across a 30 km radius.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- QR Action Box -->
+  <div class="action-box">
+    <div class="action-text">
+      <div class="step-badge">Instant Activation</div>
+      <h3>Get Your Personal Share Link</h3>
+      <p>Scan the code and text 'MY CREDITS' to our WhatsApp bot. Share with classmates in 10 seconds.</p>
+      <div class="wa-number">&bull; WhatsApp: +91 94957 06405</div>
+    </div>
+    <div class="qr-frame">
+      <img src="data:image/png;base64,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" alt="Scan QR Code">
+      <div class="qr-caption">Scan to WhatsApp</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-left">
+      <strong>Hubs:</strong> Thriprayar (Oxygen Students Paradise) &bull; Nattika (Opp. SN College)
+    </div>
+    <div class="footer-right">
+      printosky.com
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

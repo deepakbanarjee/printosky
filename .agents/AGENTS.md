@@ -19,3 +19,6 @@
   - Mixed-colour jobs group consecutive sheets of the same color mode (B&W or Colour) and send them as sequential print jobs to preserve collation order in the output tray.
   - N-up grids are filled sequentially (not odd/even split) for slide/handout formats.
 
+## Strict Customer Brand Rule (Non-Negotiable)
+
+- **Printosky Only**: The customer-facing brand is strictly **Printosky**. NEVER mention "Oxygen" or "Oxygen Students Paradise" in any public posts, captions, marketing assets, carousels, stories, posters, or customer communications.
