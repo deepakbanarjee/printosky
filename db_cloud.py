@@ -1,4 +1,4 @@
-﻿"""
+"""
 PRINTOSKY CLOUD DB ADAPTER
 ===========================
 Supabase backend for whatsapp_bot.py and webhook_receiver.py.
@@ -12,6 +12,7 @@ whatsapp_bot.py can swap backends transparently.
 import os
 import logging
 from datetime import datetime, timezone, timedelta
+import clock
 
 # Note: pickup_code and routing.engine are imported lazily inside
 # update_job_paid (see below). Keeping them out of module-top means a
@@ -48,7 +49,7 @@ def get_session(db_path: str, phone: str) -> dict:
 
 def save_session(db_path: str, phone: str, **kwargs) -> None:
     """Upsert bot session into Supabase, updating only the provided fields."""
-    kwargs["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    kwargs["updated_at"] = clock.now_str()
     try:
         # UPDATE existing row; if no rows matched, INSERT a new one.
         result = _client().table("bot_sessions").update(kwargs).eq("phone", phone).execute()
@@ -79,7 +80,7 @@ def save_customer_profile(phone: str, settings: dict, db_path: str) -> None:
         "last_copies":    settings["copies"],
         "last_finishing": settings["finishing"],
         "last_delivery":  int(settings["delivery"]),
-        "updated_at":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_at":     clock.now_str(),
     }
     try:
         _client().table("customer_profiles").upsert(row, on_conflict="phone").execute()
@@ -396,7 +397,7 @@ def insert_job_from_webhook(job_id: str, sender: str, filename: str,
             "file_url":    file_url,
             "status":      "Pending",
             "assigned_store_id": DEFAULT_FULFILLING_STORE,
-            "received_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "received_at": clock.now_str(),
         }, on_conflict="job_id").execute()
     except Exception as e:
         logger.error(f"insert_job_from_webhook error for {job_id}: {e}")

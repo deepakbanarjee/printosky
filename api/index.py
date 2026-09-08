@@ -38,6 +38,7 @@ import time
 import collections
 import urllib.request
 from datetime import datetime
+import clock  # one clock for the whole system — see clock.py
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
@@ -1255,7 +1256,7 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
             logger.error("Notes PDF handling failed for %s: %s", sender, _exc)
 
     ext = FILE_MIME_TYPES.get(mime_type, "")
-    ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts  = clock.stamp_str()
 
     if orig_filename and "." in orig_filename:
         base_name = re.sub(r"[^\w.\- ]", "_", os.path.basename(orig_filename)).strip()
@@ -1263,7 +1264,7 @@ def _handle_media(sender: str, msg_type: str, media_id: str,
         base_name = f"{sender}_{ts}{ext or '.bin'}"
 
     dest_name = f"{sender}_{ts}_{base_name}"   # unique storage key
-    job_id    = f"OSKY-{datetime.now().strftime('%Y%m%d')}-{sender[-4:]}-{ts[-4:]}-{os.urandom(3).hex()}"
+    job_id    = f"OSKY-{clock.today_str()}-{sender[-4:]}-{ts[-4:]}-{os.urandom(3).hex()}"
 
     # ── Step 1: ONE Meta API call — receipt + size question combined ─────────
     # This stays within Vercel's 10s Hobby timeout. Splitting into two calls
@@ -1306,7 +1307,7 @@ def _store_media_only(sender: str, media_id: str, mime_type: str,
     """Download a WhatsApp attachment and upload to Supabase — no job, no reply."""
     from db_cloud import upload_file
     ext = FILE_MIME_TYPES.get(mime_type, "")
-    ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts  = clock.stamp_str()
     if orig_filename and "." in orig_filename:
         base_name = re.sub(r"[^\w.\- ]", "_", os.path.basename(orig_filename)).strip()
     else:

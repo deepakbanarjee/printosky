@@ -22,6 +22,8 @@ import logging
 import re as _re
 import uuid as _uuid
 from datetime import datetime
+
+import clock  # one clock for the whole system — see clock.py
 from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger("api.webhook")
@@ -320,7 +322,7 @@ def _handle_order_create(h, body: bytes) -> None:
     note = (note + " · " + _STORE_LABEL.get(assigned_store_id, assigned_store_id)).strip(" ·")
     page_count = len(spec.get("pages_included") or []) or int(spec.get("total_pages", 0))
 
-    job_id = f"OSKY-{datetime.now().strftime('%Y%m%d')}-{phone[-4:]}-{_uuid.uuid4().hex[:4]}"
+    job_id = f"OSKY-{clock.today_str()}-{phone[-4:]}-{_uuid.uuid4().hex[:4]}"
     try:
         _insert_job(job_id=job_id, sender=phone, filename=file_name, file_url=file_url)
         _persist_settings(
@@ -417,7 +419,7 @@ def _handle_order_staff_create(h, body: bytes) -> None:
 
     sender = phone or "walk-in"
     suffix = phone[-4:] if phone else _uuid.uuid4().hex[:4]
-    job_id = f"OSKY-{datetime.now().strftime('%Y%m%d')}-{suffix}-{_uuid.uuid4().hex[:4]}"
+    job_id = f"OSKY-{clock.today_str()}-{suffix}-{_uuid.uuid4().hex[:4]}"
     try:
         _insert_job(job_id=job_id, sender=sender, filename=file_name, file_url=file_url)
         _persist_settings(
@@ -479,7 +481,7 @@ def _service_job_id() -> str:
     see a store's local sequence, so it uses the same id shape with a random
     suffix — exactly what /order/staff-create already does for walk-in prints.
     """
-    return f"OSKY-{datetime.now().strftime('%Y%m%d')}-{_uuid.uuid4().hex[:4]}"
+    return f"OSKY-{clock.today_str()}-{_uuid.uuid4().hex[:4]}"
 
 
 def _handle_order_service_quote(h, path: str) -> None:
@@ -617,7 +619,7 @@ def _create_service_job(h, data: dict, *, item_in_hand: bool) -> None:
     #   * `status` already says Queued, and `received_at` is the same instant.
     # tests/test_service_parity.py pins every column here against the manifest.
     taken = amount_collected + amount_partial
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = clock.now_str()
     job_id = _service_job_id()
     label = quote["label"]
 
@@ -781,7 +783,7 @@ def _handle_order_staff_photocopy(h, body: bytes) -> None:
     if store_id not in _STORE_LABEL:
         store_id = _DEFAULT_STORE_ID
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = clock.now_str()
     job_id = _service_job_id()
 
     note = f"Photocopy job created at {now} by {staff_id or 'staff'}"
@@ -985,7 +987,7 @@ def _handle_order_receive_item(h, body: bytes) -> None:
                                 "item_received_at": already, "already": True})
         return
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = clock.now_str()
     note = " | ".join(x for x in [
         row.get("notes"),
         f"Item received at {now}" + (f" by {staff_id}" if staff_id else ""),
@@ -1045,7 +1047,7 @@ def _handle_order_reorder(h, body: bytes) -> None:
     base_note = str(src.get("notes") or "").strip()
     note = ("Reorder of " + src_id + (" · " + base_note if base_note else "")).strip()
 
-    job_id = f"OSKY-{datetime.now().strftime('%Y%m%d')}-{phone[-4:]}-{_uuid.uuid4().hex[:4]}"
+    job_id = f"OSKY-{clock.today_str()}-{phone[-4:]}-{_uuid.uuid4().hex[:4]}"
     try:
         _insert_job(job_id=job_id, sender=phone,
                     filename=str(src.get("filename") or "order"), file_url=file_url)

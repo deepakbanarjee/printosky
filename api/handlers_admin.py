@@ -1,4 +1,4 @@
-﻿"""Admin-dashboard HTTP handlers — extracted from api/index.py.
+"""Admin-dashboard HTTP handlers — extracted from api/index.py.
 
 Backs the /admin/* endpoints: conversations/threads, operator queue,
 book-order ops (list/confirm/dispatch/deliver/create/edit/settle-divya),
@@ -13,6 +13,8 @@ import hmac
 import json
 import logging
 import os
+
+import clock  # one clock for the whole system — see clock.py
 import re
 
 logger = logging.getLogger("api.webhook")
@@ -848,7 +850,7 @@ def _handle_admin_book_order_create(h, body) -> None:
         grand       = books_total + courier
         commission  = bc.commission_for(items)
         pradeep_commission = bc.pradeep_commission_for(items)
-        code        = f"XTR-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
+        code        = f"XTR-{clock.today_str()}-{os.urandom(4).hex().upper()}"
         status      = "delivered" if handed_over else "confirmed"
         row = create_walk_in_order(code, name, phone, address, items,
                                    books_total, courier, grand, payment_mode, status,
@@ -1768,12 +1770,12 @@ def _handle_admin_notes_moderate(h, body: bytes, note_code: str, action: str) ->
 # ── book returns / replacements (admin-only) ────────────────────────────────
 def _new_return_code() -> str:
     from datetime import datetime
-    return f"RET-{datetime.now().strftime('%Y%m%d')}-{os.urandom(4).hex().upper()}"
+    return f"RET-{clock.today_str()}-{os.urandom(4).hex().upper()}"
 
 
 def _new_replacement_code() -> str:
     from datetime import datetime
-    return f"XTR-{datetime.now().strftime('%Y%m%d')}-R{os.urandom(3).hex().upper()}"
+    return f"XTR-{clock.today_str()}-R{os.urandom(3).hex().upper()}"
 
 
 def _norm_book_items(raw) -> dict:

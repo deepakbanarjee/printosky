@@ -49,7 +49,7 @@ Single print-job records. Primary key for everything print-related.
 |---|---|---|---|---|
 | `job_id` | text | NO | — | **PK** — `OSP-YYYYMMDD-NNNN` |
 | `store_id` | text | NO | `'OSP'` | partition key (multi-store) |
-| `received_at` | text | YES | — | ISO-8601 string (legacy from SQLite) |
+| `received_at` | text | YES | — | `'YYYY-MM-DD HH:MM:SS'` in **IST (Asia/Kolkata)** — see `clock.py`. Naive by storage, not by intent. **Rows before 2026-09-08 are mixed** — store PCs wrote IST, Vercel wrote UTC, and neither said so. Not backfilled: moving a correct timestamp by 5½ hours is worse than a history known to be mixed. |
 | `filename` | text | YES | — | original filename |
 | `file_extension` | text | YES | — | |
 | `file_size_kb` | real | YES | — | |
@@ -683,8 +683,16 @@ Checked against `pg_class.relrowsecurity` on 2026-08-29. `project_builder_orders
 2. **Booleans-as-int** (`0`/`1` integer columns instead of `boolean`) appear in older tables (`jobs.invoiced` is boolean but `jobs.colour_confirmed`, `jobs.is_sub_job`, etc. are integers). Legacy SQLite-compat artifact. New columns must use `boolean`.
 3. **Printer name casing:** the `printer` column in `printer_counters`, `printer_supplies`, `supply_changes` uses **lowercase** (`konica` / `epson`). The `jobs.printer` column uses **TitleCase** (`Konica` / `Epson`). Don't unify without checking every read site — `mis.html` filters on the lowercase form.
 4. **`store_id`** defaults to `'OSP'` (the Oxygen Students Paradise store). Multistore work (TASK-006, PHASE-E) lights up additional values from the `partners` table.
-5. **PKs**: 4 tables use natural keys (`bot_sessions.phone`, `whatsapp_contacts.phone`, `jobs.job_id`, `partners.store_id`). The rest use `bigint` surrogate ids.
-6. **No FKs except one.** Application code enforces referential integrity. Be careful when deleting rows from "parent" tables (`jobs`, `staff`, `partners`) — children won't cascade.
+5. **Timezone: every stored timestamp is IST (Asia/Kolkata)**, written through
+   `clock.now_str()`. Untrue before 2026-09-08: `datetime.now()` gives IST on a
+   store PC and UTC on Vercel, and both wrote these columns, so `jobs.received_at`
+   holds 5½ hours of disagreement depending on which half created the row. Dated
+   identifiers (`OSKY-YYYYMMDD-…`, `XTR-`, `RET-`) had the same split, putting
+   yesterday's date in the number a customer was quoted for an early-morning job.
+   `tests/test_one_timezone.py` ratchets it — **never use a bare `datetime.now()`
+   for a stored timestamp or an id**.
+6. **PKs**: 4 tables use natural keys (`bot_sessions.phone`, `whatsapp_contacts.phone`, `jobs.job_id`, `partners.store_id`). The rest use `bigint` surrogate ids.
+7. **No FKs except one.** Application code enforces referential integrity. Be careful when deleting rows from "parent" tables (`jobs`, `staff`, `partners`) — children won't cascade.
 
 ---
 

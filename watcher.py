@@ -1,4 +1,4 @@
-﻿"""
+"""
 PRINTOSKY HOT FOLDER WATCHER
 =============================
 Runs silently on the store desktop (Windows 11).
@@ -25,6 +25,8 @@ import logging
 import json
 import platform
 from datetime import datetime
+
+import clock  # one clock for the whole system — see clock.py
 from pathlib import Path
 
 # â”€â”€ watchdog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -395,7 +397,7 @@ def generate_job_id():
     lock, so concurrent watchdog threads always receive distinct IDs without
     hitting the COUNTâ†’INSERT gap of the old approach.
     """
-    today = datetime.now().strftime("%Y%m%d")
+    today = clock.today_str()
     with _job_id_lock:
         if today not in _job_id_counters:
             # Seed from DB on the first call of the day (or first call ever)
@@ -571,7 +573,7 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
             return
 
     job_id = generate_job_id()
-    received_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    received_at = clock.now_str()
 
     job = {
         "job_id": job_id,
@@ -896,12 +898,12 @@ def handle_command(cmd: str):
                 UPDATE jobs SET status='Completed', completed_at=?,
                 amount_collected=?, payment_mode=?
                 WHERE job_id=?
-            """, (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), amount, mode, job_id))
+            """, (clock.now_str(), amount, mode, job_id))
         else:
             conn.execute("""
                 UPDATE jobs SET status='Completed', completed_at=?
                 WHERE job_id=?
-            """, (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), job_id))
+            """, (clock.now_str(), job_id))
         conn.commit()
         conn.close()
         print(f"\nâœ… Job {job_id} marked as COMPLETED")
