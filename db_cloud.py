@@ -1860,6 +1860,47 @@ def _referral_code_for(phone: str) -> str:
     return f"REF{tail}{''.join(random.choices(string.ascii_uppercase, k=2))}"
 
 
+# The WhatsApp number a share link points at. api/index.py builds the same link
+# for MY CREDITS, so it lives here once rather than in each caller.
+REFERRAL_SHARE_NUMBER = "919495706405"
+
+
+def referral_share_link(code: str) -> str:
+    """The wa.me link a referrer sends to classmates. ref_CODE is what
+    api/index._capture_referral_code() reads back off the greeting."""
+    return f"https://wa.me/{REFERRAL_SHARE_NUMBER}?text=ref_{code}"
+
+
+def get_referral_code(phone: str) -> str | None:
+    """This phone's referral code, or None. Read-only -- never mints.
+
+    Distinct from ensure_referral_code because callers need to tell a
+    first-time arrival from a returning one, which ensure_ cannot report.
+    """
+    if not phone:
+        return None
+    rows = _client().table("referrers").select("code").eq("label", phone).execute()
+    return rows.data[0]["code"] if rows.data else None
+
+
+def recent_ad_click(phone: str, within_hours: int = 72) -> dict | None:
+    """The most recent ad this phone arrived from, if it was recent.
+
+    Meta attaches `referral` only to the FIRST message after the tap, so the
+    second and third messages of an ad conversation carry nothing. Reading the
+    row back is what lets the front door keep answering the ad rather than
+    reverting to a generic menu on message two.
+    """
+    if not phone:
+        return None
+    since = (datetime.now(timezone.utc) - timedelta(hours=within_hours)).isoformat()
+    rows = (_client().table("ad_clicks")
+            .select("phone,source_id,headline,body,clicked_at")
+            .eq("phone", phone).gte("clicked_at", since)
+            .order("clicked_at", desc=True).limit(1).execute())
+    return rows.data[0] if rows.data else None
+
+
 def ensure_referral_code(phone: str, platform: str = "whatsapp_selfserve") -> str | None:
     """This phone's referral code, minting one on the spot if they lack it.
 
@@ -1876,11 +1917,11 @@ def ensure_referral_code(phone: str, platform: str = "whatsapp_selfserve") -> st
     """
     if not phone:
         return None
-    sb = _client()
-    existing = sb.table("referrers").select("code").eq("label", phone).execute()
-    if existing.data:
-        return existing.data[0]["code"]
+    existing = get_referral_code(phone)
+    if existing:
+        return existing
 
+    sb = _client()
     for _ in range(10):
         candidate = _referral_code_for(phone)
         if sb.table("referrers").select("code").eq("code", candidate).execute().data:

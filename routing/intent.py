@@ -240,6 +240,73 @@ def build_menu_rows() -> list[dict]:
     ]
 
 
+# ── Ad arrivals ──────────────────────────────────────────────────────────────
+# Someone who taps "Print your Thesis for Rs.0" and lands on the generic
+# five-option menu has been answered by a different conversation than the one
+# they started. Both real arrivals on 7 Sep did exactly that: replied "H", got
+# the menu, went quiet. Neither typed MY CREDITS -- nothing on screen told them
+# to. The ad is the first half of a conversation; this is the second half.
+#
+# Keyed by Meta ad id, because "what this ad offered" is not derivable from the
+# referral payload -- Meta sent headline "Chat with us" for this campaign. A new
+# campaign that wants its own welcome adds a line here; anything unlisted falls
+# through to the ordinary menu rather than guessing.
+AD_CAMPAIGN_KIND = {
+    "120248100283360186": "referral",   # Print your Thesis for Rs.0 (Sep 2026)
+}
+
+
+def _send_referral_welcome(phone: str, name: str | None = None) -> bool:
+    """Hand an ad arrival the share link the ad promised them.
+
+    The ad tells people to text MY CREDITS to get this. We already know they
+    came from the ad, so asking them to type a keyword first is a step that
+    only loses people. Returns False if the code could not be minted, so the
+    caller falls back to the menu rather than sending nothing.
+    """
+    from db_cloud import ensure_referral_code, referral_share_link
+    code = ensure_referral_code(phone, platform="ad_click")
+    if not code:
+        return False        # ensure_referral_code has already logged the reason
+    hi = f"Hi {name}! " if name else "Hi! "
+    _send_text(phone, (
+        f"{hi}👋 You're in — here's your *Printosky share link*:\n"
+        f"{referral_share_link(code)}\n\n"
+        f"Send it to classmates. Every friend who orders with it earns you "
+        f"*₹20 store credit*, and 15–20 of them covers your semester printing "
+        f"and final thesis for *₹0*.\n\n"
+        f"Your code: *{code}*\n"
+        f"Reply *MY CREDITS* any time to check your balance, or send a file "
+        f"and we'll quote you straight away."
+    ))
+    return True
+
+
+def _maybe_welcome_ad_arrival(phone: str, name: str | None = None) -> bool:
+    """Answer the ad someone actually clicked. True if we handled the message.
+
+    Only fires for a first-time arrival: once they hold a referral code they
+    have had this message, and repeating it on every unrecognised reply would
+    be spam. That check is also what keeps a returning customer who happens to
+    tap an ad on the ordinary path.
+    """
+    try:
+        from db_cloud import get_referral_code, recent_ad_click
+        if get_referral_code(phone):
+            return False
+        ad = recent_ad_click(phone)
+        if not ad:
+            return False
+        if AD_CAMPAIGN_KIND.get((ad.get("source_id") or "").strip()) != "referral":
+            return False
+        return _send_referral_welcome(phone, name)
+    except Exception as exc:
+        # Never cost the customer their reply over this: fall through to the
+        # menu, which is what they would have got anyway.
+        logger.warning("ad welcome failed for %s: %s", phone, exc)
+        return False
+
+
 def _send_text(phone: str, message: str) -> None:
     from whatsapp_notify import _send
     _send(phone, message)
@@ -305,6 +372,12 @@ def route_front_door(phone: str, text: str, name: str | None = None) -> None:
         for msg in reminder:
             _send_text(phone, msg)
         return
+    # Answer the ad BEFORE the intent, not instead of it. Someone who arrives
+    # from "Print your Thesis for Rs.0" and types "print" wants the order link
+    # AND the offer they clicked; sending only one of the two loses half the
+    # conversation. Fires once per person, so it cannot become noise.
+    welcomed = _maybe_welcome_ad_arrival(phone, name)
+
     intent = decide_intent(text)
     if intent in _LINK_MESSAGES:
         _send_text(phone, _LINK_MESSAGES[intent])
@@ -312,5 +385,5 @@ def route_front_door(phone: str, text: str, name: str | None = None) -> None:
         _open_books(phone, name)               # Plan 1 interim: shared catalog
     elif intent == "sociology":
         _open_soc(phone, name)
-    else:                                       # unknown / anything unhandled
-        _send_menu(phone)
+    elif not welcomed:                          # unknown / anything unhandled
+        _send_menu(phone)                       # (the welcome already answered)
