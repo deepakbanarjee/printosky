@@ -709,7 +709,8 @@ def _send_credits_balance(phone: str) -> None:
                             .is_("redeemed_at", "null")
                             .execute())
         balance = sum(int(row.get("amount_inr") or 0) for row in (credits.data or []))
-        share_link = f"https://wa.me/919495706405?text=ref_{code}"
+        from db_cloud import referral_share_link
+        share_link = referral_share_link(code)
         if balance == 0:
             _send(raw_phone,
                   f"Your share code: *{code}*\n\n"
