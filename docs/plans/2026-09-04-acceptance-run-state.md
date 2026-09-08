@@ -431,6 +431,67 @@ The third cannot print whatever happens: its `file_url` is empty, which is the
 separate webhook fault recorded above. It needs the customer to resend, or the
 21 July copy of the same document already in the bucket.
 
+### 2026-09-08 check-in: the backfill did NOT make them print
+
+Checked at 17:31 IST. The two July jobs still read `Paid`, with `printer`,
+`completed_at`, `printed_by` and `pickup_ready_at` all null — now *with*
+`assigned_store_id = 'OSP'` set. So **`assigned_store_id` was not the whole
+blocker**, or the puller never got a fair run at them. The evidence does not yet
+separate those two, and it matters which.
+
+**What is established:**
+
+* OSP renewed both leases up to **09:48 IST** and heartbeated at **09:50**, so
+  it was alive and working this morning. `konica_jobs` holds 48 rows for today,
+  fetched up to 09:38.
+* `store_puller` polls every **900 s** and is *deliberately* not gated on store
+  hours (`store_puller.py:269` — "docs/FAIL_LOUD.md rejects an hours
+  construction"). So a process alive for a quarter of an hour polls at least
+  once.
+* The backfill landed at 01:51 IST. OSP was off overnight and came up some time
+  before 09:48; **how long it ran is not visible from the cloud** — `last_seen`
+  and lease `updated_at` keep only the newest value, not a history.
+
+**What that leaves.** `select_pullable()` has exactly three conditions: not in
+`pulled_ids`, status in `("Paid",)`, non-empty `file_url`. These jobs satisfy
+the last two plainly. **The remaining candidate is `pulled_ids`** — the local
+`pulled_jobs` table on the OSP PC, which `record_pulled()` writes to mean "never
+download this again". If those two ids are in it, they are excluded for good, no
+matter what `assigned_store_id` says.
+
+That would be its own fault worth having: a job recorded as pulled that never
+printed is unreachable by design and invisible from the cloud.
+
+**Two checks at the box settle it**, and neither needs the run:
+
+```powershell
+python -c "import sqlite3; c=sqlite3.connect(r'C:\Printosky\Data\jobs.db'); print(c.execute('SELECT job_id, pulled_at FROM pulled_jobs WHERE job_id LIKE ''OSP-20260725%''').fetchall())"
+findstr /C:"store_puller" /C:"pulled" logs\store_puller.log
+```
+
+Present in `pulled_jobs` → that is the second blocker, and the backfill was
+necessary but not sufficient. Absent → the puller had no real run this morning,
+and this test is simply not finished.
+
+### The boxes are down, which is the more urgent finding
+
+| Store | Last seen (IST) | Ago | Version |
+|---|---|---|---|
+| PRIOFF | 2026-09-08 17:31 | **now** | `main@497ff63` |
+| **OSP** | 2026-09-08 09:50 | **7.7 h** | `main@f32ff7f` |
+| **PRINTK** | 2026-09-06 19:39 | **45.9 h** | `main@f32ff7f` |
+
+It is a Tuesday afternoon. OSP has been silent since mid-morning and PRINTK
+since Sunday evening, and nothing said so — the console health banner needs a
+console open, and the alerts these boxes would raise are raised *by* the boxes.
+Two days ago this file recorded all three on the tip and heartbeating within
+three minutes, "first time in the run this has been true". It lasted a day.
+
+`main` has also moved four commits past `f32ff7f` (#117, #118, #119 and a
+marketing feature) — none of them this run's, and OSP is still on `f32ff7f`, so
+the P3-2 test premise held. PRIOFF has auto-pulled `497ff63`, which is
+`SETUP_AUTOSTART.bat` working as designed.
+
 ### Before the paper: which queue simplex uses, and how OSP is wired
 
 **Decided (2026-09-04): OSP's simplex queue is the original
