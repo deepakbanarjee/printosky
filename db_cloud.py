@@ -1846,6 +1846,55 @@ def create_replacement_order(order_code: str, parent_order_code: str,
 DIVYA_LEDGER_STATUSES = ("confirmed", "dispatched", "delivered")
 
 
+def _referral_code_for(phone: str) -> str:
+    """REF + last 4 of phone + 2 random uppercase letters.
+
+    Mirrors review_manager._generate_referral_code so a code minted from the bot
+    is indistinguishable from one minted after a 5-star review.
+    tests/test_referral_on_demand.py asserts the two stay in step.
+    """
+    import random
+    import string
+    digits = "".join(c for c in phone if c.isdigit())
+    tail = digits[-4:].zfill(4) if digits else "0000"
+    return f"REF{tail}{''.join(random.choices(string.ascii_uppercase, k=2))}"
+
+
+def ensure_referral_code(phone: str, platform: str = "whatsapp_selfserve") -> str | None:
+    """This phone's referral code, minting one on the spot if they lack it.
+
+    The "Print your Thesis for Rs.0" ad tells people to text MY CREDITS and get
+    a share link "in 10 seconds". Until this existed the bot could only LOOK UP
+    a code -- codes were created solely by the web account page and by
+    review_manager after a 4-5 star review -- so everyone who followed the ad's
+    instructions was told to go buy something first. That is why the referral
+    tables held nothing but test rows while the campaign ran.
+
+    Returns the code, or None if it could not be created (the caller alerts:
+    a customer who asked for their link and silently got nothing is exactly the
+    failure docs/FAIL_LOUD.md exists to stop).
+    """
+    if not phone:
+        return None
+    sb = _client()
+    existing = sb.table("referrers").select("code").eq("label", phone).execute()
+    if existing.data:
+        return existing.data[0]["code"]
+
+    for _ in range(10):
+        candidate = _referral_code_for(phone)
+        if sb.table("referrers").select("code").eq("code", candidate).execute().data:
+            continue          # collision on the 2-letter suffix; draw again
+        sb.table("referrers").insert(
+            {"code": candidate, "label": phone, "platform": platform}
+        ).execute()
+        logger.info("Minted referral code %s for %s (%s)", candidate, phone, platform)
+        return candidate
+
+    logger.error("Could not mint a unique referral code for %s after 10 attempts", phone)
+    return None
+
+
 # ── Ad attribution report (SCHEMA v42) ───────────────────────────────────────
 # Statuses that mean a book order is real money, reused by the ad report.
 AD_REPORT_SOLD_STATUSES = DIVYA_LEDGER_STATUSES

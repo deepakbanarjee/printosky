@@ -683,14 +683,25 @@ def _send_credits_balance(phone: str) -> None:
     if not phone:
         return
     try:
-        ref = _client().table("referrers").select("code").eq("label", phone).execute()
-        if not ref.data:
+        # Mint on demand. The "Print your Thesis for Rs.0" ad tells people to
+        # text MY CREDITS and get their share link "in 10 seconds"; before this,
+        # a first-time sender was told to go buy something and leave a 5-star
+        # review first, so every single person who followed the ad hit a wall.
+        from db_cloud import ensure_referral_code
+        code = ensure_referral_code(phone)
+        if not code:
+            logger.error("MY CREDITS: could not mint a referral code for %s", phone)
+            _alert_ops(
+                f"Referral code not minted ({phone})",
+                f"\u26a0\ufe0f {phone} texted MY CREDITS and we could not give them a "
+                f"share link. This is the click-to-WhatsApp ad's call to action, so "
+                f"the click is paid for and wasted. Check SUPABASE keys and the "
+                f"referrers table.",
+            )
             _send(raw_phone,
-                  "You don't have a Printosky referral code yet.\n\n"
-                  "Tip: rate your next order 4 or 5 stars - we'll send you a personal "
-                  "share link so you can start earning store credit.")
+                  "Sorry - we couldn't set up your share link just now. "
+                  "Please try again in a minute, or reply AGENT and we'll sort it out.")
             return
-        code = ref.data[0]["code"]
         # Sum unredeemed credits only.
         credits = (_client().table("referral_credits")
                             .select("amount_inr")
