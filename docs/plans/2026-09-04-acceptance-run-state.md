@@ -601,6 +601,20 @@ sheet on paper, but as confirmation rather than an open question.
   * **Not fixed during the run**: `print_planner` is the path Phase 3 exists to
     prove unchanged. Same rule as `received_at` above. Note which checks are
     already red (`/health`) before starting P3-1, so a new one can be told apart.
+* **Do not merge the `handlers_notes` import fix on its own — the flow it wakes
+  sends dicts to a text sender.** `handlers_notes` builds full Meta payloads
+  (`_send_text()` returns `{"messaging_product": ..., "text": {"body": ...}}`),
+  and `api/index.py` dispatches them with `whatsapp_notify._send(phone,
+  message)`, which takes plain TEXT and builds its own payload — putting the
+  dict in the message body. The same applies to the inline dict fallbacks at
+  `api/index.py:1080-1086` and `:1257`.
+  It has never shown because the import has never resolved, so the flow has
+  never run. **Fixing the import turns it on.** Checked before claiming it:
+  `book_bot` returns *strings* and sends its own interactive messages directly,
+  so the live book flow is unaffected — this is confined to notes.
+  Either fix the dispatch (send by shape: `str` → `_send`, `type: text` →
+  `_send(body)`, `type: interactive` → `_post_interactive`) or hold the import
+  fix. Not built here: it is a dormant feature, and the live faults come first.
 * Intermittent lease timeouts on all boxes (Phase 0 finding, unaddressed).
 * PRIOFF is configured with OSP's `konica_ip` (192.168.55.110).
 * Supabase Realtime not delivering to `store_puller` — jobs can wait up to 15
