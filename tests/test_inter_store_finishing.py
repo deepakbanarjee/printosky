@@ -325,7 +325,12 @@ def test_the_overdue_threshold_matches_the_digest(name):
 
 @pytest.mark.parametrize("name", CONSOLES)
 def test_the_queue_refreshes_with_the_job_list(name):
-    assert "if (!isDemo) refreshFinishingQueue();" in _html(name)
+    """Renamed 2026-09-08: the flag was `isDemo`, which was true whenever the
+    jobs query came back empty and made the console show invented jobs and
+    ₹140 of invented takings. The guard itself is unchanged — don't fetch a
+    finishing queue when there is nothing to show — but it now hangs off
+    whether there ARE jobs rather than off a fiction."""
+    assert "if (hasJobs) refreshFinishingQueue();" in _html(name)
 
 
 def test_the_queue_is_identical_in_both_consoles():

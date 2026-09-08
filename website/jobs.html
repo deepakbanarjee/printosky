@@ -2033,15 +2033,25 @@ window.addEventListener("DOMContentLoaded", async () => {
 // the page's sbAuthFail() hook — here that logs the staff session out.
 function sbAuthFail() { logout(); }
 
-// ── Demo data (shown when Supabase has no records yet) ───────────────────────
-const DEMO_JOBS = [
-  { job_id:"OSP-20260312-0001", received_at:"2026-03-12 09:14:00", filename:"Chemistry_Notes.pdf", source:"Pen Drive", status:"Completed", service_type:"B&W Print", amount_collected:15, payment_mode:"Cash" },
-  { job_id:"OSP-20260312-0002", received_at:"2026-03-12 10:32:00", filename:"WhatsApp Image.jpg", source:"WhatsApp", status:"Received", service_type:"Colour Print", amount_collected:null, payment_mode:null },
-  { job_id:"OSP-20260312-0003", received_at:"2026-03-12 11:05:00", filename:"Resume_Arun.docx", source:"Pen Drive", status:"Completed", service_type:"B&W Print + Binding", amount_collected:75, payment_mode:"UPI" },
-  { job_id:"OSP-20260312-0004", received_at:"2026-03-12 13:20:00", filename:"Thesis_Final.pdf", source:"Pen Drive", status:"In Progress", service_type:"Thesis Binding", amount_collected:null, payment_mode:null },
-  { job_id:"OSP-20260311-0009", received_at:"2026-03-11 16:45:00", filename:"ID_Photo.jpg", source:"WhatsApp", status:"Completed", service_type:"PVC Card", amount_collected:50, payment_mode:"Cash" },
-];
-const DEMO_SUMMARY = { total_jobs:4, completed:2, pending:2, revenue:140, cash:65, upi:75 };
+// ── Empty is not the same as unauthenticated ────────────────────────────────
+// Removed from here: a hardcoded list of invented jobs and a summary reading
+// { revenue:140, cash:65, upi:75 }, shown whenever the jobs query returned zero
+// rows, under the label "Demo Mode — start watcher at store".
+//
+// Zero rows has three quite different causes, and that label named the wrong
+// one for two of them. The common case is nobody being signed in: sbFetch falls
+// back to the anon key, RLS (auth.role() = 'authenticated', SEC-4) allows
+// nothing, and Supabase answers 200 with []. Not a 401, so the auth path never
+// fires. PRIOFF sat like this with 135 real jobs in the table.
+//
+// So staff were shown fabricated takings on a screen they are meant to trust,
+// and told to restart a watcher that was not the problem. Nothing here invents
+// a number any more: say which case it is, and show real zeros.
+function emptyReason() {
+  let signedIn = false;
+  try { signedIn = !!sessionStorage.getItem("supabase_jwt"); } catch (e) { signedIn = false; }
+  return signedIn ? "empty" : "signin";
+}
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allJobs = [];
@@ -2049,7 +2059,7 @@ let todaysJobs = [];            // today's jobs (all stores), source for the sta
 let activeFilter = "all";
 let storeFilter = "all";        // "all" | "OSP" | "PRINTK" — which location's jobs to show
 let storeFilterInited = false;  // default set once from this PC's store, then user-controlled
-let isDemo = false;
+let hasJobs = false;          // false = nothing to show, NOT a reason to invent something
 
 // ── Load everything ─────────────────────────────────────────────────────────
 async function loadAll() {
@@ -2060,17 +2070,17 @@ async function loadAll() {
       sbFetch("jobs", todayJobsParams(today())),   // today's jobs → stat cards
     ]);
 
-    isDemo = jobs.length === 0;
-    allJobs = isDemo ? DEMO_JOBS : jobs;
-    todaysJobs = isDemo ? [] : (todayJobs || []);
+    hasJobs = jobs.length > 0;
+    allJobs = jobs;
+    todaysJobs = todayJobs || [];
     initStoreFilter();
     updateStats();
     renderTable();
-    setSyncState(isDemo ? "demo" : "ok");
+    setSyncState(hasJobs ? "ok" : emptyReason());
     // "Supabase answered" is not "the store is working" — check the store PC
     // and the freshness of what we just drew, and banner anything broken.
-    if (!isDemo) refreshHealthBanner(printerViewStore(storeFilter));
-    if (!isDemo) refreshFinishingQueue();
+    if (hasJobs) refreshHealthBanner(printerViewStore(storeFilter));
+    if (hasJobs) refreshFinishingQueue();
   } catch (e) {
     setSyncState("err", e.message);
     renderHealthBanner([{ level: "error", title: "Could not load the console",
@@ -2081,7 +2091,7 @@ async function loadAll() {
 function updateStats() {
   // Aggregate today's jobs (the source of truth) rather than the store-PC's
   // daily_summary rows, which miss cloud-created orders and mis-split cash/upi.
-  renderStats(isDemo ? DEMO_SUMMARY : summarizeJobs(todaysJobs, storeFilter));
+  renderStats(summarizeJobs(todaysJobs, storeFilter));
 }
 
 // ── Sync indicator ──────────────────────────────────────────────────────────
@@ -2092,9 +2102,10 @@ function setSyncState(s, msg) {
   const dot   = document.getElementById("sync-dot");
   const label = document.getElementById("sync-label");
   dot.className = "sync-dot " + (s === "ok" ? "ok" : s === "err" ? "err" : "");
-  label.textContent = s === "ok"   ? "Loaded · " + now()
-                    : s === "demo" ? "Demo Mode — start watcher at store to see live data"
-                    : s === "err"  ? "Sync error: " + msg
+  label.textContent = s === "ok"     ? "Loaded · " + now()
+                    : s === "signin" ? "Not signed in — no jobs are being shown. Sign in to see live data."
+                    : s === "empty"  ? "Signed in · no jobs yet · " + now()
+                    : s === "err"    ? "Sync error: " + msg
                     : "Refreshing…";
 }
 
