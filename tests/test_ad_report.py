@@ -168,6 +168,86 @@ class TestShape:
         assert r["totals"]["clicks"] == 0 and r["totals"]["revenue"] == 0.0
 
 
+
+def referrer(code, phone):
+    return {"code": code, "label": phone}
+
+
+def credit(code, order_id, amount_inr=20):
+    return {"referrer_code": code, "order_id": order_id, "amount_inr": amount_inr}
+
+
+class TestReferralChain:
+    """The live campaign offers free printing for recruiting classmates, so the
+    clicker is worth Rs.0 direct BY DESIGN. Measuring only their own orders
+    would score a perfectly working ad as a failure."""
+
+    def test_referred_order_credits_the_recruiter_ad(self):
+        clicks = [click("91900", "2026-09-01T10:00:00+00:00", "ad_THESIS")]
+        # the classmate never clicked; their job is reached via order_id
+        jobs = [dict(job("91555", "2026-09-04T10:00:00+00:00", 300.0), job_id="OSP-1")]
+        r = _compute(clicks, jobs, [], [referrer("REFX", "91900")], [credit("REFX", "OSP-1")])
+        ad = r["ads"][0]
+        assert ad["revenue"] == 0.0, "the recruiter printed for free, as promised"
+        assert ad["referred_orders"] == 1
+        assert ad["referred_revenue"] == 300.0
+        assert ad["referral_credit_inr"] == 20.0
+        assert ad["total_revenue"] == 300.0
+
+    def test_direct_and_referred_stay_separate(self):
+        clicks = [click("91900", "2026-09-01T10:00:00+00:00")]
+        jobs = [dict(job("91900", "2026-09-02T10:00:00+00:00", 50.0), job_id="OSP-SELF"),
+                dict(job("91555", "2026-09-03T10:00:00+00:00", 300.0), job_id="OSP-REF")]
+        r = _compute(clicks, jobs, [], [referrer("REFX", "91900")], [credit("REFX", "OSP-REF")])
+        ad = r["ads"][0]
+        assert ad["revenue"] == 50.0 and ad["referred_revenue"] == 300.0
+        assert ad["total_revenue"] == 350.0
+
+    def test_an_order_paid_once_is_never_counted_twice(self):
+        """The classmate also clicked the same ad. One order, one payment."""
+        clicks = [click("91900", "2026-09-01T10:00:00+00:00", "ad_A"),
+                  click("91555", "2026-09-01T11:00:00+00:00", "ad_A")]
+        jobs = [dict(job("91555", "2026-09-03T10:00:00+00:00", 300.0), job_id="OSP-REF")]
+        r = _compute(clicks, jobs, [], [referrer("REFX", "91900")], [credit("REFX", "OSP-REF")])
+        ad = r["ads"][0]
+        assert ad["revenue"] == 300.0, "counted once, directly"
+        assert ad["referred_revenue"] == 0.0, "and not a second time as referred"
+        assert ad["total_revenue"] == 300.0
+        assert ad["referred_orders"] == 1, "still visible as a referral"
+
+    def test_referred_book_order_counts_at_its_value_not_the_credit(self):
+        clicks = [click("91900", "2026-09-01T10:00:00+00:00")]
+        books = [dict(book("91555", "2026-09-04T10:00:00+00:00", 515.0), order_code="XTR-9")]
+        r = _compute(clicks, [], books, [referrer("REFX", "91900")], [credit("REFX", "XTR-9")])
+        assert r["ads"][0]["referred_revenue"] == 515.0, "not the Rs.20 credit"
+
+    def test_manual_campaign_codes_are_ignored(self):
+        """referrers.label also holds human labels like 'Haadi 10% Referral',
+        which are not phones and must never match a clicker."""
+        clicks = [click("91900", "2026-09-01T10:00:00+00:00")]
+        jobs = [dict(job("91555", "2026-09-03T10:00:00+00:00", 300.0), job_id="OSP-1")]
+        r = _compute(clicks, jobs, [], [referrer("HAADI", "Haadi 10% Referral")],
+                     [credit("HAADI", "OSP-1")])
+        assert r["ads"][0]["referred_orders"] == 0
+
+    def test_credit_for_an_order_we_cannot_value_still_counts_as_referred(self):
+        """amount_collected is blank on ~59% of paid jobs; the referral is real
+        even when its rupee value is not recorded."""
+        clicks = [click("91900", "2026-09-01T10:00:00+00:00")]
+        r = _compute(clicks, [], [], [referrer("REFX", "91900")], [credit("REFX", "OSP-MISSING")])
+        ad = r["ads"][0]
+        assert ad["referred_orders"] == 1
+        assert ad["referred_revenue"] == 0.0
+
+    def test_no_referral_data_behaves_exactly_as_before(self):
+        clicks = [click("91900", "2026-09-01T10:00:00+00:00")]
+        jobs = [dict(job("91900", "2026-09-02T10:00:00+00:00", 40.0), job_id="OSP-1")]
+        a = _compute(clicks, jobs, [])
+        b = _compute(clicks, jobs, [], [], [])
+        assert a["ads"][0]["total_revenue"] == 40.0
+        assert a == b
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # GET /admin/ads/report — the endpoint around the aggregation
 # ═════════════════════════════════════════════════════════════════════════════
