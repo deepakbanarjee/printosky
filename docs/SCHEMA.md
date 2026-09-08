@@ -352,6 +352,14 @@ first ad they ever clicked, and only orders dated at or after that click count,
 so an existing customer who taps an ad cannot hand it their order history.
 Spend is deliberately absent: Meta never sends it to this database.
 
+The report also follows the **referral chain** — `ad_clicks.phone` →
+`referrers.label` → `referral_credits` → the referred order's own value — and
+reports it as `referred_revenue`, separate from direct. The live campaign
+("Print your Thesis for ₹0") pays the clicker in free printing for recruiting
+classmates, so its clicker is worth ₹0 direct by design; scoring it on direct
+revenue alone would call a working ad a failure. An order is never counted in
+both halves.
+
 #### `customer_profiles` 🟦
 Last-used selections per phone — pre-fills bot prompts.
 

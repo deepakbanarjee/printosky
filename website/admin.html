@@ -1426,7 +1426,7 @@
             <th>Result</th>
           </tr></thead>
           <tbody id="konica-jobs-tbody">
-            <tr><td colspan="9" class="empty"><span class="spinner"></span></td></tr>
+            <tr><td colspan="11" class="empty"><span class="spinner"></span></td></tr>
           </tbody>
         </table>
       </div>
@@ -1643,6 +1643,7 @@
         <span class="ref-stat"><span class="v" id="ads-stat-customers">0</span><span class="l">People</span></span>
         <span class="ref-stat"><span class="v" id="ads-stat-converted">0</span><span class="l">Ordered</span></span>
         <span class="ref-stat"><span class="v" id="ads-stat-revenue">Rs.0</span><span class="l">Revenue</span></span>
+        <span class="ref-stat"><span class="v" id="ads-stat-referred">0</span><span class="l">Referred orders</span></span>
       </div>
       <div>
         <button class="ctrl-btn" onclick="loadAdsReport(30)">30d</button>
@@ -1660,13 +1661,15 @@
           <th style="text-align:right">Ordered</th>
           <th style="text-align:right">Print</th>
           <th style="text-align:right">Books</th>
-          <th style="text-align:right">Revenue</th>
+          <th style="text-align:right">Direct</th>
+          <th style="text-align:right">Referred</th>
+          <th style="text-align:right">Total</th>
           <th style="text-align:right">Per click</th>
           <th>Last click</th>
         </tr>
       </thead>
       <tbody id="ads-tbody">
-        <tr><td colspan="9" style="padding:24px;color:var(--muted);text-align:center">Loading&#8230;</td></tr>
+        <tr><td colspan="11" style="padding:24px;color:var(--muted);text-align:center">Loading&#8230;</td></tr>
       </tbody>
     </table>
     <div class="note">
@@ -1674,6 +1677,11 @@
       never sends spend to this database, so compare it against <b>cost per result</b>
       in Ads Manager yourself &#8212; an ad is paying for itself only when per-click
       revenue clears that number.<br>
+      <b>Direct</b> is what the person who clicked spent. <b>Referred</b> is what
+      the classmates they recruited spent, via their referral code &#8212; kept
+      separate because an ad like "Print your Thesis for &#8377;0" is designed to
+      earn &#8377;0 direct, and judging it on that alone would score a working ad
+      as a failure. An order is never counted in both.<br>
       Revenue is credited to the <b>first</b> ad a customer ever clicked, and only
       counts orders placed <b>after</b> that click, so an existing customer who taps
       an ad does not hand it their whole history. Anything they spent beforehand is
@@ -1745,7 +1753,7 @@
         </tr>
       </thead>
       <tbody id="pb-orders-tbody">
-        <tr><td colspan="9" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>
+        <tr><td colspan="11" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -2823,7 +2831,7 @@ function renderTable() {
 
   const tbody = document.getElementById("jobs-tbody");
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="empty">No jobs found</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="empty">No jobs found</td></tr>`;
     return;
   }
 
@@ -3000,7 +3008,7 @@ async function loadPrinterJobs() {
   const kt = wantK ? document.getElementById("konica-jobs-tbody") : null;
   if (kt) {
     if (!konicaRows || !konicaRows.length) {
-      kt.innerHTML = `<tr><td colspan="9" class="empty">No Konica job records for this period — if that is unexpected, see the health banner at the top</td></tr>`;
+      kt.innerHTML = `<tr><td colspan="11" class="empty">No Konica job records for this period — if that is unexpected, see the health banner at the top</td></tr>`;
     } else {
       kt.innerHTML = konicaRows.map(r => `
         <tr>
@@ -5759,13 +5767,13 @@ async function loadAdsReport(days) {
   if (winBtn) winBtn.classList.add("active");
 
   const tbody = document.getElementById("ads-tbody");
-  tbody.innerHTML = '<tr><td colspan="9" style="padding:24px;color:var(--muted);text-align:center">Loading&#8230;</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="11" style="padding:24px;color:var(--muted);text-align:center">Loading&#8230;</td></tr>';
   try {
     const r = await fetch(`${ACAD_API}/admin/ads/report?days=${_adsDays}`, {
       headers: { 'X-Admin-Password': _convPw() }
     });
     if (!r.ok) {
-      tbody.innerHTML = `<tr><td colspan="9" style="padding:24px;color:var(--red);text-align:center">${r.status === 403 ? "Admin password required" : "Failed to load (HTTP " + r.status + ")"}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11" style="padding:24px;color:var(--red);text-align:center">${r.status === 403 ? "Admin password required" : "Failed to load (HTTP " + r.status + ")"}</td></tr>`;
       return;
     }
     const d = await r.json();
@@ -5773,18 +5781,19 @@ async function loadAdsReport(days) {
     document.getElementById("ads-stat-clicks").textContent    = t.clicks || 0;
     document.getElementById("ads-stat-customers").textContent = t.customers || 0;
     document.getElementById("ads-stat-converted").textContent = t.converted || 0;
-    document.getElementById("ads-stat-revenue").textContent   = "Rs." + Math.round(t.revenue || 0);
+    document.getElementById("ads-stat-revenue").textContent   = "Rs." + Math.round(t.total_revenue ?? t.revenue ?? 0);
+    document.getElementById("ads-stat-referred").textContent  = t.referred_orders || 0;
 
     // A failed fetch inside ad_report returns empty totals plus _error. Say so
     // rather than rendering "no ad clicks yet", which reads as a working
     // pipeline with nothing in it -- the exact silence the fail-loud rule bans.
     if (d._error) {
-      tbody.innerHTML = `<tr><td colspan="9" style="padding:24px;color:var(--red);text-align:center">Report failed: ${escHtml(d._error)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11" style="padding:24px;color:var(--red);text-align:center">Report failed: ${escHtml(d._error)}</td></tr>`;
       return;
     }
     const ads = d.ads || [];
     if (!ads.length) {
-      tbody.innerHTML = '<tr><td colspan="9" style="padding:24px;color:var(--muted);text-align:center">No ad clicks recorded in this window. Capture started 7 Sep 2026 &#8212; clicks before that were never recorded.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" style="padding:24px;color:var(--muted);text-align:center">No ad clicks recorded in this window. Capture started 7 Sep 2026 &#8212; clicks before that were never recorded.</td></tr>';
       return;
     }
     tbody.innerHTML = ads.map(a => {
@@ -5798,12 +5807,14 @@ async function loadAdsReport(days) {
         <td style="text-align:right" class="${a.print_revenue ? "" : "zero"}">Rs.${Math.round(a.print_revenue || 0)}<span class="headline">${a.print_jobs} job${a.print_jobs === 1 ? "" : "s"}</span></td>
         <td style="text-align:right" class="${a.book_revenue ? "" : "zero"}">Rs.${Math.round(a.book_revenue || 0)}<span class="headline">${a.book_orders} order${a.book_orders === 1 ? "" : "s"}</span></td>
         <td style="text-align:right" class="${rev ? "money" : "zero"}">Rs.${Math.round(rev)}${pre ? `<span class="headline">+Rs.${Math.round(pre)} before click, excluded</span>` : ""}</td>
+        <td style="text-align:right" class="${a.referred_revenue ? "money" : "zero"}">Rs.${Math.round(a.referred_revenue || 0)}<span class="headline">${a.referred_orders || 0} order${a.referred_orders === 1 ? "" : "s"}${a.referral_credit_inr ? `, Rs.${Math.round(a.referral_credit_inr)} credit paid` : ""}</span></td>
+        <td style="text-align:right" class="${a.total_revenue ? "money" : "zero"}">Rs.${Math.round(a.total_revenue || 0)}</td>
         <td style="text-align:right" class="${rev ? "money" : "zero"}">Rs.${(a.revenue_per_click || 0).toFixed(2)}</td>
         <td>${a.last_click ? escHtml(String(a.last_click).slice(0, 16).replace("T", " ")) : "&#8212;"}</td>
       </tr>`;
     }).join("");
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="9" style="padding:24px;color:var(--red);text-align:center">Network error: ${escHtml(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="padding:24px;color:var(--red);text-align:center">Network error: ${escHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -5944,7 +5955,7 @@ function exportLeaderboardCsv() {
 // ── Project Builder Orders ──────────────────────────────────────────────────
 async function loadPBOrders() {
   const tbody = document.getElementById("pb-orders-tbody");
-  tbody.innerHTML = '<tr><td colspan="9" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="11" style="padding:24px;color:var(--muted);text-align:center">Loading…</td></tr>';
   let pw = _convPw();
   if (!pw) {
     pw = await _adminPwPrompt(false);
@@ -5957,13 +5968,13 @@ async function loadPBOrders() {
     });
     if (!r.ok) {
       const msg = r.status === 401 ? "Unauthorized — wrong password" : `Failed to load (HTTP ${r.status})`;
-      tbody.innerHTML = `<tr><td colspan="9" style="padding:24px;color:var(--red);text-align:center">${msg}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11" style="padding:24px;color:var(--red);text-align:center">${msg}</td></tr>`;
       return;
     }
     const d = await r.json();
     const orders = d.orders || [];
     if (!orders.length) {
-      tbody.innerHTML = '<tr><td colspan="9" style="padding:24px;color:var(--muted);text-align:center">No orders yet</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" style="padding:24px;color:var(--muted);text-align:center">No orders yet</td></tr>';
       return;
     }
     tbody.innerHTML = orders.map(o => {
@@ -5988,7 +5999,7 @@ async function loadPBOrders() {
       </tr>`;
     }).join('');
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="9" style="padding:24px;color:var(--red);text-align:center">Network error: ${escHtml(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="padding:24px;color:var(--red);text-align:center">Network error: ${escHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -7014,7 +7025,7 @@ function exportDivyaPDF() {
       <div class="sum">Oxygen owes Divya: <b>₹${d.oxygen_owes_divya}</b> · Divya owes Oxygen: <b>₹${d.divya_owes_oxygen}</b></div>
       <div class="net">NET: ${netLabel}</div>
       <table><thead><tr><th>Order</th><th>Date</th><th>Customer</th><th>Bk</th><th>Total</th><th>Comm.</th><th>Collected</th><th>Owed</th><th>Settled</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="9" style="text-align:center">No orders in this period.</td></tr>'}</tbody></table>
+      <tbody>${rows || '<tr><td colspan="11" style="text-align:center">No orders in this period.</td></tr>'}</tbody></table>
       <div class="foot">Oxygen Students Paradise · printosky.com · generated ${new Date().toLocaleString()}</div>
       <scr` + `ipt>window.onload=function(){setTimeout(function(){window.print();},150);}</scr` + `ipt>
     </body></html>`;

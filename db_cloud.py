@@ -1868,7 +1868,9 @@ def _ad_parse(ts) -> "datetime | None":
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
-def _compute_ad_report(clicks: list, jobs: list, book_orders: list) -> dict:
+def _compute_ad_report(clicks: list, jobs: list, book_orders: list,
+                       referrers: list | None = None,
+                       referral_credits: list | None = None) -> dict:
     """Aggregate ad clicks into per-ad revenue. Pure: no DB, no clock.
 
     ATTRIBUTION IS FIRST TOUCH, AND ONLY FORWARDS.
@@ -1885,6 +1887,16 @@ def _compute_ad_report(clicks: list, jobs: list, book_orders: list) -> dict:
     Revenue that predates the click is still returned as `pre_click_revenue`,
     per ad -- not added to any total, but visible, so a suspiciously quiet ad
     can be told apart from one whose audience were already customers.
+
+    REFERRAL CHAIN, BECAUSE SOME ADS SELL A RECRUITER RATHER THAN A SALE
+    The live campaign ("Print your Thesis for Rs.0") offers free printing in
+    exchange for recruiting classmates. Its clicker is worth Rs.0 direct revenue
+    BY DESIGN -- that is the offer -- and measuring only their own orders would
+    score a perfectly working ad as a total failure. So when a clicker holds a
+    referral code, the orders placed by people they referred are reported too,
+    as `referred_orders` / `referred_revenue`, kept SEPARATE from direct revenue
+    rather than blended: one is what the clicker spent, the other is what they
+    brought in, and an ad can be good at one and useless at the other.
     """
     first: dict = {}          # phone -> (clicked_at, source_id)
     ads: dict = {}            # source_id -> accumulator
@@ -1903,6 +1915,8 @@ def _compute_ad_report(clicks: list, jobs: list, book_orders: list) -> dict:
             "print_jobs": 0, "print_revenue": 0.0,
             "book_orders": 0, "book_revenue": 0.0,
             "pre_click_revenue": 0.0,
+            "referred_orders": 0, "referred_revenue": 0.0,
+            "referral_credit_inr": 0.0, "direct_order_ids": set(),
             "first_click": None, "last_click": None,
         })
         ad["clicks"] += 1
@@ -1913,7 +1927,7 @@ def _compute_ad_report(clicks: list, jobs: list, book_orders: list) -> dict:
         if phone not in first:
             first[phone] = (when, sid)
 
-    def _credit(phone, when, amount, kind):
+    def _credit(phone, when, amount, kind, order_id=""):
         """Add one order's money to whichever ad first brought `phone` in."""
         entry = first.get(phone)
         if entry is None or when is None or amount <= 0:
@@ -1926,18 +1940,59 @@ def _compute_ad_report(clicks: list, jobs: list, book_orders: list) -> dict:
         ad[f"{kind}_revenue"] += amount
         ad["print_jobs" if kind == "print" else "book_orders"] += 1
         ad["converted"].add(phone)
+        if order_id:
+            ad["direct_order_ids"].add(order_id)
 
     for j in jobs:
         _credit((j.get("sender") or "").strip(),
                 _ad_parse(j.get("received_at")),
-                float(j.get("amount_collected") or 0), "print")
+                float(j.get("amount_collected") or 0), "print",
+                (j.get("job_id") or "").strip())
 
     for b in book_orders:
         if (b.get("status") or "") not in AD_REPORT_SOLD_STATUSES:
             continue
         _credit((b.get("phone") or "").strip(),
                 _ad_parse(b.get("created_at")),
-                float(b.get("grand_total") or 0), "book")
+                float(b.get("grand_total") or 0), "book",
+                (b.get("order_code") or "").strip())
+
+    # ── referral chain ───────────────────────────────────────────────────────
+    # referrers.label holds the owner's phone for a personal code (it also holds
+    # a human label for manual campaign codes like "Haadi 10% Referral", which
+    # simply never match a phone and are correctly ignored).
+    code_owner: dict = {}
+    for r in (referrers or []):
+        label = (r.get("label") or "").strip()
+        code = (r.get("code") or "").strip()
+        if label and code and label in first:
+            code_owner[code] = label
+
+    # An order value keyed by the id referral_credits points at, so a referred
+    # order counts for what it was worth and not for the Rs.20 credit we paid.
+    order_value: dict = {}
+    for j in jobs:
+        jid = (j.get("job_id") or "").strip()
+        if jid:
+            order_value[jid] = float(j.get("amount_collected") or 0)
+    for b in book_orders:
+        oid = (b.get("order_code") or "").strip()
+        if oid and (b.get("status") or "") in AD_REPORT_SOLD_STATUSES:
+            order_value[oid] = float(b.get("grand_total") or 0)
+
+    for rc in (referral_credits or []):
+        owner = code_owner.get((rc.get("referrer_code") or "").strip())
+        if not owner:
+            continue
+        ad = ads[first[owner][1]]
+        oid = (rc.get("order_id") or "").strip()
+        ad["referred_orders"] += 1
+        ad["referral_credit_inr"] += float(rc.get("amount_inr") or 0)
+        # If the referred customer clicked this same ad themselves, their order
+        # is already in its direct revenue. Counting it again here would inflate
+        # total_revenue for one order that was only ever paid once.
+        if oid not in ad["direct_order_ids"]:
+            ad["referred_revenue"] += order_value.get(oid, 0.0)
 
     out = []
     for ad in ads.values():
@@ -1959,6 +2014,12 @@ def _compute_ad_report(clicks: list, jobs: list, book_orders: list) -> dict:
             # What one click has been worth so far. Compare against cost per
             # result in Ads Manager: Meta bills us, so spend is not in this DB
             # and this deliberately does not pretend to know it.
+            "referred_orders": ad["referred_orders"],
+            "referred_revenue": round(ad["referred_revenue"], 2),
+            # What the Rs.20-per-classmate promise has cost against what it
+            # brought in. Negative means the credits outran the orders.
+            "referral_credit_inr": round(ad["referral_credit_inr"], 2),
+            "total_revenue": round(revenue + ad["referred_revenue"], 2),
             "revenue_per_click": round(revenue / ad["clicks"], 2) if ad["clicks"] else 0.0,
             "first_click": ad["first_click"].isoformat() if ad["first_click"] else None,
             "last_click": ad["last_click"].isoformat() if ad["last_click"] else None,
@@ -1975,6 +2036,10 @@ def _compute_ad_report(clicks: list, jobs: list, book_orders: list) -> dict:
             "print_jobs": sum(a["print_jobs"] for a in out),
             "book_orders": sum(a["book_orders"] for a in out),
             "revenue": round(sum(a["revenue"] for a in out), 2),
+            "referred_orders": sum(a["referred_orders"] for a in out),
+            "referred_revenue": round(sum(a["referred_revenue"] for a in out), 2),
+            "referral_credit_inr": round(sum(a["referral_credit_inr"] for a in out), 2),
+            "total_revenue": round(sum(a["total_revenue"] for a in out), 2),
         },
     }
 
@@ -1988,7 +2053,10 @@ def ad_report(days: int = 90) -> dict:
     """
     empty = {"ads": [], "totals": {"ads": 0, "clicks": 0, "customers": 0,
                                    "converted": 0, "print_jobs": 0,
-                                   "book_orders": 0, "revenue": 0.0},
+                                   "book_orders": 0, "revenue": 0.0,
+                                   "referred_orders": 0, "referred_revenue": 0.0,
+                                   "referral_credit_inr": 0.0,
+                                   "total_revenue": 0.0},
              "window_days": days, "generated_at": None}
     try:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -2006,16 +2074,42 @@ def ad_report(days: int = 90) -> dict:
         # in_() with an empty list builds `sender=in.()`, which PostgREST rejects.
         # Clicks with no phone are unattributable anyway, so there is nothing to
         # look up -- go straight to the aggregation with no orders.
-        jobs, books = [], []
+        jobs, books, referrers, credits = [], [], [], []
         if phones:
+            # job_id / order_code come along because the referral chain values a
+            # referred order by what it was worth, not by the credit paid on it.
             jobs = (sb.table("jobs")
-                      .select("sender,amount_collected,received_at")
+                      .select("job_id,sender,amount_collected,received_at")
                       .in_("sender", phones).execute().data or [])
             books = (sb.table("book_orders")
-                       .select("phone,grand_total,status,created_at")
+                       .select("order_code,phone,grand_total,status,created_at")
                        .in_("phone", phones).execute().data or [])
 
-        report = _compute_ad_report(clicks, jobs, books)
+            # Referral codes owned by the people who clicked, then the credits
+            # earned on those codes -- the "recruit your classmates" half of the
+            # funnel, which is the entire point of the current campaign.
+            referrers = (sb.table("referrers")
+                           .select("code,label")
+                           .in_("label", phones).execute().data or [])
+            codes = [r["code"] for r in referrers if r.get("code")]
+            if codes:
+                credits = (sb.table("referral_credits")
+                             .select("referrer_code,customer_phone,order_id,amount_inr")
+                             .in_("referrer_code", codes).execute().data or [])
+
+                # A referred order belongs to someone who never clicked the ad,
+                # so its row is not in `jobs`/`books` above. Fetch those by id.
+                order_ids = sorted({(c.get("order_id") or "").strip()
+                                    for c in credits if c.get("order_id")})
+                if order_ids:
+                    jobs += (sb.table("jobs")
+                               .select("job_id,sender,amount_collected,received_at")
+                               .in_("job_id", order_ids).execute().data or [])
+                    books += (sb.table("book_orders")
+                                .select("order_code,phone,grand_total,status,created_at")
+                                .in_("order_code", order_ids).execute().data or [])
+
+        report = _compute_ad_report(clicks, jobs, books, referrers, credits)
         report["window_days"] = days
         report["generated_at"] = datetime.now(timezone.utc).isoformat()
         return report
