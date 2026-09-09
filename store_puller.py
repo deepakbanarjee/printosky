@@ -121,14 +121,37 @@ def clear_print_failure(job_id: str) -> None:
 
 
 def retry_ready(job_id: str) -> bool:
-    """False while a previously-failed job is still inside its backoff window."""
+    """False while a previously-failed job is still inside its backoff window,
+    and false for good for a job this box cannot print at all."""
+    if job_id in _unprintable:
+        return False
     state = _retry_state.get(job_id)
     return True if state is None else _monotonic() >= state[1]
+
+
+# Jobs this box cannot print at all — a Word file on a machine without Word, a
+# format with no converter, a corrupt or password-locked document. A backoff is
+# the wrong answer for these: the same file will fail the same way at every
+# interval until someone intervenes, and the retry is what turned one bad file
+# into a day of lost printing. So they are set aside, once, loudly. In memory
+# only: a restart tries again, which is right — the box may have gained Office,
+# or the customer may have re-sent the file.
+_unprintable: dict[str, str] = {}
+
+
+def mark_unprintable(job_id: str, reason: str) -> None:
+    """This job cannot be printed here. Stop retrying it and say why."""
+    _unprintable[job_id] = reason
+
+
+def unprintable_reason(job_id: str) -> str | None:
+    return _unprintable.get(job_id)
 
 
 def reset_retry_state() -> None:
     """Forget every backoff. For tests, and for a caller that wants a clean run."""
     _retry_state.clear()
+    _unprintable.clear()
 
 
 # -- local tracking table ------------------------------------------------------
@@ -411,6 +434,7 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
     gets the right sheet/orientation instead of the queue default.
     """
     temp_dir = None
+    converted_path = None          # a PDF we made from a .docx/.jpg, ours to clean up
     try:
         try:
             n = int(copies)
@@ -457,6 +481,25 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
 
         import print_planner
         from print_server import send_to_printer
+        from printable import Unprintable, to_printable_pdf
+
+        # SumatraPDF prints PDFs and nothing else. A .docx or a .jpg — the two
+        # things customers most often send over WhatsApp — reach it as-is, are
+        # parsed as PDFs, and fail ("cannot recognize version marker"). Convert
+        # first, into the same directory the download landed in.
+        try:
+            printable_path = to_printable_pdf(
+                dest_path, os.path.dirname(os.path.abspath(dest_path)),
+                paper_size=(print_spec or {}).get("paper_size") or paper_size,
+            )
+            if printable_path != dest_path:
+                converted_path = printable_path
+            dest_path = printable_path
+        except Unprintable as exc:
+            # Permanent. Retrying changes nothing, so stop and say so plainly.
+            mark_unprintable(job_id, str(exc))
+            logger.error("store_puller: %s cannot be printed on this box: %s", job_id, exc)
+            return False
 
         # Mixed-colour jobs are split into ordered B&W/colour sub-jobs. Each
         # sub-job routes to its NATURAL device — B&W -> Konica, colour -> Epson —
@@ -507,7 +550,17 @@ def auto_print(job_id: str, dest_path: str, colour: str | None, copies,
                 logger.warning("store_puller: auto-print sub-job %d/%d failed: %s", idx + 1, n_actions, msg)
                 break
 
-        return success and printed_actions > 0
+        printed = success and printed_actions > 0
+        if printed and converted_path:
+            # The original download is removed by the caller; remove our
+            # conversion of it too. A FAILED print keeps it — staff can print
+            # the PDF by hand, which they cannot do with the .docx.
+            try:
+                os.remove(converted_path)
+            except OSError as exc:
+                logger.debug("store_puller: could not remove %s (%s) — purge_old_files "
+                             "will sweep it", converted_path, exc)
+        return printed
     except Exception as exc:
         logger.warning(
             "store_puller: auto-print error for %s: %s (file in %s for manual print)",
@@ -704,22 +757,34 @@ def pull_once(
             record_pulled(conn, job_id, dest)
             pulled.append(job_id)
         else:
-            delay = note_print_failure(job_id)
-            logger.warning(
-                "store_puller: %s did not print — leaving un-recorded, next attempt in %ds",
-                job_id, int(delay),
-            )
             # A paid job that will not print is exactly what the hard rule is
             # about, and until now it produced a log line and nothing else: two
             # jobs failed every poll for a day at OSP in silence. Alert. The
             # watchdog dedupes the repeats.
-            _report_health(
-                "store_puller.autoprint", False,
-                f"paid job {job_id} ({row.get('filename') or 'unnamed file'}) did not print — "
-                f"the file is in {dest} for manual printing; retrying in {int(delay)}s. "
-                "Check logs/store_puller.log for the printer's own error.",
-                store_id=store_id,
-            )
+            name = row.get("filename") or "unnamed file"
+            permanent = unprintable_reason(job_id)
+            if permanent:
+                logger.error("store_puller: %s will not be retried — %s", job_id, permanent)
+                _report_health(
+                    "store_puller.unprintable", False,
+                    f"paid job {job_id} ({name}) CANNOT be printed here and will not be "
+                    f"retried: {permanent} The file is in {dest}. Someone has to print it "
+                    "by hand or ask the customer for a PDF.",
+                    store_id=store_id,
+                )
+            else:
+                delay = note_print_failure(job_id)
+                logger.warning(
+                    "store_puller: %s did not print — leaving un-recorded, next attempt in %ds",
+                    job_id, int(delay),
+                )
+                _report_health(
+                    "store_puller.autoprint", False,
+                    f"paid job {job_id} ({name}) did not print — the file is in {dest} for "
+                    f"manual printing; retrying in {int(delay)}s. Check "
+                    "logs/store_puller.log for the printer's own error.",
+                    store_id=store_id,
+                )
             _unclaim(job_id)
     return pulled
 

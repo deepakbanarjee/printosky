@@ -83,6 +83,27 @@ So:
   the process starts cannot be in flight — it is the wreckage of the last run,
   and worth saying so.
 
+### What the printer is handed is always a PDF
+
+SumatraPDF prints PDFs and nothing else. Handed a `.docx` or a `.jpg` it parses
+the bytes as a PDF, fails on the version marker and exits 1 — which is how
+`nithya coverpage.docx` and a WhatsApp photo, both paid in July, were still
+unprinted in September.
+
+`printable.to_printable_pdf()` sits in front of every print — in
+`store_puller.auto_print()` before the planner, and at the top of
+`print_server.send_to_printer()` for the staff and counter paths. A PDF passes
+straight through, so the common case costs nothing. Images become one fitted
+page each (aspect kept, the *sheet* turned for a landscape photo rather than the
+picture); Word, PowerPoint and Excel go out through the installed application,
+the same mechanism `watcher.py` already uses to count pages.
+
+When no conversion is possible — no Office on this box, no converter for the
+format, a corrupt or locked document — that is **permanent**, and treated as
+such: the job is set aside rather than retried, and `store_puller.unprintable`
+names the file and the reason. Separating that from a printer-busy failure is
+the whole point; retrying a file that can never print is what cost the day.
+
 ### A failed print backs off — it does not spin
 
 `pull_once` leaves a failed job un-recorded "to retry next poll". The retry did

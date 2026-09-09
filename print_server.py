@@ -709,6 +709,32 @@ def send_to_printer(job_id: str, filepath: str, printer_key: str, copies: int = 
         else:
             return False, f"File not found: {filepath} (also checked Archive)"
 
+    # SumatraPDF prints PDFs and nothing else: hand it a .docx or a .jpg and it
+    # parses the bytes as a PDF, fails on the version marker, and exits 1. Two
+    # paid WhatsApp jobs sat unprintable at OSP for six weeks that way. Convert
+    # first — a PDF comes back unchanged, so this costs nothing for the file
+    # type that is already 95% of the traffic.
+    converted_here = None
+    try:
+        from printable import Unprintable, needs_conversion, to_printable_pdf
+
+        if needs_conversion(filepath):
+            converted_here = to_printable_pdf(filepath, paper_size=paper_size)
+            logging.info("job %s: converted %s for printing -> %s",
+                         job_id, os.path.basename(filepath), converted_here)
+            filepath = converted_here
+    except Unprintable as exc:
+        _report_health(
+            "print_server.unprintable", False,
+            f"job {job_id}: {exc}",
+        )
+        return False, f"Cannot print this file: {exc}"
+    except ImportError as exc:
+        # printable.py not deployed on this box yet. Previous behaviour: hand
+        # the file over as-is. Said out loud rather than left to look normal.
+        logging.warning("job %s: printable.py unavailable (%s) — sending %s unconverted",
+                        job_id, exc, os.path.basename(filepath))
+
     sumatra = find_sumatra()
     if not sumatra:
         # Fallback: use Windows print verb. This path has NO control over
