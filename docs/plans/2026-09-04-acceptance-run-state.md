@@ -672,6 +672,29 @@ the first.
 Only after 3 is it safe to clear those claims by hand, and after 3 there is no
 need to.
 
+**Both merged, 2026-09-09 ~10:55 IST** — #122 then #123, squashed onto `main`,
+CI green on both (`test`, `drift`, Vercel, Netlify). Steps 1 and 2 are done.
+`main` is now at `848e945`.
+
+**Step 3 is the one nobody but a person at OSP can do:** `PULL_UPDATE.bat`, then
+restart the watcher. Until that happens the box is still running the spinning
+code and still skipping both jobs every five minutes — merging changed nothing
+on the store PC, by design.
+
+What to expect in `logs/store_puller.log` on the restart, in this order:
+
+1. `released 2 print claim(s) this box was still holding from a previous run`
+   — plus a `store_puller.stale_claim` alert saying the last run died mid-print.
+2. Both jobs pulled again.
+3. `919446903907_20260725_063022.jpg` converted to a fitted A4 page and printed.
+4. `nithya coverpage.docx` printed **if Word is installed on that box**. If it is
+   not, a `store_puller.unprintable` alert naming the file and the reason, and
+   the job set aside instead of retried. Either outcome is a pass for the fix —
+   the failure mode being removed is the silence, not the missing Word.
+
+Whether Word is on DESKTOP-3NJM40G is not visible from here and has not been
+checked. Do not read step 4 as predicted; read the alert.
+
 ### The boxes are down, which is the more urgent finding
 
 | Store | Last seen (IST) | Ago | Version |
