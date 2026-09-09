@@ -781,7 +781,9 @@ def _handle_help_request(sender: str, trigger: str) -> None:
 
 WELCOME_MESSAGE = (
     "👋 *Welcome to Printosky!*\n"
-    "_Oxygen Students Paradise, Thrissur_\n\n"
+    # Printosky only, per .agents/AGENTS.md. The line above already carries the
+    # brand, so this one keeps the place and drops the second name.
+    "_Thriprayar, Thrissur_\n\n"
     "Happy to help — what do you need today?\n\n"
     "📄 *Printouts / photocopies* — just send your PDF or document here and "
     "we'll quote you instantly.\n"

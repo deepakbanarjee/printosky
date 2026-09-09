@@ -214,7 +214,9 @@ _LINK_MESSAGES = {
         "🖨️ *Print a file*\n"
         "Upload your file, pick paper / colour / copies and pay online here:\n"
         f"{_ORDER_LINK}\n\n"
-        "— Oxygen Students Paradise, Thriprayar"
+        # Customer-facing copy is Printosky only (.agents/AGENTS.md). The
+        # locality stays -- students want to know which counter to walk into.
+        "— Printosky, Thriprayar"
     ),
     "academic": (
         "🎓 *Academic project*\n"
