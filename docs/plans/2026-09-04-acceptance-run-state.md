@@ -597,6 +597,34 @@ bite any job, not just these two. Fixes, in the order they matter:
    SumatraPDF cannot open must alert and stop retrying, not loop.
 4. Alert on a failed auto-print at all — `ops_watchdog.report()` in both places.
 
+**Done — branch `claude/stale-print-claim`, off `main`.** Fixes C, B and 4:
+
+* `claim_job()` accepts a claim older than `CLAIM_TTL_SECONDS` (900 s) as well
+  as a null one, still as one atomic conditional UPDATE — the loser of a race
+  re-checks its WHERE against the row the winner just wrote, so exactly-once
+  survives. Tested both ways round: a fresh claim stays exclusive, and a third
+  box racing for an expired one still does not print.
+* The skip message reads the row and names the holder.
+* `store_puller` releases claims bearing this device's id at startup and alerts
+  that the previous run died mid-print (`store_puller.stale_claim`).
+* A failed print is held back one poll interval, doubling, capped at an hour —
+  so the self-inflicted realtime wake finds nothing to do.
+* `store_puller.autoprint` alerts on a failed print and reports recovery.
+* Ratchets: `claim_job` may never filter on NULL alone; the reconcile query may
+  never stop selecting the claim columns (dropping them would make the recovery
+  a no-op reporting "no claims left over" — the pattern this file is named for).
+
+147 tests green in `test_store_puller` / `test_device_lease` /
+`test_print_retry_pacing` / `test_fail_loud_rule` / `test_autoprint_e2e`.
+
+**Do NOT clear the two stale claims by hand yet.** The OSP box is running
+`f32ff7f`, which is the spinning code. Freeing those claims before that box has
+pulled this branch just restarts the 1/s loop on a file that still cannot print.
+Order: merge → `PULL_UPDATE.bat` at OSP → restart the watcher (which releases
+the claims itself, and says so) → then fault A.
+
+Fault A is still open and is what actually stops these two jobs printing.
+
 ### The boxes are down, which is the more urgent finding
 
 | Store | Last seen (IST) | Ago | Version |
