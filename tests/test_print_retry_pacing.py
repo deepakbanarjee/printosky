@@ -200,6 +200,90 @@ def test_download_only_mode_reports_nothing_about_printing(tmp_path, granted, mo
     assert not [a for a in alerts if a[0] == "store_puller.autoprint"]
 
 
+# ── a file that can never print is not a file to retry ────────────────────────
+
+def test_an_unprintable_job_is_set_aside_permanently():
+    sp.mark_unprintable("J1", "no converter for .psd")
+    assert retry_ready("J1") is False
+
+
+def test_no_amount_of_waiting_makes_an_unprintable_job_ready(monkeypatch):
+    """The distinction that cost the day: a backoff expires, this does not."""
+    sp.mark_unprintable("J1", "no Word on this box")
+    _advance(monkeypatch, 60 * 60 * 24 * 7)
+    assert retry_ready("J1") is False
+
+
+def test_a_restart_gives_it_one_more_chance():
+    """In memory only, deliberately: the box may have gained Office, or the
+    customer may have re-sent the file as a PDF."""
+    sp.mark_unprintable("J1", "no Word on this box")
+    reset_retry_state()
+    assert retry_ready("J1") is True
+
+
+def test_an_unprintable_job_alerts_differently_from_a_printer_that_is_busy(
+        tmp_path, granted, monkeypatch):
+    """Two different jobs for whoever reads the alert: one waits, one has to be
+    printed by hand or sent back to the customer."""
+    alerts = []
+    monkeypatch.setattr(sp, "_report_health",
+                        lambda check, ok, detail, **kw: alerts.append((check, ok, detail)))
+
+    def on_pulled(row, dest):
+        sp.mark_unprintable(row["job_id"], "no converter for .psd —")
+        return False
+
+    pull_once(_Client(ROWS), "NTK", str(tmp_path), _conn(),
+              downloader=lambda u, d: 1, on_pulled=on_pulled)
+    kinds = {a[0] for a in alerts}
+    assert "store_puller.unprintable" in kinds
+    assert "store_puller.autoprint" not in kinds, (
+        "a file that will never print must not be reported as a retryable failure"
+    )
+    detail = [a for a in alerts if a[0] == "store_puller.unprintable"][0][2]
+    assert "will not be retried" in detail
+    assert "a.docx" in detail, "the alert must name the file someone has to go and print"
+
+
+def test_the_docx_that_started_this_converts_or_fails_loudly(tmp_path, monkeypatch):
+    """The OSP file itself, through auto_print, on a box with no Word: it must
+    come back False having been MARKED, not left to retry every poll."""
+    import print_server
+    from store_puller import auto_print
+
+    src = tmp_path / "nithya coverpage.docx"
+    src.write_bytes(b"PK\x03\x04 a real docx starts like this")
+    monkeypatch.setitem(sys.modules, "win32com.client", None)
+    monkeypatch.setattr(print_server, "send_to_printer",
+                        lambda *a, **k: pytest.fail("SumatraPDF must never see a .docx"))
+
+    assert auto_print("OSP-J", str(src), "bw", 1,
+                      print_spec={"sides": "simplex"}) is False
+    reason = sp.unprintable_reason("OSP-J")
+    assert reason and "Word" in reason
+
+
+def test_a_photo_reaches_the_printer_as_a_pdf(tmp_path, monkeypatch):
+    """The other OSP job. A .jpg must arrive at send_to_printer as a PDF."""
+    fitz = pytest.importorskip("fitz")
+    import print_server
+    from store_puller import auto_print
+
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=800)
+    page.draw_rect(fitz.Rect(10, 10, 590, 790), fill=(0.1, 0.1, 0.1))
+    page.get_pixmap().save(str(tmp_path / "photo.png"))
+    doc.close()
+
+    seen = {}
+    monkeypatch.setattr(print_server, "send_to_printer",
+                        lambda job_id, path, key, **kw: (seen.update(path=path), (True, "ok"))[1])
+    assert auto_print("OSP-P", str(tmp_path / "photo.png"), "bw", 1,
+                      print_spec={"sides": "simplex"}) is True
+    assert seen["path"].lower().endswith(".pdf")
+
+
 # ── the claim this box left behind ────────────────────────────────────────────
 
 def test_our_own_leftover_claim_is_released_at_startup(monkeypatch):

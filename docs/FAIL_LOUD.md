@@ -105,6 +105,7 @@ Alerts go to the ops WhatsApp number via `whatsapp_notify.send_staff_alert`.
 | `fetcher.epson` | The fetch loop itself threw |
 | `sync.supabase` | A sync cycle failed, or Supabase is not configured — i.e. the console is now stale |
 | `config.epson_ip` | `epson_ip` missing from `store_config.json` |
+| `store_puller.unprintable` / `print_server.unprintable` | The file cannot be turned into a PDF on this box — no converter for the format, no Word/PowerPoint installed, or the document is corrupt or password-protected. **Not retried**, deliberately: the same file fails the same way every poll. Someone has to print it by hand or ask the customer for a PDF |
 | `store_puller.autoprint` | A paid job was downloaded and did not print. The file is left in `Jobs/Assigned` for manual printing and the job backs off before retrying. Until 2026-09-09 this was a `logger.warning` and nothing else — two jobs failed every poll for a day at OSP in silence |
 | `store_puller.stale_claim` | This box started up still holding a print claim, so the previous run died mid-print. Those jobs were unprintable until the claim was released; check `logs/store_puller.log` for why it stopped |
 | `store_puller.realtime` / `academic_worker.realtime` / `transcription_worker.realtime` | The Supabase Realtime subscription could not be established, or a live one died — pickup is back on the 15-minute fallback poll until `realtime_liveness.hold` rebuilds it (recovery is announced) |
