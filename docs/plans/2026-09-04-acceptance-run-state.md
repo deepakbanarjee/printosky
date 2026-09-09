@@ -623,7 +623,54 @@ pulled this branch just restarts the 1/s loop on a file that still cannot print.
 Order: merge → `PULL_UPDATE.bat` at OSP → restart the watcher (which releases
 the claims itself, and says so) → then fault A.
 
-Fault A is still open and is what actually stops these two jobs printing.
+**Fault A — done, branch `claude/print-non-pdf-files`, stacked on
+`claude/stale-print-claim`.** New `printable.py` in front of every print:
+`store_puller.auto_print()` before the planner, and the top of
+`print_server.send_to_printer()` for the staff and counter paths (the locked
+Konica routing is untouched — the hook sits after it). A PDF passes straight
+through with no existence check, so `send_to_printer` keeps its `Jobs\Archive`
+fallback. Images become one fitted page, aspect kept, turning the *sheet* for a
+landscape photo. Word/PPT/Excel export through the installed application.
+
+A file that cannot be converted at all is **permanent**: set aside, not retried,
+and alerted as `store_puller.unprintable` — a different alert from
+`store_puller.autoprint`'s "the printer was busy", because they send whoever
+reads them to different places. In memory only, so a restart gives it one more
+chance.
+
+3074 tests pass; 22 new ones, driving real raster files rather than stubs, and
+including the OSP `.docx` itself on a box with no Word — which must come back
+marked, never handed to SumatraPDF.
+
+### 2026-09-09 09:52 IST check-in — still not printed, as expected
+
+All three boxes are up and on `main@5cf6df2`, heartbeating within four minutes —
+first time since 09-06. Both July jobs are still `Paid`, `printer`,
+`completed_at`, `printed_by` and `pickup_ready_at` all null, and
+`print_claimed_at` unchanged since 09-08: the puller is skipping them every five
+minutes exactly as the log analysis says it must.
+
+The check-in that fired this morning offered the `pulled_jobs` hypothesis as the
+branch to take if they had not printed. That branch is dead — the box's own
+query returned 63 rows with no July ids — and the log answered the question
+instead. Noted here so the instruction is not followed later by someone reading
+only the check-in.
+
+**Order to land these.** Both branches are off `main`; the second is stacked on
+the first.
+
+1. `claude/stale-print-claim` — the claim TTL, the honest skip message, the
+   startup release, the backoff, the alerts.
+2. `claude/print-non-pdf-files` — the conversion and the permanent-failure
+   split.
+3. `PULL_UPDATE.bat` at OSP, restart the watcher. It releases its own two stale
+   claims at startup and alerts that it did.
+4. Then the two July jobs print: the `.jpg` certainly, the `.docx` if Word is
+   installed on that box — and if it is not, the alert will say so by name
+   instead of failing every poll in silence.
+
+Only after 3 is it safe to clear those claims by hand, and after 3 there is no
+need to.
 
 ### The boxes are down, which is the more urgent finding
 
