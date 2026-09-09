@@ -51,13 +51,51 @@ else:
     pass                      # another box at this store already has it
 ```
 
-The claim is an atomic conditional update — `print_claimed_at IS NULL` — so of
-any number of boxes trying at the same instant, exactly one gets a row back. A
-failed print calls `release_job()` so the retry can proceed.
+The claim is an atomic conditional update — unclaimed, **or claimed longer than
+`CLAIM_TTL_SECONDS` ago** — so of any number of boxes trying at the same instant,
+exactly one gets a row back. A failed print calls `release_job()` so the retry
+can proceed.
 
 `pulled_jobs`, the old guard, is a **local** SQLite table: it stops one box
 pulling a job twice and can say nothing about the box next to it. The claim is
 what makes printing exactly-once.
+
+#### The claim expires, because a box can die holding one
+
+It did, at OSP on 2026-09-08: a job whose file SumatraPDF could not open span the
+puller until the process died mid-cycle, between `claim_job()` and
+`release_job()`. The claim required `print_claimed_at IS NULL` and nothing aged
+one out, so it was permanent. Two paid jobs were skipped every five minutes for
+a day, and the log said *"already claimed by another box"* — about the box
+reading the message, which was the only box serving that store.
+
+So:
+
+* **A claim older than `CLAIM_TTL_SECONDS` (default 900 s, `PRINT_CLAIM_TTL_SECONDS`)
+  can be taken over.** Longer than any real print takes; shorter than a customer
+  will wait. Exactly-once still holds — two boxes racing for the same expired
+  claim both send the same conditional UPDATE, Postgres serialises them, and the
+  loser re-checks its WHERE against the row the winner just wrote.
+* **The skip message names the actual holder**, read from the row, instead of
+  asserting "another box" without looking.
+* **`store_puller` releases its own leftovers at startup** and alerts
+  (`store_puller.stale_claim`). A claim bearing this device's id at the moment
+  the process starts cannot be in flight — it is the wreckage of the last run,
+  and worth saying so.
+
+### A failed print backs off — it does not spin
+
+`pull_once` leaves a failed job un-recorded "to retry next poll". The retry did
+not wait for the poll: `claim_job()` and `release_job()` UPDATE the same `jobs`
+row the puller subscribes to over Realtime, so the puller's own bookkeeping woke
+the puller. `_wake_event.wait(POLL_SECONDS)` returned instantly and the cycle ran
+again, about once a second, re-downloading the file and writing two Supabase
+updates each time.
+
+A job that just failed to print is therefore not pullable again until its backoff
+expires — one poll interval, doubling per consecutive failure, capped at an hour.
+The self-inflicted wake still happens; it now finds nothing to do. And the
+failure raises `store_puller.autoprint` instead of a log line nobody reads.
 
 ## What happens when Supabase is unreachable
 

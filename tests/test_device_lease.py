@@ -32,6 +32,7 @@ class _Query:
     def __init__(self, table, op, payload=None):
         self.t, self.op, self.payload = table, op, payload
         self.filters = {}
+        self.ors: list[tuple[str, str, str | None]] = []
 
     def select(self, *a, **k):  return self
     def limit(self, *a, **k):   return self
@@ -42,6 +43,20 @@ class _Query:
 
     def is_(self, col, val):
         self.filters[col] = None if str(val).lower() in ("null", "none") else val
+        return self
+
+    def or_(self, expr):
+        """PostgREST `or=(a.is.null,a.lt.X)` — a disjunction, ANDed with the rest.
+
+        Only the operators device_lease actually uses are implemented; anything
+        else fails loudly rather than quietly matching everything, which would
+        make a broken claim look exactly like a working one.
+        """
+        for clause in expr.split(","):
+            col, op, val = clause.split(".", 2)
+            if op not in ("is", "lt"):
+                raise AssertionError(f"fake does not implement or-operator {op!r}")
+            self.ors.append((col, op, None if val.lower() == "null" else val))
         return self
 
     def execute(self):
@@ -75,19 +90,36 @@ class FakeSupabase:
             raise RuntimeError("supabase unreachable")
         return _Table(name, self)
 
-    def _match(self, row, filters):
-        return all(row.get(k) == v for k, v in filters.items())
+    def _match(self, row, filters, ors=()):
+        if not all(row.get(k) == v for k, v in filters.items()):
+            return False
+        if not ors:
+            return True
+        return any(self._match_or(row, c) for c in ors)
+
+    @staticmethod
+    def _match_or(row, clause):
+        col, op, val = clause
+        cur = row.get(col)
+        if op == "is":
+            return cur == val
+        if cur is None:
+            return False           # a null is never "less than" a timestamp
+        try:
+            return datetime.fromisoformat(str(cur)) < datetime.fromisoformat(str(val))
+        except ValueError:
+            return str(cur) < str(val)
 
     def execute(self, name, q):
         rows = self.rows.setdefault(name, [])
         self.calls.append((name, q.op, dict(q.filters)))
         if q.op == "select":
-            return _Result([r for r in rows if self._match(r, q.filters)])
+            return _Result([r for r in rows if self._match(r, q.filters, q.ors)])
         if q.op in ("insert", "upsert"):
             rows.append(dict(q.payload))
             return _Result([dict(q.payload)])
         if q.op == "update":
-            hit = [r for r in rows if self._match(r, q.filters)]
+            hit = [r for r in rows if self._match(r, q.filters, q.ors)]
             for r in hit:
                 r.update(q.payload)
             return _Result([dict(r) for r in hit])
@@ -267,6 +299,87 @@ def test_release_job_only_clears_our_own_claim(lease, monkeypatch):
     _as(monkeypatch, "box-B")
     dl.release_job("OSP-1")                        # B must not free A's claim
     assert db.rows["jobs"][0]["print_claimed_by"] == "box-A"
+
+
+# ── A claim that outlives the box holding it ─────────────────────────────────
+#
+# 2026-09-08, OSP. A job whose file SumatraPDF could not open span the puller
+# until the process died, mid-cycle, between claim_job() and release_job(). The
+# claim it left behind was permanent — claim_job() required print_claimed_at to
+# be NULL and nothing ever aged one out — so two paid jobs were skipped every
+# five minutes for a day, and the log blamed "another box" while the row named
+# DESKTOP-3NJM40G: the box reading the message.
+
+def _claimed(job_id, by, at):
+    return {"job_id": job_id, "print_claimed_by": by, "print_claimed_at": at.isoformat()}
+
+
+def test_a_claim_older_than_the_ttl_can_be_taken_over(lease, monkeypatch):
+    dead = NOW - timedelta(seconds=dl.CLAIM_TTL_SECONDS + 60)
+    db = FakeSupabase({"jobs": [_claimed("OSP-1", "box-dead", dead)]})
+    monkeypatch.setattr(dl, "_client", lambda: db)
+    _as(monkeypatch, "box-B")
+    assert dl.claim_job("OSP-1") is True
+    assert db.rows["jobs"][0]["print_claimed_by"] == "box-B"
+
+
+def test_our_own_abandoned_claim_does_not_freeze_the_job_forever(lease, monkeypatch):
+    """The OSP case exactly: the holder is this very box, from a dead process."""
+    dead = NOW - timedelta(hours=22)
+    db = FakeSupabase({"jobs": [_claimed("OSP-1", "box-A", dead)]})
+    monkeypatch.setattr(dl, "_client", lambda: db)
+    assert dl.claim_job("OSP-1") is True
+
+
+def test_a_claim_inside_the_ttl_is_still_exclusive(lease, monkeypatch):
+    """The TTL must not become a licence to print the same job twice."""
+    fresh = NOW - timedelta(seconds=5)
+    db = FakeSupabase({"jobs": [_claimed("OSP-1", "box-A", fresh)]})
+    monkeypatch.setattr(dl, "_client", lambda: db)
+    _as(monkeypatch, "box-B")
+    assert dl.claim_job("OSP-1") is False
+    assert db.rows["jobs"][0]["print_claimed_by"] == "box-A"
+
+
+def test_the_loser_of_a_race_for_an_expired_claim_does_not_print(lease, monkeypatch):
+    dead = NOW - timedelta(hours=3)
+    db = FakeSupabase({"jobs": [_claimed("OSP-1", "box-dead", dead)]})
+    monkeypatch.setattr(dl, "_client", lambda: db)
+    _as(monkeypatch, "box-B")
+    assert dl.claim_job("OSP-1") is True       # B takes it over
+    _as(monkeypatch, "box-C")
+    assert dl.claim_job("OSP-1") is False      # C, a moment later, must not
+
+
+def test_the_skip_message_names_the_holder_not_a_guess(lease, monkeypatch, caplog):
+    fresh = NOW - timedelta(seconds=5)
+    db = FakeSupabase({"jobs": [_claimed("OSP-1", "box-A", fresh)]})
+    monkeypatch.setattr(dl, "_client", lambda: db)
+    with caplog.at_level("INFO"):
+        assert dl.claim_job("OSP-1") is False   # we ARE box-A
+    text = caplog.text
+    assert "THIS box" in text, text
+    assert "another box" not in text, text
+
+
+def test_a_claim_held_elsewhere_is_reported_as_held_elsewhere(lease, monkeypatch, caplog):
+    fresh = NOW - timedelta(seconds=5)
+    db = FakeSupabase({"jobs": [_claimed("OSP-1", "box-Z", fresh)]})
+    monkeypatch.setattr(dl, "_client", lambda: db)
+    with caplog.at_level("INFO"):
+        assert dl.claim_job("OSP-1") is False
+    assert "box-Z" in caplog.text
+
+
+def test_claim_job_never_filters_on_null_alone(lease):
+    """Ratchet. Restoring `is_("print_claimed_at", "null")` as the only
+    condition reinstates the permanent freeze this file exists to prevent."""
+    import inspect
+    src = inspect.getsource(dl.claim_job)
+    assert ".or_(" in src, "the claim must also accept an expired claim"
+    assert 'is_("print_claimed_at"' not in src, (
+        "a claim filtered on NULL alone can never be taken over from a dead box"
+    )
 
 
 # ── Identity ──────────────────────────────────────────────────────────────────

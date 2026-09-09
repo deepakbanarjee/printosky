@@ -59,6 +59,24 @@ def _mem_conn() -> sqlite3.Connection:
     return sqlite3.connect(":memory:")
 
 
+@pytest.fixture(autouse=True)
+def _clean_retry_state():
+    """The post-failure backoff is module-level state that must survive between
+    poll cycles in a live process — so it also survives between tests, and every
+    class here reuses the ids J1/J2. Reset it around each test."""
+    import store_puller as sp
+    sp.reset_retry_state()
+    yield
+    sp.reset_retry_state()
+
+
+def _advance(monkeypatch, seconds: float):
+    """Move the puller's clock forward without sleeping through a backoff."""
+    import store_puller as sp
+    base = sp._monotonic()
+    monkeypatch.setattr(sp, "_monotonic", lambda: base + seconds)
+
+
 # ---------- safe_filename ------------------------------------------------------
 
 class TestSafeFilename:
@@ -230,13 +248,17 @@ class TestPullOnce:
         assert pulled == []
         assert load_pulled_ids(conn) == set()
 
-    def test_failed_print_retries_next_cycle(self, tmp_path):
+    def test_failed_print_retries_next_poll(self, tmp_path, monkeypatch):
         conn = _mem_conn()
         # First cycle: print fails -> not recorded.
         pulled1 = pull_once(_FakeClient(self._rows()), "NTK", str(tmp_path), conn,
                             downloader=lambda u, d: 1, on_pulled=lambda r, d: False)
         assert pulled1 == []
         assert load_pulled_ids(conn) == set()
+        # The retry is owed to the NEXT POLL, not to the next instruction. See
+        # test_print_retry_pacing.py: the puller's own claim writes wake it,
+        # so "next cycle" arrives about a second later, forever.
+        _advance(monkeypatch, 901)
         # Second cycle: print succeeds -> recorded, not re-pulled after.
         pulled2 = pull_once(_FakeClient(self._rows()), "NTK", str(tmp_path), conn,
                             downloader=lambda u, d: 1, on_pulled=lambda r, d: True)
