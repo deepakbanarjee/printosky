@@ -60,6 +60,21 @@ log = logging.getLogger("device_lease")
 # dies is replaced after at most LEASE_TTL_SECONDS.
 LEASE_TTL_SECONDS = int(os.environ.get("DEVICE_LEASE_TTL_SECONDS", "180"))
 
+# How long a print claim is good for. A claim is taken before the download and
+# released after the print, so it lives for seconds — but only if the process
+# survives to release it. It did not, on 2026-09-08 at OSP: a job whose file
+# SumatraPDF could not open span the puller until the process died mid-cycle,
+# between claim_job() and release_job(). The claim then sat there forever,
+# because claim_job() required `print_claimed_at IS NULL` and NOTHING aged a
+# claim out. Two paid jobs were skipped every five minutes for a day, with the
+# log saying "already claimed by another box" about the very box that was
+# reading it.
+#
+# So a claim expires. Longer than any real print takes, shorter than a customer
+# will wait: one poll interval. A takeover is never silent — a claim old enough
+# to expire means a box died holding it, which is worth an alert on its own.
+CLAIM_TTL_SECONDS = int(os.environ.get("PRINT_CLAIM_TTL_SECONDS", "900"))
+
 # Roles. One holder per (store, role).
 ROLE_POLL_PRINTERS = "poll_printers"     # SNMP/web counters + supply levels
 ROLE_FETCH_EPSON   = "fetch_epson_log"   # the Epson's own job history
@@ -329,21 +344,56 @@ def claim_job(job_id: str) -> bool:
                 "cannot reach Supabase to claim jobs — auto-print is paused rather "
                 "than risk printing a job twice")
         return False
+    cutoff = _iso(_now() - timedelta(seconds=CLAIM_TTL_SECONDS))
     try:
+        # Unclaimed, or claimed so long ago that the holder must be gone. Still
+        # one atomic conditional UPDATE, so still exactly-once: two boxes racing
+        # for the same expired claim both send this, Postgres serialises them,
+        # and the loser re-checks the WHERE against the row the winner just
+        # wrote — which is now fresh, so it matches nothing and returns no rows.
         updated = (c.table("jobs")
                     .update({"print_claimed_at": _iso(_now()), "print_claimed_by": device_id()})
                     .eq("job_id", job_id)
-                    .is_("print_claimed_at", "null")
+                    .or_(f"print_claimed_at.is.null,print_claimed_at.lt.{cutoff}")
                     .execute()).data or []
         if updated:
             _report("print.claim", True, "claims working")
             return True
-        log.info("store_puller: %s is already claimed by another box — skipping", job_id)
+        _report_held_claim(c, job_id)
         return False
     except Exception as exc:
         log.warning("device_lease: claim for %s failed (%s)", job_id, exc)
         _report("print.claim", False, f"claim failed for {job_id}: {exc}")
         return False
+
+
+def _report_held_claim(c, job_id: str) -> None:
+    """Say who actually holds the claim we could not take.
+
+    The old line asserted "another box" without ever looking, which is how a
+    box came to be told, every five minutes for a day, that it was competing
+    with itself. Read the row and name the holder. Best-effort: if the read
+    fails, say that instead of guessing again.
+    """
+    holder, since = None, None
+    try:
+        rows = (c.table("jobs").select("print_claimed_by,print_claimed_at")
+                 .eq("job_id", job_id).limit(1).execute()).data or []
+        if rows:
+            holder = rows[0].get("print_claimed_by")
+            since = rows[0].get("print_claimed_at")
+    except Exception as exc:
+        log.info("store_puller: %s is claimed and could not read by whom (%s) — skipping",
+                 job_id, exc)
+        return
+    if holder and holder == device_id():
+        # Within the TTL and held by us: a sibling process on this same box, or
+        # our own in-flight print. Either way not "another box".
+        log.info("store_puller: %s is claimed by THIS box (%s, since %s) — skipping",
+                 job_id, holder, since)
+        return
+    log.info("store_puller: %s is claimed by %s (since %s) — skipping",
+             job_id, holder or "an unnamed box", since)
 
 
 def release_job(job_id: str) -> None:

@@ -73,7 +73,62 @@ KEEP_DAYS = int(os.environ.get("STORE_PULLER_KEEP_DAYS", "7"))
 PULLABLE_STATUSES = ("Paid",)
 
 # Columns we need off each job row (colour/copies drive auto-print).
-_JOB_COLUMNS = "job_id,filename,file_url,status,assigned_store_id,pickup_code,colour,copies,size,orientation,print_spec"
+_JOB_COLUMNS = ("job_id,filename,file_url,status,assigned_store_id,pickup_code,colour,"
+                "copies,size,orientation,print_spec,print_claimed_at,print_claimed_by")
+
+
+# -- retry pacing --------------------------------------------------------------
+#
+# A print that fails is left un-recorded so the next poll retries it. That is
+# right for a printer-busy or disk-full failure and catastrophic without a
+# floor under it, because the retry does not wait for the poll: claim_job() and
+# release_job() UPDATE the same `jobs` row this puller subscribes to, so our own
+# bookkeeping writes fire our own realtime callback, which sets _wake_event,
+# which makes wait(POLL_SECONDS) return at once. On 2026-09-08 at OSP one file
+# SumatraPDF could not open span that loop about once a second — re-downloading
+# 43 KB and writing two Supabase updates per second — until the process died.
+#
+# So a job that just failed is not pullable again until its backoff expires.
+# The self-inflicted wake still happens; it now finds nothing to do and goes
+# back to waiting, which is the whole fix. Backoff starts at one poll interval
+# and doubles, because a file that failed six times is not about to succeed.
+_RETRY_BACKOFF_CAP_SECONDS = int(os.environ.get("STORE_PULLER_RETRY_CAP_SECONDS", "3600"))
+_retry_state: dict[str, tuple[int, float]] = {}   # job_id -> (failures, ready_at)
+
+
+def _monotonic() -> float:
+    """Indirected so tests can move time without sleeping through a backoff."""
+    return time.monotonic()
+
+
+def _retry_base_seconds() -> int:
+    """One poll interval, never under a minute even if POLL_SECONDS is tuned down."""
+    return max(60, POLL_SECONDS)
+
+
+def note_print_failure(job_id: str) -> float:
+    """Record a failed print and return the seconds until this job is eligible again."""
+    failures, _ = _retry_state.get(job_id, (0, 0.0))
+    failures += 1
+    delay = min(_retry_base_seconds() * (2 ** (failures - 1)), _RETRY_BACKOFF_CAP_SECONDS)
+    _retry_state[job_id] = (failures, _monotonic() + delay)
+    return delay
+
+
+def clear_print_failure(job_id: str) -> None:
+    """A job that printed (or that we no longer track) starts clean next time."""
+    _retry_state.pop(job_id, None)
+
+
+def retry_ready(job_id: str) -> bool:
+    """False while a previously-failed job is still inside its backoff window."""
+    state = _retry_state.get(job_id)
+    return True if state is None else _monotonic() >= state[1]
+
+
+def reset_retry_state() -> None:
+    """Forget every backoff. For tests, and for a caller that wants a clean run."""
+    _retry_state.clear()
 
 
 # -- local tracking table ------------------------------------------------------
@@ -495,7 +550,53 @@ def reconcile_stranded(client, store_id: str, conn: sqlite3.Connection) -> int:
         conn.commit()
         logger.info("store_puller: reconcile — reset %d stranded Paid job(s) for retry: %s",
                     len(strand), ", ".join(strand))
+    release_own_stale_claims(rows, store_id)
     return len(strand)
+
+
+def release_own_stale_claims(rows: list[dict], store_id: str) -> list[str]:
+    """Startup recovery for a claim this box is still holding from a past life.
+
+    A claim is taken before the download and released after the print, so this
+    process cannot legitimately hold one at the moment it starts. Any claim
+    bearing our device_id is therefore a leftover — the previous process died
+    between claim_job() and release_job(). That happened at OSP on 2026-09-08
+    and cost two paid jobs a day of "already claimed by another box", about the
+    box reading the message.
+
+    The TTL in device_lease would free these eventually; clearing them at
+    startup makes the recovery immediate and, more to the point, says out loud
+    that a box died mid-print. Returns the ids released. Never raises.
+    """
+    try:
+        from device_lease import device_id, release_job
+    except ImportError:
+        return []          # older deployment, single-box behaviour
+    try:
+        me = device_id()
+    except Exception:
+        return []
+    mine = [r["job_id"] for r in rows
+            if (r.get("job_id") or "") and r.get("print_claimed_by") == me]
+    for jid in mine:
+        try:
+            release_job(jid)
+        except Exception as exc:
+            logger.warning("store_puller: could not release own stale claim on %s: %s", jid, exc)
+    if mine:
+        logger.warning("store_puller: released %d print claim(s) this box was still "
+                       "holding from a previous run: %s", len(mine), ", ".join(mine))
+        _report_health(
+            "store_puller.stale_claim", False,
+            f"this box was still holding {len(mine)} print claim(s) at startup "
+            f"({', '.join(mine)}) — the previous run died mid-print, and those jobs "
+            "were unprintable until now. Check logs/store_puller.log for why it stopped.",
+            store_id=store_id,
+        )
+    else:
+        _report_health("store_puller.stale_claim", True,
+                       "no claims left over from a previous run", store_id=store_id)
+    return mine
 
 
 def _claim(job_id: str) -> bool:
@@ -556,6 +657,14 @@ def pull_once(
         return []
 
     todo = select_pullable(rows, load_pulled_ids(conn))
+    # Hold back anything still inside its post-failure backoff. Without this a
+    # job that cannot print re-enters the loop on our own claim-write wake, once
+    # a second, forever — see the "retry pacing" note above.
+    held = [r["job_id"] for r in todo if not retry_ready(r["job_id"])]
+    if held:
+        logger.debug("store_puller: %d job(s) still backing off after a failed print: %s",
+                     len(held), ", ".join(held))
+    todo = [r for r in todo if retry_ready(r["job_id"])]
     if not todo:
         return []
 
@@ -588,10 +697,29 @@ def pull_once(
         # the cloud — instead of stranding at Paid forever (which is what happened
         # when a disk-full/printer-busy print failed after the download).
         if on_pulled is None or printed:
+            clear_print_failure(job_id)
+            if on_pulled is not None:
+                _report_health("store_puller.autoprint", True,
+                               "auto-print working", store_id=store_id)
             record_pulled(conn, job_id, dest)
             pulled.append(job_id)
         else:
-            logger.warning("store_puller: %s did not print — leaving un-recorded to retry next poll", job_id)
+            delay = note_print_failure(job_id)
+            logger.warning(
+                "store_puller: %s did not print — leaving un-recorded, next attempt in %ds",
+                job_id, int(delay),
+            )
+            # A paid job that will not print is exactly what the hard rule is
+            # about, and until now it produced a log line and nothing else: two
+            # jobs failed every poll for a day at OSP in silence. Alert. The
+            # watchdog dedupes the repeats.
+            _report_health(
+                "store_puller.autoprint", False,
+                f"paid job {job_id} ({row.get('filename') or 'unnamed file'}) did not print — "
+                f"the file is in {dest} for manual printing; retrying in {int(delay)}s. "
+                "Check logs/store_puller.log for the printer's own error.",
+                store_id=store_id,
+            )
             _unclaim(job_id)
     return pulled
 
