@@ -548,8 +548,36 @@ def _begin_counting(phone: str, order_code: str, keys: list, editing: bool) -> N
     _send_qty_buttons(phone, bc.BOOKS[keys[0]]["label"])
 
 
+# ── Book sales pause ─────────────────────────────────────────────────────────
+# Sales are stopped between editions while the updated version is prepared. The
+# code stays in place; only the door closes.
+BOOKS_PAUSED_REPLY = (
+    "\U0001F4DA Book orders are paused just now — a new edition is on the way and "
+    "we don't want to sell you the old one.\n\n"
+    "We'll announce it here the day it's back.\n\n"
+    "Printing is running as normal: send a file and we'll quote you straight away."
+)
+
+
+def books_paused() -> bool:
+    """True when BOOKS_SALE_PAUSED is set (Vercel env).
+
+    Default is sales ON, so a forgotten variable can never silently stop the
+    shop selling -- the failure mode of a wrong default should be noisy, not a
+    quiet loss of revenue.
+    """
+    return os.environ.get("BOOKS_SALE_PAUSED", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 def _start(phone: str, name: str | None, force_new: bool = False) -> list[str]:
     active = {} if force_new else _dbc.get_active_book_order(phone)
+    # Turn away a NEW order while sales are paused, but never someone who
+    # already has one in flight: pausing must not strand a customer who has
+    # confirmed, or paid. force_new blanks `active`, so "new" is turned away
+    # too, which is right -- starting over is starting.
+    if books_paused() and not active:
+        return [BOOKS_PAUSED_REPLY]
     if active and active.get("status") == "collecting":
         code = active["order_code"]
         _dbc.update_book_order(code, items={}, flow_cursor={}, status="collecting",
@@ -2669,6 +2697,12 @@ def maybe_handle_soc(phone: str, text: str, name: str | None = None) -> list[str
     # Route into flow if triggered or already in soc steps
     if step not in _SOC_STEPS and not is_soc_trigger(t):
         return None
+
+    # Sociology has its own flow and never passes through _start, so it needs
+    # its own gate. A fresh enquiry during a pause is turned away; someone
+    # already mid-flow is left to finish.
+    if books_paused() and step not in _SOC_STEPS:
+        return [BOOKS_PAUSED_REPLY]
 
     # Fresh trigger — show catalog
     if step not in _SOC_STEPS or is_soc_trigger(t):

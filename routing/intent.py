@@ -230,14 +230,28 @@ _LINK_MESSAGES = {
 
 
 def build_menu_rows() -> list[dict]:
-    """Rows for the tap-to-choose fallback menu (row id → parse_intent_tag)."""
-    return [
+    """Rows for the tap-to-choose fallback menu (row id → parse_intent_tag).
+
+    The three book rows disappear while sales are paused. Offering a button
+    that answers "we can't sell you that" is a worse first impression than not
+    offering it, and it is the menu three of five options come from.
+    """
+    rows = [
         {"id": "intent_print",     "title": "🖨️ Print a file",    "description": "Documents, photos, PDFs"},
         {"id": "intent_xtraa",     "title": "📘 Xtraa books",      "description": "English & Hindi learning books"},
         {"id": "intent_malayalam", "title": "📗 Malayalam book",   "description": "Aksharamrutham"},
         {"id": "intent_sociology", "title": "📕 Sociology books",  "description": "MA Sociology (SNGU)"},
         {"id": "intent_academic",  "title": "🎓 Academic project", "description": "Project report & binding"},
     ]
+    try:
+        from book_bot import books_paused
+        if books_paused():
+            book_ids = {"intent_xtraa", "intent_malayalam", "intent_sociology"}
+            rows = [r for r in rows if r["id"] not in book_ids]
+    except Exception as exc:
+        # A menu is better than no menu; leaving the rows in is the status quo.
+        logger.warning("books_paused check failed, showing full menu: %s", exc)
+    return rows
 
 
 # ── Ad arrivals ──────────────────────────────────────────────────────────────

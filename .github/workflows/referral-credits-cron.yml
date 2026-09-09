@@ -1,0 +1,38 @@
+name: Printosky referral credits
+
+# Award referral credit for referred orders that were paid at the counter.
+#
+# _credit_referrer fires only from the Razorpay webhook, so until this existed a
+# classmate who paid cash earned the referrer nothing — and cash is how most of
+# this shop's printing is paid for. The recruiter watched a Rs.0 balance and
+# concluded that sharing does not work, which is the referral programme's whole
+# failure mode.
+#
+# Idempotent (the (code, order_id) dup check lives in _credit_referrer), so a
+# missed run costs only time. Twice a day is plenty: the credit is a balance the
+# customer checks with MY CREDITS, not something they wait on live.
+#
+# 09:00 & 20:00 IST == 03:30 & 14:30 UTC.
+on:
+  schedule:
+    - cron: "30 3,14 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Award pending referral credits
+        run: |
+          echo "Sweeping for referred orders paid outside Razorpay..."
+          code=$(curl -s -o /tmp/rc.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://printosky.vercel.app/cron/referral-credits")
+          cat /tmp/rc.json
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::error::referral-credits sweep failed with HTTP $code"
+            exit 1
+          fi
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
