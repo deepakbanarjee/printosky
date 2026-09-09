@@ -3160,11 +3160,38 @@ def _handle_cron_abandoned_carts(h) -> None:
         _json_response(h, 401, {"error": "Unauthorized"})
         return
     try:
-        from book_bot import run_cart_reminders
+        from book_bot import books_paused, run_cart_reminders
+        # Chasing someone for payment on a book we have stopped selling is the
+        # worst message this cron could send. It runs hourly through the day,
+        # so without this a cart opened before the pause keeps being nudged.
+        if books_paused():
+            _json_response(h, 200, {"ok": True, "skipped": "books_sale_paused",
+                                    "nudged": 0})
+            return
         result = run_cart_reminders()
         _json_response(h, 200, {"ok": True, **result})
     except Exception as exc:
         logger.error("abandoned-carts cron error: %s", exc)
+        _json_response(h, 500, {"error": str(exc)})
+
+
+def _handle_cron_referral_credits(h) -> None:
+    """GET /cron/referral-credits — award credit for referred orders paid any way.
+
+    _credit_referrer only ever fires from the Razorpay webhook, so a referred
+    classmate who pays cash at the counter earns the referrer nothing. This
+    sweep catches those. Idempotent, so a missed run costs only time.
+    Auth: optional `Authorization: Bearer ${CRON_SECRET}` when CRON_SECRET is set.
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected and h.headers.get("Authorization", "") != f"Bearer {expected}":
+        _json_response(h, 401, {"error": "Unauthorized"})
+        return
+    try:
+        from api.handlers_referrals import sweep_referral_credits
+        _json_response(h, 200, {"ok": True, **sweep_referral_credits()})
+    except Exception as exc:
+        logger.error("referral-credits cron error: %s", exc)
         _json_response(h, 500, {"error": str(exc)})
 
 
@@ -3610,6 +3637,10 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # ── Drop-off bookings: remind, then cancel (GitHub Actions cron) ──────
+        if self.path == "/cron/referral-credits" or self.path.startswith("/cron/referral-credits?"):
+            _handle_cron_referral_credits(self)
+            return
+
         if self.path == "/cron/dropoff-sweep" or self.path.startswith("/cron/dropoff-sweep?"):
             _handle_cron_dropoff_sweep(self)
             return

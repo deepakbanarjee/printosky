@@ -265,3 +265,66 @@ def _handle_referrals_credits(h) -> None:
     except Exception as e:
         logger.error(f"_handle_referrals_credits error: {e}")
         _json_response(h, 500, {"error": "server error"})
+
+
+# ── Credit for orders paid any way at all ────────────────────────────────────
+# _credit_referrer is called from exactly two places, both inside
+# _process_razorpay_payment. So a referred classmate who walks in and pays cash
+# at the counter has always earned the referrer nothing -- and cash is how most
+# of this shop's printing is paid for. The recruiter watches their balance stay
+# at Rs.0, concludes sharing does not work, and stops. That is the referral
+# programme's whole failure mode, and it is invisible unless you go looking.
+#
+# The sweep closes it without touching the payment paths: any job that reached a
+# served status, by any channel, gets the credit its referrer is owed.
+# _credit_referrer is reused rather than reimplemented -- it already carries the
+# dup check and the flat/percentage amount rules, and a second copy of that
+# logic would drift.
+PAID_STATUSES = ("Paid", "Printed", "Delivered")
+
+
+def sweep_referral_credits(days: int = 30) -> dict:
+    """Award referral credit for referred orders paid through any channel.
+
+    Idempotent: _credit_referrer skips a (code, order_id) that already has a
+    row, so re-running is free and a missed cron run costs nothing but time.
+    """
+    from datetime import datetime, timedelta, timezone
+    from db_cloud import _client
+    from api.index import _credit_referrer, _normalize_phone
+
+    sb = _client()
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    # Only senders who actually arrived on a ref_ link can earn anyone credit,
+    # and there are few of them -- fetch that set once instead of asking per job.
+    sessions = (sb.table("bot_sessions").select("phone,referral_code")
+                  .not_.is_("referral_code", "null").execute().data or [])
+    referred = {_normalize_phone(r["phone"]) for r in sessions
+                if (r.get("referral_code") or "").strip() and r.get("phone")}
+    if not referred:
+        return {"candidates": 0, "credited": 0, "referred_customers": 0}
+
+    jobs = (sb.table("jobs").select("job_id,sender,status,received_at")
+              .in_("status", list(PAID_STATUSES))
+              .gte("received_at", since).execute().data or [])
+
+    credited = candidates = 0
+    for j in jobs:
+        sender = _normalize_phone(j.get("sender") or "")
+        job_id = (j.get("job_id") or "").strip()
+        if not sender or not job_id or sender not in referred:
+            continue
+        candidates += 1
+        before = (sb.table("referral_credits").select("id")
+                    .eq("order_id", job_id).execute().data or [])
+        _credit_referrer(sender, job_id)
+        after = (sb.table("referral_credits").select("id")
+                   .eq("order_id", job_id).execute().data or [])
+        if len(after) > len(before):
+            credited += 1
+
+    logger.info("referral sweep: %d candidates, %d newly credited", candidates, credited)
+    return {"candidates": candidates, "credited": credited,
+            "referred_customers": len(referred)}
+
