@@ -176,6 +176,12 @@ they are not the test.
 
 ### P3-1 met, P3-2 FAILED — the puller cannot see a WhatsApp job
 
+> **Superseded in part, 2026-09-09.** The heading was right about the symptom
+> and wrong about the cause. `assigned_store_id` was blocker #1 and the backfill
+> cleared it; the puller then saw, claimed and downloaded both jobs, and the
+> *print* failed. See "2026-09-09, the puller log" below. Kept as written —
+> absent means unchanged.
+
 `OSKY-20260905-2033-1326-e8974b`, 2026-09-05. P3-1 passed: quote ₹3 (the A4 B&W
 rate), pickup code `P-KK46`, paid by Razorpay (`pay_TYE8IRvTBEAiG5`). P3-2 did
 not: 40 minutes after payment the job was still `Paid` with `printer`,
@@ -472,6 +478,124 @@ findstr /C:"store_puller" /C:"pulled" logs\store_puller.log
 Present in `pulled_jobs` → that is the second blocker, and the backfill was
 necessary but not sufficient. Absent → the puller had no real run this morning,
 and this test is simply not finished.
+
+### 2026-09-09, the puller log: the backfill DID work, and three faults behind it
+
+`logs/store_puller.log` from the OSP box settles the question above and
+disproves my `pulled_jobs` hypothesis — the user's query returned 63 rows with
+**no July ids among them**. The jobs were never excluded. They were *selected,
+claimed, downloaded, and handed to the printer*, and the print failed.
+
+```
+2026-09-08 09:52 IST
+  store_puller: pulled OSP-20260725-3907-0058-e918fc -> ...\Jobs\Assigned\... (43966 bytes)
+  PrintFile: file: '...\Temp\OSP-20260725-3907-0058-e918fc.docx',
+             printer: 'KONICA MINOLTA 1100 PS'
+  cannot recognize version marker
+  trying to repair broken xref / repairing PDF document / no objects found
+  Error: Couldn't open file '...e918fc.docx' for printing
+  Finished printing, exitCode: 1
+  store_puller: ...e918fc did not print — leaving un-recorded to retry next poll
+```
+
+**So `assigned_store_id` was blocker #1 and the backfill cleared it.** P3-2's
+first cause is confirmed fixed. What sat underneath it is three separate faults.
+
+**Fault A — nothing converts a non-PDF before printing, and no gate says so.**
+The two jobs are `nithya coverpage.docx` and `919446903907_20260725_063022.jpg`.
+SumatraPDF is handed the file as-is; it tries to parse the `.docx` as a PDF
+("cannot recognize version marker", "no objects found") and exits 1.
+`watcher.py:657` *does* convert Word/PPT to PDF — but only to count pages, into
+`tempfile.gettempdir()`, and deletes it in the `finally`. Nothing converts for
+the print itself. Every Word doc and every WhatsApp photo that reaches the
+puller is an unprintable job.
+
+This is a **permanent** failure, and `pull_once` has only one failure mode:
+transient. "leaving un-recorded to retry next poll" is the right answer for a
+printer-busy or disk-full failure and the wrong one for a file that will never
+print, on this attempt or any other.
+
+**Fault B — the realtime subscription turns a failed print into a hot spin.**
+That warning repeats roughly **once per second** from 09:52:16 through
+09:52:52+, each cycle re-downloading the same 43966 bytes and re-launching
+SumatraPDF. It is not waiting for the 900 s poll, and the reason is a loop that
+feeds itself:
+
+```
+claim_job()   -> UPDATE jobs SET print_claimed_at=...      (device_lease.py:334)
+                    ↳ realtime filter assigned_store_id=eq.OSP matches
+                    ↳ _on_change -> _wake_event.set()      (store_puller.py:191)
+print fails   -> _unclaim() -> another UPDATE -> another wake
+_wake_event.wait(POLL_SECONDS) returns IMMEDIATELY          (store_puller.py:704)
+-> next cycle, at once
+```
+
+The puller's own bookkeeping writes are changes on the table it subscribes to.
+Nothing distinguishes "a job was paid" from "I just wrote to this row". A single
+unprintable file therefore pins one core, re-downloads a file every second, and
+writes two Supabase updates a second, indefinitely. This immediately precedes
+OSP going silent — last heartbeat 09:50, leases last renewed 09:48, the spin
+starts 09:52.
+
+**Fault C — the claim never expires, and the log misnames who holds it.** After
+the 09-09 restart both jobs are skipped permanently:
+
+```
+2026-09-09 07:56:39,548 reconcile — reset 1 stranded Paid job(s) for retry: ...a51d62
+2026-09-09 07:56:39,925 ...a51d62 is already claimed by another box — skipping
+2026-09-09 07:56:40,123 ...e918fc is already claimed by another box — skipping
+```
+…every ~5 minutes through 10:09. From the cloud:
+
+| job_id | print_claimed_at (UTC) | print_claimed_by |
+|---|---|---|
+| `OSP-20260725-3907-3022-a51d62` | 2026-09-08 02:26:38 | `DESKTOP-3NJM40G-34fa500a` |
+| `OSP-20260725-3907-0058-e918fc` | 2026-09-08 04:22:52 | `DESKTOP-3NJM40G-34fa500a` |
+
+`DESKTOP-3NJM40G` **is OSP**. There is no other box — PRINTK and PRIOFF do not
+serve this store. The claim is the box's own, left behind when the spinning
+process died mid-cycle between `claim_job()` and `_unclaim()`. `claim_job()`
+requires `print_claimed_at IS NULL` (`device_lease.py:336`) and **nothing ages a
+claim out**; `release_job()` only clears a claim it can match to its own
+`device_id`, and it is never reached because the claim fails first. A crash
+between those two lines makes a paid job unprintable forever.
+
+`reconcile_stranded()` is the startup recovery for exactly this shape of
+failure, and it does not cover it — it deletes `pulled_jobs` rows only, never
+touches `print_claimed_at`. That is why the 07:56 reset is followed 380 ms later
+by the skip.
+
+And the message is a false statement of fact: "already claimed by another box"
+when the row says this box. It sent me looking for a second box for a day.
+
+**None of this alerted.** `auto_print()` returns `False` on a failed
+`send_to_printer` with a `logger.warning` and no `ops_watchdog.report()`
+(`store_puller.py:451`, `:456`); so does `pull_once` at `:594`. A customer's paid
+job can fail to print, spin the box for an hour, strand its own claim and be
+skipped every five minutes for a day, and the only trace is a log file somebody
+has to think to open. CLAUDE.md's hard rule, verbatim: *a log line is not an
+alert.* This is the rule's own subject matter — the print step — going unwatched.
+
+Also visible, and separate: `store_puller.missing_print_spec` is firing for both
+— "no print_spec or missing sides value — using safe default (single-sided)".
+Correct behaviour for a July row that predates the field; noted so it is not
+read later as a new fault.
+
+**What this changes for P3-2.** The step is still failed, but the cause is now
+three named bugs rather than one open question, and two of them (B and C) can
+bite any job, not just these two. Fixes, in the order they matter:
+
+1. **C** — expire a claim, or reclaim one's own: a claim older than N minutes,
+   or held by `device_id()` itself, must be takeable. Fix the log line to name
+   the holder. Have `reconcile_stranded()` clear this box's own stale claims at
+   startup. *Without this, nothing else can be tested — the jobs are frozen.*
+2. **B** — do not let the puller's own writes wake it. Ignore a realtime payload
+   whose change is `print_claimed_at`/`print_claimed_by`, and floor the retry
+   interval so a failing job cannot be retried faster than the poll.
+3. **A** — convert Word/PPT/images to PDF before printing (the watcher already
+   has the Word path), and separate permanent failure from transient: a file
+   SumatraPDF cannot open must alert and stop retrying, not loop.
+4. Alert on a failed auto-print at all — `ops_watchdog.report()` in both places.
 
 ### The boxes are down, which is the more urgent finding
 
