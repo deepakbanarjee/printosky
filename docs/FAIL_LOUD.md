@@ -101,6 +101,9 @@ Alerts go to the ops WhatsApp number via `whatsapp_notify.send_staff_alert`.
 | `counters.konica` / `counters.epson` | Polled fine but returned no page counters |
 | `poller.cycle` | The poll loop itself threw |
 | `epson.weblog` | The Epson job log cannot be fetched (per-job colour tracking is down) |
+| `konica.joblog` | The Konica job log cannot be read over CLRC SOAP (:30081) — per-job history, attribution and copy reconciliation all stop. The SNMP counters keep climbing regardless, so **every console still looks healthy**; until 2026-09-10 this path had no watchdog call at all and an outage here was invisible. Skipped on a store with no Konica |
+| `konica.job_type` / `konica.result` / `konica.job_date` / `konica.print_end_date` | The printer wrote a value `konica_normalize` has never been taught — a firmware change or a new job type. The row is **kept, never dropped**; an unparseable date becomes NULL rather than a guess, so the job is missing from dated reports until the format is added |
+| `konica.backfill` | The one-shot normalisation of legacy rows could not run, so the consoles are reading whatever the printer wrote |
 | `epson.delta` | SNMP delta attribution threw |
 | `fetcher.epson` | The fetch loop itself threw |
 | `sync.supabase` | A sync cycle failed, or Supabase is not configured — i.e. the console is now stale |
