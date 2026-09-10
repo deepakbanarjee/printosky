@@ -659,15 +659,20 @@ def log_new_file(filepath: str, source: str = "Hot Folder", sender: str = ""):
                     tmp_pdf = _os.path.join(tempfile.gettempdir(), jid + "_pagecount.pdf")
                     try:
                         import win32com.client as _wc
+                        # DispatchEx, not Dispatch: Dispatch attaches to a Word
+                        # a person left open on the counter PC, and a modal
+                        # dialog in it fails every export (OSP 2026-09-10). That
+                        # lands here as page_count 0 and so a wrong quote. Same
+                        # reasoning as printable._office_to_pdf.
                         if ext_lower in (".doc", ".docx"):
-                            _app = _wc.Dispatch("Word.Application")
+                            _app = _wc.DispatchEx("Word.Application")
                             _app.Visible = False
                             _app.DisplayAlerts = False
                             _doc = _app.Documents.Open(str(fp), ReadOnly=True)
                             _doc.ExportAsFixedFormat(tmp_pdf, 17)
                             _doc.Close(False); _app.Quit()
                         else:
-                            _app = _wc.Dispatch("PowerPoint.Application")
+                            _app = _wc.DispatchEx("PowerPoint.Application")
                             _prs = _app.Presentations.Open(str(fp), ReadOnly=True, WithWindow=False)
                             _prs.SaveAs(tmp_pdf, 32)
                             _prs.Close(); _app.Quit()
