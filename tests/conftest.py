@@ -5,6 +5,7 @@ Sets PRINTOSKY_DB to an in-memory path so no real DB is needed.
 import os
 import sys
 import datetime
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,12 @@ os.environ.setdefault("PRINTOSKY_DB", ":memory:")
 # using the `if mod not in sys.modules: ModuleType(mod)` guard installs an empty
 # stub that pollutes razorpay/webhook/wa-cost tests for the whole run. Set
 # dummies first so the real module imports and every guard becomes a no-op.
+# A test must never be able to send a real ops alert. ops_watchdog reads this
+# at import time, so it has to be set before the pre-import loop below. Tests
+# that assert on alerting replace `_notify` wholesale, so this never gets in
+# their way — it only stops the tests that were not thinking about alerts.
+os.environ.setdefault("OPS_ALERTS_ENABLED", "0")
+
 os.environ.setdefault("RAZORPAY_KEY_ID", "test_key")
 os.environ.setdefault("RAZORPAY_KEY_SECRET", "test_secret")
 os.environ.setdefault("RAZORPAY_WEBHOOK_SECRET", "test_webhook_secret")
@@ -182,3 +189,51 @@ def mis_password() -> str:
     pw = os.environ.get("PRINTOSKY_MIS_PASSWORD", "")
     assert pw, "PRINTOSKY_MIS_PASSWORD not set in .env"
     return pw
+
+
+# ── The watchdog must never touch a real store's health state ────────────────
+#
+# ops_watchdog resolves its SQLite file from `_db_path_override`, then
+# `$PRINTOSKY_DB`, then the store config — and on a store PC that last one is
+# the live `C:\Printosky\Data\jobs.db`. Only test_ops_watchdog.py and
+# test_fail_loud_wiring.py ever called `set_db_path`, so every other test that
+# tripped a `report()` wrote into whichever store happened to be running it.
+#
+# PRIOFF, 2026-09-10: one suite run left `/health` red with four failures the
+# shop did not have, one of them naming a `pytest-of-user\pytest-45\...` path.
+# The red banner is the small half — `report()` also stamps `last_alert_at`,
+# and the dedup logic reads it, so a genuine failure arriving inside the repeat
+# window is swallowed as "alert already sent". A test run could mute a real
+# store's alerts for six hours.
+#
+# Set at import time as well as per-test, because a module that reports while
+# being imported does so before any fixture has run.
+
+_WATCHDOG_TMP = tempfile.mkdtemp(prefix="printosky-watchdog-")
+
+try:
+    import ops_watchdog as _ow
+except Exception:                                   # pragma: no cover
+    _ow = None
+else:
+    _ow.ALERTS_ENABLED = False
+    _ow.set_db_path(os.path.join(_WATCHDOG_TMP, "jobs.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ops_watchdog():
+    """Re-point the watchdog at the temp DB around every test.
+
+    Re-applied per test rather than once, because several tests legitimately
+    call `set_db_path(None)` in their own teardown — which restores the real
+    store path. Without this they would leave the next test writing to it.
+    `_memory` is cleared too: it is a module-level dict and outlives a test.
+    """
+    if _ow is None:                                 # pragma: no cover
+        yield
+        return
+    _ow.ALERTS_ENABLED = False
+    _ow.set_db_path(os.path.join(_WATCHDOG_TMP, "jobs.db"))
+    _ow._memory.clear()
+    yield
+    _ow._memory.clear()
