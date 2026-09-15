@@ -210,10 +210,18 @@ _ORDER_LINK = "https://printosky.com/order"
 _ACADEMIC_LINK = "https://printosky.com/academic"
 
 _LINK_MESSAGES = {
+    # WhatsApp first, the web form second (changed 2026-09-15). This used to
+    # open with the order link, and the one ad arrival who ever reached it
+    # (9 Sep) followed the link and never came back. The ad we pay for promises
+    # "send your PDF on WhatsApp"; handing that person a web form is a second
+    # queue in place of the one they were told they could skip. The link stays
+    # for the people who want to pay online -- it is just no longer the first
+    # thing a customer holding a PDF is asked to do.
     "print": (
         "🖨️ *Print a file*\n"
-        "Upload your file, pick paper / colour / copies and pay online here:\n"
-        f"{_ORDER_LINK}\n\n"
+        "*Just send your PDF right here* — Word, PowerPoint and photos work "
+        "too — and we'll quote you the exact price in a minute.\n\n"
+        f"Prefer to pick paper / colour / copies and pay online? {_ORDER_LINK}\n\n"
         # Customer-facing copy is Printosky only (.agents/AGENTS.md). The
         # locality stays -- students want to know which counter to walk into.
         "— Printosky, Thriprayar"
@@ -267,9 +275,120 @@ def build_menu_rows() -> list[dict]:
 # referral payload -- Meta sent headline "Chat with us" for this campaign. A new
 # campaign that wants its own welcome adds a line here; anything unlisted falls
 # through to the ordinary menu rather than guessing.
+#
+# WHY THIS AD IS "quote" AND NOT "referral" (changed 2026-09-15)
+# --------------------------------------------------------------
+# It was "referral" for eight days. The measured result, over the whole run of
+# ad 120248100283360186 (7-14 Sep): 8 clicks, 7 people, 7 of the 9 new contacts
+# in that window -- and 0 print jobs, Rs.0 revenue, 0 referred orders. Five of
+# the seven were handed a share link as the first thing they ever saw from us.
+#
+# The ad's own body is "Skip the 1-hour Xerox shop queue in Thrissur -- send
+# your assignment, project report or thesis PDF on WhatsApp". Answering that
+# with "recruit 15-20 classmates and your printing is free" asks a stranger who
+# has never bought anything to vouch for us before we have done a single thing
+# for them. The referral offer is not wrong, it is early: it belongs after the
+# first delivered job, when they have something to vouch for.
+#
+# "referral" stays implemented, for an ad aimed at people who are already
+# customers. It is simply not what a cold click-to-WhatsApp ad should hear.
 AD_CAMPAIGN_KIND = {
-    "120248100283360186": "referral",   # Print your Thesis for Rs.0 (Sep 2026)
+    "120248100283360186": "quote",      # Skip the Xerox queue (Sep 2026)
 }
+
+
+def _rupees(value: float) -> str:
+    """Money. Rs.2.00 reads as amateur next to Rs.30; Rs.1.5 reads as a bug."""
+    return str(int(value)) if float(value).is_integer() else f"{value:.2f}"
+
+
+def _per_page(sheet_rate: float) -> str:
+    """A per-sheet B&W rate said the way a student compares shops.
+
+    Duplex puts two pages on a sheet and B&W is billed per sheet, so the page
+    price is exactly half the sheet rate -- Rs.2 a sheet is Rs.1 a page, not
+    the 50 paise it looks like at a glance. Derived, never typed: this is the
+    number the customer checks us against.
+    """
+    per_page = sheet_rate / 2
+    if per_page < 1:
+        return f"{int(round(per_page * 100))} paise a page"
+    return f"₹{_rupees(per_page)} a page"
+
+
+def price_headlines() -> dict[str, str]:
+    """The two or three numbers a student compares shops on, from rate_card.
+
+    Read out of rate_card rather than retyped into the copy: a rate the owner
+    changes must not leave a stale number sitting in an ad reply, which is the
+    one message we pay Meta to deliver. Falls back to no numbers at all rather
+    than to guessed ones -- an answer with no price still beats a wrong price.
+    """
+    try:
+        from rate_card import (get_print_rate, PROJECT_BINDING_RATES,
+                               SPIRAL_A4_TIERS, SOFT_BINDING_TIERS)
+        # 50 sheets = a 100-page report printed double-sided, which is the
+        # shape of nearly every job this ad is aimed at; 150 crosses into the
+        # bulk tier.
+        bw      = get_print_rate("A4_BW", "ds", 50, is_student=True)
+        bw_bulk = get_print_rate("A4_BW", "ds", 150, is_student=True)
+        return {
+            "bw":      _rupees(bw),
+            "bw_bulk": _rupees(bw_bulk),
+            "per_page":      _per_page(bw),
+            "per_page_bulk": _per_page(bw_bulk),
+            # 50 sheets printed double-sided = the 100-page report this ad is
+            # aimed at, priced end to end rather than left as an exercise.
+            "report_100":    _rupees(round(bw * 50)),
+            "colour":  _rupees(get_print_rate("A4_col", "ss", 60)),
+            "spiral":  _rupees(SPIRAL_A4_TIERS[0][1]),
+            "soft":    _rupees(SOFT_BINDING_TIERS[0][1]),
+            "project": _rupees(min(PROJECT_BINDING_RATES.values())),
+        }
+    except Exception as exc:
+        logger.error("price headlines unavailable, sending copy without them: %s", exc)
+        return {}
+
+
+def _send_quote_welcome(phone: str, name: str | None = None) -> bool:
+    """Answer a cold ad click with the thing the ad actually offered: a price.
+
+    The ad says "send your PDF on WhatsApp and skip the queue". So this says
+    the same, in the same thread, with a number attached -- and asks for the
+    file rather than sending them to a web form. Every step between the tap and
+    the PDF is a place the customer leaves; printosky.com/order is such a step,
+    and the one arrival who reached it (9 Sep) did leave.
+
+    Always returns True: unlike the referral welcome there is nothing to mint,
+    so there is no failure mode that leaves the customer with silence.
+    """
+    p = price_headlines()
+    hi = f"Hi {name}! " if name else "Hi! "
+    if p:
+        rates = (
+            f"📄 A4 B&W, student rate: *₹{p['bw']} a sheet* — printed "
+            f"double-sided that is *{p['per_page']}*, so a 100-page report is "
+            f"about ₹{p['report_100']} of printing "
+            f"(₹{p['bw_bulk']} a sheet over 100).\n"
+            f"🎨 A4 colour from *₹{p['colour']} a sheet* — and we slice out the "
+            f"plain text pages automatically, so you only pay colour for the "
+            f"pages that are actually colour.\n"
+            f"📚 Binding: spiral from *₹{p['spiral']}*, soft from *₹{p['soft']}*, "
+            f"hardbound project cover *₹{p['project']}*.\n\n"
+        )
+    else:
+        rates = ""
+    _send_text(phone, (
+        f"{hi}👋 You tapped our *skip the Xerox queue* ad — you are in the "
+        f"right place.\n\n"
+        f"*Send your PDF right here in this chat* and we'll quote you the exact "
+        f"price in a minute. No app, no signup, no queue. Word, PowerPoint and "
+        f"photos work too.\n\n"
+        f"{rates}"
+        f"Ready when you are — just send the file. 🙏\n"
+        f"— Printosky, Thriprayar"
+    ))
+    return True
 
 
 def _send_referral_welcome(phone: str, name: str | None = None) -> bool:
@@ -301,26 +420,156 @@ def _send_referral_welcome(phone: str, name: str | None = None) -> bool:
 def _maybe_welcome_ad_arrival(phone: str, name: str | None = None) -> bool:
     """Answer the ad someone actually clicked. True if we handled the message.
 
-    Only fires for a first-time arrival: once they hold a referral code they
-    have had this message, and repeating it on every unrecognised reply would
-    be spam. That check is also what keeps a returning customer who happens to
-    tap an ad on the ordinary path.
+    Fires on the first message after a click and never again -- see
+    db_cloud.ad_welcome_already_sent for why that guard is a conversation_log
+    lookup and not "do they hold a referral code".
     """
     try:
-        from db_cloud import get_referral_code, recent_ad_click
-        if get_referral_code(phone):
-            return False
+        from db_cloud import ad_welcome_already_sent, recent_ad_click
         ad = recent_ad_click(phone)
         if not ad:
             return False
-        if AD_CAMPAIGN_KIND.get((ad.get("source_id") or "").strip()) != "referral":
+        kind = AD_CAMPAIGN_KIND.get((ad.get("source_id") or "").strip())
+        if not kind:
             return False
-        return _send_referral_welcome(phone, name)
+        if ad_welcome_already_sent(phone, ad.get("clicked_at")):
+            return False
+        if kind == "quote":
+            return _send_quote_welcome(phone, name)
+        if kind == "referral":
+            # A referral ad is aimed at people who already buy from us; someone
+            # who holds a code has had this pitch and does not need it twice.
+            from db_cloud import get_referral_code
+            if get_referral_code(phone):
+                return False
+            return _send_referral_welcome(phone, name)
+        logger.error("ad %s has kind %r with no handler — falling back to the menu",
+                     ad.get("source_id"), kind)
+        return False
     except Exception as exc:
         # Never cost the customer their reply over this: fall through to the
         # menu, which is what they would have got anyway.
         logger.warning("ad welcome failed for %s: %s", phone, exc)
         return False
+
+
+# ── Meta ice-breakers ────────────────────────────────────────────────────────
+# A click-to-WhatsApp ad shows a fixed set of tappable questions above the
+# compose box. They are configured in Ads Manager, they arrive as ordinary text
+# messages, and they are the FIRST thing most ad arrivals send -- three of the
+# seven people who clicked ad 120248100283360186 opened with the verbatim
+# string "What services do you offer?".
+#
+# All three were answered by a human, by hand, from the staff phone: asked at
+# 04:12, 07:45 and 01:27 UTC, all three answered at 17:01-17:02 the same day.
+# Nine hours, on a lead Meta charged us roughly Rs.147 for, and the answer when
+# it came was "Printing and all types of binding" -- sent twice. The shop knows
+# the answer to these questions; there is no reason a person has to be awake
+# for it.
+#
+# Keep this list in step with the ice-breakers configured on the ad. Anything
+# not listed falls through to the ordinary intent layers, which is where a
+# free-form question already goes -- an unlisted ice-breaker is answered no
+# worse than it is today, so a stale list costs nothing.
+_ICE_BREAKER_PUNCTUATION = " ?!.।"
+
+
+def _normalise_question(text: str) -> str:
+    return " ".join((text or "").lower().split()).strip(_ICE_BREAKER_PUNCTUATION)
+
+
+def _services_answer() -> str:
+    p = price_headlines()
+    rates = (
+        f"📄 *Printing / photocopy* — A4 B&W student rate ₹{p['bw']} a sheet "
+        f"(₹{p['bw_bulk']} over 100). Double-sided, that is {p['per_page']}.\n"
+        f"🎨 *Colour* — from ₹{p['colour']} a sheet, and we charge colour only "
+        f"for the pages that are actually colour.\n"
+        f"📚 *Binding* — spiral from ₹{p['spiral']}, soft from ₹{p['soft']}, "
+        f"hardbound project cover ₹{p['project']}.\n"
+        f"🎓 *Project reports & thesis* — printed, bound and ready to submit.\n\n"
+    ) if p else (
+        "📄 Printing and photocopying, 🎨 colour, 📚 every kind of binding, "
+        "🎓 project reports and thesis work.\n\n"
+    )
+    return (
+        "Here's what we do 👇\n\n"
+        f"{rates}"
+        "*Send your PDF right here* and we'll quote you the exact price in a "
+        "minute — no app, no signup.\n"
+        "— Printosky, Thriprayar"
+    )
+
+
+def _price_answer() -> str:
+    p = price_headlines()
+    if not p:
+        return ("Send your PDF right here and we'll quote you the exact price "
+                "in a minute — it depends on pages, colour and binding.\n"
+                "— Printosky, Thriprayar")
+    return (
+        "Our student rates 👇\n\n"
+        f"📄 A4 B&W — *₹{p['bw']} a sheet*, ₹{p['bw_bulk']} over 100 sheets. "
+        f"Printed double-sided that is *{p['per_page']}* ({p['per_page_bulk']} "
+        f"over 100), so a 100-page report is about "
+        f"*₹{p['report_100']}* of printing.\n"
+        f"🎨 A4 colour — from *₹{p['colour']} a sheet*. Plain text pages inside "
+        f"a colour document are billed as B&W automatically.\n"
+        f"📚 Binding — spiral from *₹{p['spiral']}*, soft from *₹{p['soft']}*, "
+        f"hardbound project cover *₹{p['project']}*.\n\n"
+        "*Send your file here* for the exact number on your document. 🙏\n"
+        "— Printosky, Thriprayar"
+    )
+
+
+def _location_answer() -> str:
+    return (
+        "📍 We're at *Thriprayar, Thrissur*.\n\n"
+        "You don't have to come in to order, though — *send your PDF right "
+        "here*, we'll quote you, print it, and tell you when it's ready to "
+        "collect. 🙏\n"
+        "— Printosky, Thriprayar"
+    )
+
+
+def _how_to_order_answer() -> str:
+    return (
+        "It's one step 👇\n\n"
+        "*Send your PDF (or Word file, or photos) right here in this chat.*\n\n"
+        "We'll reply with the exact price, you confirm, we print. No app, no "
+        "signup, no queue. 🙏\n"
+        "— Printosky, Thriprayar"
+    )
+
+
+ICE_BREAKERS: dict[str, "callable"] = {
+    # Verified live on ad 120248100283360186 — three arrivals sent it verbatim.
+    "what services do you offer": _services_answer,
+    "what do you offer": _services_answer,
+    "what services do you provide": _services_answer,
+    "services": _services_answer,
+
+    "what are your prices": _price_answer,
+    "what is the price": _price_answer,
+    "how much does it cost": _price_answer,
+    "price": _price_answer,
+    "rate": _price_answer,
+    "rates": _price_answer,
+
+    "where are you located": _location_answer,
+    "where is your shop": _location_answer,
+    "location": _location_answer,
+
+    "how do i order": _how_to_order_answer,
+    "how can i order": _how_to_order_answer,
+    "how does it work": _how_to_order_answer,
+}
+
+
+def icebreaker_reply(text: str) -> str | None:
+    """The shop's own answer to a tapped ad ice-breaker. None ⇒ not one."""
+    builder = ICE_BREAKERS.get(_normalise_question(text))
+    return builder() if builder else None
 
 
 def _send_text(phone: str, message: str) -> None:
@@ -340,7 +589,8 @@ def _send_menu(phone: str) -> None:
     )
     if not ok:
         _send_text(phone, "How can we help?\n"
-                          "• Print a file: " + _ORDER_LINK + "\n"
+                          "• Print a file: send your PDF here, or "
+                          + _ORDER_LINK + "\n"
                           "• Books: reply *books*\n"
                           "• Sociology: reply *sociology*\n"
                           "• Academic project: " + _ACADEMIC_LINK)
@@ -393,6 +643,19 @@ def route_front_door(phone: str, text: str, name: str | None = None) -> None:
     # AND the offer they clicked; sending only one of the two loses half the
     # conversation. Fires once per person, so it cannot become noise.
     welcomed = _maybe_welcome_ad_arrival(phone, name)
+
+    # A tapped ice-breaker is a question the shop can answer itself, and it is
+    # what most ad arrivals send first. Answer it here rather than letting it
+    # fall to the menu (or to a human, nine hours later).
+    #
+    # Skipped when the ad welcome just fired: that message already carries the
+    # rates and the "send your PDF" ask, so following it with a near-identical
+    # second one reads as a bot talking to itself.
+    if not welcomed:
+        answer = icebreaker_reply(text)
+        if answer:
+            _send_text(phone, answer)
+            return
 
     intent = decide_intent(text)
     if intent in _LINK_MESSAGES:
