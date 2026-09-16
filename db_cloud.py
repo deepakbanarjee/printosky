@@ -1901,6 +1901,39 @@ def recent_ad_click(phone: str, within_hours: int = 72) -> dict | None:
     return rows.data[0] if rows.data else None
 
 
+def ad_welcome_already_sent(phone: str, since) -> bool:
+    """Have we already answered this person since they tapped the ad?
+
+    The ad welcome must fire on the FIRST message after a click and never
+    again. Until now the guard was "do they hold a referral code", which only
+    worked because the welcome minted one -- a welcome that mints nothing (the
+    quote welcome) had no guard at all and would have re-sent itself on every
+    unrecognised reply for 72 hours.
+
+    This asks the question directly: an outbound row logged at or after the
+    click means the welcome has been through here already. `record_ad_click`
+    writes the click inside the same webhook turn that routes the message, and
+    the reply is logged only on send, so on the first message there is nothing
+    after the click and on every later one there is.
+
+    Errs towards True -- a customer who is silently sent nothing is worse than
+    one who misses a welcome and gets the ordinary menu instead, which is what
+    they would have had anyway.
+    """
+    if not phone or not since:
+        return True
+    try:
+        rows = (_client().table("conversation_log")
+                .select("id")
+                .eq("phone", phone).eq("direction", "outbound")
+                .gte("created_at", str(since))
+                .limit(1).execute())
+        return bool(rows.data)
+    except Exception as exc:
+        logger.warning("ad welcome guard failed for %s: %s", phone, exc)
+        return True
+
+
 def ensure_referral_code(phone: str, platform: str = "whatsapp_selfserve") -> str | None:
     """This phone's referral code, minting one on the spot if they lack it.
 
