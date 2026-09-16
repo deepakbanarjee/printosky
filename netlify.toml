@@ -32,6 +32,11 @@
   status = 200
 
 [[redirects]]
+  from   = "/console"
+  to     = "/console.html"
+  status = 200
+
+[[redirects]]
   from   = "/jobs"
   to     = "/jobs.html"
   status = 200
@@ -56,6 +61,14 @@
 # HTML that references new helpers → "X is not defined" version-skew errors.
 [[headers]]
   for = "/admin-shared.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# The v2 console's ES modules ship together with console.html; a cached
+# app/api.js against fresh HTML is the same version-skew failure the
+# admin-shared.js rule above exists to prevent.
+[[headers]]
+  for = "/app/*"
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
 

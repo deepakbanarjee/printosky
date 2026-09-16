@@ -32,6 +32,13 @@ All routes → single Python handler. Deployed from `main` branch.
 | `POST /academic/razorpay-webhook` | `_handle_acad_razorpay_webhook` | HMAC `RAZORPAY_ACADEMIC_WEBHOOK_SECRET` |
 | `POST /academic/orders/:id/*` | state transitions | staff PIN |
 
+### API v2 (`api/v2/`, mounted inside `api/index.py`)
+
+Paths under `/v2/*` only; `dispatch()` returns False for everything else, so the
+legacy table above is unaffected. Envelope: `{ok, data}` / `{ok:false, error}`.
+`GET /v2/` returns the live route table. Full list, roles and rollout →
+[V2_ARCHITECTURE.md](V2_ARCHITECTURE.md).
+
 ### Supabase (cloud DB)
 Tables: `jobs`, `job_batches`, `bot_sessions`, `customer_profiles`, `conversation_log`, `staff`, `staff_sessions`, `printer_counters`, `daily_summary`, `academic_orders`
 Storage bucket: `academic-outputs` (public)

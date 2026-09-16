@@ -1,0 +1,67 @@
+/*
+ * Printosky design tokens — the one place colour, spacing and type are decided.
+ *
+ * The values are lifted verbatim from admin.html's :root so the new console
+ * looks native next to the old ones during the migration. The difference is
+ * that they now live in a file both can import, instead of being pasted into
+ * every page: admin.html, jobs.html, mis.html and dtp.html each carry their
+ * own copy today, and they have already drifted.
+ *
+ * Adding a colour means adding a token here, not a hex value in a component.
+ */
+
+:root {
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  --bg:        #0a0e13;
+  --surface:   #111820;
+  --card:      #161d26;
+  --border:    #1e2a36;
+  --overlay:   rgba(10, 14, 19, .72);
+
+  /* ── Ink ──────────────────────────────────────────────────────────────── */
+  --text:      #e0eaf5;
+  --muted:     #5a7080;
+  --fg:        #e0eaf5;   /* legacy alias, kept so shared JS keeps working */
+  --bg2:       #111820;   /* legacy alias */
+
+  /* ── Meaning. Never use a raw hex for these. ──────────────────────────── */
+  --accent:    #00c8ff;   /* interactive, links, focus */
+  --green:     #00e676;   /* done, paid, healthy */
+  --amber:     #ffab40;   /* needs attention soon */
+  --red:       #ff5252;   /* broken, overdue, money at risk */
+
+  /* ── Type ─────────────────────────────────────────────────────────────── */
+  --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --fs-xs: 11px;  --fs-sm: 13px;  --fs-md: 15px;  --fs-lg: 19px;  --fs-xl: 26px;
+
+  /* ── Space. A 4px scale; nothing in between. ──────────────────────────── */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px;  --s-4: 16px;
+  --s-5: 24px; --s-6: 32px; --s-7: 48px;
+
+  --radius:    10px;
+  --radius-sm: 6px;
+  --shadow:    0 6px 24px rgba(0, 0, 0, .35);
+
+  /* Touch targets: this is used one-handed at a counter, often in a hurry. */
+  --tap: 44px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--fs-md);
+  min-height: 100vh;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Visible focus everywhere. Staff tab through these screens with wet hands and
+   a queue behind them; an invisible focus ring costs real seconds. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

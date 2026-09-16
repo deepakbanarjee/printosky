@@ -23,6 +23,14 @@ the watcher) or automatically at each morning's boot, silently, if
 Full detail → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 Schema reference (28 tables, owners, columns) → [docs/SCHEMA.md](docs/SCHEMA.md)
 
+## v2 core (in progress)
+`core/` holds the rules with no I/O (money, pricing, identity, orders,
+payments); `api/v2/` serves them under `/v2/*` and claims nothing else, so every
+legacy route behaves exactly as before. New work on orders, money or auth goes
+there. `website/console.html` is the v2 operator queue, beside the old consoles.
+
+Design, endpoints, schema and rollout → [docs/V2_ARCHITECTURE.md](docs/V2_ARCHITECTURE.md)
+
 ## Many PCs per store
 Boxes coordinate at runtime, not by per-machine config: a **lease** picks the one
 box that polls the printers, and an atomic **claim** (`jobs.print_claimed_at`)

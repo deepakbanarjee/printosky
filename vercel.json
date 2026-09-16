@@ -3,7 +3,7 @@
     {
       "src": "api/index.py",
       "use": "@vercel/python",
-      "config": { "maxLambdaSize": "50mb", "memory": 1024, "maxDuration": 300, "includeFiles": ["brand-kit/printosky-payment-qr.png", "api/*.py"] }
+      "config": { "maxLambdaSize": "50mb", "memory": 1024, "maxDuration": 300, "includeFiles": ["brand-kit/printosky-payment-qr.png", "api/*.py", "api/v2/*.py", "core/*.py"] }
     },
     {
       "src": "api/inngest.py",
@@ -44,6 +44,8 @@
     { "src": "/api/transcripts/(.*)",                 "dest": "/api/index.py" },
     { "src": "/api/health",                            "dest": "/api/index.py" },
     { "src": "/health",                                "dest": "/api/index.py" },
+    { "src": "/v2",                                    "dest": "/api/index.py" },
+    { "src": "/v2/(.*)",                               "dest": "/api/index.py" },
     { "src": "/",                                     "dest": "/api/index.py" }
   ]
 }
