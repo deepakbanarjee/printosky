@@ -10,14 +10,52 @@ Programmatically creates:
    - Cluster 4: Palakkad West (IPT & GPTC Shoranur, Royal Dental, SIMAT, JCET, NCERC)
 3. Ad Creatives & Ads (Click-to-WhatsApp + Campus Landing Page).
 
+WHAT META IS ASKED TO OPTIMISE FOR
+----------------------------------
+This used to create OUTCOME_TRAFFIC campaigns optimising for LINK_CLICKS,
+which is the cheapest thing an ad account can be asked to buy and exactly what
+it went and bought: ad 120248100283360186 delivered 8 clicks, 7 people and
+Rs.0 over 7-14 Sep 2026. Optimising for clicks gets clicks. It was never asked
+for customers.
+
+Two modes now, and the difference between them is what Meta is told a good
+outcome looks like:
+
+  conversations  OUTCOME_ENGAGEMENT / CONVERSATIONS. Optimises for people who
+                 actually open a WhatsApp conversation.
+  purchase       OUTCOME_SALES / OFFSITE_CONVERSIONS against the Conversions
+                 API dataset, counting the Purchase events meta_capi.py sends
+                 when an ad arrival pays. This is the one that buys customers.
+
+VOLUME IS WHY `purchase` IS NOT THE DEFAULT
+-------------------------------------------
+Conversion optimisation needs roughly 50 conversions per ad set per week to
+leave the learning phase and start working. This shop has had ZERO ad
+conversions ever, does a handful of jobs a day, and would be splitting the
+budget across four ad sets. Pointing four starved ad sets at PURCHASE does not
+produce careful spending -- it produces an ad set that barely delivers,
+because Meta cannot find the pattern it was asked for.
+
+So `conversations` is the default: a signal that fires often enough to learn
+from at this size. `--optimize purchase` is the destination, and the switch to
+make once conversions are actually landing -- check `ad_report()`'s
+`conversions.sent` before flipping it. One ad set on the whole budget will get
+there sooner than four on a quarter each.
+
 Prerequisites in .env:
   META_ACCESS_TOKEN = "EAAB..." (System User / Page Access Token with ads_management)
   META_AD_ACCOUNT_ID = "act_1234567890"
   META_PAGE_ID = "1234567890"
+  STORE_WHATSAPP_PHONE = "919495706405"   (the number the ad opens a chat with)
+  META_CAPI_DATASET_ID = "1234567890"     (--optimize purchase only; the same
+                                           dataset meta_capi.py posts to, or
+                                           Meta optimises against events it is
+                                           not being sent)
 
 Usage:
   python marketing/meta_campaign_launcher.py --dry-run
   python marketing/meta_campaign_launcher.py --deploy --daily-budget 350
+  python marketing/meta_campaign_launcher.py --deploy --optimize purchase
 """
 
 import argparse
@@ -28,6 +66,24 @@ import requests
 
 GRAPH_API_VERSION = "v20.0"
 BASE_URL = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
+
+# Objective and optimisation goal travel together -- Meta rejects a goal the
+# campaign's objective does not offer, so they are one choice, not two.
+OPTIMIZATION_MODES = {
+    "conversations": {
+        "objective":         "OUTCOME_ENGAGEMENT",
+        "optimization_goal": "CONVERSATIONS",
+        "custom_event_type": None,
+        "summary": "people who open a WhatsApp conversation",
+    },
+    "purchase": {
+        "objective":         "OUTCOME_SALES",
+        "optimization_goal": "OFFSITE_CONVERSIONS",
+        "custom_event_type": "PURCHASE",
+        "summary": "paid orders, via the Conversions API dataset",
+    },
+}
+DEFAULT_MODE = "conversations"
 
 # 2 km Pin-drop Coordinates around Campus Clusters
 CAMPUS_GEO_CLUSTERS = [
@@ -82,6 +138,47 @@ def get_env_credentials():
     return token, account_id, page_id
 
 
+def build_promoted_object(mode: str) -> dict:
+    """What Meta is told to count, for the chosen mode.
+
+    A click-to-WhatsApp ad set always names the page and the number the ad
+    opens a chat with. `purchase` additionally names the Conversions API
+    dataset and the event within it -- and it must be the SAME dataset
+    meta_capi.py posts to, or Meta optimises against events nobody sends it.
+    """
+    cfg = OPTIMIZATION_MODES[mode]
+    promoted = {
+        "page_id": os.environ.get("META_PAGE_ID", "").strip(),
+        "whatsapp_phone_number": os.environ.get("STORE_WHATSAPP_PHONE", "").strip(),
+    }
+    if cfg["custom_event_type"]:
+        promoted["pixel_id"] = os.environ.get("META_CAPI_DATASET_ID", "").strip()
+        promoted["custom_event_type"] = cfg["custom_event_type"]
+    return promoted
+
+
+def check_mode_ready(mode: str) -> list[str]:
+    """Missing configuration for this mode, as human-readable lines.
+
+    Returned rather than raised so --dry-run can show the whole list at once
+    instead of failing on the first gap, and so a deploy refuses BEFORE
+    creating a campaign it cannot finish.
+    """
+    missing = []
+    if not os.environ.get("META_PAGE_ID", "").strip():
+        missing.append("META_PAGE_ID -- the page the ad runs from")
+    if not os.environ.get("STORE_WHATSAPP_PHONE", "").strip():
+        missing.append("STORE_WHATSAPP_PHONE -- the number the ad opens a chat with")
+    if OPTIMIZATION_MODES[mode]["custom_event_type"]:
+        if not os.environ.get("META_CAPI_DATASET_ID", "").strip():
+            missing.append(
+                "META_CAPI_DATASET_ID -- required by --optimize purchase; it must "
+                "be the same dataset meta_capi.py posts to, or Meta optimises "
+                "against events nothing sends it"
+            )
+    return missing
+
+
 def build_targeting_spec(custom_locations):
     return {
         "geo_locations": {
@@ -111,11 +208,15 @@ def build_targeting_spec(custom_locations):
     }
 
 
-def create_campaign(token, account_id, campaign_name="Printosky - 60km Campus Network (Thrissur/Ernakulam/Malappuram/Palakkad)"):
+def create_campaign(token, account_id, mode=DEFAULT_MODE,
+                    campaign_name="Printosky - 60km Campus Network (Thrissur/Ernakulam/Malappuram/Palakkad)"):
     url = f"{BASE_URL}/{account_id}/campaigns"
     payload = {
         "name": campaign_name,
-        "objective": "OUTCOME_TRAFFIC",
+        # Was OUTCOME_TRAFFIC, which only ever offered goals like LINK_CLICKS.
+        # The objective decides which optimisation goals the ad sets below may
+        # use, so it is chosen by mode rather than fixed.
+        "objective": OPTIMIZATION_MODES[mode]["objective"],
         "status": "PAUSED",  # Starts paused so user can do final sanity review
         "special_ad_categories": ["NONE"],
         "access_token": token,
@@ -127,18 +228,23 @@ def create_campaign(token, account_id, campaign_name="Printosky - 60km Campus Ne
     return data["id"]
 
 
-def create_adset(token, account_id, campaign_id, cluster_name, custom_locations, daily_budget_inr=100):
+def create_adset(token, account_id, campaign_id, cluster_name, custom_locations,
+                 daily_budget_inr=100, mode=DEFAULT_MODE):
     url = f"{BASE_URL}/{account_id}/adsets"
     # Meta requires budget in subunits (paise): ₹100 = 10000 paise
     budget_paise = int(daily_budget_inr * 100)
-    
+
     targeting = build_targeting_spec(custom_locations)
     payload = {
         "name": f"AdSet: {cluster_name}",
         "campaign_id": campaign_id,
         "daily_budget": budget_paise,
         "billing_event": "IMPRESSIONS",
-        "optimization_goal": "LINK_CLICKS",
+        "optimization_goal": OPTIMIZATION_MODES[mode]["optimization_goal"],
+        # A click-to-WhatsApp ad set has to say so. Without destination_type the
+        # tap does not open a chat, which is the entire mechanic the ad sells.
+        "destination_type": "WHATSAPP",
+        "promoted_object": json.dumps(build_promoted_object(mode)),
         "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
         "targeting": json.dumps(targeting),
         "status": "PAUSED",
@@ -156,8 +262,18 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Preview campaign payloads and targeting without making API calls")
     parser.add_argument("--deploy", action="store_true", help="Execute live deployment on Meta Marketing API")
     parser.add_argument("--daily-budget", type=int, default=350, help="Total daily budget in INR (default: 350)")
+    parser.add_argument(
+        "--optimize", choices=sorted(OPTIMIZATION_MODES), default=DEFAULT_MODE,
+        help=("What Meta is asked to buy. 'conversations' (default) optimises "
+              "for people who open a WhatsApp chat; 'purchase' optimises for "
+              "paid orders via the Conversions API and needs roughly 50 "
+              "conversions per ad set per week to work -- check "
+              "ad_report()'s conversions.sent before choosing it"),
+    )
 
     args = parser.parse_args()
+    mode = args.optimize
+    cfg = OPTIMIZATION_MODES[mode]
 
     token, account_id, page_id = get_env_credentials()
 
@@ -165,6 +281,20 @@ def main():
         print("================================================================================")
         print(" META MARKETING API -- DRY RUN PREVIEW (60 KM REGIONAL CAMPUS CAMPAIGN)")
         print("================================================================================")
+        print(f"Optimising for : {cfg['summary']}")
+        print(f"  objective       : {cfg['objective']}")
+        print(f"  goal            : {cfg['optimization_goal']}")
+        print(f"  destination     : WHATSAPP")
+        print(f"  promoted_object : {json.dumps(build_promoted_object(mode))}")
+        gaps = check_mode_ready(mode)
+        if gaps:
+            print("  [BLOCKED] missing configuration:")
+            for gap in gaps:
+                print(f"    - {gap}")
+        if mode == "purchase":
+            print("  [WARN] conversion optimisation needs ~50 conversions per ad set")
+            print("         per week to leave the learning phase. Four starved ad sets")
+            print("         will under-deliver; consider one ad set on the whole budget.")
         print("Targeting Strategy: 4 Regional Geo-Fenced Clusters (100+ Professional Colleges)")
         print(f"Daily Budget: Rs. {args.daily_budget} INR (~Rs. {args.daily_budget // len(CAMPUS_GEO_CLUSTERS)} per cluster)")
         print("Demographics: Age 18-25 | Target: Engineering, Medical, Poly, Law, Management Students")
@@ -188,14 +318,27 @@ def main():
         print("Please ensure META_ACCESS_TOKEN and META_AD_ACCOUNT_ID are defined in your .env file.")
         sys.exit(1)
 
+    # Refuse BEFORE creating anything. A campaign whose ad sets then fail to
+    # create leaves an orphan in the account for someone to find and clean up.
+    gaps = check_mode_ready(mode)
+    if gaps:
+        print(f"Error: --optimize {mode} is not configured:")
+        for gap in gaps:
+            print(f"  - {gap}")
+        sys.exit(1)
+
     print(f"Deploying Campaign to Ad Account: {account_id}...")
+    print(f"Optimising for: {cfg['summary']} "
+          f"({cfg['objective']} / {cfg['optimization_goal']})")
     try:
-        camp_id = create_campaign(token, account_id)
+        camp_id = create_campaign(token, account_id, mode=mode)
         print(f"[OK] Campaign Created! ID: {camp_id}")
 
         budget_per_adset = max(100, args.daily_budget // len(CAMPUS_GEO_CLUSTERS))
         for cluster in CAMPUS_GEO_CLUSTERS:
-            adset_id = create_adset(token, account_id, camp_id, cluster["name"], cluster["custom_locations"], budget_per_adset)
+            adset_id = create_adset(token, account_id, camp_id, cluster["name"],
+                                    cluster["custom_locations"], budget_per_adset,
+                                    mode=mode)
             print(f"  [OK] Created AdSet: {cluster['name']} (ID: {adset_id}) -- Budget: Rs. {budget_per_adset}/day")
 
         print("\n[SUCCESS] Live Meta Deployment Successful! Campaigns created in PAUSED state for final account review.")

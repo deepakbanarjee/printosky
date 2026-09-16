@@ -208,6 +208,26 @@ def _credit_referrer(phone: str, order_id: str) -> None:
         logger.error(f"_credit_referrer error for {phone} / {order_id}: {e}")
 
 
+def _report_ad_conversion(phone: str, order_id: str, amount: float) -> None:
+    """Tell Meta this payment came from the ad it sold us (SCHEMA v43).
+
+    Called for EVERY paid order, not just ad arrivals: meta_capi decides, from
+    the stored ctwa_clid, whether there is anything to report, and says nothing
+    when there is not. Until this existed the click id was stored and never
+    sent, so Meta's only feedback was the click -- which is precisely why the
+    campaign kept buying cheap clicks that never bought anything.
+
+    Best-effort by construction: report_purchase never raises, and this guard
+    covers the import itself. A customer's payment is not failing over an ad
+    platform.
+    """
+    try:
+        from meta_capi import report_purchase
+        report_purchase(_normalize_phone(phone), order_id, amount)
+    except Exception as e:
+        logger.error(f"_report_ad_conversion error for {phone} / {order_id}: {e}")
+
+
 def _maybe_credit_note_uploader(job: dict) -> None:
     """Credit the notes uploader when a marketplace-sourced print job is paid.
 
@@ -1755,6 +1775,9 @@ def _process_razorpay_payment(data: dict) -> None:
         if phone:
             send_payment_confirmed(phone, ref_id, amount)
             _credit_referrer(phone, ref_id)
+            # The batch id, once, for the whole payment — not once per job.
+            # A batch is several rows but one conversion worth one value.
+            _report_ad_conversion(phone, ref_id, amount)
         # Alert staff so a paid order can't sit unnoticed. Best-effort: a failed
         # alert must never block payment processing.
         try:
@@ -1797,6 +1820,7 @@ def _process_razorpay_payment(data: dict) -> None:
     if job.get("sender"):
         send_payment_confirmed(job["sender"], ref_id, amount)
         _credit_referrer(job["sender"], ref_id)
+        _report_ad_conversion(job["sender"], ref_id, amount)
         # Notes marketplace: credit uploader when a marketplace note is printed.
         # Filename format set at print-job creation: "[NOTE-XXXX] title.pdf"
         try:

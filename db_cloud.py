@@ -294,7 +294,7 @@ def mark_job_paid_manual(job_id: str, amount: float, method: str) -> dict:
     client = _client()
     existing = (
         client.table("jobs")
-        .select("status,pickup_code")
+        .select("status,pickup_code,sender")
         .eq("job_id", job_id)
         .limit(1)
         .execute()
@@ -305,6 +305,7 @@ def mark_job_paid_manual(job_id: str, amount: float, method: str) -> dict:
 
     cur_status = rows[0].get("status") or ""
     pickup_code = rows[0].get("pickup_code")
+    sender = rows[0].get("sender") or ""
     if cur_status in _PAID_OR_LATER:
         return {"ok": True, "already": cur_status, "status": cur_status,
                 "pickup_code": pickup_code, "payment_mode": method}
@@ -326,6 +327,19 @@ def mark_job_paid_manual(job_id: str, amount: float, method: str) -> dict:
             )
 
     client.table("jobs").update(payload).eq("job_id", job_id).execute()
+
+    # Cash and counter UPI convert an ad click exactly as a gateway payment
+    # does, and this is the only path they take. Reporting only the Razorpay
+    # ones would teach Meta that half our customers are worth nothing. The
+    # early return above means an already-Paid job never reaches here twice.
+    try:
+        from meta_capi import report_purchase
+        report_purchase(sender, job_id, amount)
+    except Exception as e:
+        logger.error(
+            f"mark_job_paid_manual: ad conversion not reported for {job_id}: {e}"
+        )
+
     return {"ok": True, "status": "Paid", "pickup_code": pickup_code,
             "payment_mode": method}
 
@@ -1934,6 +1948,78 @@ def ad_welcome_already_sent(phone: str, since) -> bool:
         return True
 
 
+def ctwa_clid_for_phone(phone: str) -> dict | None:
+    """The click id to credit a purchase by this customer to, or None.
+
+    FIRST TOUCH, deliberately, matching _compute_ad_report: the ad that
+    introduced someone earns the customer. Reads the denormalised columns
+    v42 put on whatsapp_contacts so this is one indexed lookup on the
+    payment path rather than a sort over ad_clicks.
+
+    Returns {"ctwa_clid", "source_id", "first_ad_at"} or None when this
+    customer never arrived from an ad -- which is most of them.
+    """
+    if not phone:
+        return None
+    rows = (_client().table("whatsapp_contacts")
+            .select("first_ctwa_clid,first_ad_source_id,first_ad_at")
+            .eq("phone", phone).limit(1).execute())
+    data = getattr(rows, "data", None) or []
+    if not data:
+        return None
+    clid = (data[0].get("first_ctwa_clid") or "").strip()
+    if not clid:
+        return None
+    return {
+        "ctwa_clid":   clid,
+        "source_id":   data[0].get("first_ad_source_id") or "",
+        "first_ad_at": data[0].get("first_ad_at"),
+    }
+
+
+def ad_conversion_exists(order_id: str) -> bool:
+    """Has this order been SUCCESSFULLY reported to Meta? (SCHEMA v43)
+
+    Razorpay fires the same payment.captured more than once, so the second
+    delivery must not send a second event.
+
+    Deliberately `ok = true` and not merely "a row exists": a failed attempt
+    leaves a row too, and treating that as reported would let the first
+    failure — a wrong dataset id, an expired token, Meta down for a minute —
+    silently retire the conversion for good. The failed rows are a retry
+    queue, so they must not be their own tombstone.
+    """
+    if not order_id:
+        return False
+    rows = (_client().table("ad_conversions")
+            .select("id").eq("order_id", order_id).eq("ok", True)
+            .limit(1).execute())
+    return bool(getattr(rows, "data", None))
+
+
+def record_ad_conversion(order_id: str, phone: str, ctwa_clid: str,
+                         source_id: str = "", value_inr: float | None = None,
+                         ok: bool = False, error: str = "",
+                         fbtrace_id: str = "") -> None:
+    """Record one Conversions API attempt -- including the ones that failed.
+
+    The failures are the point. A boolean "sent" column would keep the
+    successes and lose every conversion Meta never accepted, which is the same
+    silence SCHEMA v42 exists to end. Raises on write failure so meta_capi can
+    log it; it never lets that reach the customer's payment.
+    """
+    _client().table("ad_conversions").upsert({
+        "order_id":   order_id,
+        "phone":      phone,
+        "ctwa_clid":  ctwa_clid,
+        "source_id":  source_id or None,
+        "value_inr":  value_inr,
+        "ok":         bool(ok),
+        "error":      error or None,
+        "fbtrace_id": fbtrace_id or None,
+    }, on_conflict="order_id").execute()
+
+
 def ensure_referral_code(phone: str, platform: str = "whatsapp_selfserve") -> str | None:
     """This phone's referral code, minting one on the spot if they lack it.
 
@@ -2167,6 +2253,48 @@ def _compute_ad_report(clicks: list, jobs: list, book_orders: list,
     }
 
 
+def _ad_conversion_summary(sb, since: str) -> dict:
+    """What Meta was actually told in this window (SCHEMA v43).
+
+    `failed` is the number that matters and the reason this is on the report at
+    all: a conversion we could not send is revenue the campaign will never
+    learn from, and it is invisible everywhere else. `last_error` saves the
+    reader a trip to SQL to find out why.
+
+    Degrades to zeroes rather than failing the whole report -- an ad report
+    without the conversion line is still worth reading, and the table may not
+    exist yet on a database that has not run the v43 migration.
+    """
+    summary = {"sent": 0, "failed": 0, "value_inr": 0.0,
+               "last_error": None, "configured": False}
+    try:
+        from meta_capi import is_configured
+        summary["configured"] = is_configured()
+    except Exception as exc:
+        # Leaves `configured` False, which reads on the console as "not set up"
+        # — the safe way round, but say why so it is not mistaken for one.
+        logger.warning("meta_capi config unreadable for the ad report: %s", exc)
+    try:
+        rows = (sb.table("ad_conversions")
+                  .select("ok,value_inr,error,sent_at")
+                  .gte("sent_at", since)
+                  .order("sent_at", desc=True).execute().data or [])
+    except Exception as exc:
+        logger.warning("ad conversion summary unavailable: %s", exc)
+        return summary
+
+    for r in rows:
+        if r.get("ok"):
+            summary["sent"] += 1
+            summary["value_inr"] += float(r.get("value_inr") or 0)
+        else:
+            summary["failed"] += 1
+            if summary["last_error"] is None:
+                summary["last_error"] = r.get("error")
+    summary["value_inr"] = round(summary["value_inr"], 2)
+    return summary
+
+
 def ad_report(days: int = 90) -> dict:
     """Per-ad clicks and attributed revenue for the last `days` of ad clicks.
 
@@ -2180,6 +2308,10 @@ def ad_report(days: int = 90) -> dict:
                                    "referred_orders": 0, "referred_revenue": 0.0,
                                    "referral_credit_inr": 0.0,
                                    "total_revenue": 0.0},
+             # Same key on every path, so a console reading report["conversions"]
+             # never has to guess whether it is missing or zero.
+             "conversions": {"sent": 0, "failed": 0, "value_inr": 0.0,
+                             "last_error": None, "configured": False},
              "window_days": days, "generated_at": None}
     try:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -2233,6 +2365,7 @@ def ad_report(days: int = 90) -> dict:
                                 .in_("order_code", order_ids).execute().data or [])
 
         report = _compute_ad_report(clicks, jobs, books, referrers, credits)
+        report["conversions"] = _ad_conversion_summary(sb, since)
         report["window_days"] = days
         report["generated_at"] = datetime.now(timezone.utc).isoformat()
         return report

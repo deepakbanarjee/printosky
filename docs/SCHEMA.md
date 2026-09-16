@@ -20,11 +20,11 @@ This document is the canonical schema reference for the shared Supabase database
 
 | | |
 |---|---|
-| Tables | 35 |
+| Tables | 36 |
 | Views | 2 (`epson_daily`, `konica_daily`) |
 | Foreign keys | **1** (`referral_credits.referrer_code → referrers.code`) |
 | Tables without RLS | **2** (both 18 Aug incident backups) — see [Security gaps](#security-gaps) |
-| Owning products | printosky (30), osp-academics (1), shared (3) |
+| Owning products | printosky (31), osp-academics (1), shared (3) |
 
 The schema is heavily denormalized — only one FK exists in the whole database. Cross-table integrity is enforced at the application layer (or not at all). Worth documenting per-table; not worth a mass FK-introduction project.
 
@@ -359,6 +359,42 @@ reports it as `referred_revenue`, separate from direct. The live campaign
 classmates, so its clicker is worth ₹0 direct by design; scoring it on direct
 revenue alone would call a working ad a failure. An order is never counted in
 both halves.
+
+#### `ad_conversions` 🟦
+What Meta was told back — the other half of `ad_clicks`.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | bigserial | NO | sequence | **PK** |
+| `order_id` | text | NO | — | **unique** — job id, batch id or order code. Also sent as Meta's `event_id` |
+| `phone` | text | NO | — | |
+| `ctwa_clid` | text | NO | — | the click being credited |
+| `source_id` | text | YES | — | Meta ad id, denormalised for the report |
+| `event_name` | text | NO | `'Purchase'` | |
+| `value_inr` | numeric | YES | — | what the order was worth |
+| `currency` | text | NO | `'INR'` | |
+| `ok` | boolean | NO | `false` | did Meta accept it |
+| `error` | text | YES | — | why it did not |
+| `fbtrace_id` | text | YES | — | Meta's own handle for the request |
+| `sent_at` | timestamptz | NO | `now()` | |
+
+Written by `meta_capi.report_purchase()` from both payment paths —
+`_process_razorpay_payment` (single and batch, keyed on the payment's
+reference so a batch is one conversion, not one per job) and
+`db_cloud.mark_job_paid_manual` for cash and counter UPI. Migration:
+[`api/migrations/SCHEMA_v43_ad_conversions.sql`](../api/migrations/SCHEMA_v43_ad_conversions.sql).
+
+**The failed rows are the point.** A boolean "sent" column on `jobs` would keep
+the successes and lose every conversion Meta refused, which is the same silence
+`ad_clicks` exists to end. `db_cloud.ad_conversion_exists()` therefore matches
+on `ok = true`: a failed row must not become its own tombstone, or the first
+outage would retire that conversion permanently. The retry queue is
+`SELECT * FROM ad_conversions WHERE NOT ok`.
+
+Counts surface on `ad_report()` as `conversions` (`sent` / `failed` /
+`value_inr` / `last_error` / `configured`). Needs `META_CAPI_DATASET_ID` set;
+until it is, an attributable conversion alerts rather than vanishing — see
+[FAIL_LOUD.md](FAIL_LOUD.md).
 
 #### `customer_profiles` 🟦
 Last-used selections per phone — pre-fills bot prompts.
