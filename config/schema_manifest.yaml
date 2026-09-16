@@ -15,10 +15,10 @@
 # DO NOT hand-edit to silence drift errors -- fix the migration or the code,
 # not the manifest.
 
-version: 42
-description: Live schema after SCHEMA_v42 (click-to-WhatsApp ad attribution),
-  built on the v29 snapshot plus the DTP transcription tables. 49 tables, all
-  RLS-enabled (excluding two ignored incident backups, which are not).
+version: 43
+description: Live schema after SCHEMA_v43 (Meta Conversions API sends), built on
+  the v29 snapshot plus the DTP transcription tables. 50 tables, all RLS-enabled
+  (excluding two ignored incident backups, which are not).
 
 # Tables with RLS DISABLED -- flagged for security review. As of 2026-06-08
 # every public table has RLS enabled (TASK-023 + TASK-024 closed the last gaps),
@@ -232,6 +232,57 @@ tables:
         default: null
         nullable: true
         type: text
+    rls: true
+  ad_conversions:
+    columns:
+      ctwa_clid:
+        default: null
+        nullable: false
+        type: text
+      currency:
+        default: '''INR''::text'
+        nullable: false
+        type: text
+      error:
+        default: null
+        nullable: true
+        type: text
+      event_name:
+        default: '''Purchase''::text'
+        nullable: false
+        type: text
+      fbtrace_id:
+        default: null
+        nullable: true
+        type: text
+      id:
+        default: nextval('ad_conversions_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      ok:
+        default: 'false'
+        nullable: false
+        type: boolean
+      order_id:
+        default: null
+        nullable: false
+        type: text
+      phone:
+        default: null
+        nullable: false
+        type: text
+      sent_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      source_id:
+        default: null
+        nullable: true
+        type: text
+      value_inr:
+        default: null
+        nullable: true
+        type: numeric
     rls: true
   b2b_clients:
     columns:
