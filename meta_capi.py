@@ -73,9 +73,12 @@ GRAPH_URL = "https://graph.facebook.com/v21.0"
 # The check name ops_watchdog dedups on; also what the health console shows.
 CHECK = "meta.capi"
 
-# Meta rejects events older than seven days. A payment reported later than that
-# is not worth a request -- it will be refused and look like a broken integration.
-MAX_EVENT_AGE_SECONDS = 7 * 24 * 60 * 60
+# Meta rejects events whose event_time is more than seven days old. Nothing here
+# guards against that because nothing here can hit it: report_purchase stamps
+# the event at payment time, which is now. Anything that later drains the failed
+# rows as a retry queue WILL need the guard -- a conversion that failed eight
+# days ago cannot be re-sent with its original timestamp and should not be
+# re-sent with a false one.
 
 _HTTP_TIMEOUT = 10
 
