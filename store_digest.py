@@ -273,22 +273,9 @@ def format_overdue_finishing(rows: Iterable[Mapping], now: datetime | None = Non
     return "\n".join(parts)
 
 
-def _as_datetime(value) -> datetime | None:
-    """Parse the timestamp shapes this repo actually stores, or None."""
-    if isinstance(value, datetime):
-        return value
-    if not value:
-        return None
-    text = str(value).strip().replace("T", " ")
-    if text.endswith("Z"):
-        text = text[:-1]
-    text = text.split("+")[0].split(".")[0].strip()
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(text, fmt)
-        except ValueError:
-            continue
-    return None
+# Shared with dropoff.py, which used to keep a deliberate copy of this parse.
+# See timestamps.py.
+from timestamps import as_datetime as _as_datetime
 
 
 # ── Composed messages ─────────────────────────────────────────────────────────

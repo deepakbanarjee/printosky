@@ -123,19 +123,9 @@ def _download_meta_media(media_id: str) -> bytes | None:
 
 # ── Referral tracking ────────────────────────────────────────────────────────
 
-def _normalize_phone(p: str) -> str:
-    """Canonicalize a WhatsApp phone to digits-only Indian format (91XXXXXXXXXX).
-
-    Strips '@c.us', '@lid', '@s.whatsapp.net' suffixes, removes non-digits,
-    auto-prepends '91' for bare 10-digit Indian numbers. Returns '' if empty.
-    """
-    if not p:
-        return ""
-    s = str(p).replace("@c.us", "").replace("@lid", "").replace("@s.whatsapp.net", "").strip()
-    digits = "".join(c for c in s if c.isdigit())
-    if len(digits) == 10:  # bare Indian mobile
-        digits = "91" + digits
-    return digits
+# Canonical customer phone form, shared with review_manager and anything else
+# that keys a customer off a number. See phone_format.py.
+from phone_format import normalize_phone as _normalize_phone
 
 
 def _capture_referral_code(phone: str, text: str) -> None:
@@ -2145,30 +2135,14 @@ def _handle_auth_legacy(h, body: bytes) -> None:
 
 
 # ── Transcripts DOCX Export ──────────────────────────────────────────────────
-_CHILLU_MAP = {
-    "\u0d7b": "\u0d23\u0d4d\u200d", # ൺ
-    "\u0d7c": "\u0d33\u0d4d\u200d", # ൾ
-    "\u0d7d": "\u0d30\u0d4d\u200d", # ർ
-    "\u0d7e": "\u0d28\u0d4d\u200d", # ൻ
-    "\u0d7f": "\u0d32\u0d4d\u200d", # ൽ
-    "\u0d7a": "\u0d23\u0d4d\u200d", # ൺ
-}
+# Malayalam chillu handling + run splitting, shared with the two
+# transcription tools. Note the known chillu-table defect documented in
+# malayalam.py before changing transcript output.
+from malayalam import (
+    replace_chillus as _replace_chillus,
+    split_malayalam_english as _split_malayalam_english,
+)
 
-def _replace_chillus(text: str) -> str:
-    for chillu, replacement in _CHILLU_MAP.items():
-        text = text.replace(chillu, replacement)
-    return text
-
-def _split_malayalam_english(text: str):
-    pattern = re.compile(r"([\u0d00-\u0d7f\u200d]+)")
-    parts = pattern.split(text)
-    segments = []
-    for part in parts:
-        if not part:
-            continue
-        is_mal = any(("\u0d00" <= char <= "\u0d7f") or (char == "\u200d") for char in part)
-        segments.append((part, is_mal))
-    return segments
 
 def _build_transcript_docx_bytes(content_text: str) -> bytes:
     import docx

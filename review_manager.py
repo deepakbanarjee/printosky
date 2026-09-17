@@ -331,15 +331,9 @@ def schedule_referral_invite(
     logger.info("Referral invite scheduled for %s in %ds", phone, delay_sec)
 
 
-def _normalize_phone(p: str) -> str:
-    """Match api/index.py's normalization: digits-only, 91-prefixed for 10-digit Indian."""
-    if not p:
-        return ""
-    s = str(p).replace("@c.us", "").replace("@lid", "").replace("@s.whatsapp.net", "").strip()
-    digits = "".join(c for c in s if c.isdigit())
-    if len(digits) == 10:
-        digits = "91" + digits
-    return digits
+# Was a hand-kept copy of api/index.py's normalization — the docstring said so.
+# Both now share the one implementation. See phone_format.py.
+from phone_format import normalize_phone as _normalize_phone
 
 
 def send_referral_invite(phone: str, send_fn) -> bool:
