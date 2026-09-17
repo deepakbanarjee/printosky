@@ -61,7 +61,7 @@ def _sources():
 def _module_level_defs(path):
     """Top-level function names defined in `path`. Nested defs don't count."""
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
     except (SyntaxError, UnicodeDecodeError):
         return set()
     return {
@@ -69,6 +69,29 @@ def _module_level_defs(path):
         for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
+
+
+def test_every_production_source_parses():
+    """Guard the guard.
+
+    The scanners above skip anything they cannot parse, so a file they cannot
+    read is a file they cannot police — a blind spot rather than a failure.
+    Five modules here start with a UTF-8 BOM (db_cloud.py, watcher.py,
+    api/handlers_admin.py, book_catalog.py, dispatch_render.py), which plain
+    utf-8 chokes on and utf-8-sig handles; between them they are a large share
+    of the codebase, and reading them as utf-8 silently excluded all five.
+    If this fails, the scanners have gone quiet — fix the read, not this test.
+    """
+    unparseable = []
+    for path in _sources():
+        try:
+            ast.parse(path.read_text(encoding="utf-8-sig"))
+        except (SyntaxError, UnicodeDecodeError) as exc:
+            unparseable.append(f"{path.relative_to(ROOT)}: {type(exc).__name__}")
+    assert unparseable == [], (
+        "these files cannot be parsed, so the duplicate-helper scanners are "
+        f"silently skipping them: {unparseable}"
+    )
 
 
 @pytest.mark.parametrize("helper,home", sorted(SINGLE_HOME.items()))
@@ -90,7 +113,7 @@ def test_the_chillu_table_itself_is_not_copied():
     owners = []
     for path in _sources():
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"))
         except (SyntaxError, UnicodeDecodeError):
             continue
         for node in tree.body:
@@ -109,7 +132,7 @@ def test_pin_iteration_count_is_not_respelled():
         str(p.relative_to(ROOT))
         for p in _sources()
         if p.name != "pin_crypto.py"
-        and "pbkdf2_hmac" in p.read_text(encoding="utf-8", errors="ignore")
+        and "pbkdf2_hmac" in p.read_text(encoding="utf-8-sig", errors="ignore")
     ]
     assert offenders == [], (
         f"PBKDF2 must only be called in pin_crypto.py; found calls in {offenders}. "

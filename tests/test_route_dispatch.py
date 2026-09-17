@@ -78,7 +78,7 @@ def _path_tests(fn):
 
 
 def _methods():
-    tree = ast.parse(API.read_text(encoding="utf-8"))
+    tree = ast.parse(API.read_text(encoding="utf-8-sig"))
     handler = _handler_class(tree)
     return {
         node.name: node
