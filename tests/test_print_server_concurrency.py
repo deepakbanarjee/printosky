@@ -98,30 +98,33 @@ class TestNetworkProbes:
         print_server._probe_cache.update({"at": 0.0, "value": None})
 
     def test_probes_run_in_parallel_not_in_sequence(self, monkeypatch):
-        """Three 0.2s probes should cost ~0.2s in total, not ~0.6s.
+        """All three probes must be in flight at once.
 
-        In production these are up to 3s + 2s + 2s when a printer is powered
+        In production they cost up to 3s + 2s + 2s when a printer is powered
         off — the exact moment a console asks whether the printer is up.
+
+        Asserted by counting how many probes are simultaneously inside their
+        body, not by wall-clock: a timing threshold on a shared CI runner is a
+        flake waiting to happen. A barrier makes it exact — if the probes ran
+        sequentially the first would block forever waiting for siblings that
+        have not started, so the test fails by timeout rather than by luck.
         """
-        delay = 0.2
+        barrier = threading.Barrier(3, timeout=10)
+        concurrent = []
 
-        def slow_internet(*a, **kw):
-            time.sleep(delay)
+        def probe(*a, **kw):
+            # Returns only once all three have arrived — impossible in sequence.
+            concurrent.append(barrier.wait())
             return True
 
-        def slow_printer(ip, *a, **kw):
-            time.sleep(delay)
-            return True
+        monkeypatch.setattr(print_server, "check_internet", probe)
+        monkeypatch.setattr(print_server, "check_printer_reachable", probe)
 
-        monkeypatch.setattr(print_server, "check_internet", slow_internet)
-        monkeypatch.setattr(print_server, "check_printer_reachable", slow_printer)
-
-        t0 = time.perf_counter()
         assert print_server._probe_network() == (True, True, True)
-        elapsed = time.perf_counter() - t0
-
-        # Sequential would be >= 3*delay; allow generous headroom for slow CI.
-        assert elapsed < delay * 2.5, f"probes appear sequential ({elapsed:.2f}s)"
+        assert len(concurrent) == 3
+        # barrier.wait() hands each waiter a distinct index — proof that three
+        # separate threads were inside the barrier together.
+        assert sorted(concurrent) == [0, 1, 2]
 
     def test_result_is_cached_so_consoles_share_one_sweep(self, monkeypatch):
         calls = []
