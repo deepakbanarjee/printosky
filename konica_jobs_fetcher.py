@@ -37,6 +37,17 @@ from store_config import get_store_config
 
 logger = logging.getLogger("konica_fetcher")
 
+try:                                            # pragma: no cover - optional dep
+    from ops_watchdog import report as _report
+except Exception:                               # pragma: no cover
+    def _report(*_a, **_kw):                    # type: ignore[misc]
+        return None
+
+#: The watchdog check name for "can we still read this printer's job log?".
+#: One name for the whole cycle: the job log is either current or it is not, and
+#: three names for three ways of failing would dedupe as three separate outages.
+HEALTH_CHECK = "konica.joblog"
+
 # ── Config ────────────────────────────────────────────────────────────────────
 KONICA_IP      = get_store_config().printers.konica_ip
 SOAP_PORT      = 30081
@@ -44,6 +55,20 @@ SOAP_ENDPOINT  = f"http://{KONICA_IP}:{SOAP_PORT}/clrc/services/CLRC"
 FETCH_INTERVAL = 1800          # seconds (30 min)
 BATCH_SIZE     = 200           # jobs per SOAP call
 HTTP_TIMEOUT   = 30
+
+def has_konica() -> bool:
+    """True iff this store actually has a Konica to read a job log from.
+
+    A finishing/collection store like Nattika sets `konica_ip` to null or "" in
+    store_config.json, so every SOAP call there fails by construction. That was
+    harmless while this module only logged; once it alerts, an unguarded fetcher
+    invents a permanent outage on a printer that does not exist. Kept in step
+    with print_server.has_konica, including "None" — what a JSON null becomes
+    once it has been through str().
+    """
+    ip = KONICA_IP
+    return bool(ip) and str(ip) != "None"
+
 
 # ── SOAP helper ───────────────────────────────────────────────────────────────
 
@@ -205,12 +230,17 @@ def fetch_and_import(db_path: str) -> tuple[int, int, int] | None:
     Strategy: fetch the most-recent BATCH_SIZE jobs (index 1..BATCH_SIZE).
     Once all are duplicates (skipped == batch size), stop — no older new jobs.
     """
+    if not has_konica():
+        logger.debug("Konica job log: this store has no Konica — nothing to fetch")
+        return None
+
     try:
         conn = sqlite3.connect(db_path)
         _init_table(conn)
         _normalise_once(conn)
 
         total_inserted = total_skipped = total_errors = 0
+        fetch_error: Exception | None = None
         start = 1
 
         while True:
@@ -221,6 +251,7 @@ def fetch_and_import(db_path: str) -> tuple[int, int, int] | None:
             except Exception as e:
                 logger.error(f"SOAP fetch error at {start}-{end}: {e}")
                 total_errors += 1
+                fetch_error = e
                 break
 
             if not jobs:
@@ -245,10 +276,29 @@ def fetch_and_import(db_path: str) -> tuple[int, int, int] | None:
             f"Konica SOAP import done: +{total_inserted} new, "
             f"{total_skipped} duplicates, {total_errors} errors"
         )
+
+        # A job log that cannot be read is a store going blind to its own
+        # printer: no per-job history, no attribution, no copy reconciliation —
+        # while the SNMP counters keep climbing and every console stays green.
+        # That is precisely the shape the hard rule exists to catch, and this
+        # module used to meet it with a log line.
+        if fetch_error is not None:
+            _report(HEALTH_CHECK, False,
+                    f"the Konica job log could not be read from {SOAP_ENDPOINT}: "
+                    f"{type(fetch_error).__name__}: {fetch_error} — per-job history "
+                    "stops here (counters are unaffected, so the consoles will "
+                    "still look healthy).")
+        else:
+            _report(HEALTH_CHECK, True,
+                    f"job log read OK — +{total_inserted} new, "
+                    f"{total_skipped} already held")
         return total_inserted, total_skipped, total_errors
 
     except Exception as e:
         logger.error(f"Konica fetch_and_import failed: {e}")
+        _report(HEALTH_CHECK, False,
+                f"the Konica job log fetch failed before it could read anything: "
+                f"{type(e).__name__}: {e} — per-job history stops here.")
         return None
 
 
@@ -277,14 +327,25 @@ def _normalise_once(conn: sqlite3.Connection) -> None:
 
 # ── Background thread ─────────────────────────────────────────────────────────
 
-def start_fetcher(db_path: str, interval: int = FETCH_INTERVAL) -> threading.Thread:
+def start_fetcher(db_path: str,
+                  interval: int = FETCH_INTERVAL) -> threading.Thread | None:
+    """Start the background fetch loop, or None on a store with no Konica."""
+    if not has_konica():
+        logger.info("Konica job fetcher not started — this store has no Konica")
+        return None
+
     def loop():
         logger.info(f"Konica SOAP fetcher started — polling every {interval}s")
         while True:
             try:
                 fetch_and_import(db_path)
             except Exception as e:
+                # fetch_and_import handles its own failures, so reaching here
+                # means the failure path itself broke. Still not silent.
                 logger.error(f"Konica fetcher loop error: {e}")
+                _report(HEALTH_CHECK, False,
+                        f"the Konica job log fetcher loop raised "
+                        f"{type(e).__name__}: {e} — it will retry in {interval}s.")
             time.sleep(interval)
 
     t = threading.Thread(target=loop, daemon=True, name="KonicaJobFetcher")

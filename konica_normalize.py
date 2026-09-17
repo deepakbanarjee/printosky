@@ -2,14 +2,15 @@
 KONICA FIELD NORMALISATION — one shape for `konica_jobs`, whoever wrote the row
 ==============================================================================
 
-`konica_jobs` has had two writers, and they disagreed about the shape of three
+`konica_jobs` has had two writers, and they disagreed about the shape of four
 columns. Nothing ever compared their output, so nothing ever noticed.
 
-| column     | `konica_csv_importer` (Feb–Mar 2026) | `konica_jobs_fetcher` SOAP (Apr 2026 →) |
-|------------|--------------------------------------|-----------------------------------------|
-| `job_type` | `Print` / `Copy` / `Scan`            | `PRINT` / `COPY` / `SCAN`               |
-| `result`   | `No Error` / `Canceled` / `Error`    | `OK` / `USERCANCEL` / `UNKNOWNERROR`    |
-| `job_date` | `2026-03-16 09:46:14`                | `2026/09/02 09:18:59`                   |
+| column           | `konica_csv_importer` (Feb–Mar 2026) | `konica_jobs_fetcher` SOAP (Apr 2026 →) |
+|------------------|--------------------------------------|-----------------------------------------|
+| `job_type`       | `Print` / `Copy` / `Scan`            | `PRINT` / `COPY` / `SCAN`               |
+| `result`         | `No Error` / `Canceled` / `Error`    | `OK` / `USERCANCEL` / `UNKNOWNERROR`    |
+| `job_date`       | `2026-03-16 09:46:14`                | `2026/09/02 09:18:59`                   |
+| `print_end_date` | `2026-03-16 09:46:31`                | `2026/09/02 09:19:30`                   |
 
 What that cost, measured on production (2026-09-02, 14,864 rows):
 
@@ -22,9 +23,15 @@ What that cost, measured on production (2026-09-02, 14,864 rows):
 * `renderKJPeriod()` buckets on `job_type === "Print"` / `"Copy"`, so the
   12,864 upper-case rows counted as neither.
 
-Three silent divergences, each individually plausible, together freezing a
+Four silent divergences, each individually plausible, together freezing a
 panel on stale data while it kept rendering numbers. This module is the fix:
 **one canonical shape, applied at write time, tolerated at read time.**
+
+`print_end_date` was missed by the first pass and found on 2026-09-10, when
+`ORDER BY print_end_date DESC` answered "the Konica job log stopped on Sep 2"
+about a fetcher that was working perfectly — 1,953 slash-dated rows (jobs
+94790–96791) outranking 13,862 ISO ones, including the same morning's. The
+column nobody normalised is the column that eventually lies to you.
 
 Unknown values are **kept, not dropped**. A value this module does not
 recognise is a printer firmware change or a new job type, which is exactly the
@@ -144,13 +151,18 @@ _SLASH_DATE = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})[ T](\d{1,2}):(\d{2})(?::
 _ISO_DATE   = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?")
 
 
-def normalize_job_date(raw) -> str | None:
+def normalize_job_date(raw, *, column: str = "job_date") -> str | None:
     """`2026/09/02 09:18:59` → `2026-09-02 09:18:59`. ISO passes through.
 
     Returns None for anything unparseable rather than a guess: a wrong
     timestamp puts a job in the wrong day's revenue, which is worse than a job
     with no timestamp at all (the same rule store_digest.overdue_finishing
     follows).
+
+    `column` names the field being normalised, because `print_end_date` has the
+    same two shapes and the same fix. It only reaches the alert: an alert that
+    says `job_date` about a broken `print_end_date` sends someone to read the
+    wrong column, which is the sort of small lie that costs an afternoon.
     """
     text = ("" if raw is None else str(raw)).strip()
     if not text:
@@ -176,8 +188,8 @@ def normalize_job_date(raw) -> str | None:
         except ValueError:
             continue
 
-    _report("konica.job_date", False,
-            f"konica_jobs.job_date={text!r} is in no format this build parses — "
+    _report(f"konica.{column}", False,
+            f"konica_jobs.{column}={text!r} is in no format this build parses — "
             "the row is kept but cannot be placed in a day, so it is missing from "
             "every dated report.")
     return None
@@ -193,6 +205,11 @@ def normalize_paper_size(raw) -> str | None:
     return None if text in _BLANK_SIZES else text
 
 
+def _normalize_print_end_date(raw) -> str | None:
+    """`print_end_date` under its own name, so a bad value alerts as itself."""
+    return normalize_job_date(raw, column="print_end_date")
+
+
 def normalize_row(row: dict) -> dict:
     """Apply every normaliser to a `konica_jobs`-shaped mapping.
 
@@ -200,10 +217,11 @@ def normalize_row(row: dict) -> dict:
     invented, so this is safe on a partial `select`.
     """
     out = dict(row)
-    for key, fn in (("job_type",   normalize_job_type),
-                    ("result",     normalize_result),
-                    ("job_date",   normalize_job_date),
-                    ("paper_size", normalize_paper_size)):
+    for key, fn in (("job_type",       normalize_job_type),
+                    ("result",         normalize_result),
+                    ("job_date",       normalize_job_date),
+                    ("paper_size",     normalize_paper_size),
+                    ("print_end_date", _normalize_print_end_date)):
         if key in out:
             out[key] = fn(out[key])
     return out
@@ -220,38 +238,74 @@ def normalize_row(row: dict) -> dict:
 BACKFILL_BATCH = 500
 
 
+#: Every column this module knows how to canonicalise, with its normaliser.
+#: The backfill applies the ones the table actually has — a store DB old enough
+#: to predate a column must still get the others fixed, because a normaliser
+#: that becomes all-or-nothing is a normaliser that silently stops running.
+_NORMALISERS: tuple[tuple[str, object], ...] = (
+    ("job_type",       normalize_job_type),
+    ("result",         normalize_result),
+    ("job_date",       normalize_job_date),
+    ("paper_size",     normalize_paper_size),
+    ("print_end_date", _normalize_print_end_date),
+)
+
+
+def _normalisable_columns(conn) -> list[tuple[str, object]]:
+    """The (column, normaliser) pairs this table actually carries, in order."""
+    present = {row[1] for row in conn.execute("PRAGMA table_info(konica_jobs)")}
+    return [(name, fn) for name, fn in _NORMALISERS if name in present]
+
+
 def backfill_sqlite(conn, *, batch: int = BACKFILL_BATCH) -> dict:
     """Rewrite legacy rows in a local `konica_jobs` into the canonical shape.
 
     Idempotent: a second run finds nothing to change. Returns a count per
     column so the caller can log what moved — and say nothing when nothing did.
+    Columns the table does not have are reported as 0, never as an error.
     """
-    changed = {"job_type": 0, "result": 0, "job_date": 0, "paper_size": 0}
+    changed = {name: 0 for name, _ in _NORMALISERS}
+    try:
+        columns = _normalisable_columns(conn)
+    except Exception as exc:
+        _report("konica.backfill", False,
+                f"could not read konica_jobs to normalise it: {type(exc).__name__}: {exc}")
+        return changed
+
+    if not columns:
+        # No table, or a table with none of these columns. Either way the
+        # normalisation cannot run, and a console is reading raw vocabularies.
+        _report("konica.backfill", False,
+                "konica_jobs has none of the columns this normalises "
+                f"({', '.join(name for name, _ in _NORMALISERS)}) — the table is "
+                "missing or reshaped, so the consoles are reading whatever the "
+                "printer wrote.")
+        return changed
+
+    names = [name for name, _ in columns]
     try:
         rows = conn.execute(
-            "SELECT rowid, job_type, result, job_date, paper_size FROM konica_jobs"
-        ).fetchall()
+            f"SELECT rowid, {', '.join(names)} FROM konica_jobs").fetchall()
     except Exception as exc:
         _report("konica.backfill", False,
                 f"could not read konica_jobs to normalise it: {type(exc).__name__}: {exc}")
         return changed
 
     pending: list[tuple] = []
-    for rowid, job_type, result, job_date, paper_size in rows:
-        new = (normalize_job_type(job_type), normalize_result(result),
-               normalize_job_date(job_date), normalize_paper_size(paper_size))
-        old = (job_type, result, job_date, paper_size)
+    for row in rows:
+        rowid, old = row[0], tuple(row[1:])
+        new = tuple(fn(value) for (_, fn), value in zip(columns, old))
         if new == old:
             continue
-        for key, was, now in zip(changed, old, new):
+        for name, was, now in zip(names, old, new):
             if was != now:
-                changed[key] += 1
+                changed[name] += 1
         pending.append((*new, rowid))
 
+    assignments = ", ".join(f"{name}=?" for name in names)
     for start in range(0, len(pending), batch):
         conn.executemany(
-            "UPDATE konica_jobs SET job_type=?, result=?, job_date=?, paper_size=? "
-            "WHERE rowid=?",
+            f"UPDATE konica_jobs SET {assignments} WHERE rowid=?",
             pending[start:start + batch],
         )
         conn.commit()

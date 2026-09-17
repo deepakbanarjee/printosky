@@ -178,12 +178,22 @@ def test_normalize_row_is_idempotent():
 
 # ── The self-applying backfill ────────────────────────────────────────────────
 
+_DB_COLUMNS = ("job_number", "job_type", "result", "job_date", "paper_size",
+               "print_end_date")
+
+
 def _db(rows):
+    """A konica_jobs stub. Rows may stop short of the last column(s) — the
+    ones they omit stay NULL, so a test only spells out what it is about."""
     conn = sqlite3.connect(":memory:")
     conn.execute("""CREATE TABLE konica_jobs (
         job_number INTEGER, job_type TEXT, result TEXT,
-        job_date TEXT, paper_size TEXT)""")
-    conn.executemany("INSERT INTO konica_jobs VALUES (?,?,?,?,?)", rows)
+        job_date TEXT, paper_size TEXT, print_end_date TEXT)""")
+    for row in rows:
+        names = _DB_COLUMNS[:len(row)]
+        conn.execute(
+            f"INSERT INTO konica_jobs ({', '.join(names)}) "
+            f"VALUES ({', '.join('?' * len(row))})", row)
     conn.commit()
     return conn
 
@@ -242,3 +252,107 @@ def test_backfill_alerts_rather_than_raising_when_the_table_is_missing(monkeypat
     changed = kn.backfill_sqlite(conn)
     assert sum(changed.values()) == 0
     assert ("konica.backfill", False) in seen
+
+
+# ── print_end_date ────────────────────────────────────────────────────────────
+#
+# The fourth divergent column, found on 2026-09-10 the same way the other three
+# were: by a query that returned a confident wrong answer. `konica_jobs` held
+# 1,953 slash-dated `print_end_date` rows (job 94790-96791, Aug 13 - Sep 2)
+# against 13,862 ISO ones, so `ORDER BY print_end_date DESC` put Sep 2 above
+# Sep 10 and the job log looked eight days dead while it was in fact current.
+
+def test_print_end_date_normalises_the_same_way_job_date_does():
+    assert kn.normalize_job_date("2026/09/02 18:18:55",
+                                 column="print_end_date") == "2026-09-02 18:18:55"
+
+
+def test_the_bug_this_prevents_the_job_log_looked_eight_days_dead():
+    """`/` (0x2F) sorts above `-` (0x2D), so the newest slash-dated row beat
+    every ISO row in `ORDER BY print_end_date DESC`. Sep 2 outranked Sep 10 and
+    a healthy fetcher read as an eight-day outage."""
+    slash, iso = "2026/09/02 18:18:55", "2026-09-10 10:30:48"
+    assert slash > iso                                          # the bug, raw
+    assert kn.normalize_job_date(slash, column="print_end_date") < iso   # gone
+
+
+def test_a_cancelled_job_has_no_end_date_and_that_is_not_an_alert(monkeypatch):
+    """A job the printer cancelled never finished, so `print_end_date` is NULL.
+    That is the machine being accurate, not a parse failure."""
+    seen = []
+    monkeypatch.setattr(kn, "_report", lambda c, ok, d="", **k: seen.append(c))
+    assert kn.normalize_job_date(None, column="print_end_date") is None
+    assert kn.normalize_job_date("", column="print_end_date") is None
+    assert seen == []
+
+
+def test_an_unparseable_end_date_alerts_under_its_own_column_name(monkeypatch):
+    """The check name has to name the column that is actually broken, or the
+    alert sends someone to read the wrong one."""
+    seen = []
+    monkeypatch.setattr(kn, "_report", lambda c, ok, d="", **k: seen.append((c, ok)))
+    assert kn.normalize_job_date("whenever", column="print_end_date") is None
+    assert ("konica.print_end_date", False) in seen
+    assert ("konica.job_date", False) not in seen
+
+
+def test_job_date_keeps_its_own_check_name_by_default(monkeypatch):
+    seen = []
+    monkeypatch.setattr(kn, "_report", lambda c, ok, d="", **k: seen.append((c, ok)))
+    kn.normalize_job_date("whenever")
+    assert ("konica.job_date", False) in seen
+
+
+def test_normalize_row_normalises_print_end_date_too():
+    row = {"job_date": "2026/09/02 18:18:29", "print_end_date": "2026/09/02 18:18:55"}
+    assert kn.normalize_row(row) == {"job_date": "2026-09-02 18:18:29",
+                                     "print_end_date": "2026-09-02 18:18:55"}
+
+
+def test_backfill_rewrites_a_slash_dated_print_end_date():
+    conn = _db([(1, "Print", "No Error", "2026-09-02 18:18:29", "A4",
+                 "2026/09/02 18:18:55")])
+    changed = kn.backfill_sqlite(conn)
+    assert conn.execute("SELECT print_end_date FROM konica_jobs").fetchone()[0] \
+        == "2026-09-02 18:18:55"
+    assert changed["print_end_date"] == 1
+    assert changed["job_date"] == 0          # already canonical, left alone
+
+
+def test_backfill_leaves_a_null_print_end_date_null():
+    """job 97439 — the cancelled .jpg — has no end date. Backfill must not
+    invent one, and must not count it as a change every single run."""
+    conn = _db([(1, "Print", "Canceled", "2026-09-08 08:09:52", None, None)])
+    changed = kn.backfill_sqlite(conn)
+    assert conn.execute("SELECT print_end_date FROM konica_jobs").fetchone()[0] is None
+    assert changed["print_end_date"] == 0
+
+
+def test_backfill_of_print_end_date_is_idempotent():
+    conn = _db([(1, "COPY", "OK", "2026/09/02 09:18:59", "legal",
+                 "2026/09/02 09:19:30")])
+    kn.backfill_sqlite(conn)
+    first = conn.execute("SELECT print_end_date FROM konica_jobs").fetchone()[0]
+    again = kn.backfill_sqlite(conn)
+    assert conn.execute("SELECT print_end_date FROM konica_jobs").fetchone()[0] == first
+    assert sum(again.values()) == 0
+
+
+def test_backfill_still_normalises_a_table_that_predates_print_end_date():
+    """Adding a column to the backfill must not make it all-or-nothing. A store
+    DB old enough to lack `print_end_date` still gets the other four fixed —
+    the alternative is a normaliser that silently stops normalising."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("""CREATE TABLE konica_jobs (
+        job_number INTEGER, job_type TEXT, result TEXT,
+        job_date TEXT, paper_size TEXT)""")
+    conn.execute("INSERT INTO konica_jobs VALUES (1,'COPY','OK','2026/09/02 09:18:59','legal')")
+    conn.commit()
+
+    changed = kn.backfill_sqlite(conn)
+
+    assert conn.execute("SELECT job_type, result, job_date, paper_size "
+                        "FROM konica_jobs").fetchone() == \
+        ("Copy", "No Error", "2026-09-02 09:18:59", "LEGAL")
+    assert changed["job_type"] == 1
+    assert changed["print_end_date"] == 0      # absent, so nothing to change
