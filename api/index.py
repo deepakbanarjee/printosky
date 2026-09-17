@@ -1767,9 +1767,36 @@ def _process_razorpay_payment(data: dict) -> None:
     # Batch payment?
     batch = get_batch(ref_id)
     if batch:
-        job_ids = [j for j in (batch.get("job_ids") or "").split(",") if j.strip()]
+        job_ids = [j.strip() for j in (batch.get("job_ids") or "").split(",") if j.strip()]
+        # ── Review finding F02 (P0), fixed here ──────────────────────────────
+        # This loop used to call update_job_paid(jid, amount, ...) with the
+        # WHOLE batch amount for every job, and update_job_paid writes that
+        # number to amount_collected. One ₹100 payment across two jobs recorded
+        # ₹200 collected; across n jobs, n × the payment.
+        #
+        # core.money.allocate splits the payment across the jobs by their
+        # quoted values (largest-remainder, ties to the earlier job) and its
+        # parts sum to the payment exactly — asserted inside allocate(), so a
+        # rounding slip is a crash in CI, not a quiet discrepancy in the books.
+        from core.money import allocate, paise_from_rupees, rupees_from_paise
+
+        quoted_paise = []
         for jid in job_ids:
-            update_job_paid(jid, amount, method, pay_id)
+            row = get_job(jid) or {}
+            try:
+                quoted_paise.append(max(0, paise_from_rupees(row.get("amount_quoted") or 0)))
+            except ValueError:
+                logger.error("batch %s: job %s has a non-numeric amount_quoted %r",
+                             ref_id, jid, row.get("amount_quoted"))
+                quoted_paise.append(0)
+
+        if job_ids:
+            shares = allocate(paise_from_rupees(amount), quoted_paise)
+            for jid, share_paise in zip(job_ids, shares):
+                update_job_paid(jid, float(rupees_from_paise(share_paise)), method, pay_id)
+            logger.info("batch %s: ₹%.2f allocated as %s across %d jobs",
+                        ref_id, amount,
+                        [str(rupees_from_paise(x)) for x in shares], len(job_ids))
         update_batch_paid(ref_id)
         phone = batch.get("phone", "")
         if phone:
@@ -2104,19 +2131,82 @@ def _handle_staff_login(h, body: bytes) -> None:
                 return
         _json_response(h, 401, {"ok": False, "error": "Incorrect PIN"})
     except Exception as e:
+        # Found while fixing F01: this path logged and returned WITHOUT writing
+        # a response, so a database outage gave the console an empty reply and
+        # the login screen just sat there. Say what happened, with a status the
+        # caller can act on, and never leave the request unanswered.
         logger.error(f"staff/login error: {e}")
+        _json_response(h, 503, {
+            "ok": False,
+            "error": "Could not check that PIN right now — try again in a moment.",
+        })
+
+
+# Mirrors netlify/functions/auth.js ENV_KEY. Two implementations of one
+# contract is one too many, but the Netlify function serves printosky.com and
+# this one serves the Vercel host, and they must agree on which env var holds
+# which hash. Changing one without the other is the bug this table prevents.
+_LEGACY_AUTH_SHA256_ENV = {
+    "superadmin": "SUPERADMIN_SHA256_HASH",
+    "store":      "STORE_SHA256_HASH",
+    "mis":        "MIS_SHA256_HASH",
+    "staff":      "STAFF_TOKEN_HASH",
+}
+_ADMIN_PBKDF2_ITER = 600_000   # must match netlify/functions/auth.js
+
+
+def _verify_legacy_admin(password: str) -> bool:
+    """PBKDF2 admin password check. False when unconfigured — never True."""
+    expected = os.environ.get("ADMIN_PBKDF2_HASH", "")
+    salt_hex = os.environ.get("ADMIN_PBKDF2_SALT", "")
+    if not (expected and salt_hex):
+        return False
+    try:
+        salt = bytes.fromhex(salt_hex)
+    except ValueError:
+        logger.error("ADMIN_PBKDF2_SALT is not hex — admin login cannot be verified")
+        return False
+    candidate = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _ADMIN_PBKDF2_ITER, 32).hex()
+    return hmac.compare_digest(candidate, expected)
+
+
 def _handle_auth_legacy(h, body: bytes) -> None:
-    """POST /.netlify/functions/auth or POST /auth
-    Verifies staff/store/admin credentials or PINs and returns {ok, supabase_jwt}.
+    """POST /.netlify/functions/auth or POST /auth — verify a credential.
+
+    Contract (unchanged): ``{type, password}`` or ``{pin}`` in, ``{ok,
+    supabase_jwt}`` out. ``type`` is one of admin | superadmin | store | mis |
+    staff, exactly as ``netlify/functions/auth.js`` accepts.
+
+    **Review finding F01 (P0), fixed here.** This handler used to end with:
+
+        if password:
+            _json_response(h, 200, {"ok": True, "supabase_jwt": _mint_supabase_jwt()})
+
+    — so any non-empty password, and any password when the configured hash did
+    not match, returned success and a Supabase JWT. It is now fail-closed:
+    every path out of this function either verified a credential or answers
+    401/503, and there is no trailing success branch.
+
+    A deployment with no hashes configured answers **503**, not 401 and not
+    200: "we cannot check" is a different fact from "you are wrong", and the
+    503 is what tells whoever is locked out to set the env vars rather than
+    hunt for a typo in their password. Staff can still sign in with their PIN
+    (the DB path below) and the consoles on printosky.com still use the
+    Netlify function, so this is not a lockout.
     """
     try:
         payload = json.loads(body or b"{}")
-        password = str(payload.get("password") or payload.get("pin") or "").strip()
     except Exception:
-        _json_response(h, 400, {"error": "Invalid JSON"})
+        _json_response(h, 400, {"ok": False, "error": "Invalid JSON"})
+        return
+    password = str(payload.get("password") or payload.get("pin") or "").strip()
+    kind = str(payload.get("type") or "").strip().lower()
+
+    if not password:
+        _json_response(h, 400, {"ok": False, "error": "password required"})
         return
 
-    # Check PIN against DB if numeric
+    # ── 1. Staff PIN against the identities/staff table ──────────────────────
     if password.isdigit() and 4 <= len(password) <= 8:
         try:
             from db_cloud import _client
@@ -2129,6 +2219,7 @@ def _handle_auth_legacy(h, body: bytes) -> None:
             )
             for r in (result.data or []):
                 if _verify_pin(password, r["pin_hash"], r.get("pin_salt")):
+                    logger.info("legacy auth: PIN login for %s", r["id"])
                     _json_response(h, 200, {
                         "ok": True,
                         "staff_id": r["id"],
@@ -2137,19 +2228,50 @@ def _handle_auth_legacy(h, body: bytes) -> None:
                     })
                     return
         except Exception as e:
-            logger.warning(f"DB PIN check in auth legacy: {e}")
+            # A database we cannot reach must not become an open door. Report it
+            # and fall through to the password checks, which have their own
+            # fail-closed answer.
+            logger.error("legacy auth: staff PIN lookup failed: %s", e)
 
-    # For store tokens / non-numeric passwords: check hash or accept if non-empty
-    if password:
-        store_hash = os.environ.get("STAFF_TOKEN_HASH") or os.environ.get("STORE_SHA256_HASH")
-        if store_hash:
-            import hashlib
-            p_hash = hashlib.sha256(password.encode()).hexdigest()
-            if p_hash == store_hash:
-                _json_response(h, 200, {"ok": True, "supabase_jwt": _mint_supabase_jwt()})
-                return
+    # ── 2. Admin password (PBKDF2) ───────────────────────────────────────────
+    if kind in ("", "admin") and _verify_legacy_admin(password):
+        logger.info("legacy auth: admin password accepted")
         _json_response(h, 200, {"ok": True, "supabase_jwt": _mint_supabase_jwt()})
         return
+
+    # ── 3. Shared SHA-256 tokens (store / mis / superadmin / staff token) ────
+    # An explicit `type` is checked against that type only. A request with no
+    # type is checked against all of them, because the pre-v2 callers did not
+    # always send one — but an unconfigured hash never matches.
+    candidates = (
+        [_LEGACY_AUTH_SHA256_ENV[kind]] if kind in _LEGACY_AUTH_SHA256_ENV
+        else list(_LEGACY_AUTH_SHA256_ENV.values())
+    )
+    supplied = hashlib.sha256(password.encode()).hexdigest()
+    configured = 0
+    for env_name in candidates:
+        expected = os.environ.get(env_name, "")
+        if not expected:
+            continue
+        configured += 1
+        if hmac.compare_digest(supplied, expected):
+            logger.info("legacy auth: %s token accepted", env_name)
+            _json_response(h, 200, {"ok": True, "supabase_jwt": _mint_supabase_jwt()})
+            return
+
+    if not configured and not (os.environ.get("ADMIN_PBKDF2_HASH") and kind in ("", "admin")):
+        logger.error(
+            "legacy auth: no credential hashes configured on this host (%s) — "
+            "cannot verify anyone. Set the *_SHA256_HASH / ADMIN_PBKDF2_* env vars.",
+            ", ".join(candidates),
+        )
+        _json_response(h, 503, {
+            "ok": False,
+            "error": "authentication is not configured on this host",
+        })
+        return
+
+    logger.warning("legacy auth: rejected (type=%r)", kind or "unset")
 
     _json_response(h, 401, {"ok": False, "error": "Invalid credentials"})
 
@@ -3518,6 +3640,31 @@ from api.handlers_resume import (
     _handle_resume_parse,
 )
 
+# ── API v2 mount (strangler fig) ──────────────────────────────────────────────
+#
+# api/v2 owns every path under /v2/ and nothing else. `_v2_dispatch` is the
+# first statement of do_GET/do_POST/do_OPTIONS below; it returns True when it
+# has answered, False for every legacy path, and the chain underneath is
+# untouched. See docs/V2_ARCHITECTURE.md.
+#
+# The import is guarded on purpose: if api/v2 ever fails to import — a syntax
+# error, a dependency that did not deploy — the whole live API must keep
+# serving WhatsApp, Razorpay and the consoles. The failure is logged at error
+# level (fail loud) and /v2/* simply 404s through the legacy chain.
+try:
+    from api.v2.app import dispatch as _v2_dispatch_impl, enabled as _v2_enabled
+
+    def _v2_dispatch(h, body=None) -> bool:
+        return _v2_enabled() and _v2_dispatch_impl(h, body)
+
+except Exception as _v2_exc:  # noqa: BLE001 - reported, never fatal
+    logger.error("api/v2 failed to load (%s: %s) — /v2/* is disabled",
+                 type(_v2_exc).__name__, _v2_exc)
+
+    def _v2_dispatch(h, body=None) -> bool:
+        return False
+
+
 # ── Vercel request handler ────────────────────────────────────────────────────
 
 class handler(BaseHTTPRequestHandler):
@@ -3526,6 +3673,9 @@ class handler(BaseHTTPRequestHandler):
         logger.debug("HTTP: " + format % args)
 
     def do_GET(self):
+        if _v2_dispatch(self):
+            return
+
         if self.path.startswith("/whatsapp-webhook"):
             params       = parse_qs(urlparse(self.path).query)
             verify_token = params.get("hub.verify_token", [""])[0]
@@ -3744,6 +3894,9 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(b"Printosky webhook OK (cloud)")
 
     def do_OPTIONS(self):
+        if _v2_dispatch(self):
+            return
+
         # CORS preflight — allow any origin, advertise supported methods/headers.
         self.send_response(204)
         _send_cors_headers(self)
@@ -3752,6 +3905,10 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body   = self.rfile.read(length)
+
+        # v2 first. The body is passed in because rfile is already drained.
+        if _v2_dispatch(self, body):
+            return
 
         # ── Meta WhatsApp Cloud API ──────────────────────────────────────────
         if self.path == "/whatsapp-webhook":

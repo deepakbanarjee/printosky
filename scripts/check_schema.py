@@ -234,14 +234,54 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+# Keys that describe the CONTRACT rather than the live schema. A --dump must
+# carry them across: they are decisions a person made, and the live database
+# cannot regenerate them. Losing `ignored_tables` in particular turns the next
+# drift check red on two incident backups that were deliberately excluded.
+_PRESERVED_KEYS = ("version", "description", "rls_disabled_known", "ignored_tables")
+
+
+def _leading_comment(path: Path) -> str:
+    """The manifest's header comment block, so --dump does not delete it.
+
+    The header says where the file comes from and, pointedly, not to hand-edit
+    it. A dump that silently dropped that instruction would make the next
+    person's hand-edit look reasonable.
+    """
+    if not path.exists():
+        return ""
+    lines = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("#") or not line.strip():
+            lines.append(line)
+            continue
+        break
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return ("\n".join(lines) + "\n\n") if lines else ""
+
+
 def dump_manifest(live: dict[str, Any], path: Path = MANIFEST_PATH) -> None:
+    """Rewrite the manifest from a live snapshot, keeping the human parts.
+
+    Only `views` and `tables` come from the database. The header comment and
+    the keys in _PRESERVED_KEYS are read back from the existing manifest and
+    written out unchanged — an earlier version of this function wrote only
+    views+tables, so running the documented post-migration `--dump` step
+    deleted the header, the version, and the ignored-table declarations.
+    """
     _require_yaml()
-    out: dict[str, Any] = {
-        "views": sorted(live.get("views", [])),
-        "tables": live.get("tables", {}),
-    }
-    text = yaml.safe_dump(out, sort_keys=True, default_flow_style=False)
-    path.write_text(text, encoding="utf-8")
+    prior: dict[str, Any] = {}
+    if path.exists():
+        with path.open() as f:
+            prior = yaml.safe_load(f) or {}
+
+    out: dict[str, Any] = {key: prior[key] for key in _PRESERVED_KEYS if key in prior}
+    out["views"] = sorted(live.get("views", []))
+    out["tables"] = live.get("tables", {})
+
+    text = yaml.safe_dump(out, sort_keys=True, default_flow_style=False, allow_unicode=True)
+    path.write_text(_leading_comment(path) + text, encoding="utf-8")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

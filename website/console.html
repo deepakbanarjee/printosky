@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Printosky Console</title>
+<link rel="icon" href="/favicon-32.png" sizes="32x32">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app/tokens.css">
+<!--
+  Printosky operator console (v2).
+
+  A deliberately small page: the shell, and one list. It exists alongside
+  admin.html and jobs.html, not instead of them — those keep working exactly as
+  they do today, against the legacy API. This one reads GET /v2/queue, which
+  returns work already sorted by what is at risk, and it is the pattern the
+  other consoles get folded into one at a time.
+
+  Everything it needs is three ES modules under /app/. No build step: the repo
+  deploys static files to Netlify on push, and adding a bundler to gain nothing
+  would be a new way for a deploy to fail.
+-->
+<style>
+  body { display: flex; flex-direction: column; }
+
+  /* ── Sign in ────────────────────────────────────────────────────────── */
+  #login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: var(--s-4); }
+  #login-screen[hidden] { display: none; }
+  .login-box { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+               padding: var(--s-6); width: min(380px, 100%); box-shadow: var(--shadow); }
+  .login-box h1 { font-size: var(--fs-xl); margin-bottom: var(--s-2); }
+  .login-box p { color: var(--muted); font-size: var(--fs-sm); margin-bottom: var(--s-5); }
+  input[type="password"], input[type="text"] {
+    width: 100%; min-height: var(--tap); padding: 0 var(--s-3); font-size: var(--fs-lg);
+    font-family: var(--mono); letter-spacing: .3em; text-align: center;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  #login-error { color: var(--red); font-size: var(--fs-sm); min-height: 1.2em; margin-top: var(--s-3); }
+
+  /* ── Shell ──────────────────────────────────────────────────────────── */
+  #console[hidden] { display: none; }
+  header.bar { position: sticky; top: 0; z-index: 10; display: flex; gap: var(--s-3);
+               align-items: center; flex-wrap: wrap;
+               padding: var(--s-3) var(--s-4); background: var(--surface);
+               border-bottom: 1px solid var(--border); }
+  header.bar h1 { font-size: var(--fs-md); font-weight: 600; letter-spacing: .04em; }
+  header.bar .spacer { flex: 1; }
+  #who, #updated { color: var(--muted); font-size: var(--fs-xs); font-family: var(--mono); }
+  select { min-height: 36px; background: var(--card); color: var(--text);
+           border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 var(--s-2); }
+
+  #health { padding: var(--s-2) var(--s-4); background: rgba(255,82,82,.12);
+            border-bottom: 1px solid var(--red); color: var(--red);
+            font-family: var(--mono); font-size: var(--fs-xs); }
+  #health[hidden] { display: none; }
+
+  main { padding: var(--s-4); display: flex; flex-direction: column; gap: var(--s-5); }
+
+  /* ── Buckets ────────────────────────────────────────────────────────── */
+  .bucket-head { display: flex; align-items: baseline; gap: var(--s-3); flex-wrap: wrap;
+                 margin-bottom: var(--s-3); }
+  .bucket-head h2 { font-size: var(--fs-md); font-weight: 600; }
+  .bucket-head .count { font-family: var(--mono); color: var(--accent); }
+  .bucket-head .hint { flex-basis: 100%; color: var(--muted); font-size: var(--fs-xs); }
+  .bucket-exceptions .bucket-head h2 { color: var(--red); }
+  .bucket-paid_not_started .bucket-head h2 { color: var(--amber); }
+
+  .cards { display: grid; gap: var(--s-3);
+           grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--border);
+          border-radius: var(--radius); padding: var(--s-3); display: flex;
+          flex-direction: column; gap: var(--s-2); }
+  .card-top { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
+  .oid { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
+  .card-who { font-weight: 500; }
+  .card-money { font-family: var(--mono); font-size: var(--fs-sm); }
+  .card-money .due { color: var(--amber); }
+  .card-money .pickup { color: var(--accent); }
+  .card-time { color: var(--muted); font-size: var(--fs-xs); }
+  .card-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-1); }
+
+  .btn { min-height: var(--tap); padding: 0 var(--s-3); cursor: pointer;
+         background: var(--surface); color: var(--text); font: inherit;
+         font-size: var(--fs-sm); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: .5; cursor: progress; }
+  .login-box .btn { width: 100%; margin-top: var(--s-4); }
+
+  .badge { font-family: var(--mono); font-size: var(--fs-xs); padding: 2px var(--s-2);
+           border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+  .badge-green { color: var(--green); }  .badge-amber { color: var(--amber); }
+  .badge-red   { color: var(--red); }    .badge-accent { color: var(--accent); }
+  .badge-muted { color: var(--muted); }
+
+  .empty { padding: var(--s-7) var(--s-4); text-align: center; color: var(--muted); }
+  .empty-msg { font-size: var(--fs-lg); color: var(--text); margin-bottom: var(--s-2); }
+  .empty-detail { font-family: var(--mono); font-size: var(--fs-xs); margin-bottom: var(--s-3); }
+  .empty-error .empty-msg { color: var(--red); }
+
+  #toast-host { position: fixed; bottom: var(--s-4); left: 50%; transform: translateX(-50%);
+                z-index: 100; display: flex; flex-direction: column; gap: var(--s-2);
+                align-items: center; pointer-events: none; }
+  .toast { background: var(--card); border: 1px solid var(--green); color: var(--green);
+           padding: var(--s-2) var(--s-4); border-radius: var(--radius-sm);
+           font-size: var(--fs-sm); box-shadow: var(--shadow); }
+  .toast-error { border-color: var(--red); color: var(--red); }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <form class="login-box" id="login-form">
+    <h1>Printosky Console</h1>
+    <p>Sign in with your PIN. Your actions are recorded against your name.</p>
+    <label for="secret" class="sr-only" hidden>PIN</label>
+    <input id="secret" type="password" inputmode="numeric" autocomplete="current-password"
+           placeholder="••••" required minlength="4" maxlength="12">
+    <div id="login-error" role="alert"></div>
+    <button class="btn" type="submit">Sign in</button>
+  </form>
+</div>
+
+<div id="console" hidden>
+  <header class="bar">
+    <h1>PRINTOSKY</h1>
+    <select id="store-filter" aria-label="Store"></select>
+    <span class="spacer"></span>
+    <span id="updated"></span>
+    <span id="who"></span>
+    <button class="btn" id="logout" type="button">Sign out</button>
+  </header>
+  <div id="health" role="alert" hidden></div>
+  <main id="queue"></main>
+</div>
+
+<script>
+  // The console is served from Netlify (printosky.com) while the v2 API lives
+  // on Vercel. Set the base once, here, so no module hard-codes a host.
+  window.PRINTOSKY_API_BASE = location.hostname.endsWith("vercel.app")
+    ? location.origin
+    : "https://printosky.vercel.app";
+</script>
+<script type="module" src="/app/console.js"></script>
+</body>
+</html>

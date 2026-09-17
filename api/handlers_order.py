@@ -152,6 +152,50 @@ def _quote_total(items, finishing, size):
     return rate_card.calculate_quote(items, finishing=finishing, paper_size=size)["total"]
 
 
+def _quote_total_or_refuse(h, items, finishing, size):
+    """Price the job, or answer 503 and return None. Never returns 0 on failure.
+
+    **Review finding F04 (P0), fixed here.** Both print-order creators used to
+    do::
+
+        try:
+            total = _quote_total(items, finishing, size)
+        except Exception:
+            total = 0.0
+
+    …and then create the job and send the customer a confirmation. A broken
+    rate card was indistinguishable from a free order, and a ₹0 order looks
+    settled to every screen that reads it.
+
+    The service-booking path in this same file already refuses to write a
+    pricing failure as a price (see the `unpriced` branch in
+    ``_handle_order_book_service``); this is the same rule for print jobs. The
+    caller gets an explicit, retryable failure and no order is created, so
+    nothing downstream has to guess what a zero meant.
+    """
+    try:
+        total = _quote_total(items, finishing, size)
+    except Exception as exc:
+        logger.error("quote failed (%s): %r — refusing to create a ₹0 order",
+                     type(exc).__name__, str(exc))
+        _json_response(h, 503, {
+            "ok": False,
+            "code": "pricing_unavailable",
+            "error": "We could not price this job just now. Nothing has been charged — "
+                     "please try again, or ask the counter for a manual quote.",
+        })
+        return None
+    if total is None:
+        logger.error("quote returned no total — refusing to create a ₹0 order")
+        _json_response(h, 503, {
+            "ok": False,
+            "code": "pricing_unavailable",
+            "error": "We could not price this job just now. Nothing has been charged.",
+        })
+        return None
+    return float(total)
+
+
 _PHONE_RE = _re.compile(r"^91\d{10}$")
 
 
@@ -301,10 +345,9 @@ def _handle_order_create(h, body: bytes) -> None:
     if orientation not in _VALID_ORIENTATION:
         orientation = "auto"
 
-    try:
-        total = _quote_total(items, finishing, size)
-    except Exception:
-        total = 0.0
+    total = _quote_total_or_refuse(h, items, finishing, size)
+    if total is None:
+        return
 
     # Which store fulfils this job (manual location picker on the order page).
     assigned_store_id = _resolve_store_id(cust.get("pickup_store"))
@@ -397,10 +440,9 @@ def _handle_order_staff_create(h, body: bytes) -> None:
     if orientation not in _VALID_ORIENTATION:
         orientation = "auto"
 
-    try:
-        total = _quote_total(items, finishing, size)
-    except Exception:
-        total = 0.0
+    total = _quote_total_or_refuse(h, items, finishing, size)
+    if total is None:
+        return
 
     # store_id here is the machine's ACTUAL store code (OSP / PRINTK), sent by
     # jobs.html staff mode — NOT a customer pickup-location name. Use it directly.

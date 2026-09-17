@@ -269,3 +269,119 @@ class TestIgnoredTables:
             "backup_20260818_nattika_counters",
             "backup_20260818_nattika_epson_jobs",
         ]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# dump_manifest — a regenerate must not throw away the human parts
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# `--dump` is the documented step after applying a migration. It used to write
+# only `views` and `tables`, so running it deleted the header comment (which
+# says "DO NOT hand-edit"), the version, and `ignored_tables` — and the very
+# next drift check then flagged the two deliberately-excluded incident backups
+# as EXTRA. Found while applying SCHEMA_v44.
+
+MANIFEST_HEAD = """# config/schema_manifest.yaml
+# Header that explains where this file comes from.
+
+"""
+
+
+def _write_manifest(path, body: dict) -> None:
+    import yaml
+
+    path.write_text(MANIFEST_HEAD + yaml.safe_dump(body, sort_keys=True), encoding="utf-8")
+
+
+def _prior_manifest() -> dict:
+    return {
+        "version": 43,
+        "description": "the previous snapshot",
+        "rls_disabled_known": [],
+        "ignored_tables": ["backup_one", "backup_two"],
+        "views": ["old_view"],
+        "tables": {"jobs": {"rls": True, "columns": {"job_id": {"type": "text", "nullable": False}}}},
+    }
+
+
+def test_dump_preserves_contract_metadata(tmp_path):
+    import yaml
+
+    path = tmp_path / "schema_manifest.yaml"
+    _write_manifest(path, _prior_manifest())
+
+    live = {
+        "views": ["new_view"],
+        "tables": {"orders": {"rls": True, "columns": {"order_id": {"type": "text", "nullable": False}}}},
+    }
+    check_schema.dump_manifest(live, path)
+    after = yaml.safe_load(path.read_text())
+
+    # Decisions a person made, which the database cannot regenerate.
+    assert after["version"] == 43
+    assert after["description"] == "the previous snapshot"
+    assert after["ignored_tables"] == ["backup_one", "backup_two"]
+    assert after["rls_disabled_known"] == []
+    # Facts the database owns, which the dump replaces.
+    assert after["views"] == ["new_view"]
+    assert set(after["tables"]) == {"orders"}
+
+
+def test_dump_preserves_the_header_comment(tmp_path):
+    path = tmp_path / "schema_manifest.yaml"
+    _write_manifest(path, _prior_manifest())
+    check_schema.dump_manifest({"views": [], "tables": {}}, path)
+    assert path.read_text().startswith("# config/schema_manifest.yaml")
+
+
+def test_dump_after_dump_is_stable(tmp_path):
+    """Two dumps of the same live schema produce byte-identical files."""
+    path = tmp_path / "schema_manifest.yaml"
+    _write_manifest(path, _prior_manifest())
+    live = {"views": ["v"], "tables": {"t": {"rls": True, "columns": {}}}}
+    check_schema.dump_manifest(live, path)
+    once = path.read_text()
+    check_schema.dump_manifest(live, path)
+    assert path.read_text() == once
+
+
+def test_dump_works_on_a_fresh_file(tmp_path):
+    """No prior manifest: no header, no preserved keys, and no crash."""
+    import yaml
+
+    path = tmp_path / "new.yaml"
+    check_schema.dump_manifest({"views": [], "tables": {}}, path)
+    after = yaml.safe_load(path.read_text())
+    assert after == {"views": [], "tables": {}}
+
+
+def test_ignored_backups_survive_a_dump_and_stay_out_of_the_diff(tmp_path):
+    """The end-to-end reason this matters: dump, then diff, must stay clean."""
+    import yaml
+
+    path = tmp_path / "schema_manifest.yaml"
+    _write_manifest(path, _prior_manifest())
+    live_tables = {"orders": {"rls": True, "columns": {}}}
+    check_schema.dump_manifest({"views": [], "tables": live_tables}, path)
+
+    expected = yaml.safe_load(path.read_text())
+    actual = {"views": [], "tables": {**live_tables,
+                                      "backup_one": {"rls": False, "columns": {}},
+                                      "backup_two": {"rls": False, "columns": {}}}}
+    assert check_schema.diff_schemas(expected, actual) == []
+
+
+def test_the_real_manifest_declares_every_v44_table():
+    """The live database has these; the contract must say so."""
+    import yaml
+
+    manifest = yaml.safe_load(check_schema.MANIFEST_PATH.read_text())
+    v44 = {
+        "orders", "order_items", "order_tasks", "payment_inbox", "payments",
+        "payment_allocations", "outbox_events", "print_attempts", "identities",
+        "identity_sessions", "login_failures",
+    }
+    assert v44 <= set(manifest["tables"]), sorted(v44 - set(manifest["tables"]))
+    assert manifest["version"] == 44
+    for table in v44:
+        assert manifest["tables"][table]["rls"] is True, f"{table} must have RLS enabled"
