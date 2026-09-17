@@ -33,11 +33,11 @@ it is labelled **structural** and the precondition is stated. Nothing here was
 exploited, executed against production, or reproduced with a live payment,
 message, printer or database query.
 
-**Limit, stated plainly:** the test suite was **not executed**. `pytest` is not
-installed in this environment and could not be installed (the package proxy
-timed out on PyPI). 137 test files exist under `tests/`. No claim in this
-document depends on a test passing or failing, and no claim asserts that the
-suite is green.
+**Limit, stated plainly:** the test suite was **not executed while this review
+was written**. `pytest` is not installed in this environment and could not be
+installed (the package proxy timed out on PyPI). 137 test files exist under
+`tests/`. CI has since run the suite green on the commit carrying this
+document, but no finding below was derived from a test result — see §6.
 
 ---
 
@@ -242,7 +242,8 @@ Re-read against the working tree at `bb17c8a`. **This is the section to act on.*
 | **F02 — batch payment overstates job collections** | 🔴 **Still open, unchanged** | `api/index.py:1771-1772` |
 | **F04 — pricing failure becomes a ₹0 quote** | 🔴 **Still open, at two sites** | `api/handlers_order.py:307`, `:403` |
 | **F07 — sync failures look like empty successes** | 🔴 **Still open** | `supabase_sync.py:157-160`, `:450` |
-| F03, F05, F06, F08–F12 | Not re-verified in this pass | — |
+| **F10 — green workflow ≠ schema verification ran** | 🔴 **Still open — confirmed live, see below** | `.github/workflows/schema-drift.yml:27-55` |
+| F03, F05, F06, F08, F09, F11, F12 | Not re-verified in this pass | — |
 
 ### F01 deserves restating, because its severity is higher than the prior review could confirm
 
@@ -282,6 +283,34 @@ Vercel environment, then `POST /auth {"password":"anything"}` — a route
 Whether the env vars are set in production is the one fact this review cannot
 see from the repository; it is checkable in the Vercel dashboard in under a
 minute, and it decides whether this is a latent bug or a live exposure.
+
+### F10 was confirmed by this review's own pull request
+
+The `drift` check on the PR carrying this document reported **success after 3
+seconds**. It verified nothing. `.github/workflows/schema-drift.yml:27-55` gates
+every real step on `SUPABASE_DB_URL` being present; the secret is not set, so
+the job skips setup, install and `scripts/check_schema.py`, and still reports a
+green check.
+
+The workflow is honest about this in a `::notice::` and in its header comment —
+but a notice is not a status, and what a reviewer sees on the PR is a passing
+check named "drift". This is F10 exactly, observed rather than inferred.
+
+**It is also the same shape as F01 and R-02**, which is the point worth
+carrying away from this section:
+
+| Missing configuration | Degrades to |
+|---|---|
+| `STAFF_TOKEN_HASH` unset *or non-matching* | authentication **grants** (`api/index.py:2143-2152`) |
+| `CRON_SECRET` unset | cron endpoints **open** (9 sites) |
+| `SUPABASE_DB_URL` unset | schema drift check **passes** (`schema-drift.yml:27`) |
+
+Three independent subsystems, one habit: an absent secret makes the check
+disappear instead of making it fail. The project already has the right
+instinct written down — `docs/FAIL_LOUD.md` — and applies it rigorously to
+runtime pipelines while the *configuration* layer does the opposite. A single
+rule would cover all three: **a security or verification control that cannot
+find its configuration reports unhealthy, never healthy.**
 
 ## 3.2 New findings
 
@@ -504,8 +533,13 @@ and defaults, not about competence.
 
 ## 6. Not verified
 
-- The test suite was not executed (`pytest` unavailable; PyPI unreachable
-  through the proxy). No claim depends on it.
+- The test suite was not executed **in this review environment** (`pytest`
+  unavailable; PyPI unreachable through the proxy). It *was* run by CI on the
+  commit carrying this document — the `test` workflow runs the full suite minus
+  two Playwright files and passed. No finding in this document was derived from
+  a test result either way; note that a green suite did not catch F01, F02, F04
+  or R-01, which is itself the argument for the request-level auth tests
+  proposed in Part 2.
 - Live environment variables, Vercel and Netlify configuration, Supabase RLS
   policies as deployed, and storage bucket visibility.
 - F03, F05, F06 and F08–F12 from the prior review were not re-verified.
