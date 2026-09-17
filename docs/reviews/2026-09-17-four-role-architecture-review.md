@@ -4,7 +4,7 @@
 **Repository:** `deepakbanarjee/printosky`
 **Reviewed commit:** `bb17c8a513869d487eec8e9296be0db017ff620d` ("Find the CAPI dataset id by asking Meta, on both edges (#130)")
 **Method:** four-role pass — Architect (design), Engineer (implementation plan), Reviewer (quality control), Optimizer (performance).
-**Changes made:** none. This document is the only artefact. No code, config, database, deployment or business record was touched.
+**Changes made:** the review itself changed nothing. The PR carrying it then fixed the two findings marked ✅ below (F01 and R-01) at the repository owner's request, with tests. No config, database, deployment or business record was touched.
 
 ---
 
@@ -15,8 +15,9 @@ dated one week before this one, with findings F01–F12. This review does **not*
 restate it. It does three things instead:
 
 1. **Re-verifies its P0 findings against today's tree.** Three of the four P0s
-   are still present, unchanged, at the same call sites. That is the most
-   important thing in this document and it is in §3.1.
+   were still present, unchanged, at the same call sites a week after being
+   filed. That is the most important thing in this document and it is in §3.1.
+   F01 has since been fixed in this PR; F02 and F04 have not.
 2. **Adds findings the prior review did not cover** — an unauthenticated admin
    endpoint returning student phone numbers, fail-open cron authentication, and
    a measured gap in the fail-loud ratchet that explains the BILLING FIX bug
@@ -238,7 +239,7 @@ Re-read against the working tree at `bb17c8a`. **This is the section to act on.*
 
 | Prior finding | Status today | Evidence |
 |---|---|---|
-| **F01 — legacy auth accepts incorrect passwords** | 🔴 **Still open, unchanged** | `api/index.py:2143-2152` |
+| **F01 — legacy auth accepts incorrect passwords** | ✅ **Fixed in this PR** (was open and unchanged when reviewed) | `api/index.py:2143-2152` |
 | **F02 — batch payment overstates job collections** | 🔴 **Still open, unchanged** | `api/index.py:1771-1772` |
 | **F04 — pricing failure becomes a ₹0 quote** | 🔴 **Still open, at two sites** | `api/handlers_order.py:307`, `:403` |
 | **F07 — sync failures look like empty successes** | 🔴 **Still open** | `supabase_sync.py:157-160`, `:450` |
@@ -279,10 +280,21 @@ Vercel environment, then `POST /auth {"password":"anything"}` — a route
 `/.netlify/functions/auth` — returns a token that satisfies every
 `authenticated`-role RLS policy in the project.
 
-**This was reported as P0 on 10 September and is unchanged on 17 September.**
-Whether the env vars are set in production is the one fact this review cannot
-see from the repository; it is checkable in the Vercel dashboard in under a
-minute, and it decides whether this is a latent bug or a live exposure.
+**This was reported as P0 on 10 September and was unchanged on 17 September.**
+
+> **Fixed in this PR.** `_handle_auth_legacy` is now a faithful, fail-closed
+> mirror of `netlify/functions/auth.js`: it reads the `type` field, maps it to
+> that type's own hash env var, uses PBKDF2 for `admin`, and returns 401 on an
+> unmatched credential, an unknown or missing type, an unset hash, or a staff
+> lookup that threw. A refusal never reaches `_mint_supabase_jwt()`.
+> `tests/test_auth_legacy_and_notes_guard.py` covers it; 12 of its 20 tests
+> fail against the pre-fix code.
+>
+> **Still worth doing by hand:** check whether `SUPABASE_AUTH_EMAIL` /
+> `SUPABASE_AUTH_PASSWORD` are set in the Vercel environment. That decides
+> whether this was a latent bug or a live exposure, and therefore whether the
+> shared Supabase auth user's password needs rotating. The code fix closes the
+> door; it does not tell you whether anyone walked through it.
 
 ### F10 was confirmed by this review's own pull request
 
@@ -339,7 +351,11 @@ pending note upload, plus the private-bucket path of their file. Adjacent
 handlers in the same module (`_handle_admin_notes_moderate`, `:1720`) are
 guarded, which is why this reads as an omission rather than a decision.
 
-**Fix:** the standard guard. **Structural fix:** Step 1 — deny by default.
+**Fixed in this PR** by adding the standard guard; the accompanying test
+asserts that an unauthenticated caller gets a 403 *and* that
+`pending_notes_queue` is never called. **Structural fix, still outstanding:**
+Step 1 — deny by default, so the next handler that forgets a guard is closed
+rather than open.
 
 ### R-02 — cron authentication is fail-open
 
@@ -508,15 +524,19 @@ completeness, not for action. Note that this loop is also the site of F02
 
 ## 5. Summary
 
-**Act on this week, in order:**
+**Done in this PR:**
 
-1. `api/index.py:2143-2152` — F01. Reject unmatched credentials. Then check
-   whether `SUPABASE_AUTH_EMAIL`/`SUPABASE_AUTH_PASSWORD` are set in Vercel;
-   that answer decides whether this was latent or live, and whether the shared
-   auth user's password needs rotating.
-2. `api/handlers_admin.py:1709` — R-01. Add the guard.
-3. `api/handlers_order.py:307`, `:403` — F04. Never price an exception.
-4. `api/index.py:1771-1772` — F02. One payment, allocated across lines.
+1. ~~`api/index.py:2143-2152` — F01. Reject unmatched credentials.~~ ✅
+2. ~~`api/handlers_admin.py:1709` — R-01. Add the guard.~~ ✅
+
+**Still to act on, in order:**
+
+3. **Check Vercel env for `SUPABASE_AUTH_EMAIL`/`SUPABASE_AUTH_PASSWORD`.** Not
+   a code change — this is the one thing the fix cannot tell you. If they were
+   set, F01 was live rather than latent for at least a week, and the shared
+   auth user's password should be rotated.
+4. `api/handlers_order.py:307`, `:403` — F04. Never price an exception.
+5. `api/index.py:1771-1772` — F02. One payment, allocated across lines.
 
 **Then the structural work,** in the order given in Part 2: deny-by-default
 routing (which retires the whole class R-01 belongs to), field ownership at the

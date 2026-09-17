@@ -1707,7 +1707,18 @@ def _handle_admin_format_fixer(h, body: bytes) -> None:
 # ── Notes marketplace admin handlers ─────────────────────────────────────────
 
 def _handle_admin_notes_queue(h) -> None:
-    """GET /admin/notes-queue — list all pending notes for moderation."""
+    """GET /admin/notes-queue — list all pending notes for moderation.
+
+    Admin password required: the rows carry `uploader_phone` and the private
+    bucket `storage_path` for every pending upload (SCHEMA_v28). This guard was
+    missing, making student phone numbers readable by anyone who knew the URL —
+    `/admin/(.*)` is routed straight to this function in vercel.json. The
+    neighbouring moderate/approve/reject handlers were guarded; only the list
+    was not.
+    """
+    if not _auth_admin_pw(_admin_pw_from_request(h)):
+        _json_response(h, 403, {"error": "Unauthorized"})
+        return
     try:
         from db_cloud import pending_notes_queue
         notes = pending_notes_queue(limit=100)
