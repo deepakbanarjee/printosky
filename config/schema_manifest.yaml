@@ -15,30 +15,14 @@
 # DO NOT hand-edit to silence drift errors -- fix the migration or the code,
 # not the manifest.
 
-version: 43
-description: Live schema after SCHEMA_v43 (Meta Conversions API sends), built on
-  the v29 snapshot plus the DTP transcription tables. 50 tables, all RLS-enabled
-  (excluding two ignored incident backups, which are not).
-
-# Tables with RLS DISABLED -- flagged for security review. As of 2026-06-08
-# every public table has RLS enabled (TASK-023 + TASK-024 closed the last gaps),
-# so this list is empty. If any table ever shows up here, investigate.
-rls_disabled_known: []
-
-# Tables that exist but are deliberately NOT part of the schema contract, so
-# they are neither expected nor reported as extra. Declaring one is meant to be
-# a visible decision -- the alternative is documenting a temporary table as if
-# it were permanent, or leaving the drift check red until people stop reading it.
-#
-# These two are snapshots taken by hand during the Nattika counter incident on
-# 2026-08-18. They hold real data (339 and 811 rows) and have RLS DISABLED, so
-# they are also the reason this project no longer has RLS on every public table.
-# They should be dropped once the incident data is confirmed no longer needed;
-# remove them from this list at the same time.
+description: 'Live schema after SCHEMA_v44 (v2 core: orders, order_items, order_tasks,
+  payment_inbox, payments, payment_allocations, outbox_events, print_attempts, identities,
+  identity_sessions, login_failures), built on the v43 snapshot. 61 tables, all RLS-enabled
+  (excluding two ignored incident backups, which are not).'
 ignored_tables:
-  - backup_20260818_nattika_counters
-  - backup_20260818_nattika_epson_jobs
-
+- backup_20260818_nattika_counters
+- backup_20260818_nattika_epson_jobs
+rls_disabled_known: []
 tables:
   academic_orders:
     columns:
@@ -1042,6 +1026,88 @@ tables:
         nullable: true
         type: text
     rls: true
+  identities:
+    columns:
+      active:
+        default: 'true'
+        nullable: false
+        type: boolean
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      display_name:
+        default: null
+        nullable: false
+        type: text
+      identity_id:
+        default: null
+        nullable: false
+        type: text
+      kind:
+        default: '''staff''::text'
+        nullable: false
+        type: text
+      metadata:
+        default: '''{}''::jsonb'
+        nullable: false
+        type: jsonb
+      role:
+        default: null
+        nullable: false
+        type: text
+      secret_hash:
+        default: null
+        nullable: false
+        type: text
+      secret_salt:
+        default: null
+        nullable: true
+        type: text
+      store_ids:
+        default: '''{}''::text[]'
+        nullable: false
+        type: ARRAY
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+    rls: true
+  identity_sessions:
+    columns:
+      device_id:
+        default: null
+        nullable: true
+        type: text
+      expires_at:
+        default: null
+        nullable: false
+        type: timestamp with time zone
+      identity_id:
+        default: null
+        nullable: false
+        type: text
+      issued_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      revoked_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      role:
+        default: null
+        nullable: false
+        type: text
+      session_id:
+        default: null
+        nullable: false
+        type: text
+      store_ids:
+        default: '''{}''::text[]'
+        nullable: false
+        type: ARRAY
+    rls: true
   job_batches:
     columns:
       batch_id:
@@ -1449,6 +1515,25 @@ tables:
         nullable: true
         type: text
     rls: true
+  login_failures:
+    columns:
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      failure_id:
+        default: nextval('login_failures_failure_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      identity_hint:
+        default: null
+        nullable: true
+        type: text
+      ip:
+        default: null
+        nullable: true
+        type: text
+    rls: true
   manuscript_transcripts:
     columns:
       confidence_data:
@@ -1629,6 +1714,175 @@ tables:
         nullable: true
         type: text
     rls: true
+  order_items:
+    columns:
+      amount_paise:
+        default: '0'
+        nullable: false
+        type: bigint
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      document_hash:
+        default: null
+        nullable: true
+        type: text
+      file_name:
+        default: null
+        nullable: true
+        type: text
+      item_id:
+        default: null
+        nullable: false
+        type: text
+      order_id:
+        default: null
+        nullable: false
+        type: text
+      page_count:
+        default: '0'
+        nullable: false
+        type: integer
+      preflight_note:
+        default: null
+        nullable: true
+        type: text
+      preflight_ok:
+        default: null
+        nullable: true
+        type: boolean
+      source_object:
+        default: null
+        nullable: false
+        type: text
+      spec:
+        default: '''{}''::jsonb'
+        nullable: false
+        type: jsonb
+    rls: true
+  order_tasks:
+    columns:
+      assigned_to:
+        default: null
+        nullable: true
+        type: text
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      due_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      item_id:
+        default: null
+        nullable: true
+        type: text
+      kind:
+        default: null
+        nullable: false
+        type: text
+      note:
+        default: null
+        nullable: true
+        type: text
+      order_id:
+        default: null
+        nullable: false
+        type: text
+      state:
+        default: '''open''::text'
+        nullable: false
+        type: text
+      store_id:
+        default: null
+        nullable: false
+        type: text
+      task_id:
+        default: null
+        nullable: false
+        type: text
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+    rls: true
+  orders:
+    columns:
+      accepted_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      channel:
+        default: '''web''::text'
+        nullable: false
+        type: text
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      customer_name:
+        default: null
+        nullable: true
+        type: text
+      customer_phone:
+        default: null
+        nullable: false
+        type: text
+      lane:
+        default: '''assisted''::text'
+        nullable: false
+        type: text
+      note:
+        default: null
+        nullable: true
+        type: text
+      order_id:
+        default: null
+        nullable: false
+        type: text
+      paid_paise:
+        default: '0'
+        nullable: false
+        type: bigint
+      payment_state:
+        default: '''unpaid''::text'
+        nullable: false
+        type: text
+      pickup_code:
+        default: null
+        nullable: true
+        type: text
+      production_state:
+        default: '''draft''::text'
+        nullable: false
+        type: text
+      promised_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      quote_hash:
+        default: null
+        nullable: true
+        type: text
+      store_id:
+        default: null
+        nullable: false
+        type: text
+      total_paise:
+        default: '0'
+        nullable: false
+        type: bigint
+      updated_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      version:
+        default: '1'
+        nullable: false
+        type: integer
+    rls: true
   otp_sessions:
     columns:
       created_at:
@@ -1666,6 +1920,45 @@ tables:
       web_token:
         default: null
         nullable: true
+        type: text
+    rls: true
+  outbox_events:
+    columns:
+      attempts:
+        default: '0'
+        nullable: false
+        type: integer
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      dedup_key:
+        default: null
+        nullable: true
+        type: text
+      due_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      last_error:
+        default: null
+        nullable: true
+        type: text
+      outbox_id:
+        default: gen_random_uuid()
+        nullable: false
+        type: uuid
+      payload:
+        default: '''{}''::jsonb'
+        nullable: false
+        type: jsonb
+      state:
+        default: '''pending''::text'
+        nullable: false
+        type: text
+      topic:
+        default: null
+        nullable: false
         type: text
     rls: true
   partners:
@@ -1761,6 +2054,135 @@ tables:
       type:
         default: '''Spoke''::text'
         nullable: true
+        type: text
+    rls: true
+  payment_allocations:
+    columns:
+      allocation_id:
+        default: nextval('payment_allocations_allocation_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      amount_paise:
+        default: null
+        nullable: false
+        type: bigint
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      item_id:
+        default: null
+        nullable: false
+        type: text
+      order_id:
+        default: null
+        nullable: false
+        type: text
+      payment_id:
+        default: null
+        nullable: false
+        type: text
+    rls: true
+  payment_inbox:
+    columns:
+      amount_paise:
+        default: null
+        nullable: false
+        type: bigint
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      currency:
+        default: '''INR''::text'
+        nullable: false
+        type: text
+      error:
+        default: null
+        nullable: true
+        type: text
+      event_id:
+        default: null
+        nullable: false
+        type: text
+      inbox_id:
+        default: nextval('payment_inbox_inbox_id_seq'::regclass)
+        nullable: false
+        type: bigint
+      method:
+        default: null
+        nullable: true
+        type: text
+      order_ref:
+        default: null
+        nullable: false
+        type: text
+      payment_id:
+        default: null
+        nullable: false
+        type: text
+      provider:
+        default: null
+        nullable: false
+        type: text
+      raw:
+        default: '''{}''::jsonb'
+        nullable: false
+        type: jsonb
+      result:
+        default: null
+        nullable: true
+        type: text
+      state:
+        default: '''received''::text'
+        nullable: false
+        type: text
+    rls: true
+  payments:
+    columns:
+      amount_paise:
+        default: null
+        nullable: false
+        type: bigint
+      captured_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      created_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      currency:
+        default: '''INR''::text'
+        nullable: false
+        type: text
+      event_id:
+        default: null
+        nullable: true
+        type: text
+      kind:
+        default: '''capture''::text'
+        nullable: false
+        type: text
+      method:
+        default: null
+        nullable: true
+        type: text
+      order_id:
+        default: null
+        nullable: false
+        type: text
+      payment_id:
+        default: null
+        nullable: false
+        type: text
+      provider:
+        default: null
+        nullable: false
+        type: text
+      provider_payment_id:
+        default: null
+        nullable: false
         type: text
     rls: true
   pb_api_calls:
@@ -1995,6 +2417,57 @@ tables:
         default: now()
         nullable: false
         type: timestamp with time zone
+    rls: true
+  print_attempts:
+    columns:
+      attempt_id:
+        default: null
+        nullable: false
+        type: text
+      attempt_token:
+        default: null
+        nullable: false
+        type: text
+      device_id:
+        default: null
+        nullable: false
+        type: text
+      failure_reason:
+        default: null
+        nullable: true
+        type: text
+      finished_at:
+        default: null
+        nullable: true
+        type: timestamp with time zone
+      printer_queue:
+        default: null
+        nullable: true
+        type: text
+      sheets_expected:
+        default: '0'
+        nullable: false
+        type: integer
+      sheets_observed:
+        default: null
+        nullable: true
+        type: integer
+      spool_id:
+        default: null
+        nullable: true
+        type: text
+      started_at:
+        default: now()
+        nullable: false
+        type: timestamp with time zone
+      state:
+        default: '''created''::text'
+        nullable: false
+        type: text
+      task_id:
+        default: null
+        nullable: false
+        type: text
     rls: true
   printer_counters:
     columns:
@@ -2666,6 +3139,7 @@ tables:
         nullable: true
         type: integer
     rls: true
+version: 44
 views:
 - epson_daily
 - konica_daily

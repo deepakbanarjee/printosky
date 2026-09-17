@@ -1,5 +1,5 @@
 # Printosky Sprint Backlog
-Last updated: 2026-09-16 — v2 core landed; review findings F01/F02/F04 fixed in the live paths (SPRINT 14)
+Last updated: 2026-09-17 — SCHEMA_v44 applied to production; v2 core landed; F01/F02/F04 fixed in the live paths (SPRINT 14)
 
 ---
 
@@ -232,8 +232,8 @@ Design and rollout: [docs/V2_ARCHITECTURE.md](docs/V2_ARCHITECTURE.md).
 | V2-2 | ~~**F02 — batch payment counted n×**~~ ✅ | `core.money.allocate` (largest remainder, exact sum) now splits a batch payment by each job's quote. 4 handler tests + 50 unit tests. |
 | V2-3 | ~~**F04 — pricing failure became a ₹0 order**~~ ✅ | `_quote_total_or_refuse` answers 503 `pricing_unavailable` at both the web and counter creators; no job, no WhatsApp. 3 tests. |
 | V2-4 | ~~**Domain core + v2 API**~~ ✅ | `core/` (no I/O) + `api/v2/` mounted under `/v2/*` only; every legacy route untouched, guarded import, `PRINTOSKY_V2_DISABLED` kill switch. 51 tests. |
-| V2-5 | **Apply SCHEMA_v44** ⏳ | 11 additive tables + `v2_apply_payment`. Then `seed_v2_identities.py`, set real roles, `check_schema.py --dump`. Nothing reads them until this runs. |
-| V2-6 | **Set `PRINTOSKY_SESSION_KEY`** ⏳ | Until set, `/v2/auth/*` answers 503 and mints nothing. Also `PRINTOSKY_AGENT_TOKEN` for the store PCs. |
+| V2-5 | ~~**Apply SCHEMA_v44**~~ ✅ | Applied to `mlhuwlnwwwxdnqafelko` (printosky.com) 2026-09-17. 11 tables + `v2_apply_payment` + `v2_outbox_fail`; all 11 verified RLS-enabled with 0 policies and no anon/authenticated grants; both functions SECURITY DEFINER, service_role-only. Manifest regenerated to v44 (61 tables). Fixed on the way: `check_schema.py --dump` wrote only views+tables, so the documented post-migration step would have deleted the header, the version and `ignored_tables`. |
+| V2-6 | **Set `PRINTOSKY_SESSION_KEY`** ⏳ (next) | Until set, `/v2/auth/*` answers 503 and mints nothing. Also `PRINTOSKY_AGENT_TOKEN` for the store PCs. |
 | V2-7 | **F03 — legacy Razorpay route still acks before persisting** ⏳ | The durable inbox→ledger→outbox path exists at `/v2/payments/webhook/razorpay`; `/webhook/razorpay` has not been moved onto it. |
 | V2-8 | **F05/F06 — attempt recording not wired to the store PC** ⏳ | `print_attempts` + `/v2/attempts` exist; `store_puller.py` / `print_server.py` still use the old claim path. Locked printing code untouched. |
 | V2-9 | **F08 — legacy `/order/create` still takes a file URL** ⏳ | v2 requires a storage object id. The old endpoint does not, and the store puller still fetches whatever URL it is given. |

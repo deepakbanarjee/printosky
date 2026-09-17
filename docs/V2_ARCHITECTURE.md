@@ -148,8 +148,14 @@ Two functions:
 
 ### Applying it
 
+**Applied to production (`mlhuwlnwwwxdnqafelko`) on 2026-09-17.** All 11 tables
+verified RLS-enabled with zero policies and no `anon`/`authenticated` grants;
+both functions `SECURITY DEFINER` and executable only by `service_role`; the
+`allocation_mismatch` gate in `v2_apply_payment` exercised and rejecting. The
+manifest is regenerated at `version: 44`. Steps 2–3 below are still to do.
+
 ```bash
-# 1. apply (Supabase SQL editor, or the MCP apply_migration)
+# 1. apply (Supabase SQL editor, or the MCP apply_migration)   ← done
 # 2. migrate the people who can already sign in
 python scripts/seed_v2_identities.py --dry-run
 python scripts/seed_v2_identities.py
@@ -278,7 +284,7 @@ The existing variables are unchanged. v2 reuses `SUPABASE_URL` /
 | Step | Change | Reversible by |
 |---|---|---|
 | 1 | Merge. v2 serves `/v2/health` and 503s on auth (no key set yet) | `PRINTOSKY_V2_DISABLED=1` |
-| 2 | Apply `SCHEMA_v44`; re-dump the schema manifest | dropping the new tables (nothing reads them) |
+| 2 | ~~Apply `SCHEMA_v44`; re-dump the schema manifest~~ **done 2026-09-17** | dropping the new tables (nothing reads them) |
 | 3 | Set `PRINTOSKY_SESSION_KEY`; seed identities; set real roles | unsetting the key |
 | 4 | Owner uses `/console` read-only for a week beside the existing consoles | closing the tab |
 | 5 | Counter takes payments through `/v2/orders/{id}/payments` at one store | the legacy console still works |
