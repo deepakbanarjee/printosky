@@ -15,6 +15,18 @@
   <meta property="og:title" content="Printosky Books &ndash; Curated Learning for Every Student">
   <meta property="og:description" content="Set of 3 books only ₹549. Order on WhatsApp for fast delivery across Kerala.">
   <meta property="og:url" content="https://printosky.com/books">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://printosky.com/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Printosky — online printing in Thrissur: bulk print, binding, lamination, PVC cards.">
+  <meta property="og:site_name" content="Printosky">
+  <meta property="og:locale" content="en_IN">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Printosky Books &ndash; Curated Learning for Every Student">
+  <meta name="twitter:description" content="Set of 3 books only ₹549. Order on WhatsApp for fast delivery across Kerala.">
+  <meta name="twitter:image" content="https://printosky.com/assets/og-image.png">
+  <meta name="twitter:image:alt" content="Printosky — online printing in Thrissur: bulk print, binding, lamination, PVC cards.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&family=Baloo+Chettan+2:wght@400;600;700&family=Syne:wght@800&display=swap" rel="stylesheet">
@@ -140,6 +152,7 @@
       letter-spacing: 1.5px;
       text-transform: uppercase;
       color: var(--mid);
+      margin-top: 0;
       margin-bottom: 14px;
     }
     .books-grid {
@@ -463,6 +476,124 @@
   </style>
 <script src="banner.js" defer></script>
 <script src="analytics.js" defer></script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "CollectionPage",
+        "name": "Printosky Books",
+        "url": "https://printosky.com/books.html",
+        "description": "Aksharamrutham, Vidyamrut and Easy English — curated learning books for every student.",
+        "publisher": {
+          "@id": "https://printosky.com/#organization"
+        }
+      },
+      {
+        "@type": "Product",
+        "name": "Aksharamrutham — Malayalam",
+        "description": "Malayalam phonics and early-reading workbook — letters, sight words, tracing and picture stories.",
+        "image": "https://printosky.com/assets/book-malayalam.jpg",
+        "brand": {
+          "@type": "Brand",
+          "name": "Printosky"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "200",
+          "priceCurrency": "INR",
+          "availability": "https://schema.org/InStock",
+          "url": "https://printosky.com/books.html",
+          "seller": {
+            "@id": "https://printosky.com/#organization"
+          }
+        }
+      },
+      {
+        "@type": "Product",
+        "name": "Vidyamrut — Hindi",
+        "description": "Hindi early-learning workbook for young students.",
+        "image": "https://printosky.com/assets/book-hindi.jpg",
+        "brand": {
+          "@type": "Brand",
+          "name": "Printosky"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "150",
+          "priceCurrency": "INR",
+          "availability": "https://schema.org/InStock",
+          "url": "https://printosky.com/books.html",
+          "seller": {
+            "@id": "https://printosky.com/#organization"
+          }
+        }
+      },
+      {
+        "@type": "Product",
+        "name": "Easy English",
+        "description": "English early-learning workbook for young students.",
+        "image": "https://printosky.com/assets/book-english.jpg",
+        "brand": {
+          "@type": "Brand",
+          "name": "Printosky"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "200",
+          "priceCurrency": "INR",
+          "availability": "https://schema.org/InStock",
+          "url": "https://printosky.com/books.html",
+          "seller": {
+            "@id": "https://printosky.com/#organization"
+          }
+        }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "https://printosky.com/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Books",
+            "item": "https://printosky.com/books.html"
+          }
+        ]
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://printosky.com/#organization",
+        "name": "Printosky",
+        "url": "https://printosky.com",
+        "logo": "https://printosky.com/assets/printosky-wordmark.png",
+        "image": "https://printosky.com/assets/og-image.png",
+        "description": "Print shop and online printing service in Thrissur, Kerala — bulk documents, student projects, binding, lamination and PVC cards.",
+        "areaServed": {
+          "@type": "Place",
+          "name": "Thrissur, Kerala"
+        },
+        "contactPoint": [
+          {
+            "@type": "ContactPoint",
+            "telephone": "+919495706405",
+            "contactType": "customer service",
+            "areaServed": "IN",
+            "availableLanguage": [
+              "en",
+              "ml"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
 
@@ -484,11 +615,11 @@
   </section>
 
   <section class="section">
-    <div class="section-title">Our books</div>
+    <h2 class="section-title">Our books</h2>
     <div class="books-grid">
 
       <div class="book-card">
-        <img class="cover" src="assets/book-malayalam.jpg" alt="Aksharamrutham — Malayalam">
+        <img class="cover" src="assets/book-malayalam.jpg" alt="Aksharamrutham — Malayalam" width="777" height="1100" fetchpriority="high" decoding="async">
         <div class="info">
           <div class="lang">Malayalam</div>
           <div class="title">Aksharamrutham</div>
@@ -501,7 +632,7 @@
       </div>
 
       <div class="book-card">
-        <img class="cover" src="assets/book-hindi.jpg" alt="Vidyamrut — Hindi">
+        <img class="cover" src="assets/book-hindi.jpg" alt="Vidyamrut — Hindi" width="778" height="1100" loading="lazy" decoding="async">
         <div class="info">
           <div class="lang">Hindi</div>
           <div class="title">Vidyamrut</div>
@@ -514,7 +645,7 @@
       </div>
 
       <div class="book-card">
-        <img class="cover" src="assets/book-english.jpg" alt="Easy English">
+        <img class="cover" src="assets/book-english.jpg" alt="Easy English" width="777" height="1100" loading="lazy" decoding="async">
         <div class="info">
           <div class="lang">English</div>
           <div class="title">Easy English</div>
@@ -558,7 +689,7 @@
     <div class="author-cards">
 
       <div class="author-card">
-        <img class="author-photo" src="assets/author-pradeep.jpg" alt="Pradeep K K">
+        <img class="author-photo" src="assets/author-pradeep.jpg" alt="Pradeep K K" width="184" height="239" loading="lazy" decoding="async">
         <div class="author-info">
           <div class="author-name">Pradeep K K</div>
           <div class="author-role">Author · Educator</div>
@@ -571,7 +702,7 @@
       </div>
 
       <div class="author-card">
-        <img class="author-photo" src="assets/author-divya.png" alt="Dr. Divya M">
+        <img class="author-photo" src="assets/author-divya.png" alt="Dr. Divya M" width="163" height="229" loading="lazy" decoding="async">
         <div class="author-info">
           <div class="author-name">Dr. Divya M</div>
           <div class="author-role">Author · Educator</div>

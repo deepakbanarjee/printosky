@@ -11,6 +11,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Project Report Builder — Printosky</title>
   <link rel="canonical" href="https://printosky.com/project-builder.html">
+  <meta name="description" content="Build a print-ready college project report free — cover, certificate, contents and chapters — then order it printed and bound in Thrissur.">
+  <meta property="og:title" content="Project Report Builder — Printosky">
+  <meta property="og:description" content="Build a print-ready college project report — cover, certificate, contents and chapters — then order it printed and bound.">
+  <meta property="og:url" content="https://printosky.com/project-builder.html">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://printosky.com/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Printosky — online printing in Thrissur: bulk print, binding, lamination, PVC cards.">
+  <meta property="og:site_name" content="Printosky">
+  <meta property="og:locale" content="en_IN">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Project Report Builder — Printosky">
+  <meta name="twitter:description" content="Build a print-ready college project report — cover, certificate, contents and chapters — then order it printed and bound.">
+  <meta name="twitter:image" content="https://printosky.com/assets/og-image.png">
+  <meta name="twitter:image:alt" content="Printosky — online printing in Thrissur: bulk print, binding, lamination, PVC cards.">
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -79,7 +95,7 @@
     .tier-card .price { font-family: 'Syne', sans-serif; font-size: 1.4rem; font-weight: 800; color: var(--ink); margin: .3rem 0; }
     .tier-card .price.free { color: var(--green); }
     .tier-card p { font-size: .82rem; color: #666; margin: 0; line-height: 1.5; }
-    .tier-card h4 { font-weight: 700; font-size: .95rem; margin-bottom: .25rem; }
+    .tier-card h3 { font-weight: 700; font-size: .95rem; margin: 0 0 .25rem; }
     .tier-popular { position: absolute; top: -10px; right: 12px; background: var(--accent); color: #fff; font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; }
 
     /* ── Admin (dark) theme overrides ── */
@@ -317,20 +333,20 @@
         <div class="tier-grid">
 
           <div class="tier-card" data-tier="free" onclick="selectTier('free')">
-            <h4>Free Template</h4>
+            <h3>Free Template</h3>
             <div class="price free">Free</div>
             <p>Download a pre-built .docx with your university's exact margins, fonts, heading styles, and page numbering. Fill in your content.</p>
           </div>
 
           <div class="tier-card selected" data-tier="format_fix" onclick="selectTier('format_fix')">
             <div class="tier-popular">Most popular</div>
-            <h4>Format Fixer</h4>
+            <h3>Format Fixer</h3>
             <div class="price">₹199</div>
             <p>Already written your project? Paste or upload your rough draft — we apply your university's exact format in minutes.</p>
           </div>
 
           <div class="tier-card" data-tier="generate" onclick="selectTier('generate')">
-            <h4>Generate from Scratch</h4>
+            <h3>Generate from Scratch</h3>
             <div class="price">₹399 – ₹999</div>
             <p>Fill in your details and content. We build the full report — cover page, certificate, declaration, all chapters.</p>
             <div class="tier-unavailable-msg" id="generate-unavailable">

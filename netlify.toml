@@ -46,6 +46,36 @@
   to     = "/account.html"
   status = 200
 
+# Enforce HTTPS. Netlify already 301s http -> https; HSTS makes the browser
+# refuse plain http on its own after the first visit, so the redirect hop (and
+# its downgrade window) disappears.
+# Not set: `includeSubDomains` / `preload` — those bind every current and future
+# subdomain to HTTPS-only and preload is effectively irreversible. Add them only
+# once every subdomain is confirmed HTTPS-only.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Strict-Transport-Security = "max-age=31536000"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Fingerprint-free static assets: cache hard, and let a filename change bust it.
+# Big LCP/repeat-visit win; HTML stays must-revalidate below so pages never go stale.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/drdivyam/images/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/drdivyam/audio/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 [[headers]]
   for = "/*.html"
   [headers.values]
