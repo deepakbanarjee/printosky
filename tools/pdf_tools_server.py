@@ -37,7 +37,13 @@ sys.stdout.reconfigure(encoding="utf-8")
 # Pull in the conversion engine
 _here = Path(__file__).parent
 sys.path.insert(0, str(_here))
+sys.path.insert(0, str(_here.parent))   # repo root, for shared modules
 from pdf_bw import convert  # noqa: E402
+
+# Malayalam chillu handling + run splitting, shared with api/index.py and
+# tools/cloud_transcription_worker.py. Note the known chillu-table defect
+# documented in malayalam.py before changing transcript output.
+from malayalam import replace_chillus, split_malayalam_english  # noqa: E402
 
 load_dotenv(str(_here.parent / ".env"), override=True)
 
@@ -600,33 +606,6 @@ def get_page_image():
         )
     except Exception as e:
         return f"Error: {e}", 500
-
-CHILLU_MAP = {
-    "\u0d7b": "\u0d23\u0d4d\u200d", # ൺ
-    "\u0d7c": "\u0d33\u0d4d\u200d", # ൾ
-    "\u0d7d": "\u0d30\u0d4d\u200d", # ർ
-    "\u0d7e": "\u0d28\u0d4d\u200d", # ൻ
-    "\u0d7f": "\u0d32\u0d4d\u200d", # ൽ
-    "\u0d7a": "\u0d23\u0d4d\u200d", # ൺ
-}
-
-def replace_chillus(text):
-    for chillu, replacement in CHILLU_MAP.items():
-        text = text.replace(chillu, replacement)
-    return text
-
-def split_malayalam_english(text):
-    # Regex to find blocks of Malayalam characters (Unicode block 0D00-0D7F and ZWJ 200D)
-    pattern = re.compile(r"([\u0d00-\u0d7f\u200d]+)")
-    parts = pattern.split(text)
-    
-    segments = []
-    for part in parts:
-        if not part:
-            continue
-        is_mal = any(("\u0d00" <= char <= "\u0d7f") or (char == "\u200d") for char in part)
-        segments.append((part, is_mal))
-    return segments
 
 @app.route("/api/transcripts/export-docx")
 def export_docx():

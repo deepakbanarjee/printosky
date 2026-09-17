@@ -66,26 +66,10 @@ ARRIVED     = "arrived"       # the item is here
 NOT_DROPOFF = "not_a_dropoff"  # not a booking at all
 
 
-def _as_datetime(value) -> datetime | None:
-    """Parse the timestamp shapes this repo stores, or None.
-
-    Deliberately the same permissive parse as store_digest._as_datetime: rows
-    reach here from SQLite (space-separated) and from Supabase (ISO with a zone).
-    """
-    if isinstance(value, datetime):
-        return value
-    if not value:
-        return None
-    text = str(value).strip().replace("T", " ")
-    if text.endswith("Z"):
-        text = text[:-1]
-    text = text.split("+")[0].split(".")[0].strip()
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(text, fmt)
-        except ValueError:
-            continue
-    return None
+# Was "deliberately the same permissive parse as store_digest._as_datetime",
+# kept in step by hand. Both now share the one implementation, which is where
+# that reasoning is written down. See timestamps.py.
+from timestamps import as_datetime as _as_datetime
 
 
 def _money(value) -> float:

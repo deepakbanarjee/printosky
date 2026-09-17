@@ -3,18 +3,11 @@ import os
 import sqlite3
 
 
-def _epson_ip() -> str:
-    """This store's Epson IP — EPSON_IP env var wins, else store_config.json.
-    Hardcoding it broke these scripts when the EM-C8100 (192.168.55.214)
-    replaced the WF-C21000 (192.168.55.202) on 2026-06-29."""
-    override = os.environ.get("EPSON_IP")
-    if override:
-        return override.strip()
-    try:
-        from store_config import get_store_config
-        return get_store_config().printers.epson_ip
-    except Exception:
-        return "192.168.55.214"
+# This store's Epson IP — EPSON_IP env var wins, else store_config.json.
+# Hardcoding it broke these scripts when the EM-C8100 (192.168.55.214) replaced
+# the WF-C21000 (192.168.55.202) on 2026-06-29; it then lived as four identical
+# copies, one per script. It now lives once, in printer_endpoints.
+from printer_endpoints import epson_ip as _epson_ip
 
 
 DB = r"C:\Printosky\Data\jobs.db"
