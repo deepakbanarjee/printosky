@@ -183,28 +183,16 @@ def _get_supabase_jwt() -> str:
         return ""
 
 
-def _sha256(text: str) -> str:
-    """Legacy SHA-256 hash — kept for admin password comparison only."""
-    return hashlib.sha256(text.encode()).hexdigest()
-
-# ── PBKDF2 PIN hashing ────────────────────────────────────────────────────────
-_PBKDF2_ITERATIONS = 260_000
-
-def _hash_pin(pin: str) -> tuple[str, str]:
-    """Return (hash_hex, salt_hex) using PBKDF2-HMAC-SHA256."""
-    import secrets as _secrets
-    salt = _secrets.token_hex(16)
-    h = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt.encode(), _PBKDF2_ITERATIONS).hex()
-    return h, salt
-
-def _verify_pin(pin: str, stored_hash: str, stored_salt: str | None) -> bool:
-    """Verify PIN against stored hash. Handles both legacy SHA-256 (salt=None) and PBKDF2."""
-    if stored_salt is None:
-        # Legacy path: plain SHA-256
-        return hmac.compare_digest(stored_hash, hashlib.sha256(pin.encode()).hexdigest())
-    # New path: PBKDF2
-    expected = hashlib.pbkdf2_hmac("sha256", pin.encode(), stored_salt.encode(), _PBKDF2_ITERATIONS).hex()
-    return hmac.compare_digest(stored_hash, expected)
+# ── Staff PIN hashing ─────────────────────────────────────────────────────────
+# Shared with the cloud (api/index.py) and the seeding CLI (staff_setup.py) via
+# pin_crypto. A PIN set on any one of them must verify on the others, so the
+# derivation lives in exactly one place. See pin_crypto.py.
+from pin_crypto import (
+    PBKDF2_ITERATIONS as _PBKDF2_ITERATIONS,
+    hash_pin as _hash_pin,
+    sha256_hex as _sha256,
+    verify_pin as _verify_pin,
+)
 
 
 # Allowed directories for legacy /print filepath parameter

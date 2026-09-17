@@ -96,3 +96,8 @@ SumatraPDF-settings.txt
 
 # HQ-provided secrets file dropped here for the installer to read (never commit)
 hq-secrets.env
+
+# Stray file SQLite creates if a Windows db path is used on a POSIX box. The
+# guard for it is tests/test_ops_watchdog.py::test_a_store_path_that_does_not
+# _exist_falls_back_to_memory; ignoring it keeps an accidental one out of a commit.
+C:\Printosky\Data\jobs.db

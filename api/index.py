@@ -1851,9 +1851,10 @@ def _process_razorpay_payment(data: dict) -> None:
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
 
 
-def _sha256(value: str) -> str:
-    """SHA-256 — used for admin password comparison only. Do NOT use for PIN hashing."""
-    return hashlib.sha256(value.encode()).hexdigest()
+# Shared with the store PC (print_server.py) and the seeding CLI
+# (staff_setup.py) via pin_crypto: a PIN set on any one of them must verify on
+# the others, so the derivation lives in exactly one place. See pin_crypto.py.
+from pin_crypto import sha256_hex as _sha256
 
 
 def _compress_lossless(data: bytes, mime: str) -> bytes:
@@ -1890,23 +1891,12 @@ def _fmt_phone(phone: str) -> str:
     return ("+" + phone) if not phone.startswith("+") else phone
 
 
-# ── PBKDF2 PIN hashing ────────────────────────────────────────────────────────
-import secrets as _sec
-
-_PBKDF2_ITER = 260_000
-
-def _hash_pin(pin: str) -> tuple[str, str]:
-    """Return (hash_hex, salt_hex) using PBKDF2-HMAC-SHA256."""
-    salt = _sec.token_hex(16)
-    h = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt.encode(), _PBKDF2_ITER).hex()
-    return h, salt
-
-def _verify_pin(pin: str, stored_hash: str, stored_salt: str | None) -> bool:
-    """Constant-time PIN verify. Handles legacy SHA-256 (salt=None) and PBKDF2."""
-    if stored_salt is None:
-        return hmac.compare_digest(stored_hash, hashlib.sha256(pin.encode()).hexdigest())
-    expected = hashlib.pbkdf2_hmac("sha256", pin.encode(), stored_salt.encode(), _PBKDF2_ITER).hex()
-    return hmac.compare_digest(stored_hash, expected)
+# ── Staff PIN hashing ─────────────────────────────────────────────────────────
+from pin_crypto import (
+    PBKDF2_ITERATIONS as _PBKDF2_ITER,
+    hash_pin as _hash_pin,
+    verify_pin as _verify_pin,
+)
 
 
 def _handle_internal_notify_owner(h, body: bytes) -> None:
