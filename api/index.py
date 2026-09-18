@@ -2105,18 +2105,85 @@ def _handle_staff_login(h, body: bytes) -> None:
         _json_response(h, 401, {"ok": False, "error": "Incorrect PIN"})
     except Exception as e:
         logger.error(f"staff/login error: {e}")
+# Console credential type -> env var holding its SHA-256 hash. Mirrors ENV_KEY
+# in netlify/functions/auth.js, which is the implementation the consoles on the
+# Netlify origin actually reach; this handler serves the same contract for
+# requests that arrive at the Vercel origin. `admin` is deliberately absent: it
+# uses PBKDF2, below.
+_AUTH_TYPE_ENV = {
+    "superadmin": "SUPERADMIN_SHA256_HASH",
+    "store":      "STORE_SHA256_HASH",
+    "mis":        "MIS_SHA256_HASH",
+    "staff":      "STAFF_TOKEN_HASH",
+}
+
+# The admin console password is PBKDF2, not SHA-256, and at a different
+# iteration count from _PBKDF2_ITER (which is for staff PINs). 600_000 matches
+# netlify/functions/auth.js; the two MUST stay equal or an admin password set
+# on one origin will not verify on the other.
+_ADMIN_PBKDF2_ITER = 600_000
+
+
+def _verify_admin_password(password: str) -> bool:
+    """Constant-time PBKDF2 check of the admin console password.
+
+    Returns False when ADMIN_PBKDF2_HASH/ADMIN_PBKDF2_SALT are unset or
+    malformed — an unconfigured deployment refuses admin logins rather than
+    allowing them.
+    """
+    expected = os.environ.get("ADMIN_PBKDF2_HASH", "")
+    salt_hex = os.environ.get("ADMIN_PBKDF2_SALT", "")
+    if not (expected and salt_hex):
+        logger.error(
+            "auth: admin credential rejected — ADMIN_PBKDF2_HASH/ADMIN_PBKDF2_SALT "
+            "are not set on this deployment"
+        )
+        return False
+    try:
+        salt = bytes.fromhex(salt_hex)
+    except ValueError:
+        logger.error("auth: ADMIN_PBKDF2_SALT is not valid hex — admin login refused")
+        return False
+    derived = hashlib.pbkdf2_hmac(
+        "sha256", password.encode(), salt, _ADMIN_PBKDF2_ITER, 32
+    ).hex()
+    return hmac.compare_digest(derived, expected)
+
+
 def _handle_auth_legacy(h, body: bytes) -> None:
-    """POST /.netlify/functions/auth or POST /auth
-    Verifies staff/store/admin credentials or PINs and returns {ok, supabase_jwt}.
+    """POST /.netlify/functions/auth, /auth or /auth/login
+    Verifies a staff PIN or a typed console credential and returns
+    {ok, supabase_jwt}.
+
+    Mirrors netlify/functions/auth.js. Body: {type, password} where type is
+    admin | superadmin | store | mis | staff, or {pin} / {password} carrying a
+    4-8 digit staff PIN (checked against the staff table, no type needed).
+
+    **Every path fails closed.** An unmatched credential, an unknown or missing
+    type, a type whose hash env var is unset, and a failed staff lookup are all
+    401. A credential is never accepted merely for being non-empty.
+
+    That was F01: this handler used to fall through to an unconditional grant,
+    so any non-empty password returned a real `authenticated`-role Supabase JWT
+    from _mint_supabase_jwt() — the exact role RLS was tightened to in SEC-4.
+    Configuring a hash did not help either; a NON-MATCHING hash fell through to
+    the same grant. See docs/reviews/2026-09-10-professional-review.md (F01) and
+    docs/reviews/2026-09-17-four-role-architecture-review.md (S3.1).
     """
     try:
         payload = json.loads(body or b"{}")
-        password = str(payload.get("password") or payload.get("pin") or "").strip()
     except Exception:
         _json_response(h, 400, {"error": "Invalid JSON"})
         return
 
-    # Check PIN against DB if numeric
+    password  = str(payload.get("password") or payload.get("pin") or "").strip()
+    cred_type = str(payload.get("type") or "").strip().lower()
+
+    if not password:
+        _json_response(h, 401, {"ok": False, "error": "Invalid credentials"})
+        return
+
+    # Staff PIN — verified against the staff table, not an env hash.
     if password.isdigit() and 4 <= len(password) <= 8:
         try:
             from db_cloud import _client
@@ -2137,17 +2204,29 @@ def _handle_auth_legacy(h, body: bytes) -> None:
                     })
                     return
         except Exception as e:
-            logger.warning(f"DB PIN check in auth legacy: {e}")
+            # A lookup that cannot run is not a lookup that passed.
+            logger.error("auth: staff PIN check failed, refusing login: %s", e)
+        _json_response(h, 401, {"ok": False, "error": "Invalid credentials"})
+        return
 
-    # For store tokens / non-numeric passwords: check hash or accept if non-empty
-    if password:
-        store_hash = os.environ.get("STAFF_TOKEN_HASH") or os.environ.get("STORE_SHA256_HASH")
-        if store_hash:
-            import hashlib
-            p_hash = hashlib.sha256(password.encode()).hexdigest()
-            if p_hash == store_hash:
-                _json_response(h, 200, {"ok": True, "supabase_jwt": _mint_supabase_jwt()})
-                return
+    # Typed console credential.
+    granted = False
+    if cred_type == "admin":
+        granted = _verify_admin_password(password)
+    elif cred_type in _AUTH_TYPE_ENV:
+        env_key  = _AUTH_TYPE_ENV[cred_type]
+        expected = os.environ.get(env_key, "")
+        if not expected:
+            logger.error(
+                "auth: %s credential rejected — %s is not set on this deployment",
+                cred_type, env_key,
+            )
+        else:
+            granted = hmac.compare_digest(_sha256(password), expected)
+    else:
+        logger.warning("auth: rejected credential with unknown type %r", cred_type)
+
+    if granted:
         _json_response(h, 200, {"ok": True, "supabase_jwt": _mint_supabase_jwt()})
         return
 
