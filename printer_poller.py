@@ -398,67 +398,148 @@ def poll_konica_supplies_xml():
 
 # ── SNMP helper ───────────────────────────────────────────────────────────────
 
-def snmp_get(ip, oid):
+#: OIDs per SNMP GET. One PDU carries many varbinds, but an agent may answer
+#: `tooBig` if the reply would not fit its buffer — see _snmp_get_chunk, which
+#: falls back to one OID at a time when that happens. 10 keeps a reply well
+#: inside a 1500-byte MTU while still collapsing a supply sweep into two round
+#: trips.
+SNMP_MAX_VARBINDS = 10
+
+
+def _snmp_value(vb_value):
+    """A varbind's value as an int, or None.
+
+    None covers both "not an integer" and SNMPv2c's per-varbind
+    noSuchObject/noSuchInstance markers, whose str() is prose that int() rejects
+    — which is how the caller learns an OID is absent without the whole PDU
+    failing. (mpModel=1 is v2c; under v1 a missing OID would error the entire
+    request, and batching would not be safe.)
     """
-    SNMP GET using pysnmp 7.x asyncio API wrapped in asyncio.run().
-    Returns integer value or None.
+    try:
+        return int(str(vb_value))
+    except (ValueError, TypeError):
+        return None
+
+
+def snmp_get_many(ip, oids, chunk_size=SNMP_MAX_VARBINDS):
+    """GET several OIDs from one host, in as few round trips as possible.
+
+    Returns {oid: int|None} with an entry for every requested OID.
+
+    Previously each OID was its own snmp_get() call, and each of those built a
+    fresh event loop, SnmpEngine and UDP transport for a single GET. A poll
+    cycle spent ~27 of those back to back, so the Epson supply sweep alone was
+    12 sequential round trips to read 5 ink levels. One engine and one transport
+    now serve the whole batch.
     """
     import asyncio
 
-    async def _get():
+    oids = list(oids)
+    if not oids:
+        return {}
+
+    async def _run():
         try:
             from pysnmp.hlapi.asyncio import (
                 get_cmd, SnmpEngine, CommunityData,
                 UdpTransportTarget, ContextData,
                 ObjectType, ObjectIdentity,
             )
+        except ImportError:
+            logger.warning("pysnmp not installed — install with: pip install pysnmp")
+            return {o: None for o in oids}
+
+        results = {}
+        try:
+            engine = SnmpEngine()
             transport = await UdpTransportTarget.create(
                 (ip, 161), timeout=SNMP_TIMEOUT, retries=1
             )
+        except Exception as exc:
+            logger.debug(f"SNMP {ip}: transport setup failed: {exc}")
+            return {o: None for o in oids}
+
+        async def _get_chunk(chunk):
+            """{oid: value} for one PDU, or None if the whole PDU failed."""
             errInd, errStat, _, varBinds = await get_cmd(
-                SnmpEngine(),
+                engine,
                 CommunityData(SNMP_COMMUNITY, mpModel=1),
                 transport,
                 ContextData(),
-                ObjectType(ObjectIdentity(oid)),
+                *[ObjectType(ObjectIdentity(o)) for o in chunk],
             )
             if errInd or errStat:
-                logger.debug(f"SNMP {ip} {oid}: {errInd or errStat}")
+                logger.debug(f"SNMP {ip} {chunk}: {errInd or errStat}")
                 return None
-            for vb in varBinds:
-                val = str(vb[1])
-                try:
-                    return int(val)
-                except ValueError:
-                    return None
-            return None
-        except ImportError:
-            logger.warning("pysnmp not installed — install with: pip install pysnmp")
-            return None
-        except Exception as e:
-            logger.debug(f"SNMP {ip} {oid}: {e}")
-            return None
+            # GET replies carry varbinds in request order.
+            return {o: _snmp_value(vb[1]) for o, vb in zip(chunk, varBinds)}
+
+        for i in range(0, len(oids), chunk_size):
+            chunk = oids[i:i + chunk_size]
+            try:
+                got = await _get_chunk(chunk)
+            except Exception as exc:
+                logger.debug(f"SNMP {ip} {chunk}: {exc}")
+                got = None
+
+            if got is None and len(chunk) > 1:
+                # tooBig, or an agent that dislikes multi-varbind GETs. Re-ask
+                # one at a time — exactly what this code did before batching —
+                # so a fussy printer degrades in speed, never in correctness.
+                logger.debug(f"SNMP {ip}: batch of {len(chunk)} failed, "
+                             "retrying those OIDs individually")
+                got = {}
+                for o in chunk:
+                    try:
+                        single = await _get_chunk([o])
+                    except Exception as exc:
+                        logger.debug(f"SNMP {ip} {o}: {exc}")
+                        single = None
+                    got[o] = (single or {}).get(o)
+
+            results.update(got or {o: None for o in chunk})
+
+        return results
+
+    def _drive():
+        try:
+            return asyncio.run(_run())
+        except RuntimeError:
+            # Already inside an event loop — use a new one.
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(_run())
+            finally:
+                loop.close()
 
     try:
-        return asyncio.run(_get())
-    except RuntimeError:
-        # Already inside an event loop — use new loop
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(_get())
-        finally:
-            loop.close()
+        out = _drive()
+    except Exception as exc:
+        logger.debug(f"SNMP {ip}: {exc}")
+        return {o: None for o in oids}
+    # Never hand back a short dict — a caller reading a missing key would see a
+    # KeyError where the old per-OID call returned None.
+    return {o: (out or {}).get(o) for o in oids}
+
+
+def snmp_get(ip, oid):
+    """SNMP GET for a single OID. Returns an integer value, or None."""
+    return snmp_get_many(ip, [oid])[oid]
 
 
 # ── Konica: SNMP fallback ─────────────────────────────────────────────────────
 
 def poll_konica_snmp():
     """Poll Konica via SNMP. Used if XML method fails or returns no data."""
-    total    = snmp_get(KONICA_IP, OID_KONICA_TOTAL)
-    print_bw = snmp_get(KONICA_IP, OID_KONICA_PRINT_BW)
-    copy_bw  = snmp_get(KONICA_IP, OID_KONICA_COPY_BW)
-    print_col= snmp_get(KONICA_IP, OID_KONICA_PRINT_COL)
-    copy_col = snmp_get(KONICA_IP, OID_KONICA_COPY_COL)
+    got = snmp_get_many(KONICA_IP, [
+        OID_KONICA_TOTAL, OID_KONICA_PRINT_BW, OID_KONICA_COPY_BW,
+        OID_KONICA_PRINT_COL, OID_KONICA_COPY_COL,
+    ])
+    total    = got[OID_KONICA_TOTAL]
+    print_bw = got[OID_KONICA_PRINT_BW]
+    copy_bw  = got[OID_KONICA_COPY_BW]
+    print_col= got[OID_KONICA_PRINT_COL]
+    copy_col = got[OID_KONICA_COPY_COL]
 
     if total is None and print_bw is None:
         logger.warning("Konica SNMP returned no data")
@@ -485,8 +566,9 @@ def poll_konica_supplies_vendor_snmp():
 
     Returns list of supply dicts compatible with save_supplies().
     """
-    toner_pct = snmp_get(KONICA_IP, OID_KONICA_TONER_PCT)
-    toner_sts = snmp_get(KONICA_IP, OID_KONICA_TONER_STS)
+    got = snmp_get_many(KONICA_IP, [OID_KONICA_TONER_PCT, OID_KONICA_TONER_STS])
+    toner_pct = got[OID_KONICA_TONER_PCT]
+    toner_sts = got[OID_KONICA_TONER_STS]
 
     if toner_pct is None:
         logger.warning("Konica vendor SNMP: toner OID returned no data")
@@ -527,8 +609,9 @@ def poll_epson_snmp():
 
     Sample figures from the retired WF-C21000: total 910,112, A4 print 897,489.
     """
-    total      = snmp_get(EPSON_IP, OID_EPSON_TOTAL)
-    print_mono = snmp_get(EPSON_IP, OID_EPSON_PRINT_MONO)
+    got = snmp_get_many(EPSON_IP, [OID_EPSON_TOTAL, OID_EPSON_PRINT_MONO])
+    total      = got[OID_EPSON_TOTAL]
+    print_mono = got[OID_EPSON_PRINT_MONO]
 
     if total is None:
         logger.warning("Epson SNMP returned no data")
@@ -609,9 +692,23 @@ def poll_supplies(ip, printer_key):
     """
     labels  = SUPPLY_LABELS.get(printer_key, {})
     results = []
-    for idx in range(1, 11):
-        max_cap = snmp_get(ip, f"1.3.6.1.2.1.43.11.1.1.8.1.{idx}")
-        level   = snmp_get(ip, f"1.3.6.1.2.1.43.11.1.1.9.1.{idx}")
+
+    # Ask for every index up front. This used to be two SNMP GETs per index,
+    # walked until both came back empty — 12 sequential round trips to read the
+    # Epson's 5 ink levels, on every poll cycle. One batch answers them all, and
+    # the loop below still stops at the first empty index, so an agent that
+    # reports a gap is read exactly as it was before.
+    MAX_SUPPLY_INDEX = 10
+    indices = range(1, MAX_SUPPLY_INDEX + 1)
+    cap_oid   = {i: f"1.3.6.1.2.1.43.11.1.1.8.1.{i}" for i in indices}
+    level_oid = {i: f"1.3.6.1.2.1.43.11.1.1.9.1.{i}" for i in indices}
+    got = snmp_get_many(
+        ip, [cap_oid[i] for i in indices] + [level_oid[i] for i in indices]
+    )
+
+    for idx in indices:
+        max_cap = got[cap_oid[idx]]
+        level   = got[level_oid[idx]]
         if max_cap is None and level is None:
             break  # no more supplies at this index
         label = labels.get(idx, f"Supply {idx}")
