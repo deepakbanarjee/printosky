@@ -12,6 +12,21 @@
 <title>Place a Print Order — Acrobat-style preview | Printosky</title>
 <meta name="description" content="Upload your file, preview every page, pick colour/N-up/duplex/binding, see a live price, and order printing online — pickup from Thriprayar or Nattika.">
 <link rel="canonical" href="https://printosky.com/order-v2.html">
+<meta property="og:title" content="Place a Print Order — Page-by-Page Preview | Printosky">
+<meta property="og:description" content="Upload your file, preview every page, pick colour/N-up/duplex/binding, and pay online. Pickup across Thrissur.">
+<meta property="og:url" content="https://printosky.com/order-v2.html">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://printosky.com/assets/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Printosky — online printing in Thrissur: bulk print, binding, lamination, PVC cards.">
+<meta property="og:site_name" content="Printosky">
+<meta property="og:locale" content="en_IN">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Place a Print Order — Page-by-Page Preview | Printosky">
+<meta name="twitter:description" content="Upload your file, preview every page, pick colour/N-up/duplex/binding, and pay online. Pickup across Thrissur.">
+<meta name="twitter:image" content="https://printosky.com/assets/og-image.png">
+<meta name="twitter:image:alt" content="Printosky — online printing in Thrissur: bulk print, binding, lamination, PVC cards.">
 <link rel="stylesheet" href="styles.css">
 <script src="analytics.js" defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -45,7 +60,7 @@
   .ov2-topbar { background: var(--blue); padding: 14px 20px; display: flex; align-items: center; gap: 10px; }
   .ov2-topbar-logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 18px; color: #fff; letter-spacing: -0.5px; }
   .ov2-topbar-logo span { color: var(--orange, #e8500a); }
-  .ov2-topbar-sub { font-size: 12px; color: rgba(255,255,255,0.6); margin-left: auto; }
+  .ov2-topbar-sub { font-size: 12px; font-weight: 400; color: rgba(255,255,255,0.6); margin: 0 0 0 auto; }
 
   .ov2-steps { display: flex; gap: 0; padding: 14px 20px 0; }
   .ov2-step-pill {
@@ -296,6 +311,14 @@
   }
   .ov2-field input:focus, .ov2-field textarea:focus { border-color: var(--blue); }
   .ov2-field textarea { resize: vertical; min-height: 64px; }
+
+  /* iOS Safari zooms the whole page in whenever a focused form control is
+     under 16px, which throws the customer out of the layout mid-order. Bump
+     every control to 16px on phones; desktop keeps the tighter sizing. */
+  @media (max-width: 768px) {
+    .ov2-field input, .ov2-field textarea, .ov2-field select,
+    .ov2-select, .ov2-manual input { font-size: 16px; }
+  }
   .ov2-addr { display: none; }
   .ov2-addr.show { display: block; }
 
@@ -354,7 +377,7 @@
   <div class="ov2-shell">
     <div class="ov2-topbar">
       <div class="ov2-topbar-logo"><img src="assets/printosky-wordmark-reverse.svg" alt="Printosky" style="height:24px;width:auto;display:inline-block;vertical-align:middle"></div>
-      <div class="ov2-topbar-sub">Place your print order</div>
+      <h1 class="ov2-topbar-sub">Place your print order</h1>
     </div>
     <div class="ov2-steps">
       <div class="ov2-step-pill active" id="ov2-step1pill">1 · File &amp; Print Settings</div>
@@ -814,6 +837,8 @@
         <li><a href="order-v2.html">Place Order</a></li>
         <li><a href="about.html">About</a></li>
         <li><a href="contact.html">Contact</a></li>
+        <li><a href="academic.html">Academic Projects</a></li>
+        <li><a href="project-builder.html">Project Report Builder</a></li>
       </ul>
     </div>
     <div>

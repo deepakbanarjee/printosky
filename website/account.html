@@ -10,8 +10,23 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>My Account – Printosky</title>
-<meta name="description" content="Your Printosky space — store credit, your uploaded notes, and quick uploads.">
+<meta name="description" content="Your Printosky account — store credit, uploaded notes, order history and one-tap reorders. Pickup in Thriprayar or Nattika, across Thrissur.">
 <link rel="canonical" href="https://printosky.com/account.html">
+<meta property="og:title" content="My Account — Printosky">
+<meta property="og:description" content="Your Printosky space — store credit, uploaded notes, and quick reorders.">
+<meta property="og:url" content="https://printosky.com/account.html">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://printosky.com/assets/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Printosky — online printing in Thrissur: bulk print, binding, lamination, PVC cards.">
+<meta property="og:site_name" content="Printosky">
+<meta property="og:locale" content="en_IN">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="My Account — Printosky">
+<meta name="twitter:description" content="Your Printosky space — store credit, uploaded notes, and quick reorders.">
+<meta name="twitter:image" content="https://printosky.com/assets/og-image.png">
+<meta name="twitter:image:alt" content="Printosky — online printing in Thrissur: bulk print, binding, lamination, PVC cards.">
 <text y='.9em' font-size='90'>📚</text></svg>">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -279,7 +294,7 @@
     <!-- Place an order (logged-in identity flows to order-v2 via the Supabase session) -->
     <a class="btn btn-submit" href="order-v2.html" style="margin:0 0 14px;display:block;text-align:center;text-decoration:none;box-sizing:border-box">🖨️ Place a print order</a>
 
-    <div class="section-title">Your orders</div>
+    <h2 class="section-title">Your orders</h2>
     <div id="ordersList"></div>
 
     <!-- Refer & Earn -->
@@ -299,7 +314,7 @@
 
     <button class="btn btn-submit" onclick="goUpload()" style="margin-top:0">📤 Upload notes &amp; earn</button>
 
-    <div class="section-title">My notes</div>
+    <h2 class="section-title">My notes</h2>
     <div id="notesList"></div>
   </div>
 
