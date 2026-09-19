@@ -29,8 +29,10 @@ import subprocess
 import sys
 import threading
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from functools import lru_cache
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
@@ -150,6 +152,13 @@ except ImportError:
 
 # ── Staff session helpers ──────────────────────────────────────────────────────
 _active_sessions = {}   # pc_id → {staff_id, name, session_id}  (in-memory cache)
+_sessions_lock = threading.Lock()   # guards _active_sessions (server is threaded)
+
+
+def _active_staff_snapshot() -> list:
+    """The pc_ids with a staff member logged in, read atomically."""
+    with _sessions_lock:
+        return list(_active_sessions.keys())
 
 # ── Supabase JWT cache (for returning to admin.html on staff login) ────────────
 _supabase_jwt_cache = {"token": None, "expires_at": 0}
@@ -317,11 +326,14 @@ def staff_logout(db_path: str, session_id: int, idle: bool = False):
         (now, 1 if idle else 0, session_id)
     )
     conn.commit()
-    # Clear from in-memory cache
-    for pc_id, info in list(_active_sessions.items()):
-        if info.get("session_id") == session_id:
-            del _active_sessions[pc_id]
-            break
+    # Clear from in-memory cache. Locked because the server is threaded: a
+    # concurrent login writing this dict while we scan it would raise
+    # "dictionary changed size during iteration" and abort the logout.
+    with _sessions_lock:
+        for pc_id, info in list(_active_sessions.items()):
+            if info.get("session_id") == session_id:
+                del _active_sessions[pc_id]
+                break
     conn.close()
     logging.info("Staff logout: session #%d (idle=%s)", session_id, idle)
     return {"ok": True}
@@ -350,13 +362,15 @@ def get_active_staff(db_path: str, pc_id: str):
 # Function extracted to retired/2026-05-12-graveyard/konica_attribution.py.
 
 # ── Internet / network health check ──────────────────────────────────────────
+# Each probe passes its own timeout to create_connection. The old code called
+# socket.setdefaulttimeout(), which is a PROCESS-WIDE setting: it raced between
+# concurrent probes and left its timeout behind on every socket the process
+# opened afterwards (Supabase, urllib, SNMP). Per-socket timeouts keep a probe's
+# deadline to that probe.
 def check_internet(host="8.8.8.8", port=53, timeout=3) -> bool:
     try:
-        socket.setdefaulttimeout(timeout)
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((host, port))
-        s.close()
-        return True
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
     except Exception:
         return False
 
@@ -364,11 +378,8 @@ def check_printer_reachable(ip: str | None, timeout=2) -> bool:
     if not ip:  # finishing-only nodes have no Konica → treat as unreachable
         return False
     try:
-        socket.setdefaulttimeout(timeout)
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((ip, 9100))
-        s.close()
-        return True
+        with socket.create_connection((ip, 9100), timeout=timeout):
+            return True
     except Exception:
         return False
 
@@ -390,23 +401,63 @@ import time as _time
 _rate_limit: dict[str, list[float]] = {}  # ip -> [timestamp, ...]
 _RATE_LIMIT_MAX    = 5     # max attempts per window
 _RATE_LIMIT_WINDOW = 60.0  # seconds
+_rate_limit_lock = threading.Lock()
 
 def _check_rate_limit(ip: str) -> bool:
-    """Return True if allowed, False if rate-limited (5 attempts per 60s per IP)."""
+    """Return True if allowed, False if rate-limited (5 attempts per 60s per IP).
+
+    The read-prune-count-append below must be atomic: the server is threaded, so
+    without the lock a burst of simultaneous attempts would each read the same
+    pre-append list, all see fewer than _RATE_LIMIT_MAX hits, and all be let
+    through — which is precisely the burst this limiter exists to stop.
+    """
     now = _time.monotonic()
-    hits = [t for t in _rate_limit.get(ip, []) if now - t < _RATE_LIMIT_WINDOW]
-    _rate_limit[ip] = hits
-    if len(hits) >= _RATE_LIMIT_MAX:
-        return False
-    _rate_limit[ip].append(now)
-    return True
+    with _rate_limit_lock:
+        hits = [t for t in _rate_limit.get(ip, []) if now - t < _RATE_LIMIT_WINDOW]
+        _rate_limit[ip] = hits
+        if len(hits) >= _RATE_LIMIT_MAX:
+            return False
+        hits.append(now)
+        return True
 
 _SERVER_START = _time.monotonic()  # for uptime in /health
 
+# The three reachability probes are network round-trips that cost up to 7s
+# together when a printer is powered off — the exact case a console asks about
+# most. Run them concurrently (wall time = the slowest probe, not their sum) and
+# hold the answer briefly, so N consoles refreshing together share one sweep
+# instead of each paying for its own.
+#
+# The TTL is deliberately short: a printer coming back must show up on the next
+# refresh, not minutes later. Set PRINTOSKY_HEALTH_TTL=0 to disable caching.
+_HEALTH_PROBE_TTL = float(os.environ.get("PRINTOSKY_HEALTH_TTL", "10"))
+_probe_lock = threading.Lock()
+_probe_cache: dict = {"at": 0.0, "value": None}
+
+
+def _probe_network() -> tuple[bool, bool, bool]:
+    """(internet, konica_ok, epson_ok) — probed in parallel, cached briefly."""
+    now = _time.monotonic()
+    with _probe_lock:
+        cached = _probe_cache["value"]
+        if cached is not None and (now - _probe_cache["at"]) < _HEALTH_PROBE_TTL:
+            return cached
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        f_net = pool.submit(check_internet)
+        f_kon = pool.submit(check_printer_reachable, PRINTER_IPS["konica"])
+        f_eps = pool.submit(check_printer_reachable, PRINTER_IPS["epson"])
+        # A probe returns False on any failure, so this cannot raise; being
+        # explicit keeps a future change from turning a probe bug into a 500.
+        result = (f_net.result(), f_kon.result(), f_eps.result())
+
+    with _probe_lock:
+        _probe_cache["at"], _probe_cache["value"] = _time.monotonic(), result
+    return result
+
+
 def get_system_health() -> dict:
-    internet  = check_internet()
-    konica_ok = check_printer_reachable(PRINTER_IPS["konica"])
-    epson_ok  = check_printer_reachable(PRINTER_IPS["epson"])
+    internet, konica_ok, epson_ok = _probe_network()
 
     if internet and (konica_ok or epson_ok):
         mode = "full"
@@ -438,6 +489,8 @@ def get_system_health() -> dict:
     except Exception as exc:                      # never let /health itself 500
         watchdog = {"healthy": None, "error": str(exc), "checks": {}, "failing": []}
 
+    _active_staff = _active_staff_snapshot()
+
     return {
         "internet":     internet,
         "konica":       konica_ok,
@@ -446,8 +499,12 @@ def get_system_health() -> dict:
         "printer_ips":  PRINTER_IPS,
         "mode":         mode,
         "mode_label":   mode_label,
-        "active_staff": list(_active_sessions.keys()),
-        "staff_count":  len(_active_sessions),
+        # One snapshot feeds both fields — taken under the lock, so a
+        # login/logout landing mid-iteration can neither raise "dictionary
+        # changed size during iteration" (500ing the one request that must never
+        # fail) nor report a count that disagrees with the list beside it.
+        "active_staff": _active_staff,
+        "staff_count":  len(_active_staff),
         "time":         datetime.now().strftime("%H:%M:%S"),
         "uptime_s":     int(_time.monotonic() - _SERVER_START),
         "db_ok":        __import__("os").path.exists(DB_PATH),
@@ -504,11 +561,26 @@ except Exception:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def find_sumatra():
+@lru_cache(maxsize=1)
+def _find_sumatra_cached():
     for p in SUMATRA_PATHS:
         if os.path.exists(p):
             return p
     return None
+
+
+def find_sumatra():
+    """Path to SumatraPDF, or None.
+
+    Cached: this is on the /status path that every console hits on every
+    refresh, and it stats a handful of fixed install locations each time. An
+    installer that appears mid-session is a restart, not a per-request search —
+    call find_sumatra.cache_clear() if that ever needs to be re-checked live.
+    """
+    return _find_sumatra_cached()
+
+
+find_sumatra.cache_clear = _find_sumatra_cached.cache_clear
 
 
 def update_job_status(job_id: str, status: str, printer: str, staff_id: str = None):
@@ -888,10 +960,46 @@ def windows_shell_print(filepath: str, printer_name: str, copies: int, printer_k
 
 # ── New Sprint 1 helpers ───────────────────────────────────────────────────────
 
+#: Set once per process, the first time a connection is opened. journal_mode is
+#: a persistent property of the database file, so one successful PRAGMA is
+#: enough — repeating it on every connection only costs a disk write.
+_wal_enabled = False
+_wal_lock = threading.Lock()
+
+
 def _db():
-    """Return a sqlite3 connection to the jobs DB with row_factory."""
-    conn = sqlite3.connect(DB_PATH)
+    """Return a sqlite3 connection to the jobs DB with row_factory.
+
+    WAL mode matters here because three writers share this one file — the
+    watcher, the printer poller and this server — and in SQLite's default
+    (DELETE) journal a writer locks the whole database, so an operator's
+    read blocked behind whichever background thread happened to be writing.
+    Under WAL, readers and one writer proceed concurrently.
+
+    busy_timeout replaces an instant "database is locked" with a short wait, so
+    a write that collides with another writer retries instead of surfacing as a
+    failed save at the counter.
+    """
+    global _wal_enabled
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=10000")
+    if not _wal_enabled:
+        with _wal_lock:
+            if not _wal_enabled:
+                try:
+                    mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+                    # A network share or a read-only file refuses WAL and stays
+                    # on the old journal — correct, just slower, so log it
+                    # rather than failing the request.
+                    if str(mode).lower() != "wal":
+                        logging.warning(
+                            "SQLite stayed in %s mode (WAL refused) for %s — "
+                            "concurrent reads will block on writes", mode, DB_PATH)
+                    _wal_enabled = True
+                except Exception as exc:
+                    logging.warning("Could not set WAL on %s: %s", DB_PATH, exc)
+                    _wal_enabled = True     # don't retry on every connection
     return conn
 
 
@@ -3671,10 +3779,28 @@ class PrintHandler(BaseHTTPRequestHandler):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+class _PrintServer(ThreadingHTTPServer):
+    """One thread per request.
+
+    A store runs several PCs against this one server (docs/MULTI_BOX.md), and
+    several handlers block for seconds at a time: /health probes printers over
+    the network, /print downloads the file from Supabase (30s timeout),
+    /detect-colour shells out to a 90s subprocess. On the single-threaded
+    HTTPServer this module used before, every one of those froze *all* the other
+    consoles for its full duration — an operator's quote could not be priced
+    while another PC waited on a printer that was switched off.
+
+    daemon_threads keeps Ctrl-C shutdown instant; allow_reuse_address lets a
+    restart rebind the port without waiting out TIME_WAIT.
+    """
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 def start_print_server():
     init_staff_tables(DB_PATH)
-    server = HTTPServer(("0.0.0.0", PORT), PrintHandler)
-    logging.info("🖨️  Print server running on port %d", PORT)
+    server = _PrintServer(("0.0.0.0", PORT), PrintHandler)
+    logging.info("🖨️  Print server running on port %d (threaded)", PORT)
     if has_konica():
         logging.info("   Konica : %s", PRINTERS["konica"])
     else:
