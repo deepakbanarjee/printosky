@@ -24,6 +24,7 @@ import sqlite3
 import logging
 import json
 import platform
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -1181,10 +1182,38 @@ def _fire_batch_conversation(batch_id: str, phone: str, job_ids_str: str):
                 pass
 
 
+#: One lock per customer phone number, created on first use.
+#:
+#: The bot relay is threaded so two customers are never stuck behind each other,
+#: but a single customer's messages must still be handled one at a time: a turn
+#: reads that phone's bot session, decides from it, and writes it back, so two
+#: overlapping messages from the same person would otherwise interleave on
+#: their session row and answer the wrong question. Serialising per phone keeps
+#: the ordering the old single-threaded server gave by accident, and gives up
+#: nothing, because messages from one person are inherently sequential anyway.
+#:
+#: Entries are never evicted. That is deliberate: a lock is ~100 bytes, a store
+#: sees hundreds of distinct numbers a day, and the watcher restarts at each
+#: morning's boot — so this settles in the tens of KB. Evicting safely would
+#: need refcounting, because dropping a lock that another thread has looked up
+#: but not yet acquired hands the next caller a *different* lock for the same
+#: phone, silently losing the serialisation this exists to provide.
+_phone_locks = {}
+_phone_locks_guard = threading.Lock()
+
+
+def _lock_for_phone(phone: str):
+    with _phone_locks_guard:
+        lock = _phone_locks.get(phone)
+        if lock is None:
+            lock = _phone_locks[phone] = threading.Lock()
+        return lock
+
+
 def start_bot_relay_server(db_path):
     """HTTP server on port 3003 â€” Node posts customer text replies here."""
     import threading
-    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     import json as _json
 
     class BotRelayHandler(BaseHTTPRequestHandler):
@@ -1215,20 +1244,37 @@ def start_bot_relay_server(db_path):
                 return
             if self.path != "/bot":
                 self.send_response(404); self.end_headers(); return
+
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(length)
                 data = _json.loads(body)
                 phone = data.get("phone", "").strip()
                 text  = data.get("text", "").strip()
+            except Exception as e:
+                logging.warning(f"Bot relay error: {e}")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(_json.dumps({"replies": [], "error": str(e)}).encode())
+                return
 
-                if not phone or not text:
-                    self.send_response(400)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(_json.dumps({"replies": []}).encode())
-                    return
+            if not phone or not text:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(_json.dumps({"replies": []}).encode())
+                return
 
+            # One customer at a time, but never one customer behind another:
+            # the turn below reads this phone's session, decides from it and
+            # writes it back, so two of their messages must not overlap. Two
+            # different customers hold different locks and run concurrently.
+            with _lock_for_phone(phone):
+                self._handle_bot(phone, text)
+
+        def _handle_bot(self, phone, text):
+            try:
                 # Check if customer is responding to "more files?" prompt
                 import sqlite3 as _rq3
                 from whatsapp_notify import _send as _rsend
@@ -1289,6 +1335,15 @@ def start_bot_relay_server(db_path):
                 reply_list = [r for r in (replies or []) if isinstance(r, str)]
 
                 # Log inbound + outbound to conversation_log
+                # Answer Node first. The customer's reply is only sent once this
+                # response lands, and the logging below is one Supabase round
+                # trip per message — so logging first held every reply back by
+                # (1 + replies) network calls for a record nobody is waiting on.
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(_json.dumps({"replies": reply_list}).encode())
+
                 try:
                     from db_cloud import log_message as _log
                     _log(phone, "inbound", text, message_type="text")
@@ -1297,11 +1352,6 @@ def start_bot_relay_server(db_path):
                 except Exception:
                     pass
 
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(_json.dumps({"replies": reply_list}).encode())
-
             except Exception as e:
                 logging.warning(f"Bot relay error: {e}")
                 self.send_response(500)
@@ -1309,9 +1359,22 @@ def start_bot_relay_server(db_path):
                 self.end_headers()
                 self.wfile.write(_json.dumps({"replies": [], "error": str(e)}).encode())
 
+    class _RelayServer(ThreadingHTTPServer):
+        """One thread per request, so customers do not queue behind each other.
+
+        A bot turn is several network round trips — the Supabase session read,
+        the reply itself, then a conversation_log write per message. On the
+        single-threaded server this replaced, every customer's WhatsApp message
+        waited for the whole of the previous customer's turn before it was even
+        parsed. Same-phone ordering is preserved by _lock_for_phone, not by the
+        server being serial.
+        """
+        daemon_threads = True
+        allow_reuse_address = True
+
     def _run():
-        server = HTTPServer(("127.0.0.1", 3003), BotRelayHandler)
-        logging.info("Bot relay server started â€” listening on :3003/bot")
+        server = _RelayServer(("127.0.0.1", 3003), BotRelayHandler)
+        logging.info("Bot relay server started â€” listening on :3003/bot (threaded)")
         server.serve_forever()
 
     t = threading.Thread(target=_run, daemon=True, name="BotRelay")
