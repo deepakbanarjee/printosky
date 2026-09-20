@@ -24,6 +24,26 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    # Throwaway Postgres for tests/test_sla_breaches_sql.py, which runs the
+    # SCHEMA_v44 SLA function and the Python it replaced over the same rows and
+    # asserts they agree. That equivalence is the safety argument for computing
+    # breaches in SQL, so it has to be re-checked on every change rather than
+    # verified once by hand. Without this service those tests skip, silently.
+    # It holds no real data — the test creates its own table.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci_pg
+          POSTGRES_DB: sla_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     # Synthetic env vars so razorpay_integration.py:25 (which does
     # os.environ["RAZORPAY_WEBHOOK_SECRET"]) doesn't KeyError at import.
     # Real production secrets never enter CI.
@@ -34,6 +54,8 @@ jobs:
       META_APP_SECRET: ci_meta_app_secret
       ADMIN_PASSWORD_HASH: ci_admin_password_hash
       UPTIME_NOTIFY_SECRET: ci_uptime_notify_secret
+      PRINTOSKY_TEST_PG: "host=127.0.0.1 port=5432 user=postgres password=ci_pg dbname=sla_test"
+      PGPASSWORD: ci_pg
 
     steps:
       - name: Checkout
@@ -44,6 +66,13 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
+
+      - name: Install psql
+        # tests/test_sla_breaches_sql.py drives the SLA function through psql.
+        # Installed explicitly rather than assumed from the runner image: if the
+        # client is missing the test skips rather than fails, and a silent skip
+        # would quietly retire the SQL/Python equivalence check.
+        run: sudo apt-get install -y --no-install-recommends postgresql-client
 
       - name: Install dependencies
         run: |

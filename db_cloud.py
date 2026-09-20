@@ -667,6 +667,71 @@ def _compute_sla_breaches(rows, now, threshold_hours: int = 1,
     return breaches
 
 
+#: Row ceiling for the fallback path only. The RPC has no equivalent, which is
+#: the point of it — see _sla_breaches_clientside.
+SLA_FALLBACK_ROW_CAP = 2000
+
+
+def _sla_breaches_rpc(client, threshold_hours, lookback_hours) -> list[dict] | None:
+    """Ask Postgres to compute the breaches (SCHEMA_v44).
+
+    Returns the breach list — possibly empty, which is a real answer — or None
+    when the RPC could not be used at all, so the caller can fall back.
+    """
+    try:
+        resp = client.rpc("sla_breaches", {
+            "threshold_hours":   float(threshold_hours),
+            "tolerance_seconds": float(SLA_REPLY_TOLERANCE_SECONDS),
+            "lookback_hours":    float(lookback_hours),
+        }).execute()
+    except Exception as exc:
+        # Most likely the migration has not been applied yet: the API deploys
+        # from a push to main, the SQL does not, so there is a window where the
+        # function does not exist. Named loudly because the fallback is capped
+        # and this should not be the steady state.
+        logger.warning(
+            "sla_breaches RPC unavailable (%s) — falling back to the capped "
+            "client-side sweep. Apply api/migrations/SCHEMA_v44_sla_breaches_rpc.sql.",
+            exc,
+        )
+        return None
+    return [
+        {"phone": r.get("phone"), "last_inbound_at": r.get("last_inbound_at")}
+        for r in (resp.data or [])
+        if r.get("phone")
+    ]
+
+
+def _sla_breaches_clientside(client, threshold_hours, lookback_hours) -> list[dict]:
+    """The original sweep: pull rows, reduce them here. Fallback only.
+
+    This is capped at SLA_FALLBACK_ROW_CAP newest rows, and the cap is lossy: a
+    busy window pushes an older unanswered message off the end and its customer
+    is never alerted. That is why the RPC exists. Kept so a deploy that lands
+    before the migration still reports something rather than nothing.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
+    rows = (
+        client.table("conversation_log")
+        .select("phone,direction,created_at")
+        .gte("created_at", cutoff_iso)
+        .order("created_at", desc=True)
+        .limit(SLA_FALLBACK_ROW_CAP)
+        .execute()
+        .data
+        or []
+    )
+    if len(rows) >= SLA_FALLBACK_ROW_CAP:
+        logger.warning(
+            "SLA fallback hit its %d-row cap — breaches older than the newest "
+            "%d messages cannot be seen on this path. Apply SCHEMA_v44.",
+            SLA_FALLBACK_ROW_CAP, SLA_FALLBACK_ROW_CAP,
+        )
+    return _compute_sla_breaches(rows, datetime.now(timezone.utc), threshold_hours)
+
+
 def find_sla_breaches(threshold_hours: int = 1,
                       alert_cooldown_hours: int = 6,
                       lookback_hours: int = 48) -> list[dict]:
@@ -675,23 +740,17 @@ def find_sla_breaches(threshold_hours: int = 1,
     Returns a list of {"phone", "last_inbound_at"} dicts, excluding any phone
     that was already alerted within `alert_cooldown_hours` (cooldown to avoid
     repeating the same nag).
+
+    Postgres does the aggregation (SCHEMA_v44); the client-side sweep this
+    replaced remains as a fallback for a deploy that lands before the migration.
+    The two are held to identical output by tests/test_sla_breaches_sql.py.
     """
     from datetime import datetime, timezone, timedelta
     try:
         client = _client()
-        cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
-        rows = (
-            client.table("conversation_log")
-            .select("phone,direction,created_at")
-            .gte("created_at", cutoff_iso)
-            .order("created_at", desc=True)
-            .limit(2000)
-            .execute()
-            .data
-            or []
-        )
-
-        breaches = _compute_sla_breaches(rows, datetime.now(timezone.utc), threshold_hours)
+        breaches = _sla_breaches_rpc(client, threshold_hours, lookback_hours)
+        if breaches is None:
+            breaches = _sla_breaches_clientside(client, threshold_hours, lookback_hours)
 
         if not breaches or alert_cooldown_hours <= 0:
             return breaches
