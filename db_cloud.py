@@ -802,6 +802,94 @@ def _is_handoff_ack(body: str) -> bool:
     return any(m in b for m in _HANDOFF_ACK_MARKERS)
 
 
+#: Row ceiling for the fallback path only. The RPC has no equivalent — it
+#: returns one row per phone by construction. See _latest_messages_clientside.
+LATEST_MESSAGES_FALLBACK_ROW_CAP = 4000
+
+
+def _latest_messages_rpc(client, phones, lookback_hours) -> dict | None:
+    """Newest conversation_log row per phone, from Postgres (SCHEMA_v45).
+
+    Returns {phone: row} — possibly empty, which is a real answer — or None
+    when the RPC could not be used at all, so the caller can fall back.
+    """
+    try:
+        resp = client.rpc("latest_messages", {
+            "phones":         list(phones),
+            "lookback_hours": float(lookback_hours),
+        }).execute()
+    except Exception as exc:
+        logger.warning(
+            "latest_messages RPC unavailable (%s) — falling back to the capped "
+            "log scan. Apply api/migrations/SCHEMA_v45_latest_messages_rpc.sql.",
+            exc,
+        )
+        return None
+    return {r["phone"]: r for r in (resp.data or []) if r.get("phone")}
+
+
+def _latest_messages_clientside(client, phones, lookback_hours) -> dict:
+    """The original scan: pull the log and keep the first row seen per phone.
+
+    Fallback only, and lossy. It reads every phone's messages to answer about a
+    handful, and its cap drops a flagged phone whose newest message falls
+    outside the newest LATEST_MESSAGES_FALLBACK_ROW_CAP rows — which reads as
+    "no reply yet" and reports an already-handled chat as still waiting.
+
+    The phone filter is new here: the old query had none, so this is strictly
+    less lossy than what it replaced even before the RPC exists.
+    """
+    from datetime import timedelta
+
+    wanted = [p for p in phones if p]
+    if not wanted:
+        return {}
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
+    log_rows = (
+        client.table("conversation_log")
+        .select("phone,direction,body,created_at")
+        .in_("phone", wanted)
+        .gte("created_at", cutoff)
+        .order("created_at", desc=True)
+        .limit(LATEST_MESSAGES_FALLBACK_ROW_CAP)
+        .execute()
+        .data
+        or []
+    )
+    if len(log_rows) >= LATEST_MESSAGES_FALLBACK_ROW_CAP:
+        logger.warning(
+            "chat-audit fallback hit its %d-row cap — a flagged chat may be "
+            "reported as waiting when it was already answered. Apply SCHEMA_v45.",
+            LATEST_MESSAGES_FALLBACK_ROW_CAP,
+        )
+
+    out: dict = {}
+    for lr in log_rows:                   # desc order → first seen is newest
+        out.setdefault(lr.get("phone"), lr)
+    return out
+
+
+def _latest_messages(client, phones, lookback_hours) -> dict:
+    """Newest message per phone, server-side where available.
+
+    Never raises: the chat audit is a digest, and one missing lookup must not
+    cost the whole snapshot. An empty result is indistinguishable from "no
+    messages", which is the same answer the row scan gave on failure.
+    """
+    wanted = [p for p in phones if p]
+    if not wanted:
+        return {}
+    try:
+        found = _latest_messages_rpc(client, wanted, lookback_hours)
+        if found is None:
+            found = _latest_messages_clientside(client, wanted, lookback_hours)
+        return found
+    except Exception as exc:
+        logger.error("chat_audit_snapshot last-message error: %s", exc)
+        return {}
+
+
 def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
                         lookback_hours: int = 336) -> dict:
     """Read-only snapshot for the twice-daily chat audit (AM/PM).
@@ -817,8 +905,6 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
       counts:        {inbound, jobs, hours} from activity_counts(24h).
       pinned:        chats staff pinned for manual follow-up (list_pinned_contacts).
     """
-    from datetime import timedelta
-
     def _parse(ts):
         # last_help_request_at is timestamptz (aware); updated_at is TEXT and
         # often naive ("2026-06-13 06:37:10"). Force UTC so the subtraction from
@@ -845,23 +931,9 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
 
         # Newest message per flagged phone → tells "still waiting" from
         # "already replied (stale flag)".
-        last_by_phone: dict = {}
-        try:
-            cutoff = (now - timedelta(hours=lookback_hours)).isoformat()
-            log_rows = (
-                _client().table("conversation_log")
-                .select("phone,direction,body,created_at")
-                .gte("created_at", cutoff)
-                .order("created_at", desc=True)
-                .limit(4000)
-                .execute()
-                .data
-                or []
-            )
-            for lr in log_rows:               # desc order → first seen is newest
-                last_by_phone.setdefault(lr.get("phone"), lr)
-        except Exception as exc:
-            logger.error("chat_audit_snapshot last-message error: %s", exc)
+        last_by_phone = _latest_messages(
+            _client(), [r.get("phone") for r in rows], lookback_hours
+        )
 
         waiting, handled = [], []
         for r in rows:
