@@ -80,6 +80,59 @@ class TestAnswers:
             assert len(intent.icebreaker_reply(question)) > 80
 
 
+class TestAskingForAPrice:
+    """The longest list, because it is the thing people ask for most.
+
+    "Printing charges?" arrived from a live ad click on 21 Sep 2026, four
+    hours after the ice-breaker fix shipped, and was not in the list. It
+    worked out — the ad welcome carries the rate card — but by accident, and
+    what they got was the generic welcome rather than the rate breakdown they
+    had actually asked for.
+    """
+
+    @pytest.mark.parametrize("text", [
+        "Printing charges?",            # the real one, 21 Sep 2026
+        "printing charges",
+        "Printing charge",
+        "print charges",
+        "printing rate",
+        "Printing rates",
+        "print rate",
+        "printing cost",
+        "xerox rate",
+        "Xerox charges?",
+        "Charges",
+        "charge",
+        "cost",
+        "How much?",
+        "how much do you charge",
+        "What are the charges?",
+        "what is the rate",
+        "What are your rates?",
+        "Rate card",
+        "price list",
+        "prices",
+    ])
+    def test_it_is_answered_with_the_rate_breakdown(self, text):
+        answer = intent.icebreaker_reply(text)
+        assert answer is not None, f"{text!r} is not recognised as a price question"
+        assert "a sheet" in answer, "the answer must carry the actual rates"
+
+    def test_the_answer_still_asks_for_the_file(self):
+        """A price with no ask is a conversation that ends politely."""
+        assert "send your file" in intent.icebreaker_reply("Printing charges?").lower()
+
+    @pytest.mark.parametrize("text", [
+        "how much for 200 pages of my thesis",   # a real quote request
+        "what is the cost of spiral binding for 3 copies",
+    ])
+    def test_a_real_question_is_left_to_the_intent_layers(self, text):
+        """Matching is on the whole message, so a sentence that happens to
+        contain these words still reaches the classifier — which can route it
+        to the print flow instead of reciting a rate card at it."""
+        assert intent.icebreaker_reply(text) is None
+
+
 class TestRouting:
     @pytest.fixture
     def wire(self, monkeypatch):
