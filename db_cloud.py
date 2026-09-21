@@ -456,11 +456,19 @@ def upload_file(filename: str, content: bytes, mime_type: str) -> str:
 def log_message(phone: str, direction: str, body: str,
                 message_type: str = "text", filename: str | None = None,
                 job_id: str | None = None,
-                media_url: str | None = None) -> None:
-    """Insert a row into conversation_log. Silent on error — never raises."""
+                media_url: str | None = None,
+                channel: str = "whatsapp") -> None:
+    """Insert a row into conversation_log. Silent on error — never raises.
+
+    `channel` (v45) defaults to whatsapp, which is what every row written
+    before it existed means. An Instagram thread puts the IGSID in `phone`:
+    it is the only identity that person has, and the Conversations console
+    needs the channel to know it cannot dial it.
+    """
     try:
         _client().table("conversation_log").insert({
             "phone":        phone,
+            "channel":      channel,
             "direction":    direction,
             "message_type": message_type,
             "body":         (body or "")[:2000],
@@ -627,7 +635,7 @@ def undelivered_since(hours: int = 24) -> dict:
 
 
 def record_ad_click(phone: str, wamid: str, referral: dict,
-                    channel: str = "whatsapp") -> bool:
+                    channel: str = "whatsapp", igsid: str | None = None) -> bool:
     """Store a click-to-WhatsApp arrival and stamp first touch on the contact.
 
     Meta attaches `referral` to the first message after someone taps a
@@ -642,11 +650,16 @@ def record_ad_click(phone: str, wamid: str, referral: dict,
 
     Returns True when the click was stored.
     """
-    if not phone or not referral:
+    # Instagram identifies a person by IGSID and issues no phone number at all,
+    # so v45 made `phone` nullable behind a CHECK that one of the two is
+    # present. One identity or the other; never neither.
+    igsid = (igsid or "").strip() or None
+    if not (phone or igsid) or not referral:
         return False
 
     row = {
-        "phone":       phone,
+        "phone":       phone or None,
+        "igsid":       igsid,
         "channel":     channel,
         "wamid":       wamid or None,
         "source_type": referral.get("source_type"),
@@ -667,6 +680,12 @@ def record_ad_click(phone: str, wamid: str, referral: dict,
     else:
         client.table("ad_clicks").insert(row).execute()
 
+    # whatsapp_contacts is keyed on a phone number, so an Instagram click has
+    # no row to stamp here. instagram_threads carries its first touch instead,
+    # written by record_instagram_message on the same webhook turn.
+    if not phone:
+        return True
+
     # Ensure the contact row exists before stamping it. Sending only `phone`
     # cannot clear a name already stored by upsert_contact().
     client.table("whatsapp_contacts").upsert(
@@ -683,6 +702,95 @@ def record_ad_click(phone: str, wamid: str, referral: dict,
     }).eq("phone", phone).is_("first_ad_at", "null").execute()
 
     return True
+
+
+# ── Instagram Direct (SCHEMA v45) ────────────────────────────────────────────
+# Instagram has no phone number, so it cannot use whatsapp_contacts or the
+# conversation_log-based welcome guard. instagram_threads is the equivalent:
+# one row per person per business account, carrying first-touch attribution,
+# the welcome-once stamp and the needs_human flag the chat-audit digest reads.
+
+def get_instagram_thread(igsid: str) -> dict | None:
+    """The thread row for this IGSID, or None. Never raises."""
+    if not igsid:
+        return None
+    try:
+        rows = (_client().table("instagram_threads")
+                .select("*").eq("igsid", igsid).limit(1).execute())
+        return rows.data[0] if rows.data else None
+    except Exception as exc:
+        logger.warning("get_instagram_thread(%s) failed: %s", igsid, exc)
+        return None
+
+
+def touch_instagram_thread(igsid: str, *, username: str | None = None,
+                           name: str | None = None,
+                           inbound: bool = False, outbound: bool = False,
+                           welcomed: bool = False,
+                           needs_human: bool | None = None,
+                           first_ad: dict | None = None) -> bool:
+    """Create or update the thread row. Returns True when the write landed.
+
+    Errors propagate as False rather than an exception -- a DM must still be
+    answered when the bookkeeping fails -- but the caller reports it, because
+    a thread that is never stamped `welcomed_at` gets the ad welcome again on
+    the next message, forever.
+
+    `first_ad` is applied ONLY when the row has no first_ad_at, so the ad that
+    actually introduced the customer keeps the credit. That mirrors the
+    is_("first_ad_at", "null") guard record_ad_click uses on the WhatsApp side.
+    """
+    if not igsid:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    row: dict = {"igsid": igsid, "updated_at": now}
+    if username:
+        row["username"] = username
+    if name:
+        row["name"] = name
+    if inbound:
+        row["last_inbound_at"] = now
+    if outbound:
+        row["last_outbound_at"] = now
+    if welcomed:
+        row["welcomed_at"] = now
+    if needs_human is not None:
+        row["needs_human"] = bool(needs_human)
+
+    try:
+        client = _client()
+        client.table("instagram_threads").upsert(
+            row, on_conflict="igsid").execute()
+        if first_ad:
+            client.table("instagram_threads").update({
+                "first_ad_id":  first_ad.get("source_id"),
+                "first_ad_ref": first_ad.get("source_url"),
+                "first_ad_at":  now,
+            }).eq("igsid", igsid).is_("first_ad_at", "null").execute()
+        return True
+    except Exception as exc:
+        logger.error("touch_instagram_thread(%s) failed: %s", igsid, exc)
+        return False
+
+
+def instagram_waiting() -> dict:
+    """Instagram threads sitting on a human, for the chat-audit digest.
+
+    Returns {"waiting", "sample", "ok"}; `ok` False when the lookup failed, so
+    the caller never reads a broken query as "nobody is waiting".
+    """
+    out = {"waiting": 0, "sample": [], "ok": False}
+    try:
+        rows = (_client().table("instagram_threads")
+                .select("igsid,username,last_inbound_at")
+                .eq("needs_human", True)
+                .order("last_inbound_at", desc=True).limit(50).execute())
+        data = rows.data or []
+        out.update(waiting=len(data), ok=True,
+                   sample=[(r.get("username") or r.get("igsid")) for r in data[:5]])
+    except Exception as exc:
+        logger.warning("instagram_waiting failed: %s", exc)
+    return out
 
 
 # The webhook logs the bot's auto-reply a few hundred ms BEFORE the inbound that
@@ -792,6 +900,10 @@ def _sla_breaches_clientside(client, threshold_hours, lookback_hours) -> list[di
         client.table("conversation_log")
         .select("phone,direction,created_at")
         .gte("created_at", cutoff_iso)
+        # WhatsApp only, matching v45's sla_breaches(). An Instagram row puts
+        # an IGSID in `phone`, and the cooldown that stops this repeating
+        # itself lives in whatsapp_contacts, which an IGSID never matches.
+        .eq("channel", "whatsapp")
         .order("created_at", desc=True)
         .limit(SLA_FALLBACK_ROW_CAP)
         .execute()
@@ -927,6 +1039,11 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
                 _client().table("conversation_log")
                 .select("phone,direction,body,created_at")
                 .gte("created_at", cutoff)
+                # WhatsApp only. The Instagram queue is counted separately
+                # (instagram_threads.needs_human) because this digest's
+                # "unanswered" list is keyed on a phone number staff can open
+                # in the Conversations tab, and an IGSID is not one.
+                .eq("channel", "whatsapp")
                 .order("created_at", desc=True)
                 .limit(4000)
                 .execute()

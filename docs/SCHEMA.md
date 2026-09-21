@@ -20,11 +20,11 @@ This document is the canonical schema reference for the shared Supabase database
 
 | | |
 |---|---|
-| Tables | 36 |
+| Tables | 37 |
 | Views | 2 (`epson_daily`, `konica_daily`) |
 | Foreign keys | **1** (`referral_credits.referrer_code → referrers.code`) |
 | Tables without RLS | **2** (both 18 Aug incident backups) — see [Security gaps](#security-gaps) |
-| Owning products | printosky (31), osp-academics (1), shared (3) |
+| Owning products | printosky (32), osp-academics (1), shared (3) |
 
 The schema is heavily denormalized — only one FK exists in the whole database. Cross-table integrity is enforced at the application layer (or not at all). Worth documenting per-table; not worth a mass FK-introduction project.
 
@@ -328,9 +328,10 @@ Click-to-WhatsApp ad arrivals — the join between Meta ad spend and revenue.
 | Column | Type | Null | Default | Notes |
 |---|---|---|---|---|
 | `id` | bigserial | NO | sequence | **PK** |
-| `phone` | text | NO | — | WhatsApp number, or IG-scoped sender id |
-| `channel` | text | NO | `'whatsapp'` | `whatsapp` / `instagram` — only WhatsApp is wired up |
-| `wamid` | text | YES | — | **unique** — the message that carried the referral |
+| `phone` | text | **YES** | — | WhatsApp number. NULL on Instagram rows (v45) |
+| `igsid` | text | YES | — | Instagram-Scoped ID. NULL on WhatsApp rows (v45) |
+| `channel` | text | NO | `'whatsapp'` | `whatsapp` / `instagram` |
+| `wamid` | text | YES | — | **unique** — the message that carried the referral (a wamid, or an Instagram `mid`) |
 | `source_type` | text | YES | — | `ad` / `post` |
 | `source_id` | text | YES | — | Meta ad id — groups clicks per ad |
 | `source_url` | text | YES | — | |
@@ -342,7 +343,15 @@ Written by `_process_meta_webhook` from the `referral` object Meta attaches to
 the first message after an ad click. Meta sends it **once** and never resends
 it, so a failed write alerts rather than logging — see
 [FAIL_LOUD.md](FAIL_LOUD.md). Migration:
-[`api/migrations/SCHEMA_v42_ad_attribution.sql`](../api/migrations/SCHEMA_v42_ad_attribution.sql).
+[`api/migrations/SCHEMA_v42_ad_attribution.sql`](../api/migrations/SCHEMA_v42_ad_attribution.sql),
+extended for Instagram by
+[`SCHEMA_v45_instagram_dm.sql`](../api/migrations/SCHEMA_v45_instagram_dm.sql).
+
+`phone` and `igsid` are the two identities a click can arrive with, and a
+`CHECK` requires exactly one of them to be present. An IGSID is deliberately
+NOT stored in `phone`: `_normalize_phone()` strips every non-digit and
+prepends `91` to anything ten digits long, so an IGSID that went through it
+would come out as a phone number belonging to somebody else.
 Store PCs never read this table; it is cloud-only.
 
 Read back by `db_cloud.ad_report()` behind `GET /admin/ads/report?days=N`
@@ -359,6 +368,40 @@ reports it as `referred_revenue`, separate from direct. The live campaign
 classmates, so its clicker is worth ₹0 direct by design; scoring it on direct
 revenue alone would call a working ad a failure. An order is never counted in
 both halves.
+
+#### `instagram_threads` 🟦
+One row per person who has DMed the Printosky Instagram profile. The
+`whatsapp_contacts` of a channel with no phone numbers.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `igsid` | text | NO | — | **PK** — Instagram-Scoped ID: unique to this person *and* this business account |
+| `username` | text | YES | — | @handle, when Meta sends it |
+| `name` | text | YES | — | |
+| `first_ad_id` | text | YES | — | the ad that introduced them — first touch, never overwritten |
+| `first_ad_ref` | text | YES | — | the ad's `ref` payload |
+| `first_ad_at` | timestamptz | YES | — | |
+| `welcomed_at` | timestamptz | YES | — | the welcome-once guard |
+| `needs_human` | boolean | NO | `false` | what the chat-audit digest counts |
+| `last_inbound_at` / `last_outbound_at` | timestamptz | YES | — | |
+| `created_at` / `updated_at` | timestamptz | NO | `now()` | |
+
+Written by `api/index._handle_instagram_message`. Migration:
+[`api/migrations/SCHEMA_v45_instagram_dm.sql`](../api/migrations/SCHEMA_v45_instagram_dm.sql).
+
+**`welcomed_at` is a column here and a query on WhatsApp.** The WhatsApp side
+asks `conversation_log` whether an outbound exists since the click
+(`db_cloud.ad_welcome_already_sent`); a thread with no phone number cannot be
+looked up that way, and a welcome that fires on every message reads as a
+broken bot. Both err towards *already sent* on a failed lookup: one missing
+welcome is a single silent message, a repeating one is visibly broken.
+
+**Instagram is not in the SLA sweep.** `sla_breaches()` groups
+`conversation_log` by `phone`, and its cooldown lives in `whatsapp_contacts`,
+which an IGSID never matches — so an Instagram thread in that sweep would be
+alerted every 30 minutes forever. v45 filters the function to
+`channel = 'whatsapp'`; `needs_human` here plus the `instagram.queue`
+watchdog check is what watches this channel instead.
 
 #### `ad_conversions` 🟦
 What Meta was told back — the other half of `ad_clicks`.

@@ -15,6 +15,7 @@
     { "src": "/api/inngest",                          "dest": "/api/inngest.py" },
     { "src": "/api/inngest\\?(.*)",                   "dest": "/api/inngest.py" },
     { "src": "/whatsapp-webhook",                     "dest": "/api/index.py" },
+    { "src": "/instagram-webhook",                    "dest": "/api/index.py" },
     { "src": "/webhook/razorpay",                     "dest": "/api/index.py" },
     { "src": "/staff/(.*)",                           "dest": "/api/index.py" },
     { "src": "/admin/(.*)",                           "dest": "/api/index.py" },
