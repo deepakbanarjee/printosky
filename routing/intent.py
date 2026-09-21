@@ -350,59 +350,65 @@ def price_headlines() -> dict[str, str]:
         return {}
 
 
-def _send_quote_welcome(phone: str, name: str | None = None,
-                        icebreaker: str | None = None) -> bool:
-    """Answer a cold ad click with the thing the ad actually offered: a price.
+def quote_welcome_text(name: str | None = None,
+                       icebreaker: str | None = None) -> str:
+    """The words a cold ad click is answered with. One copy, both channels.
 
     The ad says "send your PDF on WhatsApp and skip the queue". So this says
-    the same, in the same thread, with a number attached -- and asks for the
-    file rather than sending them to a web form. Every step between the tap and
-    the PDF is a place the customer leaves; printosky.com/order is such a step,
-    and the one arrival who reached it (9 Sep) did leave.
+    the same, with a number attached -- and asks for the file rather than
+    sending them to a web form. Every step between the tap and the PDF is a
+    place the customer leaves; printosky.com/order is such a step, and the one
+    arrival who reached it (9 Sep) did leave.
 
     `icebreaker` is the shop's answer to the question they tapped on the way in
     (see ICE_BREAKERS). When there is one it REPLACES the generic body: someone
     who asked "Where are you located?" gets the address, not a rate card that
-    ignores them. It cannot be sent as a second message instead — the welcome
-    and _services_answer/_price_answer say much the same thing, and two of those
-    in a row reads as a bot talking to itself.
+    ignores them. It cannot be sent as a second message instead -- the welcome
+    and _services_answer/_price_answer say much the same thing, and two of
+    those in a row reads as a bot talking to itself.
 
-    Always returns True: unlike the referral welcome there is nothing to mint,
-    so there is no failure mode that leaves the customer with silence.
+    Pure, and public, because instagram_dm.py needs the same words: a customer
+    who finds the shop on Instagram should not meet a different business.
     """
-    p = price_headlines()
     hi = f"Hi {name}! " if name else "Hi! "
+    opener = (f"{hi}\U0001F44B You tapped our *skip the Xerox queue* ad — you are "
+              f"in the right place.\n\n")
     if icebreaker:
-        _send_text(phone, (
-            f"{hi}👋 You tapped our *skip the Xerox queue* ad — you are in the "
-            f"right place.\n\n"
-            f"{icebreaker}"
-        ))
-        return True
+        return opener + icebreaker
+
+    p = price_headlines()
     if p:
         rates = (
-            f"📄 A4 B&W, student rate: *₹{p['bw']} a sheet* — printed "
+            f"\U0001F4C4 A4 B&W, student rate: *₹{p['bw']} a sheet* — printed "
             f"double-sided that is *{p['per_page']}*, so a 100-page report is "
             f"about ₹{p['report_100']} of printing "
             f"(₹{p['bw_bulk']} a sheet over 100).\n"
-            f"🎨 A4 colour from *₹{p['colour']} a sheet* — and we slice out the "
-            f"plain text pages automatically, so you only pay colour for the "
+            f"\U0001F3A8 A4 colour from *₹{p['colour']} a sheet* — and we slice out "
+            f"the plain text pages automatically, so you only pay colour for the "
             f"pages that are actually colour.\n"
-            f"📚 Binding: spiral from *₹{p['spiral']}*, soft from *₹{p['soft']}*, "
-            f"hardbound project cover *₹{p['project']}*.\n\n"
+            f"\U0001F4DA Binding: spiral from *₹{p['spiral']}*, soft from "
+            f"*₹{p['soft']}*, hardbound project cover *₹{p['project']}*.\n\n"
         )
     else:
         rates = ""
-    _send_text(phone, (
-        f"{hi}👋 You tapped our *skip the Xerox queue* ad — you are in the "
-        f"right place.\n\n"
+    return opener + (
         f"*Send your PDF right here in this chat* and we'll quote you the exact "
         f"price in a minute. No app, no signup, no queue. Word, PowerPoint and "
         f"photos work too.\n\n"
         f"{rates}"
-        f"Ready when you are — just send the file. 🙏\n"
+        f"Ready when you are — just send the file. \U0001F64F\n"
         f"— Printosky, Thriprayar"
-    ))
+    )
+
+
+def _send_quote_welcome(phone: str, name: str | None = None,
+                        icebreaker: str | None = None) -> bool:
+    """Send quote_welcome_text on WhatsApp.
+
+    Always returns True: unlike the referral welcome there is nothing to mint,
+    so there is no failure mode that leaves the customer with silence.
+    """
+    _send_text(phone, quote_welcome_text(name, icebreaker))
     return True
 
 
@@ -572,7 +578,7 @@ def _location_answer() -> str:
     )
 
 
-def _how_to_order_answer() -> str:
+def how_to_order_answer() -> str:
     return (
         "It's one step 👇\n\n"
         "*Send your PDF (or Word file, or photos) right here in this chat.*\n\n"
@@ -600,9 +606,9 @@ ICE_BREAKERS: dict[str, "callable"] = {
     "where is your shop": _location_answer,
     "location": _location_answer,
 
-    "how do i order": _how_to_order_answer,
-    "how can i order": _how_to_order_answer,
-    "how does it work": _how_to_order_answer,
+    "how do i order": how_to_order_answer,
+    "how can i order": how_to_order_answer,
+    "how does it work": how_to_order_answer,
 }
 
 
