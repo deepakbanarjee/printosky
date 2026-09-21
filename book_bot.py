@@ -1600,6 +1600,21 @@ def maybe_handle_location(phone: str) -> list[str] | None:
     return []
 
 
+def _ad_welcome_owed(phone: str) -> bool:
+    """Is this the first message after a click-to-WhatsApp ad tap?
+
+    Never raises, and False on any doubt: this decides whether the book flow
+    stands down, so a broken lookup must leave the book flow exactly as it was
+    rather than quietly switch it off.
+    """
+    try:
+        from routing.intent import pending_ad_arrival
+        return pending_ad_arrival(phone) is not None
+    except Exception as exc:
+        logger.warning("ad-arrival check failed for %s: %s", phone, exc)
+        return False
+
+
 def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[str] | None:
     session = _dbc.get_session(DB, phone) or {}
     step = session.get("step") or ""
@@ -1624,6 +1639,18 @@ def maybe_handle_book(phone: str, text: str, name: str | None = None) -> list[st
             track = _maybe_tracking_reply(phone, text)
             if track is not None:
                 return track
+        # Somebody who just tapped an ad belongs to the ad, not to us. This runs
+        # above the front door in api/index._handle_text, and is_book_trigger
+        # matches "book" anywhere in the sentence — so on 19 Sep 2026 a print-ad
+        # click that opened with "Can I book an appointment?" was answered with
+        # the Malayalam book catalogue, got a book_orders row, and was nudged
+        # about it again three hours later. The check has to come BEFORE
+        # _maybe_book_enquiry and _start, because both of those create that row
+        # on the way to returning. It is gated on is_book_trigger so the common
+        # message, which is not book-ish at all, costs no extra queries; from
+        # the second message on, a real book enquiry lands here as usual.
+        if is_book_trigger(text) and _ad_welcome_owed(phone):
+            return None
         if not _in_print_flow(session):
             enquiry = _maybe_book_enquiry(phone, text, name)
             if enquiry is not None:

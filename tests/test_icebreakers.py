@@ -89,7 +89,7 @@ class TestRouting:
                             lambda phone: sent.append("<<GENERIC MENU>>"))
         monkeypatch.setattr(intent, "_pending_payment_reminder", lambda p, n: None)
         monkeypatch.setattr(intent, "_maybe_welcome_ad_arrival",
-                            lambda phone, name=None: False)
+                            lambda phone, name=None, icebreaker=None: False)
         monkeypatch.setattr(intent, "decide_intent", lambda t: "unknown")
         return sent
 
@@ -100,20 +100,83 @@ class TestRouting:
         assert "send your" in body.lower()
 
     def test_it_is_answered_once_not_twice(self, wire):
-        """The duplicate sends on 9 Sep were a person answering by hand from
-        the staff phone. One message."""
         intent.route_front_door("918907318168", "What services do you offer?")
         assert len(wire) == 1
 
-    def test_an_ad_welcome_suppresses_it(self, monkeypatch):
-        """The quote welcome already carries the rates and the ask; a
-        near-identical second message reads as a bot talking to itself."""
+
+class TestTheWelcomeCarriesTheAnswer:
+    """Meta delivers a tapped ice-breaker AS the message carrying `referral`.
+
+    So on the one message an ice-breaker can ever arrive on, the ad welcome is
+    firing too. The first version of this code answered the ice-breaker only
+    `if not welcomed`, which on that message is never true: four of the six ad
+    clicks between 17 and 19 Sep 2026 opened with one ("What services do you
+    offer?" three times, "Rate send me" once) and not one was answered. The
+    feature never fired in production at all.
+    """
+
+    @pytest.fixture
+    def wire(self, monkeypatch):
         sent: list[str] = []
+        got: dict = {}
         monkeypatch.setattr(intent, "_send_text", lambda phone, msg: sent.append(msg))
-        monkeypatch.setattr(intent, "_send_menu", lambda phone: None)
+        monkeypatch.setattr(intent, "_send_menu",
+                            lambda phone: sent.append("<<GENERIC MENU>>"))
         monkeypatch.setattr(intent, "_pending_payment_reminder", lambda p, n: None)
-        monkeypatch.setattr(intent, "decide_intent", lambda t: "unknown")
-        monkeypatch.setattr(intent, "_maybe_welcome_ad_arrival",
-                            lambda phone, name=None: sent.append("<<WELCOME>>") or True)
+        monkeypatch.setattr(intent, "decide_intent",
+                            lambda t: got.setdefault("intent_ran", True) and "unknown")
+
+        def _welcome(phone, name=None, icebreaker=None):
+            got["icebreaker"] = icebreaker
+            sent.append("<<WELCOME>>")
+            return True
+        monkeypatch.setattr(intent, "_maybe_welcome_ad_arrival", _welcome)
+        return sent, got
+
+    def test_the_welcome_is_handed_the_answer(self, wire):
+        sent, got = wire
+        intent.route_front_door("918907318168", "What services do you offer?")
+        assert got["icebreaker"] is not None
+        assert "send your" in got["icebreaker"].lower()
+
+    def test_still_exactly_one_message(self, wire):
+        """Welcome-then-answer would be two messages saying much the same
+        thing in a row, which reads as a bot talking to itself."""
+        sent, _ = wire
         intent.route_front_door("918907318168", "What services do you offer?")
         assert sent == ["<<WELCOME>>"]
+
+    def test_the_intent_layers_never_run_on_an_answered_question(self, wire):
+        """"Can I book an appointment?" classifies as `xtraa`. Letting the
+        intent layers run after the question was answered is how a print-ad
+        click got posted the Malayalam book catalogue on 19 Sep 2026."""
+        sent, got = wire
+        intent.route_front_door("918907318168", "How do I order?")
+        assert "intent_ran" not in got
+        assert sent == ["<<WELCOME>>"]
+
+
+class TestTheWelcomeItself:
+    @pytest.fixture
+    def sent(self, monkeypatch):
+        out: list[str] = []
+        monkeypatch.setattr(intent, "_send_text", lambda phone, msg: out.append(msg))
+        return out
+
+    def test_an_asked_question_replaces_the_rate_card(self, sent):
+        """Someone who asked where the shop is gets the address, not a wall of
+        prices that ignores them."""
+        intent._send_quote_welcome("918907318168", "Vishnu",
+                                   icebreaker=intent._location_answer())
+        assert len(sent) == 1
+        assert "Thriprayar" in sent[0]
+
+    def test_it_still_says_which_ad_they_came_from(self, sent):
+        intent._send_quote_welcome("918907318168", None,
+                                   icebreaker=intent._location_answer())
+        assert "Xerox queue" in sent[0]
+
+    def test_no_question_means_the_ordinary_welcome(self, sent):
+        intent._send_quote_welcome("918907318168", "Vishnu")
+        assert len(sent) == 1
+        assert "Send your PDF right here in this chat" in sent[0]

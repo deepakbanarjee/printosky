@@ -57,7 +57,9 @@ BUDGET = {
     "whatsapp_bot.py": 3,
     "whatsapp_notify.py": 3,
     "work_session_tracker.py": 1,
-    "api/handlers_admin.py": 4,
+    "api/handlers_admin.py": 2,   # 4 -> 2: /admin/send's duplicate log_message
+                                  # went, and the book-order relay's swallowed
+                                  # send now reports (2026-09-20)
     "api/handlers_pb.py": 1,
     "api/index.py": 8,
     "api/inngest.py": 2,
