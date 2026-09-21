@@ -595,12 +595,37 @@ ICE_BREAKERS: dict[str, "callable"] = {
     "what services do you provide": _services_answer,
     "services": _services_answer,
 
+    # "Printing charges?" arrived from a live ad click on 21 Sep 2026 and was
+    # not in this list. It worked out — the welcome carries the rate card — but
+    # it worked by accident, and the answer they got was the generic one rather
+    # than the rate breakdown they asked for. People ask for a price in more
+    # ways than they ask for anything else, so this list is the longest.
     "what are your prices": _price_answer,
     "what is the price": _price_answer,
+    "what is the rate": _price_answer,
+    "what are the charges": _price_answer,
+    "what are your rates": _price_answer,
     "how much does it cost": _price_answer,
+    "how much do you charge": _price_answer,
+    "how much": _price_answer,
     "price": _price_answer,
+    "prices": _price_answer,
+    "price list": _price_answer,
     "rate": _price_answer,
     "rates": _price_answer,
+    "rate card": _price_answer,
+    "charges": _price_answer,
+    "charge": _price_answer,
+    "cost": _price_answer,
+    "printing charges": _price_answer,
+    "printing charge": _price_answer,
+    "print charges": _price_answer,
+    "printing rate": _price_answer,
+    "printing rates": _price_answer,
+    "print rate": _price_answer,
+    "printing cost": _price_answer,
+    "xerox rate": _price_answer,
+    "xerox charges": _price_answer,
 
     "where are you located": _location_answer,
     "where is your shop": _location_answer,
