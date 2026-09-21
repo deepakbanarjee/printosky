@@ -908,29 +908,13 @@ def _session_is_stale(session: dict) -> bool:
         return False
 
 
-# Short acknowledgements / option inputs that should NOT trigger a human handoff.
-_HANDOFF_NOOP = {
-    "ok", "okay", "k", "kk", "thanks", "thank you", "thankyou", "ty", "tq",
-    "done", "good", "great", "nice", "fine", "cool", "yes", "no", "y", "n",
-    "👍", "🙏", "ശരി", "നന്ദി", "ഓക്കെ",
-}
-
-
+# The handoff heuristic and the handoff itself live in routing/handoff.py, so
+# the front door (routing.intent) can reach them too — it could not import them
+# from here without a cycle, which is half of why ad arrivals never got one.
 def _should_handoff_text(text: str) -> bool:
-    """Heuristic: is this free-text worth routing to a human (vs ignoring)?
-
-    True for real questions/sentences; False for courtesy words, bare digits/
-    option taps, emoji, and very short inputs.
-    """
-    t = (text or "").strip()
-    if len(t) < 3:
-        return False
-    if t.lower() in _HANDOFF_NOOP:
-        return False
-    # Needs a couple of letters (any script) — filters bare digits, punctuation
-    # and emoji, while accepting Malayalam, where combining vowel marks would
-    # break a consecutive-letter run.
-    return sum(1 for ch in t if ch.isalpha()) >= 2
+    """Heuristic: is this free-text worth routing to a human (vs ignoring)?"""
+    from routing.handoff import should_handoff_text
+    return should_handoff_text(text)
 
 
 # ── Known B2B vendors (toner / supply buyers) ────────────────────────────────
@@ -1199,18 +1183,8 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     # until staff resume (and auto-clears once the session goes stale).
     if (not handled) and customer_is_idle and (not customer_is_new) \
             and _should_handoff_text(text):
-        try:
-            from db_cloud import save_session
-            _mark_session_needs_human(sender)
-            save_session("supabase", sender, step="staff_hold", needs_human=True)
-            _send(sender, "🙏 Thanks for your message — a team member will reply to "
-                          "you shortly. You can keep typing in the meantime.")
-            send_staff_alert(
-                f"🤖→🧑 Bot couldn't handle a message from {_fmt_phone(sender)}: "
-                f"\"{text.strip()[:80]}\". Open Conversations → 'Needs human'."
-            )
-        except Exception as e:
-            logger.error(f"Human handoff error for {sender}: {e}")
+        from routing.handoff import hand_off_to_human
+        hand_off_to_human(sender, text, "Bot couldn't handle a message")
 
 
 def _handle_media(sender: str, msg_type: str, media_id: str,
@@ -2636,6 +2610,28 @@ def _handle_track(h, code: str) -> None:
 
 
 
+def _report_undelivered_messages(hours: int = 24) -> dict:
+    """Read the undelivered rollup and report it once. Never raises."""
+    from db_cloud import undelivered_since
+    snap = undelivered_since(hours)
+    try:
+        from ops_watchdog import report
+        if not snap.get("ok"):
+            report("whatsapp.delivery", False,
+                   "could not check whether recent replies were delivered")
+        elif snap["failed"]:
+            report("whatsapp.delivery", False,
+                   f"{snap['failed']} messages to {snap['recipients']} people "
+                   f"were accepted by WhatsApp and never delivered in the last "
+                   f"{hours}h — usually the 24h reply window closing, so those "
+                   f"customers were answered into thin air.")
+        else:
+            report("whatsapp.delivery", True, "every recent reply was delivered")
+    except Exception as exc:
+        logger.error("could not report undelivered messages: %s", exc)
+    return snap
+
+
 def _handle_cron_chat_audit(h) -> None:
     """GET /cron/chat-audit — twice-daily (10:00 & 18:00 IST) chat-health digest.
 
@@ -2705,7 +2701,19 @@ def _handle_cron_chat_audit(h) -> None:
                 lines.append(f"• {_fmt_phone(p['phone'])} ({age_s}){note_s}")
             if len(pinned) > 10:
                 lines.append(f"  …and {len(pinned) - 10} more")
+        # Replies WhatsApp accepted and then dropped. Invisible everywhere else:
+        # the send returns 200, the console says nothing, and the customer is
+        # simply never answered. Reported here rather than from the status
+        # callback because that runs on Vercel, where ops_watchdog keeps no
+        # state between invocations and so could not dedup a burst.
+        undelivered = _report_undelivered_messages()
         lines.append("")
+        if undelivered.get("failed"):
+            sample = ", ".join("…" + (p or "")[-4:] for p in undelivered["sample"])
+            lines.append(f"📵 *Not delivered (24h): {undelivered['failed']}* to "
+                         f"{undelivered['recipients']} people ({sample})")
+            lines.append("  Usually the 24h reply window — answer sooner, or "
+                         "use a template.")
         lines.append(f"📥 Inbound (24h): {inbound_24h}")
         lines.append("Open printosky.com/admin → *Conversations* → 'Needs human'.")
         msg = "\n".join(lines)
@@ -2730,6 +2738,7 @@ def _handle_cron_chat_audit(h) -> None:
             "resolved": resolved,
             "unanswered": len(unanswered),
             "pinned": len(pinned),
+            "undelivered": undelivered.get("failed", 0),
             "alerted": bool(sent),
         })
     except Exception as exc:

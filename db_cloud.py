@@ -493,6 +493,38 @@ def has_recent_outbound(phone: str, minutes: int = 5) -> bool:
         return False
 
 
+# Meta lets a business send free-form text only within 24h of the customer's
+# last message. Past that, the API still returns 200 and the message is
+# silently dropped — which is how an ad lead who asked a question at 09:53 on
+# 19 Sep got their answer typed at 13:08 the next day, 27h15m later, into
+# nothing at all.
+WA_SERVICE_WINDOW_HOURS = 24.0
+WA_WINDOW_WARN_HOURS = 20.0
+
+
+def hours_since_last_inbound(phone: str) -> float | None:
+    """Age in hours of this customer's most recent message to us.
+
+    None when we have never heard from them, or the lookup failed — the caller
+    must treat that as "unknown", never as "plenty of time left".
+    """
+    try:
+        from datetime import datetime, timezone
+        rows = (_client().table("conversation_log")
+                .select("created_at")
+                .eq("phone", phone).eq("direction", "inbound")
+                .order("created_at", desc=True).limit(1).execute())
+        if not rows.data:
+            return None
+        last = datetime.fromisoformat(str(rows.data[0]["created_at"]).replace("Z", "+00:00"))
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - last).total_seconds() / 3600.0
+    except Exception as exc:
+        logger.warning("hours_since_last_inbound(%s) failed: %s", phone, exc)
+        return None
+
+
 # ── WhatsApp (Meta) per-message cost tracking ─────────────────────────────────
 # Meta never returns a money amount, but each outbound message's status callback
 # carries a `pricing` object: category (service / marketing / utility /
@@ -548,6 +580,49 @@ def record_wa_message_cost(wamid: str, recipient: str | None, status: str | None
         _client().table("wa_message_costs").upsert(row, on_conflict="wamid").execute()
     except Exception as exc:
         logger.warning("record_wa_message_cost error for %s: %s", wamid, exc)
+
+    if (status or "").lower() == "failed":
+        logger.warning("WhatsApp would not deliver %s to %s", wamid[:24],
+                       recipient or "?")
+
+
+def undelivered_since(hours: int = 24) -> dict:
+    """Messages Meta accepted and then did not deliver, over a recent window.
+
+    A 'failed' status means the send returned 200 and the customer got
+    nothing — almost always the 24-hour reply window closing, which no error at
+    send time can report. It was being written to a table nobody reads: 118 of
+    September's 761 messages, 15.5%, never arrived, including the staff answer
+    to an ad lead who had been waiting 27 hours.
+
+    This is a ROLLUP on purpose. The obvious place for the alert is the status
+    callback itself, but that runs on Vercel, where ops_watchdog has no SQLite
+    to remember an alert in and so cannot dedup — the 116 failures of 10 Sep
+    would have been 116 WhatsApps. The chat-audit cron reads this twice a day
+    and reports it once, which is also what lets the check announce its own
+    recovery.
+
+    Returns {"failed", "recipients", "sample", "window_hours"}; all zero/empty
+    when the lookup fails, with `ok` False so the caller does not read a broken
+    query as good news.
+    """
+    out = {"failed": 0, "recipients": 0, "sample": [], "window_hours": hours,
+           "ok": False}
+    try:
+        from datetime import datetime, timezone, timedelta
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        rows = (_client().table("wa_message_costs")
+                .select("recipient,created_at")
+                .eq("status", "failed").gte("created_at", since)
+                .order("created_at", desc=True).limit(500).execute())
+        people = [r.get("recipient") for r in (rows.data or []) if r.get("recipient")]
+        out.update(failed=len(rows.data or []),
+                   recipients=len(set(people)),
+                   sample=sorted(set(people))[:5],
+                   ok=True)
+    except Exception as exc:
+        logger.warning("undelivered_since(%s) failed: %s", hours, exc)
+    return out
 
 
 

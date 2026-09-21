@@ -200,15 +200,28 @@ class TestAdArrivalWithAnIntent:
         assert "printosky.com/order" in body, "the thing they asked for"
         assert "<<GENERIC MENU>>" not in body
 
-    def test_a_books_intent_from_an_ad_still_opens_books(self, wire, monkeypatch):
+    def test_no_book_catalog_rides_along_with_a_print_ad_welcome(self, wire,
+                                                                 monkeypatch):
+        """It used to, and that was wrong.
+
+        The ad is "skip the Xerox queue". A book catalogue is a different
+        product, and `xtraa` is what the classifier returns for any sentence
+        containing the word "book" -- which is how the 19 Sep 2026 arrival who
+        asked "Can I book an appointment?" was answered with the Malayalam book
+        list and then nudged about the cart three hours later.
+
+        Nobody who actually wants books loses them: the welcome goes out, and
+        their next message opens the catalogue as usual, because the welcome
+        only fires once.
+        """
         sent, state = wire
         state["ad"] = _ad()
         opened: list[str] = []
         monkeypatch.setattr(intent, "decide_intent", lambda t: "xtraa")
         monkeypatch.setattr(intent, "_open_books",
                             lambda phone, name: opened.append(phone))
-        intent.route_front_door("919233255016", "books")
-        assert opened == ["919233255016"]
+        intent.route_front_door("919233255016", "Can I book an appointment?")
+        assert opened == []
         assert "send your pdf" in "\n".join(sent).lower()
 
 

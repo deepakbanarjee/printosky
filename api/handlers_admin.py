@@ -83,6 +83,32 @@ def _clear_needs_human(phone: str) -> None:
         logger.warning(f"_clear_needs_human({phone}) failed: {exc}")
 
 
+def _service_window_warning(phone: str) -> str | None:
+    """Tell staff when a free-form reply is about to stop being deliverable.
+
+    Meta drops free-form text sent more than 24h after the customer's last
+    message, and returns 200 doing it — the only trace is a `failed` status
+    callback hours later. The console showed nothing at all, so a reply typed
+    27 hours late looked exactly like one that arrived.
+    """
+    try:
+        from db_cloud import (WA_SERVICE_WINDOW_HOURS, WA_WINDOW_WARN_HOURS,
+                              hours_since_last_inbound)
+        hours = hours_since_last_inbound(phone)
+        if hours is None or hours < WA_WINDOW_WARN_HOURS:
+            return None
+        if hours >= WA_SERVICE_WINDOW_HOURS:
+            return (f"The 24-hour reply window closed {hours - WA_SERVICE_WINDOW_HOURS:.0f}h "
+                    f"ago (they last wrote {hours:.0f}h ago). WhatsApp will most "
+                    f"likely drop this message without telling you — use an "
+                    f"approved template to reopen the conversation.")
+        return (f"They last wrote {hours:.0f}h ago. Free-form replies stop being "
+                f"delivered at 24h.")
+    except Exception as exc:
+        logger.warning(f"_service_window_warning({phone}) failed: {exc}")
+        return None
+
+
 def _handle_admin_send(h, body: bytes) -> None:
     """POST /admin/send — staff manually sends a WhatsApp message to a customer."""
     try:
@@ -106,15 +132,16 @@ def _handle_admin_send(h, body: bytes) -> None:
 
     from whatsapp_notify import _send
     try:
+        warning = _service_window_warning(phone)
         ok = _send(phone, message)
         if ok:
-            try:
-                from db_cloud import log_message
-                log_message(phone, "outbound", message, message_type="text")
-            except Exception:
-                pass
+            # whatsapp_notify._send already logged this to conversation_log on
+            # the way out. Logging it again here put every staff reply in the
+            # thread twice, ~0.3s apart, which made the transcript, the audit
+            # and every reply-latency number read wrong.
             _clear_needs_human(phone)   # staff replied → drop the SOS pill
-            _json_response(h, 200, {"ok": True})
+            _json_response(h, 200, {"ok": True, "warning": warning} if warning
+                           else {"ok": True})
             logger.info(f"Admin manually sent message to {phone}")
         else:
             _json_response(h, 502, {"error": "WhatsApp send failed"})
@@ -154,14 +181,16 @@ def _handle_admin_start_book_order(h, body: bytes) -> None:
         # on (re-issues that prompt) instead of wiping their items/address. A
         # customer with no cart yet just gets the opening book list.
         relay = book_bot.resume_order(phone)
+        from ops_watchdog import guard
         from whatsapp_notify import _send
-        from db_cloud import log_message
         for msg in (relay or []):
-            try:
-                if _send(phone, msg):
-                    log_message(phone, "outbound", msg, message_type="text")
-            except Exception:
-                pass
+            # _send logs the outbound itself; logging it again here duplicated
+            # every line of the resumed cart in the transcript.
+            with guard("admin.book_resume",
+                       f"could not relay a resumed book order to {phone}",
+                       reraise=False):
+                if not _send(phone, msg):
+                    raise RuntimeError("WhatsApp send returned False")
         _clear_needs_human(phone)   # staff acted -> drop the SOS pill
         _json_response(h, 200, {"ok": True})
         logger.info(f"Admin started book order flow for {phone}")
