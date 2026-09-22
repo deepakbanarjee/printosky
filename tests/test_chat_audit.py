@@ -28,6 +28,9 @@ class _Query:
     def eq(self, *a, **k):
         return self
 
+    def in_(self, *a, **k):
+        return self
+
     def gte(self, *a, **k):
         return self
 
@@ -45,12 +48,35 @@ class _Query:
 
 
 class _Client:
+    """Stands in for the Supabase client, including the SCHEMA_v45 RPC.
+
+    chat_audit_snapshot asks Postgres for the newest message per flagged phone
+    (db_cloud._latest_messages). Emulating that here keeps these tests on the
+    same path production takes; without `rpc` they would silently exercise only
+    the fallback. The SQL itself is verified separately, against a real
+    Postgres, in tests/test_latest_messages_sql.py.
+    """
+
     def __init__(self, sessions, logs=None):
         self._sessions = sessions
         self._logs = logs or []
 
     def table(self, name):
         return _Query(self._sessions if name == "bot_sessions" else self._logs)
+
+    def rpc(self, name, params):
+        if name != "latest_messages":
+            raise AssertionError(f"unexpected rpc: {name}")
+        wanted = set(params.get("phones") or [])
+        newest: dict = {}
+        for row in self._logs:
+            phone = row.get("phone")
+            if phone not in wanted:
+                continue
+            best = newest.get(phone)
+            if best is None or row.get("created_at", "") > best.get("created_at", ""):
+                newest[phone] = row
+        return _Query(list(newest.values()))
 
 
 def _isolate(monkeypatch, sessions, logs=None):

@@ -2832,6 +2832,15 @@ def _handle_cron_chat_audit(h) -> None:
                 resolved += 1
 
         lines = ["🗒️ *Printosky chat audit*", ""]
+        # A sweep running on a lossy fallback is reported here rather than left
+        # in a log: the digest is the channel a human already reads, and it is
+        # bounded to twice a day (docs/FAIL_LOUD.md).
+        degraded = snap.get("degraded") or []
+        if degraded:
+            lines.append("⚠️ *This audit is degraded*")
+            for d in degraded:
+                lines.append(f"• {d}")
+            lines.append("")
         if handoffs:
             lines.append(f"🧑 *Waiting for a human: {len(handoffs)}*")
             for hf in handoffs[:10]:

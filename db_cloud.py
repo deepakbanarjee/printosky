@@ -877,6 +877,10 @@ def _sla_breaches_rpc(client, threshold_hours, lookback_hours) -> list[dict] | N
             "client-side sweep. Apply api/migrations/SCHEMA_v44_sla_breaches_rpc.sql.",
             exc,
         )
+        _note_degraded(
+            "SLA sweep is on the capped fallback — a waiting customer can go "
+            "unreported. Apply SCHEMA_v44_sla_breaches_rpc.sql."
+        )
         return None
     return [
         {"phone": r.get("phone"), "last_inbound_at": r.get("last_inbound_at")}
@@ -989,6 +993,130 @@ def _is_handoff_ack(body: str) -> bool:
     return any(m in b for m in _HANDOFF_ACK_MARKERS)
 
 
+#: Row ceiling for the fallback path only. The RPC has no equivalent — it
+#: returns one row per phone by construction. See _latest_messages_clientside.
+LATEST_MESSAGES_FALLBACK_ROW_CAP = 4000
+
+#: Lookups that ran on a lossy fallback during this invocation.
+#:
+#: A log line is not an alert (docs/FAIL_LOUD.md), and a migration that never
+#: gets applied would otherwise leave these sweeps quietly lossy forever. This
+#: is read by chat_audit_snapshot and printed in the twice-daily digest a human
+#: actually reads.
+#:
+#: Why not ops_watchdog.report() here: its repeat-suppression lives in SQLite,
+#: and on Vercel _db_path() resolves to None (the store's Windows path is
+#: rejected on POSIX), so state is in-memory and dies with the container. Each
+#: cold start would look like a first failure and alert again — measured at up
+#: to 48/day for the 30-minute SLA cron, against metered outbound messages.
+#: The digest is bounded to twice a day and reaches the same person.
+_degraded: list[str] = []
+
+
+def _note_degraded(what: str) -> None:
+    if what not in _degraded:
+        _degraded.append(what)
+
+
+def take_degraded() -> list[str]:
+    """Drain the degradations recorded so far, for the caller to report."""
+    out = list(_degraded)
+    _degraded.clear()
+    return out
+
+
+def _latest_messages_rpc(client, phones, lookback_hours) -> dict | None:
+    """Newest conversation_log row per phone, from Postgres (SCHEMA_v46).
+
+    Returns {phone: row} — possibly empty, which is a real answer — or None
+    when the RPC could not be used at all, so the caller can fall back.
+    """
+    try:
+        resp = client.rpc("latest_messages", {
+            "phones":         list(phones),
+            "lookback_hours": float(lookback_hours),
+        }).execute()
+    except Exception as exc:
+        logger.warning(
+            "latest_messages RPC unavailable (%s) — falling back to the capped "
+            "log scan. Apply api/migrations/SCHEMA_v46_latest_messages_rpc.sql.",
+            exc,
+        )
+        _note_degraded(
+            "chat-audit last-message lookup is on the capped fallback — "
+            "an already-answered chat can show as still waiting. "
+            "Apply SCHEMA_v46_latest_messages_rpc.sql."
+        )
+        return None
+    return {r["phone"]: r for r in (resp.data or []) if r.get("phone")}
+
+
+def _latest_messages_clientside(client, phones, lookback_hours) -> dict:
+    """The original scan: pull the log and keep the first row seen per phone.
+
+    Fallback only, and lossy. It reads every phone's messages to answer about a
+    handful, and its cap drops a flagged phone whose newest message falls
+    outside the newest LATEST_MESSAGES_FALLBACK_ROW_CAP rows — which reads as
+    "no reply yet" and reports an already-handled chat as still waiting.
+
+    The phone filter is new here: the old query had none, so this is strictly
+    less lossy than what it replaced even before the RPC exists.
+    """
+    from datetime import timedelta
+
+    wanted = [p for p in phones if p]
+    if not wanted:
+        return {}
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
+    log_rows = (
+        client.table("conversation_log")
+        .select("phone,direction,body,created_at")
+        .in_("phone", wanted)
+        .gte("created_at", cutoff)
+        # WhatsApp only, matching the RPC and SCHEMA_v45's reasoning: Instagram
+        # rows carry an IGSID in the phone column, and this digest is keyed on a
+        # number staff can open in the Conversations tab.
+        .eq("channel", "whatsapp")
+        .order("created_at", desc=True)
+        .limit(LATEST_MESSAGES_FALLBACK_ROW_CAP)
+        .execute()
+        .data
+        or []
+    )
+    if len(log_rows) >= LATEST_MESSAGES_FALLBACK_ROW_CAP:
+        logger.warning(
+            "chat-audit fallback hit its %d-row cap — a flagged chat may be "
+            "reported as waiting when it was already answered. Apply SCHEMA_v46.",
+            LATEST_MESSAGES_FALLBACK_ROW_CAP,
+        )
+
+    out: dict = {}
+    for lr in log_rows:                   # desc order → first seen is newest
+        out.setdefault(lr.get("phone"), lr)
+    return out
+
+
+def _latest_messages(client, phones, lookback_hours) -> dict:
+    """Newest message per phone, server-side where available.
+
+    Never raises: the chat audit is a digest, and one missing lookup must not
+    cost the whole snapshot. An empty result is indistinguishable from "no
+    messages", which is the same answer the row scan gave on failure.
+    """
+    wanted = [p for p in phones if p]
+    if not wanted:
+        return {}
+    try:
+        found = _latest_messages_rpc(client, wanted, lookback_hours)
+        if found is None:
+            found = _latest_messages_clientside(client, wanted, lookback_hours)
+        return found
+    except Exception as exc:
+        logger.error("chat_audit_snapshot last-message error: %s", exc)
+        return {}
+
+
 def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
                         lookback_hours: int = 336) -> dict:
     """Read-only snapshot for the twice-daily chat audit (AM/PM).
@@ -1004,8 +1132,6 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
       counts:        {inbound, jobs, hours} from activity_counts(24h).
       pinned:        chats staff pinned for manual follow-up (list_pinned_contacts).
     """
-    from datetime import timedelta
-
     def _parse(ts):
         # last_help_request_at is timestamptz (aware); updated_at is TEXT and
         # often naive ("2026-06-13 06:37:10"). Force UTC so the subtraction from
@@ -1017,7 +1143,7 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
             return None
 
     out = {"open_handoffs": [], "handled_stale": [], "unanswered": [],
-           "counts": {}, "pinned": []}
+           "counts": {}, "pinned": [], "degraded": []}
     now = datetime.now(timezone.utc)
 
     try:
@@ -1031,29 +1157,13 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
         )
 
         # Newest message per flagged phone → tells "still waiting" from
-        # "already replied (stale flag)".
-        last_by_phone: dict = {}
-        try:
-            cutoff = (now - timedelta(hours=lookback_hours)).isoformat()
-            log_rows = (
-                _client().table("conversation_log")
-                .select("phone,direction,body,created_at")
-                .gte("created_at", cutoff)
-                # WhatsApp only. The Instagram queue is counted separately
-                # (instagram_threads.needs_human) because this digest's
-                # "unanswered" list is keyed on a phone number staff can open
-                # in the Conversations tab, and an IGSID is not one.
-                .eq("channel", "whatsapp")
-                .order("created_at", desc=True)
-                .limit(4000)
-                .execute()
-                .data
-                or []
-            )
-            for lr in log_rows:               # desc order → first seen is newest
-                last_by_phone.setdefault(lr.get("phone"), lr)
-        except Exception as exc:
-            logger.error("chat_audit_snapshot last-message error: %s", exc)
+        # "already replied (stale flag)". WhatsApp only: the Instagram queue is
+        # counted separately (instagram_threads.needs_human) because this
+        # digest's list is keyed on a phone number staff can open in the
+        # Conversations tab, and an IGSID is not one (SCHEMA_v45).
+        last_by_phone = _latest_messages(
+            _client(), [r.get("phone") for r in rows], lookback_hours
+        )
 
         waiting, handled = [], []
         for r in rows:
@@ -1101,6 +1211,10 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
         out["pinned"] = list_pinned_contacts()
     except Exception as exc:
         logger.error("chat_audit_snapshot pinned error: %s", exc)
+
+    # Anything that ran on a lossy fallback goes in the digest a human reads,
+    # rather than only into a log nobody opens (docs/FAIL_LOUD.md).
+    out["degraded"] = take_degraded()
 
     return out
 
