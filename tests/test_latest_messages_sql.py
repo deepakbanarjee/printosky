@@ -1,5 +1,5 @@
 """
-The SQL in SCHEMA_v45 must agree with the row scan it replaces.
+The SQL in SCHEMA_v46 must agree with the row scan it replaces.
 
 Same contract as tests/test_sla_breaches_sql.py: the Python is the reference
 implementation and stays in the tree as the fallback, so both are run over the
@@ -7,7 +7,7 @@ same rows — the Python in process, the SQL in a real Postgres — and asserted
 produce identical output.
 
 Also pins two claims the migration makes:
-  * the existing (phone, created_at DESC) index serves DISTINCT ON, so v45 adds
+  * the existing (phone, created_at DESC) index serves DISTINCT ON, so v46 adds
     no index of its own
   * the result is one row per phone regardless of how many messages exist,
     which is what removes the 4000-row cap's misreporting
@@ -27,10 +27,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 
-_MIGRATION = os.path.join(
-    os.path.dirname(__file__), "..", "api", "migrations",
-    "SCHEMA_v45_latest_messages_rpc.sql",
-)
+def _migration(name):
+    return os.path.join(os.path.dirname(__file__), "..", "api", "migrations", name)
+
+
+# v45 adds conversation_log.channel, which v46's function filters on. Applied in
+# order so what the tests run against is what production runs.
+_MIGRATIONS = [_migration("SCHEMA_v45_instagram_dm.sql"),
+               _migration("SCHEMA_v46_latest_messages_rpc.sql")]
 
 # Mirrors SCHEMA_v11, including the index whose existence v45 relies on.
 _SCHEMA = """
@@ -47,6 +51,21 @@ CREATE TABLE public.conversation_log (
 );
 CREATE INDEX idx_conversation_log_phone_created
     ON public.conversation_log (phone, created_at DESC);
+
+-- v45 also alters ad_clicks and creates instagram_threads on its way to adding
+-- conversation_log.channel. Stubbed to the columns it touches so the migration
+-- applies here exactly as in production, rather than being excerpted — an
+-- excerpt is a second copy of the SQL that can drift from the real one.
+DROP TABLE IF EXISTS public.ad_clicks CASCADE;
+CREATE TABLE public.ad_clicks (
+    id          BIGSERIAL PRIMARY KEY,
+    phone       TEXT NOT NULL,
+    channel     TEXT NOT NULL DEFAULT 'whatsapp',
+    wamid       TEXT UNIQUE,
+    source_id   TEXT,
+    clicked_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+DROP TABLE IF EXISTS public.instagram_threads CASCADE;
 DO $$ BEGIN CREATE ROLE service_role; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 """
 
@@ -77,8 +96,9 @@ def dsn():
     except Exception as exc:
         pytest.skip(f"Postgres not reachable: {exc}")
     _psql(_SCHEMA, d)
-    with open(_MIGRATION, encoding="utf-8") as fh:
-        _psql(fh.read(), d)
+    for path in _MIGRATIONS:
+        with open(path, encoding="utf-8") as fh:
+            _psql(fh.read(), d)
     return d
 
 
@@ -201,6 +221,43 @@ class TestAgreement:
     def test_null_body_reads_as_empty(self, run_both):
         sql, _ = run_both([("+911", "inbound", "", 5)], ["+911"])
         assert sql["+911"] == ("inbound", "")
+
+
+class TestChannelScoping:
+    """SCHEMA_v45 put Instagram in conversation_log with an IGSID in the phone
+    column. The chat-audit digest is keyed on a number staff can open in the
+    Conversations tab, so this lookup stays WhatsApp-only — the same decision
+    v45 made for sla_breaches()."""
+
+    def test_instagram_rows_are_not_returned(self, dsn):
+        _psql("TRUNCATE public.conversation_log;", dsn)
+        _psql(
+            "INSERT INTO public.conversation_log "
+            "(phone, direction, body, channel, created_at) VALUES "
+            "('+911','outbound','wa reply','whatsapp', now() - interval '20 minutes'),"
+            "('+911','inbound','ig dm','instagram', now() - interval '5 minutes');",
+            dsn,
+        )
+        out = _psql(
+            "SELECT phone, direction, body FROM public.latest_messages("
+            "ARRAY['+911']::text[], 336);", dsn, want_rows=True)
+
+        # The Instagram row is NEWER. Without the channel filter it would win
+        # and the chat would read as still waiting on us.
+        assert out.strip().split(_SEP) == ["+911", "outbound", "wa reply"]
+
+    def test_a_phone_with_only_instagram_rows_is_absent(self, dsn):
+        _psql("TRUNCATE public.conversation_log;", dsn)
+        _psql(
+            "INSERT INTO public.conversation_log "
+            "(phone, direction, body, channel, created_at) VALUES "
+            "('igsid_123','inbound','hello','instagram', now() - interval '5 minutes');",
+            dsn,
+        )
+        out = _psql(
+            "SELECT phone FROM public.latest_messages("
+            "ARRAY['igsid_123']::text[], 336);", dsn, want_rows=True)
+        assert out.strip() == ""
 
 
 class TestRandomisedAgreement:

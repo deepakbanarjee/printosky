@@ -5589,7 +5589,7 @@ async function sendConvMessage() {
   ta.value = '';
   ta.style.height = '';
   try {
-    await fetch(`${ACAD_API}/admin/send`, {
+    const r = await fetch(`${ACAD_API}/admin/send`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
@@ -5598,7 +5598,16 @@ async function sendConvMessage() {
         message: msg,
       }),
     });
-  } catch (e) { console.error('[conv] send failed', e); }
+    // A refused send used to be logged to a console nobody has open, so a
+    // reply typed outside the 24h window looked exactly like a delivered one.
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      ta.value = msg;                       // don't lose what they typed
+      alert('Not sent — ' + (out.error || ('HTTP ' + r.status)));
+      return;
+    }
+    if (out.warning) alert('⚠️ ' + out.warning);
+  } catch (e) { console.error('[conv] send failed', e); alert('Send failed: ' + e.message); }
   await convFetchThread(_convActivePhone);
 }
 

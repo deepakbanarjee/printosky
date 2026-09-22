@@ -1,4 +1,4 @@
--- SCHEMA v45 — newest message per phone, server-side
+-- SCHEMA v46 — newest message per phone, server-side
 --
 -- WHY
 -- ---
@@ -46,6 +46,12 @@ AS $$
     FROM public.conversation_log cl
     WHERE cl.phone = ANY(phones)
       AND cl.created_at >= now() - make_interval(secs => lookback_hours * 3600)
+      -- WhatsApp only, for the same reason v45 added this to sla_breaches():
+      -- Instagram rows carry an IGSID in the phone column, and the chat-audit
+      -- digest is keyed on a number staff can open in the Conversations tab.
+      -- The phone filter above would usually exclude them anyway; relying on
+      -- that would be an accident rather than the decision v45 made.
+      AND cl.channel = 'whatsapp'
     ORDER BY cl.phone, cl.created_at DESC, cl.id DESC;
 $$;
 
@@ -64,7 +70,7 @@ END $$;
 
 COMMENT ON FUNCTION public.latest_messages(text[], double precision) IS
     'Newest conversation_log row per phone, for the given phones inside the '
-    'lookback window. Feeds chat_audit_snapshot; see SCHEMA_v45.';
+    'lookback window, WhatsApp only. Feeds chat_audit_snapshot; see SCHEMA_v46.';
 
 -- PostgREST serves RPC from a cached schema; a function it has not seen yet
 -- answers 404 and the caller would sit on its fallback. No-op where nothing

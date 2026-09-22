@@ -456,11 +456,19 @@ def upload_file(filename: str, content: bytes, mime_type: str) -> str:
 def log_message(phone: str, direction: str, body: str,
                 message_type: str = "text", filename: str | None = None,
                 job_id: str | None = None,
-                media_url: str | None = None) -> None:
-    """Insert a row into conversation_log. Silent on error — never raises."""
+                media_url: str | None = None,
+                channel: str = "whatsapp") -> None:
+    """Insert a row into conversation_log. Silent on error — never raises.
+
+    `channel` (v45) defaults to whatsapp, which is what every row written
+    before it existed means. An Instagram thread puts the IGSID in `phone`:
+    it is the only identity that person has, and the Conversations console
+    needs the channel to know it cannot dial it.
+    """
     try:
         _client().table("conversation_log").insert({
             "phone":        phone,
+            "channel":      channel,
             "direction":    direction,
             "message_type": message_type,
             "body":         (body or "")[:2000],
@@ -491,6 +499,38 @@ def has_recent_outbound(phone: str, minutes: int = 5) -> bool:
         return (res.count or 0) > 0
     except Exception:
         return False
+
+
+# Meta lets a business send free-form text only within 24h of the customer's
+# last message. Past that, the API still returns 200 and the message is
+# silently dropped — which is how an ad lead who asked a question at 09:53 on
+# 19 Sep got their answer typed at 13:08 the next day, 27h15m later, into
+# nothing at all.
+WA_SERVICE_WINDOW_HOURS = 24.0
+WA_WINDOW_WARN_HOURS = 20.0
+
+
+def hours_since_last_inbound(phone: str) -> float | None:
+    """Age in hours of this customer's most recent message to us.
+
+    None when we have never heard from them, or the lookup failed — the caller
+    must treat that as "unknown", never as "plenty of time left".
+    """
+    try:
+        from datetime import datetime, timezone
+        rows = (_client().table("conversation_log")
+                .select("created_at")
+                .eq("phone", phone).eq("direction", "inbound")
+                .order("created_at", desc=True).limit(1).execute())
+        if not rows.data:
+            return None
+        last = datetime.fromisoformat(str(rows.data[0]["created_at"]).replace("Z", "+00:00"))
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - last).total_seconds() / 3600.0
+    except Exception as exc:
+        logger.warning("hours_since_last_inbound(%s) failed: %s", phone, exc)
+        return None
 
 
 # ── WhatsApp (Meta) per-message cost tracking ─────────────────────────────────
@@ -549,10 +589,53 @@ def record_wa_message_cost(wamid: str, recipient: str | None, status: str | None
     except Exception as exc:
         logger.warning("record_wa_message_cost error for %s: %s", wamid, exc)
 
+    if (status or "").lower() == "failed":
+        logger.warning("WhatsApp would not deliver %s to %s", wamid[:24],
+                       recipient or "?")
+
+
+def undelivered_since(hours: int = 24) -> dict:
+    """Messages Meta accepted and then did not deliver, over a recent window.
+
+    A 'failed' status means the send returned 200 and the customer got
+    nothing — almost always the 24-hour reply window closing, which no error at
+    send time can report. It was being written to a table nobody reads: 118 of
+    September's 761 messages, 15.5%, never arrived, including the staff answer
+    to an ad lead who had been waiting 27 hours.
+
+    This is a ROLLUP on purpose. The obvious place for the alert is the status
+    callback itself, but that runs on Vercel, where ops_watchdog has no SQLite
+    to remember an alert in and so cannot dedup — the 116 failures of 10 Sep
+    would have been 116 WhatsApps. The chat-audit cron reads this twice a day
+    and reports it once, which is also what lets the check announce its own
+    recovery.
+
+    Returns {"failed", "recipients", "sample", "window_hours"}; all zero/empty
+    when the lookup fails, with `ok` False so the caller does not read a broken
+    query as good news.
+    """
+    out = {"failed": 0, "recipients": 0, "sample": [], "window_hours": hours,
+           "ok": False}
+    try:
+        from datetime import datetime, timezone, timedelta
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        rows = (_client().table("wa_message_costs")
+                .select("recipient,created_at")
+                .eq("status", "failed").gte("created_at", since)
+                .order("created_at", desc=True).limit(500).execute())
+        people = [r.get("recipient") for r in (rows.data or []) if r.get("recipient")]
+        out.update(failed=len(rows.data or []),
+                   recipients=len(set(people)),
+                   sample=sorted(set(people))[:5],
+                   ok=True)
+    except Exception as exc:
+        logger.warning("undelivered_since(%s) failed: %s", hours, exc)
+    return out
+
 
 
 def record_ad_click(phone: str, wamid: str, referral: dict,
-                    channel: str = "whatsapp") -> bool:
+                    channel: str = "whatsapp", igsid: str | None = None) -> bool:
     """Store a click-to-WhatsApp arrival and stamp first touch on the contact.
 
     Meta attaches `referral` to the first message after someone taps a
@@ -567,11 +650,16 @@ def record_ad_click(phone: str, wamid: str, referral: dict,
 
     Returns True when the click was stored.
     """
-    if not phone or not referral:
+    # Instagram identifies a person by IGSID and issues no phone number at all,
+    # so v45 made `phone` nullable behind a CHECK that one of the two is
+    # present. One identity or the other; never neither.
+    igsid = (igsid or "").strip() or None
+    if not (phone or igsid) or not referral:
         return False
 
     row = {
-        "phone":       phone,
+        "phone":       phone or None,
+        "igsid":       igsid,
         "channel":     channel,
         "wamid":       wamid or None,
         "source_type": referral.get("source_type"),
@@ -592,6 +680,12 @@ def record_ad_click(phone: str, wamid: str, referral: dict,
     else:
         client.table("ad_clicks").insert(row).execute()
 
+    # whatsapp_contacts is keyed on a phone number, so an Instagram click has
+    # no row to stamp here. instagram_threads carries its first touch instead,
+    # written by record_instagram_message on the same webhook turn.
+    if not phone:
+        return True
+
     # Ensure the contact row exists before stamping it. Sending only `phone`
     # cannot clear a name already stored by upsert_contact().
     client.table("whatsapp_contacts").upsert(
@@ -608,6 +702,95 @@ def record_ad_click(phone: str, wamid: str, referral: dict,
     }).eq("phone", phone).is_("first_ad_at", "null").execute()
 
     return True
+
+
+# ── Instagram Direct (SCHEMA v45) ────────────────────────────────────────────
+# Instagram has no phone number, so it cannot use whatsapp_contacts or the
+# conversation_log-based welcome guard. instagram_threads is the equivalent:
+# one row per person per business account, carrying first-touch attribution,
+# the welcome-once stamp and the needs_human flag the chat-audit digest reads.
+
+def get_instagram_thread(igsid: str) -> dict | None:
+    """The thread row for this IGSID, or None. Never raises."""
+    if not igsid:
+        return None
+    try:
+        rows = (_client().table("instagram_threads")
+                .select("*").eq("igsid", igsid).limit(1).execute())
+        return rows.data[0] if rows.data else None
+    except Exception as exc:
+        logger.warning("get_instagram_thread(%s) failed: %s", igsid, exc)
+        return None
+
+
+def touch_instagram_thread(igsid: str, *, username: str | None = None,
+                           name: str | None = None,
+                           inbound: bool = False, outbound: bool = False,
+                           welcomed: bool = False,
+                           needs_human: bool | None = None,
+                           first_ad: dict | None = None) -> bool:
+    """Create or update the thread row. Returns True when the write landed.
+
+    Errors propagate as False rather than an exception -- a DM must still be
+    answered when the bookkeeping fails -- but the caller reports it, because
+    a thread that is never stamped `welcomed_at` gets the ad welcome again on
+    the next message, forever.
+
+    `first_ad` is applied ONLY when the row has no first_ad_at, so the ad that
+    actually introduced the customer keeps the credit. That mirrors the
+    is_("first_ad_at", "null") guard record_ad_click uses on the WhatsApp side.
+    """
+    if not igsid:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    row: dict = {"igsid": igsid, "updated_at": now}
+    if username:
+        row["username"] = username
+    if name:
+        row["name"] = name
+    if inbound:
+        row["last_inbound_at"] = now
+    if outbound:
+        row["last_outbound_at"] = now
+    if welcomed:
+        row["welcomed_at"] = now
+    if needs_human is not None:
+        row["needs_human"] = bool(needs_human)
+
+    try:
+        client = _client()
+        client.table("instagram_threads").upsert(
+            row, on_conflict="igsid").execute()
+        if first_ad:
+            client.table("instagram_threads").update({
+                "first_ad_id":  first_ad.get("source_id"),
+                "first_ad_ref": first_ad.get("source_url"),
+                "first_ad_at":  now,
+            }).eq("igsid", igsid).is_("first_ad_at", "null").execute()
+        return True
+    except Exception as exc:
+        logger.error("touch_instagram_thread(%s) failed: %s", igsid, exc)
+        return False
+
+
+def instagram_waiting() -> dict:
+    """Instagram threads sitting on a human, for the chat-audit digest.
+
+    Returns {"waiting", "sample", "ok"}; `ok` False when the lookup failed, so
+    the caller never reads a broken query as "nobody is waiting".
+    """
+    out = {"waiting": 0, "sample": [], "ok": False}
+    try:
+        rows = (_client().table("instagram_threads")
+                .select("igsid,username,last_inbound_at")
+                .eq("needs_human", True)
+                .order("last_inbound_at", desc=True).limit(50).execute())
+        data = rows.data or []
+        out.update(waiting=len(data), ok=True,
+                   sample=[(r.get("username") or r.get("igsid")) for r in data[:5]])
+    except Exception as exc:
+        logger.warning("instagram_waiting failed: %s", exc)
+    return out
 
 
 # The webhook logs the bot's auto-reply a few hundred ms BEFORE the inbound that
@@ -717,6 +900,10 @@ def _sla_breaches_clientside(client, threshold_hours, lookback_hours) -> list[di
         client.table("conversation_log")
         .select("phone,direction,created_at")
         .gte("created_at", cutoff_iso)
+        # WhatsApp only, matching v45's sla_breaches(). An Instagram row puts
+        # an IGSID in `phone`, and the cooldown that stops this repeating
+        # itself lives in whatsapp_contacts, which an IGSID never matches.
+        .eq("channel", "whatsapp")
         .order("created_at", desc=True)
         .limit(SLA_FALLBACK_ROW_CAP)
         .execute()
@@ -808,7 +995,7 @@ LATEST_MESSAGES_FALLBACK_ROW_CAP = 4000
 
 
 def _latest_messages_rpc(client, phones, lookback_hours) -> dict | None:
-    """Newest conversation_log row per phone, from Postgres (SCHEMA_v45).
+    """Newest conversation_log row per phone, from Postgres (SCHEMA_v46).
 
     Returns {phone: row} — possibly empty, which is a real answer — or None
     when the RPC could not be used at all, so the caller can fall back.
@@ -821,7 +1008,7 @@ def _latest_messages_rpc(client, phones, lookback_hours) -> dict | None:
     except Exception as exc:
         logger.warning(
             "latest_messages RPC unavailable (%s) — falling back to the capped "
-            "log scan. Apply api/migrations/SCHEMA_v45_latest_messages_rpc.sql.",
+            "log scan. Apply api/migrations/SCHEMA_v46_latest_messages_rpc.sql.",
             exc,
         )
         return None
@@ -851,6 +1038,10 @@ def _latest_messages_clientside(client, phones, lookback_hours) -> dict:
         .select("phone,direction,body,created_at")
         .in_("phone", wanted)
         .gte("created_at", cutoff)
+        # WhatsApp only, matching the RPC and SCHEMA_v45's reasoning: Instagram
+        # rows carry an IGSID in the phone column, and this digest is keyed on a
+        # number staff can open in the Conversations tab.
+        .eq("channel", "whatsapp")
         .order("created_at", desc=True)
         .limit(LATEST_MESSAGES_FALLBACK_ROW_CAP)
         .execute()
@@ -860,7 +1051,7 @@ def _latest_messages_clientside(client, phones, lookback_hours) -> dict:
     if len(log_rows) >= LATEST_MESSAGES_FALLBACK_ROW_CAP:
         logger.warning(
             "chat-audit fallback hit its %d-row cap — a flagged chat may be "
-            "reported as waiting when it was already answered. Apply SCHEMA_v45.",
+            "reported as waiting when it was already answered. Apply SCHEMA_v46.",
             LATEST_MESSAGES_FALLBACK_ROW_CAP,
         )
 
@@ -930,7 +1121,10 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
         )
 
         # Newest message per flagged phone → tells "still waiting" from
-        # "already replied (stale flag)".
+        # "already replied (stale flag)". WhatsApp only: the Instagram queue is
+        # counted separately (instagram_threads.needs_human) because this
+        # digest's list is keyed on a phone number staff can open in the
+        # Conversations tab, and an IGSID is not one (SCHEMA_v45).
         last_by_phone = _latest_messages(
             _client(), [r.get("phone") for r in rows], lookback_hours
         )

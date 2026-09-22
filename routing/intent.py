@@ -350,44 +350,65 @@ def price_headlines() -> dict[str, str]:
         return {}
 
 
-def _send_quote_welcome(phone: str, name: str | None = None) -> bool:
-    """Answer a cold ad click with the thing the ad actually offered: a price.
+def quote_welcome_text(name: str | None = None,
+                       icebreaker: str | None = None) -> str:
+    """The words a cold ad click is answered with. One copy, both channels.
 
     The ad says "send your PDF on WhatsApp and skip the queue". So this says
-    the same, in the same thread, with a number attached -- and asks for the
-    file rather than sending them to a web form. Every step between the tap and
-    the PDF is a place the customer leaves; printosky.com/order is such a step,
-    and the one arrival who reached it (9 Sep) did leave.
+    the same, with a number attached -- and asks for the file rather than
+    sending them to a web form. Every step between the tap and the PDF is a
+    place the customer leaves; printosky.com/order is such a step, and the one
+    arrival who reached it (9 Sep) did leave.
 
-    Always returns True: unlike the referral welcome there is nothing to mint,
-    so there is no failure mode that leaves the customer with silence.
+    `icebreaker` is the shop's answer to the question they tapped on the way in
+    (see ICE_BREAKERS). When there is one it REPLACES the generic body: someone
+    who asked "Where are you located?" gets the address, not a rate card that
+    ignores them. It cannot be sent as a second message instead -- the welcome
+    and _services_answer/_price_answer say much the same thing, and two of
+    those in a row reads as a bot talking to itself.
+
+    Pure, and public, because instagram_dm.py needs the same words: a customer
+    who finds the shop on Instagram should not meet a different business.
     """
-    p = price_headlines()
     hi = f"Hi {name}! " if name else "Hi! "
+    opener = (f"{hi}\U0001F44B You tapped our *skip the Xerox queue* ad — you are "
+              f"in the right place.\n\n")
+    if icebreaker:
+        return opener + icebreaker
+
+    p = price_headlines()
     if p:
         rates = (
-            f"📄 A4 B&W, student rate: *₹{p['bw']} a sheet* — printed "
+            f"\U0001F4C4 A4 B&W, student rate: *₹{p['bw']} a sheet* — printed "
             f"double-sided that is *{p['per_page']}*, so a 100-page report is "
             f"about ₹{p['report_100']} of printing "
             f"(₹{p['bw_bulk']} a sheet over 100).\n"
-            f"🎨 A4 colour from *₹{p['colour']} a sheet* — and we slice out the "
-            f"plain text pages automatically, so you only pay colour for the "
+            f"\U0001F3A8 A4 colour from *₹{p['colour']} a sheet* — and we slice out "
+            f"the plain text pages automatically, so you only pay colour for the "
             f"pages that are actually colour.\n"
-            f"📚 Binding: spiral from *₹{p['spiral']}*, soft from *₹{p['soft']}*, "
-            f"hardbound project cover *₹{p['project']}*.\n\n"
+            f"\U0001F4DA Binding: spiral from *₹{p['spiral']}*, soft from "
+            f"*₹{p['soft']}*, hardbound project cover *₹{p['project']}*.\n\n"
         )
     else:
         rates = ""
-    _send_text(phone, (
-        f"{hi}👋 You tapped our *skip the Xerox queue* ad — you are in the "
-        f"right place.\n\n"
+    return opener + (
         f"*Send your PDF right here in this chat* and we'll quote you the exact "
         f"price in a minute. No app, no signup, no queue. Word, PowerPoint and "
         f"photos work too.\n\n"
         f"{rates}"
-        f"Ready when you are — just send the file. 🙏\n"
+        f"Ready when you are — just send the file. \U0001F64F\n"
         f"— Printosky, Thriprayar"
-    ))
+    )
+
+
+def _send_quote_welcome(phone: str, name: str | None = None,
+                        icebreaker: str | None = None) -> bool:
+    """Send quote_welcome_text on WhatsApp.
+
+    Always returns True: unlike the referral welcome there is nothing to mint,
+    so there is no failure mode that leaves the customer with silence.
+    """
+    _send_text(phone, quote_welcome_text(name, icebreaker))
     return True
 
 
@@ -417,7 +438,37 @@ def _send_referral_welcome(phone: str, name: str | None = None) -> bool:
     return True
 
 
-def _maybe_welcome_ad_arrival(phone: str, name: str | None = None) -> bool:
+def pending_ad_arrival(phone: str) -> dict | None:
+    """The ad click this phone is still owed a welcome for, or None.
+
+    Public because the book flow has to ask it too. book_bot.maybe_handle_book
+    runs ABOVE the front door in api/index._handle_text, and is_book_trigger
+    matches the word "book" anywhere -- so on 19 Sep 2026 someone tapped the
+    print ad, asked "Can I book an appointment?", and was sold the Malayalam
+    book catalogue. The ad welcome never ran at all, and three hours later they
+    got an abandoned-cart nudge for books they had never asked about.
+
+    Never raises: this decides whether ANOTHER handler stands down, so an
+    error here must leave the existing behaviour alone rather than silence a
+    flow that works.
+    """
+    try:
+        from db_cloud import ad_welcome_already_sent, recent_ad_click
+        ad = recent_ad_click(phone)
+        if not ad:
+            return None
+        if not AD_CAMPAIGN_KIND.get((ad.get("source_id") or "").strip()):
+            return None
+        if ad_welcome_already_sent(phone, ad.get("clicked_at")):
+            return None
+        return ad
+    except Exception as exc:
+        logger.warning("pending ad-arrival check failed for %s: %s", phone, exc)
+        return None
+
+
+def _maybe_welcome_ad_arrival(phone: str, name: str | None = None,
+                              icebreaker: str | None = None) -> bool:
     """Answer the ad someone actually clicked. True if we handled the message.
 
     Fires on the first message after a click and never again -- see
@@ -425,17 +476,12 @@ def _maybe_welcome_ad_arrival(phone: str, name: str | None = None) -> bool:
     lookup and not "do they hold a referral code".
     """
     try:
-        from db_cloud import ad_welcome_already_sent, recent_ad_click
-        ad = recent_ad_click(phone)
+        ad = pending_ad_arrival(phone)
         if not ad:
             return False
         kind = AD_CAMPAIGN_KIND.get((ad.get("source_id") or "").strip())
-        if not kind:
-            return False
-        if ad_welcome_already_sent(phone, ad.get("clicked_at")):
-            return False
         if kind == "quote":
-            return _send_quote_welcome(phone, name)
+            return _send_quote_welcome(phone, name, icebreaker=icebreaker)
         if kind == "referral":
             # A referral ad is aimed at people who already buy from us; someone
             # who holds a code has had this pitch and does not need it twice.
@@ -532,7 +578,7 @@ def _location_answer() -> str:
     )
 
 
-def _how_to_order_answer() -> str:
+def how_to_order_answer() -> str:
     return (
         "It's one step 👇\n\n"
         "*Send your PDF (or Word file, or photos) right here in this chat.*\n\n"
@@ -549,20 +595,45 @@ ICE_BREAKERS: dict[str, "callable"] = {
     "what services do you provide": _services_answer,
     "services": _services_answer,
 
+    # "Printing charges?" arrived from a live ad click on 21 Sep 2026 and was
+    # not in this list. It worked out — the welcome carries the rate card — but
+    # it worked by accident, and the answer they got was the generic one rather
+    # than the rate breakdown they asked for. People ask for a price in more
+    # ways than they ask for anything else, so this list is the longest.
     "what are your prices": _price_answer,
     "what is the price": _price_answer,
+    "what is the rate": _price_answer,
+    "what are the charges": _price_answer,
+    "what are your rates": _price_answer,
     "how much does it cost": _price_answer,
+    "how much do you charge": _price_answer,
+    "how much": _price_answer,
     "price": _price_answer,
+    "prices": _price_answer,
+    "price list": _price_answer,
     "rate": _price_answer,
     "rates": _price_answer,
+    "rate card": _price_answer,
+    "charges": _price_answer,
+    "charge": _price_answer,
+    "cost": _price_answer,
+    "printing charges": _price_answer,
+    "printing charge": _price_answer,
+    "print charges": _price_answer,
+    "printing rate": _price_answer,
+    "printing rates": _price_answer,
+    "print rate": _price_answer,
+    "printing cost": _price_answer,
+    "xerox rate": _price_answer,
+    "xerox charges": _price_answer,
 
     "where are you located": _location_answer,
     "where is your shop": _location_answer,
     "location": _location_answer,
 
-    "how do i order": _how_to_order_answer,
-    "how can i order": _how_to_order_answer,
-    "how does it work": _how_to_order_answer,
+    "how do i order": how_to_order_answer,
+    "how can i order": how_to_order_answer,
+    "how does it work": how_to_order_answer,
 }
 
 
@@ -639,30 +710,82 @@ def route_front_door(phone: str, text: str, name: str | None = None) -> None:
             _send_text(phone, msg)
         return
     # Answer the ad BEFORE the intent, not instead of it. Someone who arrives
-    # from "Print your Thesis for Rs.0" and types "print" wants the order link
-    # AND the offer they clicked; sending only one of the two loses half the
+    # from "Print your Thesis for ₹0" and types "print" wants the order link AND
+    # the offer they clicked; sending only one of the two loses half the
     # conversation. Fires once per person, so it cannot become noise.
-    welcomed = _maybe_welcome_ad_arrival(phone, name)
-
+    #
     # A tapped ice-breaker is a question the shop can answer itself, and it is
     # what most ad arrivals send first. Answer it here rather than letting it
     # fall to the menu (or to a human, nine hours later).
     #
-    # Skipped when the ad welcome just fired: that message already carries the
-    # rates and the "send your PDF" ask, so following it with a near-identical
-    # second one reads as a bot talking to itself.
-    if not welcomed:
-        answer = icebreaker_reply(text)
-        if answer:
+    # It has to be decided BEFORE the welcome, because Meta delivers a tapped
+    # ice-breaker as the very message that carries the `referral` object. The
+    # old code answered it only `if not welcomed`, which is never true on the
+    # one message an ice-breaker can arrive on: four of the six ad clicks
+    # between 17-19 Sep 2026 opened this way ("What services do you offer?"
+    # three times, "Rate send me" once) and not one of them was answered. The
+    # feature had never fired in production. So hand the answer to the welcome
+    # and let it send the two as one message.
+    answer = icebreaker_reply(text)
+    welcomed = _maybe_welcome_ad_arrival(phone, name, icebreaker=answer)
+    if answer:
+        if not welcomed:
             _send_text(phone, answer)
-            return
+        # Their question has been answered, by name. Running the intent layers
+        # on top would add a second message about something else -- "Can I book
+        # an appointment?" classifies as `xtraa` and would post a book catalog.
+        return
 
     intent = decide_intent(text)
-    if intent in _LINK_MESSAGES:
+    if intent in _LINK_MESSAGES:                # print / academic / notes
+        # Compatible with the ad they clicked, so it is worth adding to the
+        # welcome rather than instead of it.
         _send_text(phone, _LINK_MESSAGES[intent])
+    elif welcomed:
+        # A catalog is a DIFFERENT product, and following the ad welcome with
+        # one is how a print-ad click got posted the Malayalam book list on
+        # 19 Sep 2026. Standing book_bot down was only half the fix: the word
+        # "book" in "Can I book an appointment?" classifies as `xtraa` here
+        # too. The welcome answered them; leave it at that.
+        return
     elif intent in ("xtraa", "malayalam"):
         _open_books(phone, name)               # Plan 1 interim: shared catalog
     elif intent == "sociology":
         _open_soc(phone, name)
-    elif not welcomed:                          # unknown / anything unhandled
-        _send_menu(phone)                       # (the welcome already answered)
+    else:                                       # unknown / anything unhandled
+        _unhandled(phone, text)
+
+
+def _unhandled(phone: str, text: str) -> None:
+    """Nothing understood the message. Menu, or a human if it was a question.
+
+    api/index._handle_text has a handoff for exactly this, and it is
+    unreachable from here: it is guarded by `customer_is_idle`, and an idle
+    customer is precisely who gets routed into this function and returned on.
+    Every ad arrival is idle, so the net has never caught one.
+
+    The menu is the right answer to "hi". It is the wrong answer to a question,
+    and repeating it is worse than saying nothing -- on 18 Sep 2026 a Hindi
+    speaker off the ad got the same English list twice and then silence, with
+    `needs_human` still false and no alert raised.
+
+    Scoped to people who came from an ad, deliberately. They cost roughly
+    Rs.164 each and there are a handful a day, so a staff_hold on one is cheap
+    and losing one is not; the walk-in traffic that types something odd keeps
+    the menu it has always had.
+    """
+    from routing.handoff import hand_off_to_human, should_handoff_text
+    if should_handoff_text(text) and _came_from_an_ad(phone):
+        hand_off_to_human(phone, text, "Front door couldn't answer an ad arrival")
+        return
+    _send_menu(phone)
+
+
+def _came_from_an_ad(phone: str) -> bool:
+    """Did this person arrive from a click-to-WhatsApp ad recently? Never raises."""
+    try:
+        from db_cloud import recent_ad_click
+        return bool(recent_ad_click(phone))
+    except Exception as exc:
+        logger.warning("ad-arrival lookup failed for %s: %s", phone, exc)
+        return False

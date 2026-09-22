@@ -830,10 +830,20 @@ async function sendMsg() {
   if (!msg || !_phone) return;
   ta.value = ''; ta.style.height = '';
   try {
-    await fetch(`${API}/admin/send`, {
+    const r = await fetch(`${API}/admin/send`, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({admin_password:_pw, phone:_phone, message:msg})
     });
+    // This used to ignore the response entirely, so a refused send and a
+    // delivered one looked identical — staff had no way to know a reply
+    // outside the 24h window never arrived.
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      ta.value = msg;                       // don't lose what they typed
+      alert('Not sent — ' + (out.error || ('HTTP ' + r.status)));
+      return;
+    }
+    if (out.warning) alert('⚠️ ' + out.warning);
     await fetchThread();
   } catch(e) { alert('Send failed: ' + e.message); }
 }

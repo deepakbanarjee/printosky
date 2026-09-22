@@ -908,29 +908,13 @@ def _session_is_stale(session: dict) -> bool:
         return False
 
 
-# Short acknowledgements / option inputs that should NOT trigger a human handoff.
-_HANDOFF_NOOP = {
-    "ok", "okay", "k", "kk", "thanks", "thank you", "thankyou", "ty", "tq",
-    "done", "good", "great", "nice", "fine", "cool", "yes", "no", "y", "n",
-    "👍", "🙏", "ശരി", "നന്ദി", "ഓക്കെ",
-}
-
-
+# The handoff heuristic and the handoff itself live in routing/handoff.py, so
+# the front door (routing.intent) can reach them too — it could not import them
+# from here without a cycle, which is half of why ad arrivals never got one.
 def _should_handoff_text(text: str) -> bool:
-    """Heuristic: is this free-text worth routing to a human (vs ignoring)?
-
-    True for real questions/sentences; False for courtesy words, bare digits/
-    option taps, emoji, and very short inputs.
-    """
-    t = (text or "").strip()
-    if len(t) < 3:
-        return False
-    if t.lower() in _HANDOFF_NOOP:
-        return False
-    # Needs a couple of letters (any script) — filters bare digits, punctuation
-    # and emoji, while accepting Malayalam, where combining vowel marks would
-    # break a consecutive-letter run.
-    return sum(1 for ch in t if ch.isalpha()) >= 2
+    """Heuristic: is this free-text worth routing to a human (vs ignoring)?"""
+    from routing.handoff import should_handoff_text
+    return should_handoff_text(text)
 
 
 # ── Known B2B vendors (toner / supply buyers) ────────────────────────────────
@@ -1199,18 +1183,8 @@ def _handle_text(sender: str, text: str, name: str | None = None) -> None:
     # until staff resume (and auto-clears once the session goes stale).
     if (not handled) and customer_is_idle and (not customer_is_new) \
             and _should_handoff_text(text):
-        try:
-            from db_cloud import save_session
-            _mark_session_needs_human(sender)
-            save_session("supabase", sender, step="staff_hold", needs_human=True)
-            _send(sender, "🙏 Thanks for your message — a team member will reply to "
-                          "you shortly. You can keep typing in the meantime.")
-            send_staff_alert(
-                f"🤖→🧑 Bot couldn't handle a message from {_fmt_phone(sender)}: "
-                f"\"{text.strip()[:80]}\". Open Conversations → 'Needs human'."
-            )
-        except Exception as e:
-            logger.error(f"Human handoff error for {sender}: {e}")
+        from routing.handoff import hand_off_to_human
+        hand_off_to_human(sender, text, "Bot couldn't handle a message")
 
 
 def _handle_media(sender: str, msg_type: str, media_id: str,
@@ -1450,8 +1424,9 @@ def _mark_webhook_processed(event_id: str, handler: str) -> bool:
         return True  # fail-open: don't drop real events on a DB hiccup
 
 
-def _record_ad_click(sender: str, wamid: str, referral: dict) -> None:
-    """Persist a click-to-WhatsApp arrival, and alert loudly if it cannot be.
+def _record_ad_click(sender: str, wamid: str, referral: dict,
+                     channel: str = "whatsapp", igsid: str = "") -> None:
+    """Persist a click-to-message arrival, and alert loudly if it cannot be.
 
     Meta attaches `referral` to the first message after an ad click and never
     sends it again -- there is no backfill and no second chance. A click lost
@@ -1459,33 +1434,170 @@ def _record_ad_click(sender: str, wamid: str, referral: dict) -> None:
     of the few places in the webhook where failure must reach a human rather
     than a log line (docs/FAIL_LOUD.md).
 
+    Shared by both channels (v45). On Instagram `sender` is empty and the
+    person is the IGSID; the alert is worth just as much there, and a second
+    copy of it would be a second thing to forget to fix.
+
     Never raises: an attribution problem must not cost us the customer's actual
     message, which is handled by the dispatch immediately below the call site.
     """
     source_id = (referral or {}).get("source_id") or "unknown"
+    who = sender or igsid or "?"
+    where = "click-to-WhatsApp" if channel == "whatsapp" else "Instagram"
     try:
         from db_cloud import record_ad_click
-        if record_ad_click(sender, wamid, referral):
-            logger.info("Ad click recorded: %s from ad %s", sender, source_id)
+        if record_ad_click(sender, wamid, referral, channel=channel, igsid=igsid):
+            logger.info("Ad click recorded: %s from ad %s (%s)", who, source_id, channel)
             return
         detail = "recorder declined the payload"
     except Exception as exc:
         detail = str(exc)
 
-    logger.error("Ad click NOT recorded for %s (ad %s): %s", sender, source_id, detail)
+    logger.error("Ad click NOT recorded for %s (ad %s): %s", who, source_id, detail)
     try:
         _alert_ops(
-            f"Ad click not recorded ({sender})",
-            f"\u26a0\ufe0f A click-to-WhatsApp ad click from {sender} (ad {source_id}) "
+            f"Ad click not recorded ({who})",
+            f"\u26a0\ufe0f A {where} ad click from {who} (ad {source_id}) "
             f"could not be recorded in full: {detail}\n\n"
             f"Meta does not resend this -- attribution for this click is lost. "
-            f"Check SUPABASE keys and that SCHEMA_v42 has been applied.",
+            f"Check SUPABASE keys and that SCHEMA_v42"
+            + (" / v45" if channel != "whatsapp" else "")
+            + " has been applied.",
         )
     except Exception as exc:
-        logger.error("ad-click alert itself failed for %s: %s", sender, exc)
+        logger.error("ad-click alert itself failed for %s: %s", who, exc)
+
+
+def _process_instagram_webhook(data: dict) -> None:
+    """Handle a DM to the Printosky Instagram profile.
+
+    Deliberately NOT routed through routing.route_front_door. That function is
+    phone-shaped all the way down — the payment reminder, the book catalog and
+    the print state machine all key on a phone number this person does not
+    have. Forcing an IGSID through it would either crash or, worse, collide
+    with somebody's real number.
+
+    So Instagram gets the part that matters for a paid lead and nothing it
+    cannot honour: the ad welcome, the ice-breaker answer, and a human for
+    everything else. Exactly the ladder PR #139 established on WhatsApp.
+    """
+    from instagram_dm import parse_webhook
+
+    for ev in parse_webhook(data):
+        # Meta retries on a slow handler; the mid is the message's own id.
+        if ev["mid"] and not _mark_webhook_processed(ev["mid"], "instagram"):
+            continue
+        try:
+            _handle_instagram_message(ev)
+        except Exception as exc:
+            logger.error("Instagram message handling failed for %s: %s",
+                         ev.get("igsid"), exc)
+            _alert_ops(
+                "Instagram DM not handled",
+                f"⚠️ A DM to the Printosky Instagram profile from "
+                f"{ev.get('igsid')} could not be handled: {exc}\n\n"
+                f"They have not been answered. Open Instagram and reply by hand.",
+            )
+
+
+def _handle_instagram_message(ev: dict) -> None:
+    """One inbound DM: record it, answer it, or fetch a human."""
+    import db_cloud
+    from instagram_dm import referral_to_ad_click, send_text
+    from routing.intent import (how_to_order_answer, icebreaker_reply,
+                                quote_welcome_text)
+    from routing.handoff import should_handoff_text
+
+    igsid = ev["igsid"]
+    text = ev["text"]
+
+    db_cloud.log_message(igsid, "inbound", text or "[attachment]",
+                         message_type="text", channel="instagram")
+
+    # An ad-originated DM carries the ad. Record it before anything can fail:
+    # Meta sends `referral` once and never resends it, same as on WhatsApp.
+    first_ad = None
+    if ev["referral"]:
+        first_ad = referral_to_ad_click(ev["referral"])
+        _record_ad_click("", ev["mid"], first_ad,
+                         channel="instagram", igsid=igsid)
+
+    if not db_cloud.touch_instagram_thread(igsid, inbound=True, first_ad=first_ad):
+        logger.error("instagram thread not stamped for %s", igsid)
+
+    # One read answers both questions: did an ad introduce them, and have they
+    # already been welcomed. A failed read yields {} — so nothing is welcomed
+    # twice, and the message falls through to a person, which is loud and safe.
+    thread = db_cloud.get_instagram_thread(igsid) or {}
+    came_from_an_ad = bool(ev["referral"]) or bool(thread.get("first_ad_at"))
+    answer = icebreaker_reply(text)
+
+    if came_from_an_ad and not thread.get("welcomed_at"):
+        if send_text(igsid, quote_welcome_text(None, answer)):
+            db_cloud.touch_instagram_thread(igsid, outbound=True, welcomed=True)
+        return
+    if answer:
+        if send_text(igsid, answer):
+            db_cloud.touch_instagram_thread(igsid, outbound=True)
+        return
+
+    if not should_handoff_text(text):
+        # A greeting or a courtesy word. There is no tap-to-choose menu on this
+        # channel, and fetching a person to answer "hi" is how an inbox stops
+        # being read — so say the one thing the shop always wants said.
+        if send_text(igsid, how_to_order_answer()):
+            db_cloud.touch_instagram_thread(igsid, outbound=True)
+        return
+
+    # A real question nothing here understood. A person is the honest answer,
+    # and unlike a WhatsApp thread nobody would otherwise ever see this one.
+    _hand_off_instagram(igsid, text)
+
+
+def _hand_off_instagram(igsid: str, text: str) -> None:
+    """Flag the thread, ack the customer, tell staff. Never raises."""
+    from instagram_dm import send_text
+
+    db_ok = True
+    try:
+        import db_cloud
+        db_ok = db_cloud.touch_instagram_thread(igsid, needs_human=True)
+    except Exception as exc:
+        db_ok = False
+        logger.error("instagram handoff flag failed for %s: %s", igsid, exc)
+
+    if send_text(igsid, "🙏 Thanks for your message — someone from Printosky "
+                        "will reply to you shortly."):
+        try:
+            import db_cloud
+            db_cloud.touch_instagram_thread(igsid, outbound=True)
+        except Exception as exc:
+            logger.warning("instagram outbound stamp failed for %s: %s", igsid, exc)
+
+    _alert_ops(
+        "Instagram DM needs a person",
+        f"📸 Instagram DM from {igsid}: \"{(text or '').strip()[:80]}\"\n\n"
+        f"The bot could not answer it. Open Instagram and reply — this thread "
+        f"is not in the Conversations console's reply box, only its history."
+        + ("" if db_ok else "\n\n⚠️ The needs_human flag could not be saved, so "
+                            "the digest will not list this one."),
+    )
 
 
 def _process_meta_webhook(data: dict) -> None:
+    # WhatsApp and Instagram share this app, this callback URL and this
+    # signature, but not a payload shape: WhatsApp nests messages under
+    # entry[].changes[].value.messages[], Instagram under entry[].messaging[].
+    # `object` is the only thing that says which arrived.
+    try:
+        from instagram_dm import is_instagram_payload
+        if is_instagram_payload(data):
+            _process_instagram_webhook(data)
+            return
+    except Exception as exc:
+        logger.error("Instagram webhook dispatch failed: %s", exc)
+        return
+
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
             value    = change.get("value", {})
@@ -2636,6 +2748,57 @@ def _handle_track(h, code: str) -> None:
 
 
 
+def _report_undelivered_messages(hours: int = 24) -> dict:
+    """Read the undelivered rollup and report it once. Never raises."""
+    from db_cloud import undelivered_since
+    snap = undelivered_since(hours)
+    try:
+        from ops_watchdog import report
+        if not snap.get("ok"):
+            report("whatsapp.delivery", False,
+                   "could not check whether recent replies were delivered")
+        elif snap["failed"]:
+            report("whatsapp.delivery", False,
+                   f"{snap['failed']} messages to {snap['recipients']} people "
+                   f"were accepted by WhatsApp and never delivered in the last "
+                   f"{hours}h — usually the 24h reply window closing, so those "
+                   f"customers were answered into thin air.")
+        else:
+            report("whatsapp.delivery", True, "every recent reply was delivered")
+    except Exception as exc:
+        logger.error("could not report undelivered messages: %s", exc)
+    return snap
+
+
+def _instagram_waiting_line(lines: list) -> int:
+    """Append the Instagram handoff queue to the digest. Returns the count.
+
+    Reported through ops_watchdog as well, because a DM waiting on a person is
+    the one thing on this channel nothing else watches: there is no SLA sweep
+    over instagram_threads and no needs_human pill in the console.
+    """
+    from db_cloud import instagram_waiting
+    snap = instagram_waiting()
+    try:
+        from ops_watchdog import report
+        if not snap.get("ok"):
+            report("instagram.queue", False,
+                   "could not read the Instagram handoff queue")
+        else:
+            report("instagram.queue", snap["waiting"] == 0,
+                   f"{snap['waiting']} Instagram DMs waiting on a person"
+                   if snap["waiting"] else "no Instagram DM is waiting")
+    except Exception as exc:
+        logger.error("could not report the Instagram queue: %s", exc)
+
+    if snap.get("waiting"):
+        who = ", ".join(str(x) for x in snap["sample"])
+        lines.append("")
+        lines.append(f"\U0001F4F8 *Instagram DMs waiting: {snap['waiting']}* ({who})")
+        lines.append("  Reply in the Instagram app — not in Conversations.")
+    return snap.get("waiting", 0)
+
+
 def _handle_cron_chat_audit(h) -> None:
     """GET /cron/chat-audit — twice-daily (10:00 & 18:00 IST) chat-health digest.
 
@@ -2705,7 +2868,23 @@ def _handle_cron_chat_audit(h) -> None:
                 lines.append(f"• {_fmt_phone(p['phone'])} ({age_s}){note_s}")
             if len(pinned) > 10:
                 lines.append(f"  …and {len(pinned) - 10} more")
+        # Replies WhatsApp accepted and then dropped. Invisible everywhere else:
+        # the send returns 200, the console says nothing, and the customer is
+        # simply never answered. Reported here rather than from the status
+        # callback because that runs on Vercel, where ops_watchdog keeps no
+        # state between invocations and so could not dedup a burst.
+        undelivered = _report_undelivered_messages()
+        # Instagram threads have no reply box in the Conversations console and
+        # no SLA sweep watching them, so the digest is the only routine thing
+        # that will ever mention one.
+        insta = _instagram_waiting_line(lines)
         lines.append("")
+        if undelivered.get("failed"):
+            sample = ", ".join("…" + (p or "")[-4:] for p in undelivered["sample"])
+            lines.append(f"📵 *Not delivered (24h): {undelivered['failed']}* to "
+                         f"{undelivered['recipients']} people ({sample})")
+            lines.append("  Usually the 24h reply window — answer sooner, or "
+                         "use a template.")
         lines.append(f"📥 Inbound (24h): {inbound_24h}")
         lines.append("Open printosky.com/admin → *Conversations* → 'Needs human'.")
         msg = "\n".join(lines)
@@ -2730,6 +2909,8 @@ def _handle_cron_chat_audit(h) -> None:
             "resolved": resolved,
             "unanswered": len(unanswered),
             "pinned": len(pinned),
+            "undelivered": undelivered.get("failed", 0),
+            "instagram_waiting": insta,
             "alerted": bool(sent),
         })
     except Exception as exc:
@@ -3605,7 +3786,12 @@ class handler(BaseHTTPRequestHandler):
         logger.debug("HTTP: " + format % args)
 
     def do_GET(self):
-        if self.path.startswith("/whatsapp-webhook"):
+        # Both products verify the same way, with the same token. Instagram
+        # gets its own path because the App Dashboard configures a callback URL
+        # per product and "/whatsapp-webhook" in the Instagram box is the kind
+        # of thing nobody ever un-confuses.
+        if (self.path.startswith("/whatsapp-webhook")
+                or self.path.startswith("/instagram-webhook")):
             params       = parse_qs(urlparse(self.path).query)
             verify_token = params.get("hub.verify_token", [""])[0]
             challenge    = params.get("hub.challenge",    [""])[0]
@@ -3832,8 +4018,11 @@ class handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body   = self.rfile.read(length)
 
-        # ── Meta WhatsApp Cloud API ──────────────────────────────────────────
-        if self.path == "/whatsapp-webhook":
+        # ── Meta WhatsApp Cloud API + Instagram Direct ───────────────────────
+        # One handler: the payload's `object` says which product sent it, so
+        # either URL accepts either product and a mis-pasted callback URL still
+        # works rather than silently dropping a customer.
+        if self.path in ("/whatsapp-webhook", "/instagram-webhook"):
             # Must return 200 immediately or Meta retries
             self.send_response(200)
             self.end_headers()

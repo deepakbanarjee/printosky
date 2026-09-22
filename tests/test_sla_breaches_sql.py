@@ -28,10 +28,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 
-_MIGRATION = os.path.join(
-    os.path.dirname(__file__), "..", "api", "migrations",
-    "SCHEMA_v44_sla_breaches_rpc.sql",
-)
+def _migration(name):
+    return os.path.join(os.path.dirname(__file__), "..", "api", "migrations", name)
+
+
+# v45 replaces the function with the same signature plus a channel filter, so
+# both are applied in order — what CI runs against is what production runs.
+_MIGRATIONS = [_migration("SCHEMA_v44_sla_breaches_rpc.sql"),
+               _migration("SCHEMA_v45_instagram_dm.sql")]
 
 _SCHEMA = """
 DROP TABLE IF EXISTS public.conversation_log CASCADE;
@@ -43,8 +47,24 @@ CREATE TABLE public.conversation_log (
     body          TEXT,
     filename      TEXT,
     job_id        TEXT,
+    channel       TEXT NOT NULL DEFAULT 'whatsapp',
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- v45 also touches ad_clicks and creates instagram_threads on its way to
+-- replacing sla_breaches(). Stubbed to the columns it alters so the migration
+-- applies here exactly as it does in production, rather than being excerpted
+-- — an excerpt is a second copy of the SQL that can drift from the real one.
+DROP TABLE IF EXISTS public.ad_clicks CASCADE;
+CREATE TABLE public.ad_clicks (
+    id          BIGSERIAL PRIMARY KEY,
+    phone       TEXT NOT NULL,
+    channel     TEXT NOT NULL DEFAULT 'whatsapp',
+    wamid       TEXT UNIQUE,
+    source_id   TEXT,
+    clicked_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+DROP TABLE IF EXISTS public.instagram_threads CASCADE;
 DO $$ BEGIN CREATE ROLE service_role; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 """
 
@@ -69,8 +89,9 @@ def dsn():
     except Exception as exc:
         pytest.skip(f"Postgres not reachable: {exc}")
     _psql(_SCHEMA, d)
-    with open(_MIGRATION, encoding="utf-8") as fh:
-        _psql(fh.read(), d)
+    for path in _MIGRATIONS:
+        with open(path, encoding="utf-8") as fh:
+            _psql(fh.read(), d)
     return d
 
 
@@ -242,3 +263,64 @@ class TestNoRowCap:
         rows += [(f"+9190000{i:05d}", "outbound", 1 + i * 0.0001) for i in range(2500)]
         sql, _ = run_both(rows)
         assert "+919999999999" in sql
+
+
+class TestTheSweepStaysAWhatsAppSweep:
+    """v45 adds `AND cl.channel = 'whatsapp'`.
+
+    Instagram rows put an IGSID in conversation_log.phone. Without the filter
+    the sweep would report a "customer" nobody can dial, every 30 minutes
+    forever: the cooldown that stops it repeating lives in whatsapp_contacts,
+    and an IGSID never matches a row there. Instagram is watched instead by
+    instagram_threads.needs_human and the `instagram.queue` check.
+    """
+
+    def _breaches(self, dsn):
+        out = _psql(
+            "SELECT phone FROM public.sla_breaches(1, 120, 48);",
+            dsn, want_rows=True,
+        )
+        return sorted(l.strip() for l in out.splitlines() if l.strip())
+
+    def test_an_unanswered_instagram_dm_is_not_an_sla_breach(self, dsn):
+        _psql("TRUNCATE public.conversation_log;", dsn)
+        _psql(
+            "INSERT INTO public.conversation_log (phone, direction, channel, created_at) "
+            "VALUES ('17841400000000123','inbound','instagram', now() - interval '5 hours');",
+            dsn,
+        )
+        assert self._breaches(dsn) == []
+
+    def test_an_unanswered_whatsapp_message_still_is(self, dsn):
+        _psql("TRUNCATE public.conversation_log;", dsn)
+        _psql(
+            "INSERT INTO public.conversation_log (phone, direction, created_at) "
+            "VALUES ('919495706405','inbound', now() - interval '5 hours');",
+            dsn,
+        )
+        assert self._breaches(dsn) == ["919495706405"]
+
+    def test_an_instagram_reply_cannot_clear_a_whatsapp_breach(self, dsn):
+        """Same string in `phone` on two channels must not cancel out — that
+        would silence a real customer because of an unrelated DM."""
+        _psql("TRUNCATE public.conversation_log;", dsn)
+        _psql(
+            "INSERT INTO public.conversation_log (phone, direction, channel, created_at) VALUES "
+            "('919495706405','inbound','whatsapp',  now() - interval '5 hours'),"
+            "('919495706405','outbound','instagram', now() - interval '1 minute');",
+            dsn,
+        )
+        assert self._breaches(dsn) == ["919495706405"]
+
+    def test_existing_rows_keep_their_meaning(self, dsn):
+        """The column defaults to whatsapp, so every row written before v45
+        must still be swept."""
+        _psql("TRUNCATE public.conversation_log;", dsn)
+        _psql(
+            "INSERT INTO public.conversation_log (phone, direction, created_at) "
+            "VALUES ('918907318168','inbound', now() - interval '3 hours');",
+            dsn,
+        )
+        rows = _psql("SELECT channel FROM public.conversation_log;", dsn, want_rows=True)
+        assert rows.strip() == "whatsapp"
+        assert self._breaches(dsn) == ["918907318168"]

@@ -38,9 +38,14 @@ class _Query:
     def __init__(self, rows, recorder=None, name=""):
         self._rows, self._rec, self._name = rows, recorder, name
         self.filters = {}
+        self.eq_filters = {}
 
     def in_(self, col, vals):
         self.filters[col] = list(vals)
+        return self
+
+    def eq(self, col, val):
+        self.eq_filters[col] = val
         return self
 
     def __getattr__(self, _attr):
@@ -126,7 +131,7 @@ class TestFallback:
 
         assert out["+911"]["body"] == "done"
         assert "table:conversation_log" in c.names()
-        assert any("SCHEMA_v45" in r.getMessage() for r in caplog.records)
+        assert any("SCHEMA_v46" in r.getMessage() for r in caplog.records)
 
     def test_fallback_now_filters_by_phone(self, dbc):
         """New in this change: the old query had no phone filter at all, so it
@@ -137,6 +142,16 @@ class TestFallback:
 
         log_calls = [f for name, f in c.calls if name == "table:conversation_log"]
         assert log_calls and log_calls[0].get("phone") == ["+911", "+912"]
+
+    def test_fallback_is_whatsapp_only(self, dbc):
+        """SCHEMA_v45 put Instagram in conversation_log with an IGSID in the
+        phone column. Both paths stay WhatsApp-only; if only the RPC carried
+        the filter, an unmigrated deploy would read the wrong channel."""
+        c = _FakeClient(rpc_error=Exception("nope"), log_rows=[_msg("+911")])
+        dbc._latest_messages(c, ["+911"], 336)
+
+        q = c.last_query
+        assert q.eq_filters.get("channel") == "whatsapp"
 
     def test_fallback_keeps_the_newest_row_per_phone(self, dbc):
         """Rows arrive newest-first; the first seen for a phone wins."""
