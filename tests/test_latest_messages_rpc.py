@@ -175,6 +175,45 @@ class TestFallback:
 # Doing no work when there is none
 # ─────────────────────────────────────────────────────────────────────────────
 
+class TestDegradedIsReported:
+    """A log line is not an alert (docs/FAIL_LOUD.md).
+
+    Without this, an unapplied migration leaves the sweep quietly lossy for as
+    long as nobody reads the Vercel logs — which is the whole failure mode this
+    PR exists to remove.
+    """
+
+    def setup_method(self):
+        import db_cloud
+        db_cloud.take_degraded()          # start from a clean slate
+
+    def test_fallback_records_a_degradation(self, dbc):
+        c = _FakeClient(rpc_error=Exception("nope"), log_rows=[_msg("+911")])
+        dbc._latest_messages(c, ["+911"], 336)
+
+        noted = dbc.take_degraded()
+        assert len(noted) == 1
+        assert "SCHEMA_v46" in noted[0]
+        assert "still waiting" in noted[0], "it should say what goes wrong, not just that it did"
+
+    def test_the_rpc_path_records_nothing(self, dbc):
+        c = _FakeClient(rpc_rows=[_msg("+911")])
+        dbc._latest_messages(c, ["+911"], 336)
+        assert dbc.take_degraded() == []
+
+    def test_draining_clears_it(self, dbc):
+        c = _FakeClient(rpc_error=Exception("nope"), log_rows=[_msg("+911")])
+        dbc._latest_messages(c, ["+911"], 336)
+        assert dbc.take_degraded() != []
+        assert dbc.take_degraded() == [], "a drained note must not repeat next run"
+
+    def test_repeated_failures_note_it_once(self, dbc):
+        c = _FakeClient(rpc_error=Exception("nope"), log_rows=[_msg("+911")])
+        dbc._latest_messages(c, ["+911"], 336)
+        dbc._latest_messages(c, ["+912"], 336)
+        assert len(dbc.take_degraded()) == 1
+
+
 class TestNoWork:
     def test_no_flagged_phones_does_no_io(self, dbc):
         c = _FakeClient(rpc_rows=[_msg("+911")])

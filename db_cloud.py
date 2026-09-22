@@ -877,6 +877,10 @@ def _sla_breaches_rpc(client, threshold_hours, lookback_hours) -> list[dict] | N
             "client-side sweep. Apply api/migrations/SCHEMA_v44_sla_breaches_rpc.sql.",
             exc,
         )
+        _note_degraded(
+            "SLA sweep is on the capped fallback — a waiting customer can go "
+            "unreported. Apply SCHEMA_v44_sla_breaches_rpc.sql."
+        )
         return None
     return [
         {"phone": r.get("phone"), "last_inbound_at": r.get("last_inbound_at")}
@@ -993,6 +997,33 @@ def _is_handoff_ack(body: str) -> bool:
 #: returns one row per phone by construction. See _latest_messages_clientside.
 LATEST_MESSAGES_FALLBACK_ROW_CAP = 4000
 
+#: Lookups that ran on a lossy fallback during this invocation.
+#:
+#: A log line is not an alert (docs/FAIL_LOUD.md), and a migration that never
+#: gets applied would otherwise leave these sweeps quietly lossy forever. This
+#: is read by chat_audit_snapshot and printed in the twice-daily digest a human
+#: actually reads.
+#:
+#: Why not ops_watchdog.report() here: its repeat-suppression lives in SQLite,
+#: and on Vercel _db_path() resolves to None (the store's Windows path is
+#: rejected on POSIX), so state is in-memory and dies with the container. Each
+#: cold start would look like a first failure and alert again — measured at up
+#: to 48/day for the 30-minute SLA cron, against metered outbound messages.
+#: The digest is bounded to twice a day and reaches the same person.
+_degraded: list[str] = []
+
+
+def _note_degraded(what: str) -> None:
+    if what not in _degraded:
+        _degraded.append(what)
+
+
+def take_degraded() -> list[str]:
+    """Drain the degradations recorded so far, for the caller to report."""
+    out = list(_degraded)
+    _degraded.clear()
+    return out
+
 
 def _latest_messages_rpc(client, phones, lookback_hours) -> dict | None:
     """Newest conversation_log row per phone, from Postgres (SCHEMA_v46).
@@ -1010,6 +1041,11 @@ def _latest_messages_rpc(client, phones, lookback_hours) -> dict | None:
             "latest_messages RPC unavailable (%s) — falling back to the capped "
             "log scan. Apply api/migrations/SCHEMA_v46_latest_messages_rpc.sql.",
             exc,
+        )
+        _note_degraded(
+            "chat-audit last-message lookup is on the capped fallback — "
+            "an already-answered chat can show as still waiting. "
+            "Apply SCHEMA_v46_latest_messages_rpc.sql."
         )
         return None
     return {r["phone"]: r for r in (resp.data or []) if r.get("phone")}
@@ -1107,7 +1143,7 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
             return None
 
     out = {"open_handoffs": [], "handled_stale": [], "unanswered": [],
-           "counts": {}, "pinned": []}
+           "counts": {}, "pinned": [], "degraded": []}
     now = datetime.now(timezone.utc)
 
     try:
@@ -1175,6 +1211,10 @@ def chat_audit_snapshot(unanswered_threshold_hours: int = 1,
         out["pinned"] = list_pinned_contacts()
     except Exception as exc:
         logger.error("chat_audit_snapshot pinned error: %s", exc)
+
+    # Anything that ran on a lossy fallback goes in the digest a human reads,
+    # rather than only into a log nobody opens (docs/FAIL_LOUD.md).
+    out["degraded"] = take_degraded()
 
     return out
 
