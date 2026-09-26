@@ -28,6 +28,26 @@ printer accepts, and — just as important — that distinguishes
 Word and PowerPoint conversion needs those applications, so it works on a store
 PC and is unavailable anywhere else; that is reported as a permanent failure
 with the reason, not as a mystery.
+
+Having Office installed is not enough, though — OSP, 2026-09-10, on the first
+morning this module ran there:
+
+    Word could not export ... to PDF ((-2147352567, 'Exception occurred.',
+    (0, 'Microsoft Word', 'You cannot close Microsoft Word because a dialog box
+    is open. Click OK, switch to Word, and then close the dialog box.', ...)))
+
+Nothing was wrong with the document. Someone had left a Word window open with a
+dialog in it, and `Dispatch` ATTACHES to a running instance rather than starting
+one, so the export inherited the stuck session — and `DisplayAlerts = False`
+cannot dismiss a dialog that was already up. Hence `DispatchEx` everywhere: a
+fresh out-of-process instance, ours to drive and ours to quit, immune to
+whatever a person left on screen.
+
+The message mattered too. It used to end "it may be password protected or
+corrupt", asserting a cause it had not established, and the same exception
+carries both. An alert that names the wrong cause sends someone to ask a
+customer to re-send a perfectly good file while the real fault sits untouched on
+the counter, so failures here now offer both and say which to check first.
 """
 from __future__ import annotations
 
@@ -195,9 +215,25 @@ def _office_to_pdf(src_path: str, out_path: str, ext: str) -> None:
 
     src_path = os.path.abspath(src_path)
     out_path = os.path.abspath(out_path)
-    app = None
+    name = prog_id.split(".")[0]
+
+    # DispatchEx, never Dispatch. `Dispatch` hands back an ALREADY RUNNING
+    # instance if there is one — which on a shop counter PC there usually is,
+    # opened by a person. OSP, 2026-09-10: a Word window left open with a modal
+    # dialog in it failed every automated export with "You cannot close
+    # Microsoft Word because a dialog box is open", and `DisplayAlerts = False`
+    # cannot dismiss a dialog that was already up. `DispatchEx` always starts a
+    # fresh out-of-process instance, which is ours to drive and ours to quit.
     try:
-        app = wc.Dispatch(prog_id)
+        app = wc.DispatchEx(prog_id)
+    except Exception as exc:
+        raise Unprintable(
+            f"{name} is installed but would not start for automation ({exc}) — "
+            f"that is a fault on this machine, not with "
+            f"{os.path.basename(src_path)}."
+        ) from exc
+
+    try:
         try:
             app.Visible = False
         except Exception as exc:
@@ -221,14 +257,20 @@ def _office_to_pdf(src_path: str, out_path: str, ext: str) -> None:
             wb.ExportAsFixedFormat(fmt, out_path)
             wb.Close(False)
     except Exception as exc:
+        # Two very different causes produce the same exception here, and the
+        # message used to assert the first one. Naming only "corrupt" sent
+        # someone to ask a customer to re-send a perfectly good file while the
+        # actual fault — a Word window open on the counter — sat untouched.
         raise Unprintable(
-            f"{prog_id.split('.')[0]} could not export "
-            f"{os.path.basename(src_path)} to PDF ({exc}) — it may be password "
-            "protected or corrupt"
+            f"{name} could not export {os.path.basename(src_path)} to PDF "
+            f"({exc}) — the document may be password protected or corrupt, or "
+            f"{name} may be stuck on this box: a {name} window left open with a "
+            f"dialog in it fails exactly like this and no automation can "
+            f"dismiss it. Check for a running {name} on the store PC before "
+            f"asking the customer for a PDF."
         ) from exc
     finally:
-        if app is not None:
-            try:
-                app.Quit()
-            except Exception:
-                log.debug("printable: %s did not quit cleanly", prog_id)
+        try:
+            app.Quit()
+        except Exception:
+            log.debug("printable: %s did not quit cleanly", prog_id)

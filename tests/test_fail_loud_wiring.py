@@ -7,6 +7,7 @@ test names the silence it closes.
 """
 
 import os
+import pathlib
 import sys
 import types
 from datetime import datetime, timedelta
@@ -186,3 +187,115 @@ def test_the_polling_box_still_polls(alerts, monkeypatch, tmp_path):
     pp.poll_once(str(tmp_path / "jobs.db"))      # closed + unreachable: skips the poll
 
     assert any("printer.epson" in a for a in alerts), "the owner of the printer must still alert"
+
+
+# ── The silence that made a live fetcher look eight days dead ─────────────────
+#
+# konica_jobs_fetcher had no watchdog call anywhere: a SOAP error was a
+# logger.error, fetch_and_import returned None and no caller checked it, and the
+# thread slept 1800s and tried again forever. On 2026-09-10 a query bug made the
+# job log LOOK dead since Sep 2 and the honest answer was "nothing here could
+# tell you either way" — the fetcher could have been down for eight days and
+# reported exactly the same amount: nothing.
+
+import konica_jobs_fetcher as kjf
+
+
+@pytest.fixture
+def loud(monkeypatch):
+    """Alerts are not held for quiet hours, so the tests do not depend on
+    what time the suite happens to run."""
+    monkeypatch.setattr(ow, "_in_quiet_hours", lambda: False)
+
+
+@pytest.fixture
+def konica_store(monkeypatch):
+    """A store that actually has a Konica, so has_konica() is not what is under
+    test. Without this the suite passes on any box whose store_config has no
+    konica_ip — for the wrong reason, which is worse than failing."""
+    monkeypatch.setattr(kjf, "KONICA_IP", "192.168.55.110")
+
+
+def _soap_raises(exc):
+    def _raise(_start, _end):
+        raise exc
+    return _raise
+
+
+def test_an_unreadable_konica_job_log_alerts(alerts, loud, konica_store, monkeypatch, tmp_path):
+    monkeypatch.setattr(kjf, "_soap_get_history",
+                        _soap_raises(OSError("connection refused")))
+
+    kjf.fetch_and_import(str(tmp_path / "jobs.db"))
+
+    assert len(alerts) == 1
+    assert "konica.joblog" in alerts[0]
+    assert "connection refused" in alerts[0]
+    assert kjf.SOAP_ENDPOINT in alerts[0]
+
+
+def test_a_job_log_read_that_works_does_not_alert(alerts, loud, konica_store, monkeypatch, tmp_path):
+    monkeypatch.setattr(kjf, "_soap_get_history", lambda s, e: [])
+
+    kjf.fetch_and_import(str(tmp_path / "jobs.db"))
+
+    assert alerts == []
+
+
+def test_the_job_log_coming_back_is_announced(alerts, loud, konica_store, monkeypatch, tmp_path):
+    db = str(tmp_path / "jobs.db")
+    monkeypatch.setattr(kjf, "_soap_get_history", _soap_raises(OSError("no route to host")))
+    kjf.fetch_and_import(db)
+
+    monkeypatch.setattr(kjf, "_soap_get_history", lambda s, e: [])
+    kjf.fetch_and_import(db)
+
+    assert len(alerts) == 2
+    assert "recovered" in alerts[1]
+
+
+def test_a_fetch_that_dies_before_it_starts_still_alerts(alerts, loud, konica_store, monkeypatch):
+    """The outer failure path — an unopenable DB — returned None and told
+    nobody. A store whose jobs.db has moved goes blind exactly this way."""
+    kjf.fetch_and_import(str(pathlib.Path("no") / "such" / "dir" / "jobs.db"))
+
+    assert len(alerts) == 1
+    assert "konica.joblog" in alerts[0]
+
+
+def test_the_fetcher_reports_the_printer_error_code_it_was_given(
+        alerts, loud, konica_store, monkeypatch, tmp_path):
+    """A firmware change that starts returning a non-2xx code is a real outage
+    and used to be a log line. The alert has to carry the code, or the next
+    person starts from zero."""
+    monkeypatch.setattr(kjf, "_soap_get_history",
+                        _soap_raises(ValueError("Printer returned error code: 401")))
+
+    kjf.fetch_and_import(str(tmp_path / "jobs.db"))
+
+    assert "401" in alerts[0]
+
+
+def test_a_store_with_no_konica_does_not_alert_about_its_job_log(alerts, loud,
+                                                                 monkeypatch, tmp_path):
+    """Nattika has no Konica and `konica_ip` is empty, so every SOAP call there
+    fails by construction. Silent was harmless; alerting would invent a
+    permanent outage on a printer that does not exist — the same trap
+    printer_poller.has_konica already covers."""
+    monkeypatch.setattr(kjf, "KONICA_IP", "")
+
+    kjf.fetch_and_import(str(tmp_path / "jobs.db"))
+
+    assert alerts == []
+
+
+def test_a_store_with_no_konica_never_starts_the_fetcher_thread(monkeypatch):
+    monkeypatch.setattr(kjf, "KONICA_IP", "None")   # a JSON null through str()
+    assert kjf.start_fetcher("ignored.db") is None
+
+
+def test_a_store_with_a_konica_still_starts_it(monkeypatch):
+    monkeypatch.setattr(kjf, "KONICA_IP", "192.168.55.110")
+    monkeypatch.setattr(kjf, "fetch_and_import", lambda _db: None)
+    thread = kjf.start_fetcher("ignored.db", interval=3600)
+    assert thread is not None and thread.daemon

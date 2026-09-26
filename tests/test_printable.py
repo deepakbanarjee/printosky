@@ -174,3 +174,143 @@ def test_a_converter_that_writes_nothing_is_caught(tmp_path, monkeypatch):
     with pytest.raises(Unprintable) as e:
         to_printable_pdf(src, str(tmp_path))
     assert "no PDF" in str(e.value)
+
+
+# ── Office automation: whose Word are we using? ───────────────────────────────
+#
+# OSP, 2026-09-10 10:25:14. The .docx failed again, on a box that HAS Word:
+#
+#   Word could not export ... to PDF ((-2147352567, 'Exception occurred.',
+#   (0, 'Microsoft Word', 'You cannot close Microsoft Word because a dialog box
+#   is open. Click OK, switch to Word, and then close the dialog box.', ...)))
+#   — it may be password protected or corrupt
+#
+# Nothing was wrong with the document. Someone had left a Word window open with
+# a dialog in it, and `Dispatch` ATTACHES to a running instance — so automation
+# inherited the stuck session, and `DisplayAlerts = False` cannot dismiss a
+# dialog that was already open. The tail of that message then blamed the
+# customer's file for a window on the shop PC, which is where the diagnosis went
+# wrong for a second time.
+
+import types
+
+
+def _fake_win32(monkeypatch, *, dispatch_ex=None, dispatch=None):
+    """Stand in for pywin32, which does not exist off a Windows store PC."""
+    pkg = types.ModuleType("win32com")
+    client = types.ModuleType("win32com.client")
+    if dispatch_ex is not None:
+        client.DispatchEx = dispatch_ex
+    if dispatch is not None:
+        client.Dispatch = dispatch
+    pkg.client = client
+    monkeypatch.setitem(sys.modules, "win32com", pkg)
+    monkeypatch.setitem(sys.modules, "win32com.client", client)
+    return client
+
+
+class _FakeDoc:
+    def __init__(self, on_export=None):
+        self._on_export = on_export
+
+    def ExportAsFixedFormat(self, out_path, fmt):
+        if self._on_export is not None:
+            self._on_export()
+        with open(out_path, "wb") as fh:
+            fh.write(b"%PDF-1.4\n%%EOF\n")
+
+    def Close(self, _save):
+        pass
+
+
+class _FakeWord:
+    """A Word that behaves, so the test is about which instance we asked for."""
+
+    def __init__(self, on_open=None, on_export=None):
+        self.quit_called = False
+        self._on_open = on_open
+        self._on_export = on_export
+
+    @property
+    def Documents(self):
+        return self
+
+    def Open(self, _path, ReadOnly=True):
+        if self._on_open is not None:
+            self._on_open()
+        return _FakeDoc(self._on_export)
+
+    def Quit(self):
+        self.quit_called = True
+
+
+def _docx(tmp_path, name="nithya_coverpage.docx"):
+    src = tmp_path / name
+    src.write_bytes(b"PK\x03\x04 a real docx starts like this")
+    return str(src)
+
+
+def test_word_is_asked_for_its_own_instance_not_a_humans(tmp_path, monkeypatch):
+    """`Dispatch` hands back the Word a human left open on the counter PC,
+    dialog and all. `DispatchEx` always starts a fresh out-of-process one, which
+    is the difference between an automated print and a 47-day-old paid job."""
+    word = _FakeWord()
+
+    def _no(*_a, **_k):
+        raise AssertionError("Dispatch attaches to a running Word — use DispatchEx")
+
+    _fake_win32(monkeypatch, dispatch_ex=lambda prog: word, dispatch=_no)
+
+    out = str(tmp_path / "out.pdf")
+    printable._office_to_pdf(_docx(tmp_path), out, ".docx")
+
+    assert os.path.exists(out)
+    assert word.quit_called          # our instance, so we must close it
+
+
+def test_a_word_that_will_not_start_is_not_blamed_on_the_document(tmp_path, monkeypatch):
+    """Word failing to start is a fact about this machine. Saying the customer's
+    file is corrupt sends someone to re-request a perfectly good document."""
+    def _boom(_prog):
+        raise OSError("CoCreateInstance failed")
+
+    _fake_win32(monkeypatch, dispatch_ex=_boom)
+
+    with pytest.raises(Unprintable) as e:
+        printable._office_to_pdf(_docx(tmp_path), str(tmp_path / "o.pdf"), ".docx")
+
+    msg = str(e.value)
+    assert "CoCreateInstance failed" in msg
+    assert "corrupt" not in msg.lower()
+    assert "password" not in msg.lower()
+
+
+def test_an_export_failure_names_the_stuck_window_as_a_cause(tmp_path, monkeypatch):
+    """The real OSP failure. The message must not assert the document is at
+    fault when a left-open Word produces the identical exception."""
+    def _stuck():
+        raise Exception(
+            "(-2147352567, 'Exception occurred.', (0, 'Microsoft Word', "
+            "'You cannot close Microsoft Word because a dialog box is open.', "
+            "'wdmain11.chm', 24959, -2146822809), None)")
+
+    _fake_win32(monkeypatch, dispatch_ex=lambda prog: _FakeWord(on_open=_stuck))
+
+    with pytest.raises(Unprintable) as e:
+        printable._office_to_pdf(_docx(tmp_path), str(tmp_path / "o.pdf"), ".docx")
+
+    msg = str(e.value)
+    assert "dialog box is open" in msg          # the printer's own words, kept
+    assert "may be" in msg.lower()              # offered, not asserted
+    assert "stuck" in msg.lower() or "left open" in msg.lower()
+
+
+def test_the_instance_is_closed_even_when_the_export_fails(tmp_path, monkeypatch):
+    """A Word we started and did not quit is the next run's stuck instance."""
+    word = _FakeWord(on_export=lambda: (_ for _ in ()).throw(Exception("nope")))
+    _fake_win32(monkeypatch, dispatch_ex=lambda prog: word)
+
+    with pytest.raises(Unprintable):
+        printable._office_to_pdf(_docx(tmp_path), str(tmp_path / "o.pdf"), ".docx")
+
+    assert word.quit_called
