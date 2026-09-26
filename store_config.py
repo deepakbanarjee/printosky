@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import socket
+import threading
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
@@ -297,6 +298,11 @@ def _build(raw: dict[str, Any], source: str | None) -> StoreConfig:
     )
 
 
+# Guards the missing-file alert against re-entering through report(). See the
+# comment at the point of use in get_store_config().
+_reentry = threading.local()
+
+
 @lru_cache(maxsize=1)
 def get_store_config() -> StoreConfig:
     """Return the active store config, reading from disk on first call."""
@@ -316,13 +322,41 @@ def get_store_config() -> StoreConfig:
         log.info("store_config: loaded store_id=%s from %s", cfg.store_id, path)
         return cfg
 
+    fallback = _apply_lan_override(_build(_LEGACY_OXYGEN_DEFAULTS, source=None))
+
+    # Re-entrancy guard. report() needs the store config itself — for the store
+    # id on the alert (ops_watchdog._store_id) and for the health DB path
+    # (ops_watchdog._configured_db_path) — so on a box with no config file the
+    # missing-file alert calls straight back into here. @lru_cache stores a
+    # result only when the call *returns*, so the nested call finds the cache
+    # still empty, takes this same branch, and reports again, until the stack
+    # blows. report() swallows the RecursionError and logs "could not send
+    # alert", so the one alert that says this machine has no config is the one
+    # alert that never arrives — a silent failure inside the fail-loud system,
+    # on exactly the freshly-provisioned store PC that most needs it.
+    #
+    # A nested call returns the fallback config without alerting: the outer
+    # call is already reporting this very condition, so the alert is not lost,
+    # only de-duplicated. ops_watchdog then falls back to the store id recorded
+    # on the health row, which is what it does for any failed live resolution.
+    #
+    # Thread-local rather than a module flag: pollers call report() from
+    # several threads, and a shared flag would let one thread's in-flight read
+    # silence another thread's genuine first alert.
+    if getattr(_reentry, "in_missing_file_report", False):
+        return fallback
+
     detail = (
         f"no config file found in any candidate path; falling back to "
         f"legacy Oxygen defaults (store_id={_LEGACY_OXYGEN_DEFAULTS['store_id']})"
     )
     log.info("store_config: %s", detail)
-    report("store_config.missing_file", False, detail=detail)
-    return _apply_lan_override(_build(_LEGACY_OXYGEN_DEFAULTS, source=None))
+    _reentry.in_missing_file_report = True
+    try:
+        report("store_config.missing_file", False, detail=detail)
+    finally:
+        _reentry.in_missing_file_report = False
+    return fallback
 
 
 def reload_store_config() -> StoreConfig:

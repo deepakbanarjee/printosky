@@ -139,19 +139,10 @@ Follow these rules:
 5. Output ONLY the transcribed text of the image. Do not include any intro, outro, explanations, or meta-comments.
 ''' % GLOSSARY
 
-CHILLU_MAP = {
-    "\u0d7b": "\u0d23\u0d4d\u200d", # ൺ
-    "\u0d7c": "\u0d33\u0d4d\u200d", # ൾ
-    "\u0d7d": "\u0d30\u0d4d\u200d", # ർ
-    "\u0d7e": "\u0d28\u0d4d\u200d", # ൻ
-    "\u0d7f": "\u0d32\u0d4d\u200d", # ൽ
-    "\u0d7a": "\u0d23\u0d4d\u200d", # ൺ
-}
-
-def replace_chillus(text):
-    for chillu, replacement in CHILLU_MAP.items():
-        text = text.replace(chillu, replacement)
-    return text
+# Malayalam chillu handling + run splitting, shared with api/index.py and
+# tools/pdf_tools_server.py. Note the known chillu-table defect documented
+# in malayalam.py before changing transcript output.
+from malayalam import replace_chillus, split_malayalam_english  # noqa: E402
 
 def _fail_job(job_id, filename, reason):
     """Mark a transcription job failed AND tell a human.
@@ -302,19 +293,6 @@ def process_transcription_job(job):
     finally:
         doc.close()
         _retire_temp_pdf(pdf_temp_path, filename, completed)
-
-def split_malayalam_english(text):
-    # Regex to find blocks of Malayalam characters (Unicode block 0D00-0D7F and ZWJ 200D)
-    pattern = re.compile(r"([\u0d00-\u0d7f\u200d]+)")
-    parts = pattern.split(text)
-    
-    segments = []
-    for part in parts:
-        if not part:
-            continue
-        is_mal = any(("\u0d00" <= char <= "\u0d7f") or (char == "\u200d") for char in part)
-        segments.append((part, is_mal))
-    return segments
 
 # How far back the sync pass looks. The probe asked for every completed job
 # this store had ever produced, unbounded: cheap today at 25 rows, but the cost

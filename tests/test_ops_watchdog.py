@@ -227,7 +227,12 @@ def test_a_store_path_that_does_not_exist_falls_back_to_memory(monkeypatch, tmp_
     monkeypatch.setattr(ow, "_notify", lambda m: sent.append(m) or True)
     ow._memory.clear()
     assert ow.report("printer.epson", False, "unreachable") is True   # still works
-    assert ow.health()["failing"] == ["printer.epson"]                # from memory
+    # Membership, not an exact list: a checkout with no store_config.json also
+    # records store_config.missing_file here, and legitimately so. That alert
+    # used to die in a RecursionError before it could be stored (see
+    # tests/test_store_config_reentrancy.py), so this assertion used to see
+    # exactly one entry only because the other one was being lost.
+    assert "printer.epson" in ow.health()["failing"]                   # from memory
     assert not os.path.exists(r"C:\Printosky\Data\jobs.db")
     ow._memory.clear()
 

@@ -159,10 +159,13 @@ def _store_id() -> str:
     on each call — and the store id it returns changes only when someone edits
     store_config.json and restarts the box, which is when this refreshes.
 
-    (An earlier version of this comment claimed live resolution would recurse,
-    because store_config's missing-config path calls report() itself. Measured:
-    it does not — that nested report never re-enters _store_id, so the nesting
-    depth stays at 1. The caching is a cost decision, not a safety one.)
+    The earlier claim here that live resolution cannot recurse ("Measured: ...
+    the nesting depth stays at 1") was wrong: it holds only when a config file
+    exists or _live_store_id is already warm. On a cold process with no
+    store_config.json this is one of two paths by which report() re-enters
+    get_store_config() before its lru_cache has been populated (the other is
+    _configured_db_path()). Both are broken at the source, by a re-entrancy
+    guard in store_config.get_store_config() — see the comment there.
 
     A failed resolution is never cached — "?" now must not become "?" forever
     once the config file comes back.

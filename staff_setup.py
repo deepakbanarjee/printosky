@@ -29,19 +29,14 @@ DEFAULT_STAFF = [
 ]
 
 
-import secrets as _secrets
-
-_PBKDF2_ITERATIONS = 260_000
-
-def sha256(pin: str) -> str:
-    """Legacy — kept for reference only. Do not use for new hashes."""
-    return hashlib.sha256(pin.encode()).hexdigest()
-
-def pbkdf2_hash(pin: str) -> tuple[str, str]:
-    """Return (hash_hex, salt_hex) using PBKDF2-HMAC-SHA256."""
-    salt = _secrets.token_hex(16)
-    h = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt.encode(), _PBKDF2_ITERATIONS).hex()
-    return h, salt
+# PIN derivation is shared with the store PC (print_server.py) and the cloud
+# (api/index.py) via pin_crypto — a PIN seeded here must verify on both. See
+# pin_crypto.py.
+from pin_crypto import (
+    PBKDF2_ITERATIONS as _PBKDF2_ITERATIONS,
+    hash_pin as pbkdf2_hash,
+    sha256_hex as sha256,
+)
 
 
 def get_conn():
