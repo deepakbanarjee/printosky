@@ -8,6 +8,13 @@ name: Printosky crons (SLA watchdog + abandoned book carts + store-PC watch)
 #                           day/week/month logs at closing for the main store),
 #                           and when a PC is up but its printer counters have
 #                           frozen — see docs/FAIL_LOUD.md
+#
+# Each step fails the job on a non-200, which is the point: these endpoints
+# already answer 500 when they break, and until 2026-11-01 every step ended in
+# `exit 0` and threw that away. Through the 2026-10-17 egress outage all three
+# returned errors every 30 minutes for fourteen days and the job stayed green.
+# A red run in the Actions tab is the one alert channel here that needs neither
+# the database nor WhatsApp, both of which were down.
 on:
   schedule:
     - cron: "*/30 * * * *"   # every 30 minutes (UTC)
@@ -24,7 +31,11 @@ jobs:
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "https://printosky.vercel.app/cron/sla-check")
           echo "HTTP $code"; cat /tmp/sla.json || true
-          exit 0
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::error::SLA watchdog failed with HTTP $code"
+            exit 1
+          fi
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
       - name: Abandoned book carts
@@ -34,7 +45,11 @@ jobs:
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "https://printosky.vercel.app/cron/abandoned-carts")
           echo "HTTP $code"; cat /tmp/cart.json || true
-          exit 0
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::error::abandoned-cart reminder failed with HTTP $code"
+            exit 1
+          fi
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
       - name: Store-PC liveness watch
@@ -44,6 +59,10 @@ jobs:
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "https://printosky.vercel.app/cron/store-pc-check")
           echo "HTTP $code"; cat /tmp/pc.json || true
-          exit 0
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::error::store-PC watcher failed with HTTP $code"
+            exit 1
+          fi
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

@@ -9,6 +9,11 @@ name: Printosky payment-review reminders
 # Runs hourly during IST daytime only — Anu is active then, so her 24h WhatsApp
 # window is open and the re-send actually reaches her. Lives in GitHub Actions
 # like the other Printosky crons (see daily-activity-cron.yml, sla-cron.yml).
+#
+# The step fails the job on a non-200: this endpoint already answers 500
+# when it breaks, and until 2026-11-01 the step ended in `exit 0` and threw
+# that away. Through the 2026-10-17 egress outage it returned errors on
+# every run for fourteen days and the job stayed green.
 on:
   schedule:
     - cron: "0 3-16 * * *"   # 03:00–16:00 UTC = 08:30–21:30 IST, hourly
@@ -25,6 +30,10 @@ jobs:
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "https://printosky.vercel.app/cron/payment-review-reminders")
           echo "HTTP $code"; cat /tmp/pr.json || true
-          exit 0
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::error::payment-review reminder sweep failed with HTTP $code"
+            exit 1
+          fi
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

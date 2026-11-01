@@ -11,6 +11,8 @@ Two gaps this pins shut, both proven by the August 2026 Nattika outage:
      "fine". The counters-stale check is what actually catches it.
 """
 
+import io
+import json
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
@@ -207,3 +209,115 @@ def test_state_is_persisted_for_dedup(api):
     _run(api, client)
     assert writes and writes[-1]["state"] == "up_stale"
     assert writes[-1]["store_id"] == "PRINTK"
+
+
+# ── The sweep's own status: a blind watchdog must not answer 200 ──────────────
+#
+# From 2026-10-17 the database refused every read, so _store_pc_check_one raised
+# for all three stores on every 30-minute run. The handler logged each one and
+# answered 200 with the errors in the body, the cron step ended in `exit 0`, and
+# nothing alerted for fourteen days. These pin both halves shut.
+
+class _CronHandler:
+    """Minimal stand-in for the BaseHTTPRequestHandler the cron writes to."""
+
+    def __init__(self):
+        self.headers = {}
+        self.path = "/cron/store-pc-check"
+        self.status = None
+        self.wfile = io.BytesIO()
+
+    def send_response(self, status):
+        self.status = status
+
+    def send_header(self, *a, **k):
+        pass
+
+    def end_headers(self):
+        pass
+
+    def body(self):
+        return json.loads(self.wfile.getvalue().decode("utf-8"))
+
+
+@pytest.fixture
+def sweep(api, monkeypatch):
+    """Run the real sweep handler with the per-store check and alerts stubbed."""
+    reported = []
+    # raising=False so that against a build without these helpers the status
+    # assertion below is what fails, not the patch — the defect being pinned is
+    # the HTTP 200, not the absence of a function.
+    monkeypatch.setattr(api, "_report_store_pc_sweep_failure",
+                        lambda failures: reported.append(("fail", list(failures))),
+                        raising=False)
+    monkeypatch.setattr(api, "_report_store_pc_sweep_ok",
+                        lambda: reported.append(("ok", [])), raising=False)
+    monkeypatch.setattr(api, "STORE_PC_MONITOR_IDS", ["OSP", "PRINTK"])
+    monkeypatch.setenv("CRON_SECRET", "")
+    import db_cloud
+    monkeypatch.setattr(db_cloud, "_client", lambda: _FakeClient())
+    api._test_reported = reported
+    return reported
+
+
+def _sweep_run(api, per_store):
+    """Drive the handler with `per_store` standing in for _store_pc_check_one."""
+    h = _CronHandler()
+    import api.index as idx
+    orig = idx._store_pc_check_one
+    idx._store_pc_check_one = per_store
+    try:
+        idx._handle_cron_store_pc_check(h)
+    finally:
+        idx._store_pc_check_one = orig
+    return h
+
+
+def test_a_store_whose_check_raises_is_not_reported_as_success(api, sweep):
+    """The defect: blind for fourteen days behind an HTTP 200."""
+    def boom(c, sd, sid, *a, **k):
+        raise RuntimeError("JSON could not be generated / 402 exceed_egress_quota")
+
+    h = _sweep_run(api, boom)
+
+    assert h.status == 503, "a sweep that saw nothing must not answer 200"
+    body = h.body()
+    assert len(body["failed"]) == 2
+    assert "exceed_egress_quota" in body["failed"][0]
+    assert ("fail", body["failed"]) in [(k, v) for k, v in sweep]
+
+
+def test_one_blind_store_still_fails_the_sweep(api, sweep):
+    """Partial blindness is blindness: the other store's success cannot mask it."""
+    def half(c, sd, sid, *a, **k):
+        if sid == "PRINTK":
+            raise RuntimeError("counters lookup failed")
+        return {"store_id": sid, "sent": []}
+
+    h = _sweep_run(api, half)
+
+    assert h.status == 503
+    assert h.body()["failed"] == ["PRINTK: counters lookup failed"]
+    assert [k for k, _ in sweep] == ["fail"]
+
+
+def test_a_clean_sweep_answers_200_and_closes_the_check(api, sweep):
+    """A store PC being *down* is this check working, and stays a 200."""
+    h = _sweep_run(api, lambda c, sd, sid, *a, **k: {"store_id": sid, "sent": ["offline"]})
+
+    assert h.status == 200
+    assert "failed" not in h.body()
+    assert [k for k, _ in sweep] == ["ok"], "recovery must be announced"
+
+
+def test_the_sweep_failing_outright_alerts_too(api, sweep, monkeypatch):
+    """No client, no store_digest — it already 500s, now it also says so."""
+    import db_cloud
+    monkeypatch.setattr(db_cloud, "_client",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no database")))
+
+    h = _sweep_run(api, lambda *a, **k: {})
+
+    assert h.status == 500
+    assert [k for k, _ in sweep] == ["fail"]
+    assert "no database" in sweep[0][1][0]

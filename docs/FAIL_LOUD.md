@@ -128,6 +128,30 @@ this is the layer that still works when the store PC is the thing that died:
   so the running API *is* HEAD) and alerts once a box has been behind for
   `STORE_BUILD_STALE_HOURS` (36h, i.e. it has missed a boot cycle).
 
+- **The watchdog itself blind.** `store_pc_check.sweep`. A store PC being
+  *down* is this check working: it alerts and the endpoint answers 200. A
+  store's check *raising* means the cloud cannot see that store either way, and
+  until 2026-11-01 that was written to the log and then answered **200** — so
+  the sweep reported success while blind. Through the 2026-10-17 egress outage
+  all three stores raised on every 30-minute run for fourteen days, the
+  endpoint said 200 each time, and nothing alerted. It now answers **503** and
+  reports the sweep once (not once per store: when the database refuses every
+  read, three messages say nothing the first did not). Note that ops_watchdog
+  keeps no state between invocations on Vercel, so this one cannot dedup to the
+  6-hourly repeat and fires on every run while broken — the deduped channel is
+  the cron job going red in Actions, which needs neither the database nor
+  WhatsApp, both of which were down that fortnight.
+
+  The same fortnight showed the second half of the fault, and it was not
+  confined to this endpoint: every probe step across six of the eight cron
+  workflows ended in `exit 0`, so even the endpoints that *were* honestly
+  answering 500 (`/cron/sla-check`, `/cron/abandoned-carts`, and the rest) left
+  their job green. Every probe step now fails on a non-200 — including `000`,
+  which is what curl reports when the host cannot be reached at all —
+  following the pattern already in `referral-credits-cron.yml`.
+  `tests/test_cron_fail_loud.py` is the ratchet: it executes each step's own
+  script with curl stubbed, so a step that stops failing is caught.
+
 **In the consoles** (`admin.html`, `jobs.html` via `admin-shared.js`), on every
 load and on every location switch — a banner at the top of the page for:
 
@@ -141,7 +165,11 @@ Empty tables point at the banner instead of reassuring the reader.
 ## Enforcement
 
 `tests/test_fail_loud_rule.py` ratchets the number of `except Exception: pass`
-handlers per file: it may go down, never up. Adding one fails the suite. The fix
+handlers per file: it may go down, never up. Adding one fails the suite.
+
+`tests/test_cron_fail_loud.py` does the same for the cron workflows: no probe
+step may end by discarding the status it captured, and each one is executed
+with curl stubbed to prove it exits non-zero on 500, 503 and 000. The fix
 is `guard(...)`; if the swallow is genuinely correct (closing a handle, an
 optional import), raise that file's budget in the same commit and say why.
 
