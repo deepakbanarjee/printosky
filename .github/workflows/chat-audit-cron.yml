@@ -7,6 +7,11 @@ name: Printosky chat audit (AM/PM handoff-queue digest → Anu)
 # once/day, so this runs from GitHub Actions like the other Printosky crons.
 #
 # 10:00 & 18:00 IST  ==  04:30 & 12:30 UTC.
+#
+# The step fails the job on a non-200: this endpoint already answers 500
+# when it breaks, and until 2026-11-01 the step ended in `exit 0` and threw
+# that away. Through the 2026-10-17 egress outage it returned errors on
+# every run for fourteen days and the job stayed green.
 on:
   schedule:
     - cron: "30 4,12 * * *"
@@ -23,6 +28,10 @@ jobs:
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "https://printosky.vercel.app/cron/chat-audit")
           echo "HTTP $code"; cat /tmp/audit.json || true
-          exit 0
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::error::chat-audit failed with HTTP $code"
+            exit 1
+          fi
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

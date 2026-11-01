@@ -11,6 +11,11 @@ name: Printosky drop-off booking sweep
 #
 # Vercel Hobby caps crons at once-per-day, so this lives in GitHub Actions like
 # the other Printosky crons (see daily-activity-cron.yml).
+#
+# The step fails the job on a non-200: this endpoint already answers 500
+# when it breaks, and until 2026-11-01 the step ended in `exit 0` and threw
+# that away. Through the 2026-10-17 egress outage it returned errors on
+# every run for fourteen days and the job stayed green.
 on:
   schedule:
     - cron: "0 5 * * *"   # 05:00 UTC = 10:30 IST — mid-morning, shop is open
@@ -27,6 +32,10 @@ jobs:
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "https://printosky.vercel.app/cron/dropoff-sweep")
           echo "HTTP $code"; cat /tmp/dropoff.json || true
-          exit 0
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::error::drop-off sweep failed with HTTP $code"
+            exit 1
+          fi
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

@@ -142,11 +142,15 @@ this is the layer that still works when the store PC is the thing that died:
   the cron job going red in Actions, which needs neither the database nor
   WhatsApp, both of which were down that fortnight.
 
-  The same fortnight showed the second half of the fault: every step in
-  `.github/workflows/sla-cron.yml` ended in `exit 0`, so even the two endpoints
-  that *were* honestly answering 500 (`/cron/sla-check`,
-  `/cron/abandoned-carts`) left the job green. Cron steps now fail on a
-  non-200, following `referral-credits-cron.yml`.
+  The same fortnight showed the second half of the fault, and it was not
+  confined to this endpoint: every probe step across six of the eight cron
+  workflows ended in `exit 0`, so even the endpoints that *were* honestly
+  answering 500 (`/cron/sla-check`, `/cron/abandoned-carts`, and the rest) left
+  their job green. Every probe step now fails on a non-200 — including `000`,
+  which is what curl reports when the host cannot be reached at all —
+  following the pattern already in `referral-credits-cron.yml`.
+  `tests/test_cron_fail_loud.py` is the ratchet: it executes each step's own
+  script with curl stubbed, so a step that stops failing is caught.
 
 **In the consoles** (`admin.html`, `jobs.html` via `admin-shared.js`), on every
 load and on every location switch — a banner at the top of the page for:
@@ -161,7 +165,11 @@ Empty tables point at the banner instead of reassuring the reader.
 ## Enforcement
 
 `tests/test_fail_loud_rule.py` ratchets the number of `except Exception: pass`
-handlers per file: it may go down, never up. Adding one fails the suite. The fix
+handlers per file: it may go down, never up. Adding one fails the suite.
+
+`tests/test_cron_fail_loud.py` does the same for the cron workflows: no probe
+step may end by discarding the status it captured, and each one is executed
+with curl stubbed to prove it exits non-zero on 500, 503 and 000. The fix
 is `guard(...)`; if the swallow is genuinely correct (closing a handle, an
 optional import), raise that file's budget in the same commit and say why.
 
