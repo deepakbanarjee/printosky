@@ -11,11 +11,23 @@ for fourteen days before anyone noticed. Nothing had been deployed since
 2026-09-22, so the cause was traffic, not code. These probes answer "which
 traffic" from the data itself.
 
-The arithmetic that shapes every probe here: a `bot_sessions` row is a couple
-of KB, so DB reads would need millions of calls to move 5 GB, while a customer
-print PDF is megabytes — roughly 2,500 file downloads is the whole monthly cap.
-So the question is almost always "what pulled the files", and the probes below
-are ordered to answer that first.
+The cause turned out to be neither storage nor volume. Supabase's own edge
+logs put storage GETs at 0-6 per day -- negligible -- while 60-80% of all
+requests were one query: an unbounded
+
+    GET /rest/v1/manuscript_transcripts?order=created_at.desc
+
+from website/dtp.html, which carried no `select` and no `limit`, so PostgREST
+returned every column of every row -- including `content`, the full OCR
+transcript -- and the page re-issued it every 5 seconds. Roughly 15,000
+full-table reads over the 12-17 Oct cycle against a 5.5 GB cap works out to
+about 380 KB a read, which is what the table actually weighs.
+
+So the probes are ordered payload first: measure what a read of a table costs,
+then what pulls it. `transcripts_payload` is the one that quantifies it, and
+`table_sizes` finds the next table with the same exposure. The volume probes
+further down stay useful for reconciling the outage window, but they are not
+where the egress went.
 
 Usage:
     python tools/egress_forensics.py                  # run every probe
@@ -72,6 +84,87 @@ class Probe:
 PROBES: tuple[Probe, ...] = (
 
     Probe(
+        name="transcripts_payload",
+        title="What one read of manuscript_transcripts costs, before and after",
+        why="THE decisive probe. `unbounded_read` is what the old dtp.html query "
+            "returned on every 5-second poll; `fixed_read` is what the narrowed "
+            "query returns now. Multiply unbounded_read by ~15,000 reads per "
+            "billing cycle and compare against the 5.5 GB cap -- that is the "
+            "outage, in bytes. content_bytes and confidence_bytes show where the "
+            "weight sits, and both are now fetched one row at a time on demand.",
+        needs=("manuscript_transcripts.content",
+               "manuscript_transcripts.confidence_data",
+               "manuscript_transcripts.created_at"),
+        sql="""
+            select
+              (select count(*) from manuscript_transcripts) as rows,
+              pg_size_pretty((select sum(length(row_to_json(t)::text))
+                              from manuscript_transcripts t)::bigint)      as unbounded_read,
+              pg_size_pretty((select sum(length(row_to_json(l)::text)) from (
+                  select id, filename, mode, status, total_pages,
+                         transcribed_pages, uploaded_by_store, created_at
+                  from manuscript_transcripts
+                  order by created_at desc
+                  limit 200) l)::bigint)                                   as fixed_read,
+              pg_size_pretty((select sum(length(coalesce(content, '')))
+                              from manuscript_transcripts)::bigint)        as content_bytes,
+              pg_size_pretty((select sum(length(coalesce(confidence_data::text, '')))
+                              from manuscript_transcripts)::bigint)        as confidence_bytes
+        """,
+    ),
+
+    Probe(
+        name="table_sizes",
+        title="Every public table by size on disk",
+        why="Where else the same mistake would hurt: any table high in this list "
+            "that a console reads without a `select` and a `limit` is the next "
+            "outage. Cross-check against the sbFetch call sites in website/. "
+            "CAVEAT: this is size on DISK, and TOAST compresses long text hard "
+            "-- manuscript_transcripts measured 32 kB on disk against a 421 kB "
+            "JSON payload. Disk size understates egress, sometimes by 10x. Use "
+            "it to rank candidates, then measure the real payload the way "
+            "transcripts_payload does.",
+        needs=(),
+        sql="""
+            select relname                                        as table_name,
+                   n_live_tup                                     as est_rows,
+                   pg_size_pretty(pg_total_relation_size(relid))  as total_size,
+                   pg_size_pretty(pg_table_size(relid))           as heap_size,
+                   pg_size_pretty(pg_indexes_size(relid))         as index_size
+            from pg_catalog.pg_stat_user_tables
+            where schemaname = 'public'
+            order by pg_total_relation_size(relid) desc
+            limit 25
+        """,
+    ),
+
+    Probe(
+        name="wide_column_candidates",
+        title="text / json columns, by table size",
+        why="A checklist, not a measurement: every text, json or jsonb column "
+            "that could be carrying bulk, grouped by how big its table is. "
+            "Postgres cannot report per-column wire size without dynamic SQL, "
+            "so treat these as the columns to check and to keep out of list "
+            "queries. For any that look suspect, measure the payload directly "
+            "-- copy the transcripts_payload query and swap the table in.",
+        needs=(),
+        sql="""
+            select c.table_name,
+                   c.column_name,
+                   c.data_type,
+                   pg_size_pretty(pg_total_relation_size(t.relid))  as table_total
+            from information_schema.columns c
+            join pg_catalog.pg_stat_user_tables t
+              on t.schemaname = 'public' and t.relname = c.table_name
+            where c.table_schema = 'public'
+              and c.data_type in ('text', 'jsonb', 'json')
+            order by pg_total_relation_size(t.relid) desc,
+                     c.table_name, c.column_name
+            limit 40
+        """,
+    ),
+
+    Probe(
         name="storage_totals",
         title="Storage footprint, per bucket",
         why="Ground truth on what exists to be downloaded. Multiply a bucket's "
@@ -111,11 +204,11 @@ PROBES: tuple[Probe, ...] = (
     Probe(
         name="job_volume",
         title="Jobs per day, and the megabytes their files account for",
-        why="THE decisive probe. Each job's PDF is downloaded from storage at "
-            "least once per store PC that prints it, so this column is the "
-            "floor on print-driven egress. If mid-October roughly doubles "
-            "against September, the quota was simply always too small and the "
-            "plan upgrade is the entire fix.",
+        why="Print-driven egress, for reconciling the outage window -- not the cause. "
+            "Each job's PDF is downloaded from storage at least once per store "
+            "PC that prints it, so this column is the floor on it. Measured at 0-6 "
+            "storage reads a day during the breach, so this is small; use it to "
+            "find jobs that went missing while the API was returning 402.",
         needs=("jobs.received_at", "jobs.file_size_kb"),
         sql="""
             select left(received_at, 10)                            as day,
@@ -339,9 +432,10 @@ def _split_need(need: str) -> tuple[str, str, str | None]:
     if len(parts) == 3:
         return parts[0], parts[1], parts[2]
     if len(parts) == 2:
-        # Ambiguous by shape: a known non-public schema means schema.table,
-        # anything else means public.table.column.
-        if parts[0] in ("storage", "auth", "realtime", "extensions"):
+        # Ambiguous by shape: a leading schema name means schema.table,
+        # anything else means public.table.column. "public" belongs in that
+        # first set -- leaving it out read "public.jobs" as public.public.jobs.
+        if parts[0] in ("public", "storage", "auth", "realtime", "extensions"):
             return parts[0], parts[1], None
         return "public", parts[0], parts[1]
     return "public", parts[0], None

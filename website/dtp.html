@@ -433,9 +433,39 @@ let trFilesList = [];
 let trCurrentPage = 0;
 let trTotalPages = 1;
 
+// The list query deliberately omits `content` and `confidence_data` — by far the
+// two largest columns, holding the full OCR transcript and its per-word
+// confidence. This page used to pull every column of every row with no limit,
+// every 5 seconds, which is what exhausted the Supabase egress quota on
+// 2026-10-17: ~15,000 full-table reads at roughly 380 KB each over one billing
+// cycle, against a 5.5 GB cap. tools/cloud_transcription_worker.py had already
+// been given the same treatment; this page was missed.
+//
+// The heavy columns are now fetched for ONE row, on demand, when a file is
+// opened — and cached here, because a later poll replaces trFilesList with
+// fresh light rows and would otherwise drop them under an open editor.
+const TR_LIST_COLUMNS = "id,filename,mode,status,total_pages,transcribed_pages,uploaded_by_store,created_at";
+const TR_LIST_LIMIT = 200;
+const TR_POLL_MS = 30000;          // was 5000; matches chat.html's cadence
+const trHeavyCache = {};           // transcript id -> { content, confidence_data }
+let trActiveHeavyLoaded = false;   // did the open file's text actually arrive?
+
+function trPollTick() {
+  // A console tab left open on a store PC overnight is the pattern that caused
+  // the outage, so don't poll what nobody is looking at. Even narrowed, 200
+  // rows twice a minute around the clock is ~1 GB/month against a 5.5 GB cap.
+  if (document.hidden) return;
+  // The edit modal covers the list, so refreshing behind it buys pixels nobody
+  // can see — and swaps trFilesList out from under an in-progress edit. The
+  // Refresh button still calls loadTranscripts() directly.
+  const modal = document.getElementById("tr-edit-modal");
+  if (modal && modal.style.display === "flex") return;
+  loadTranscripts();
+}
+
 function trStartPolling() {
   if (!trInterval) {
-    trInterval = setInterval(loadTranscripts, 5000);
+    trInterval = setInterval(trPollTick, TR_POLL_MS);
   }
 }
 
@@ -480,13 +510,19 @@ async function loadTranscripts() {
 
   try {
     let data = null;
-    let queryParams = "order=created_at.desc";
+    let queryParams = `select=${TR_LIST_COLUMNS}&order=created_at.desc&limit=${TR_LIST_LIMIT}`;
     if (filterStore && filterStore !== "all") {
-      queryParams = `uploaded_by_store=eq.${filterStore}&order=created_at.desc`;
+      queryParams = `select=${TR_LIST_COLUMNS}`
+        + `&uploaded_by_store=eq.${encodeURIComponent(filterStore)}`
+        + `&order=created_at.desc&limit=${TR_LIST_LIMIT}`;
     }
     
     data = await sbFetch("manuscript_transcripts", queryParams);
-    trFilesList = data || [];
+    // Light rows from the wire, re-hydrated with whatever heavy columns we
+    // already hold, so an open editor keeps its text across a refresh.
+    trFilesList = (data || []).map(row => (
+      trHeavyCache[row.id] ? Object.assign({}, row, trHeavyCache[row.id]) : row
+    ));
     
     const total_docs = trFilesList.length;
     let total_pages = 0;
@@ -643,6 +679,7 @@ async function trTrigger(jobId) {
 
 async function trDelete(jobId, filename) {
   if (!confirm(`Delete "${filename}" and its transcript? This cannot be undone.`)) return;
+  delete trHeavyCache[jobId];
   try {
     const jwt = sessionStorage.getItem("supabase_jwt") || SUPABASE_KEY;
     
@@ -802,8 +839,31 @@ function trGoToPage(targetPage) {
   trRenderConfidenceOverlay();
 }
 
+async function trLoadHeavy(fileObj) {
+  // Pull `content` + `confidence_data` for a single transcript, once, and
+  // remember them. Returns false when the row is gone or the read failed —
+  // the caller must not present an editable, empty transcript on false.
+  const cached = trHeavyCache[fileObj.id];
+  if (cached) {
+    Object.assign(fileObj, cached);
+    return true;
+  }
+  const rows = await sbFetch(
+    "manuscript_transcripts",
+    `select=content,confidence_data&id=eq.${encodeURIComponent(fileObj.id)}&limit=1`);
+  if (!rows || !rows.length) return false;
+  const heavy = {
+    content: rows[0].content || "",
+    confidence_data: rows[0].confidence_data || [],
+  };
+  trHeavyCache[fileObj.id] = heavy;
+  Object.assign(fileObj, heavy);
+  return true;
+}
+
 async function trView(filename) {
   trActiveFile = filename;
+  trActiveHeavyLoaded = false;
   const fileObj = trFilesList.find(f => f.filename === filename);
   trTotalPages = fileObj ? (fileObj.total_pages || 1) : 1;
   trCurrentPage = 0;
@@ -817,8 +877,20 @@ async function trView(filename) {
   document.getElementById("tr-edit-modal").style.display = "flex";
   
   if (fileObj) {
-    trParsePageTexts(fileObj.content || "");
-    area.value = trPageTextMap[1] || "";
+    try {
+      trActiveHeavyLoaded = await trLoadHeavy(fileObj);
+    } catch (heavyErr) {
+      trActiveHeavyLoaded = false;
+      console.error("trView: could not load transcript content:", heavyErr);
+    }
+    if (trActiveHeavyLoaded) {
+      trParsePageTexts(fileObj.content || "");
+      area.value = trPageTextMap[1] || "";
+    } else {
+      // Never leave an empty editor over a transcript that exists: saving it
+      // would write a document of blank pages over the real text.
+      area.value = "Could not load the transcript text. Close this and reopen the file.";
+    }
   } else {
     area.value = "No transcript content found.";
   }
@@ -1156,6 +1228,14 @@ async function trSaveTranscript() {
   
   if (!fileObj) return;
 
+  // trGetFullContentFromPages() assembles from trPageTextMap, which is filled
+  // from `content` when the file opens. If that fetch failed, the map is empty
+  // and saving would overwrite a real transcript with blank pages.
+  if (!trActiveHeavyLoaded) {
+    alert("The transcript text never loaded, so there is nothing safe to save.\nClose this window and open the file again.");
+    return;
+  }
+
   const fullTextToSave = trGetFullContentFromPages();
 
   const originalText = saveBtn ? saveBtn.innerText : "Save Changes";
@@ -1186,6 +1266,8 @@ async function trSaveTranscript() {
         console.warn("correction log failed:", logErr);
       }
       fileObj.content = fullTextToSave;
+      trHeavyCache[fileObj.id] = Object.assign(
+        {}, trHeavyCache[fileObj.id] || {}, { content: fullTextToSave });
       if (saveBtn) {
         saveBtn.innerText = logged ? "✓ Saved!" : "✓ Saved (correction log failed)";
         saveBtn.style.background = logged ? "#059669" : "#b45309";
