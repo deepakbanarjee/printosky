@@ -3371,6 +3371,39 @@ def _store_pc_check_one(c, sd, store_id, now_ist, now_iso, digest: bool) -> dict
     }
 
 
+def _report_store_pc_sweep_failure(failures: list[str]) -> None:
+    """Alert that the store-PC watchdog itself could not run.
+
+    One alert for the whole sweep, not one per store: when the cause is shared
+    — the database refusing every read, as from 2026-10-17 — every store fails
+    identically and three messages carry nothing the first did not.
+
+    ops_watchdog keeps no state between invocations on Vercel, so this cannot
+    dedup to the usual 6-hourly repeat and will fire on every 30-minute run
+    while the sweep is broken. That is the lesser fault: what it replaces is
+    fourteen days of silence. The channel that does dedup is the cron job
+    itself going red in Actions, which the non-200 status now causes.
+    """
+    detail = (f"the store-PC watchdog could not check {len(failures)} store(s), "
+              "so it is blind — it is not reporting their health either way:\n"
+              + "\n".join(f"• {f}" for f in failures))
+    try:
+        from ops_watchdog import report
+        report("store_pc_check.sweep", False, detail)
+    except Exception as exc:
+        logger.error("could not report the store-pc-check sweep failure: %s", exc)
+
+
+def _report_store_pc_sweep_ok() -> None:
+    """Close the sweep check, so a recovery is announced where state survives."""
+    try:
+        from ops_watchdog import report
+        report("store_pc_check.sweep", True,
+               "the store-PC watchdog checked every store")
+    except Exception as exc:
+        logger.error("could not report the store-pc-check sweep recovery: %s", exc)
+
+
 def _handle_cron_store_pc_check(h) -> None:
     """GET /cron/store-pc-check — per-store liveness + pipeline-freshness watcher.
 
@@ -3400,9 +3433,11 @@ def _handle_cron_store_pc_check(h) -> None:
         now_iso = datetime.now(timezone.utc).isoformat()
         c = _client()
 
-        # One store's lookup failing must not blind the others — check them all
-        # and report what broke, rather than 500-ing the whole sweep.
+        # One store's lookup failing must not stop the others being checked, so
+        # the loop carries on and collects what broke. The status is decided
+        # after it, from `failures` — not per store.
         results = []
+        failures = []
         for sid in STORE_PC_MONITOR_IDS:
             try:
                 results.append(_store_pc_check_one(
@@ -3410,9 +3445,32 @@ def _handle_cron_store_pc_check(h) -> None:
             except Exception as exc:
                 logger.error("store-pc-check failed for %s: %s", sid, exc)
                 results.append({"store_id": sid, "error": str(exc)})
+                failures.append(f"{sid}: {exc}")
+
+        # A store PC being *down* is this check working: it alerts and answers
+        # 200. A store's check *raising* means the watchdog cannot see that
+        # store at all, which until 2026-11-01 was written to the log and then
+        # answered 200 — so the sweep reported success while blind. From
+        # 2026-10-17 every store raised on every run for fourteen days, the
+        # endpoint said 200 each time, and nobody was told. A watchdog that
+        # cannot see must say so in its status, not just in a log line.
+        if failures:
+            _report_store_pc_sweep_failure(failures)
+            _json_response(h, 503, {
+                "error": f"store-pc-check could not check {len(failures)} "
+                         f"of {len(STORE_PC_MONITOR_IDS)} store(s)",
+                "failed": failures,
+                "stores": results,
+            })
+            return
+
+        _report_store_pc_sweep_ok()
         _json_response(h, 200, {"stores": results})
     except Exception as exc:
+        # The sweep could not start at all (no client, store_digest import, …).
+        # It already answered 500; it must also say so out loud.
         logger.error("store-pc-check cron error: %s", exc)
+        _report_store_pc_sweep_failure([f"sweep did not run: {exc}"])
         _json_response(h, 500, {"error": str(exc)})
 
 
